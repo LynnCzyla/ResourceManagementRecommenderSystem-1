@@ -61,8 +61,8 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   return (
     <div style={styles.container}>
       {/* Background elements for depth */}
-      <div style={{...styles.blob, ...styles.blob1}}></div>
-      <div style={{...styles.blob, ...styles.blob2}}></div>
+      <div style={{ ...styles.blob, ...styles.blob1 }}></div>
+      <div style={{ ...styles.blob, ...styles.blob2 }}></div>
 
       {/* Floating Theme Switch Container */}
       <div style={styles.themeToggleContainer}>
@@ -101,12 +101,12 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           <img src={weaLogo} alt="WEA Logo" style={styles.logo} />
         </div>
 
-        <h2 style={styles.title}>Resource Management</h2>
-        <p style={styles.subtitle}>Recommender System Admin Portal</p>
+        <h2 style={styles.title}>Resource Management Recommender System</h2>
+        <p style={styles.subtitle}>Admin Portal</p>
 
         {error && (
           <div style={styles.errorAlert}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: 8}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="12" y1="8" x2="12" y2="12"></line>
               <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -209,7 +209,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
 
         <div style={styles.footer}>
           <p>© {new Date().getFullYear()} WEA Industrial Distribution. All rights reserved.</p>
-          <p style={{marginTop: 4, fontSize: '10px', color: 'var(--color-text-muted)'}}>
+          <p style={{ marginTop: 4, fontSize: '10px', color: 'var(--color-text-muted)' }}>
             System Security: ISO/IEC 25010 Evaluated | AY 2026-2027
           </p>
         </div>
@@ -295,15 +295,15 @@ const styles = {
     position: 'relative',
     zIndex: 1,
     textAlign: 'center',
-    padding: '40px 32px 32px 32px',
+    padding: '25px 32px 32px 32px',
     borderRadius: 'var(--radius-lg)',
   },
   logoContainer: {
-    marginBottom: '20px',
+    marginBottom: '5px',
     display: 'inline-block',
   },
   logo: {
-    height: '60px',
+    height: '90px',
     objectFit: 'contain',
   },
   title: {
