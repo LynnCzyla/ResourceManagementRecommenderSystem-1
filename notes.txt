@@ -1,0 +1,4 @@
+cd main/src/frontend
+npm run dev
+
+http://localhost:5173/
