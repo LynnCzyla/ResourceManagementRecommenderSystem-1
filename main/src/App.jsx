@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Login from './frontend/Login';
 import AdminLayout from './frontend/Admin/AdminLayout';
+import PMLayout from './frontend/ProjectManager/PMLayout';
+import EmployeeLayout from './frontend/Employee/EmployeeLayout';
 import './App.css';
 
 function App() {
@@ -39,8 +41,22 @@ function App() {
           isDark={isDark} 
           toggleTheme={toggleTheme} 
         />
-      ) : (
+      ) : currentUser.role === 'System Administrator' ? (
         <AdminLayout 
+          user={currentUser} 
+          onLogout={handleLogout} 
+          isDark={isDark} 
+          toggleTheme={toggleTheme} 
+        />
+      ) : currentUser.role === 'Project Manager' ? (
+        <PMLayout 
+          user={currentUser} 
+          onLogout={handleLogout} 
+          isDark={isDark} 
+          toggleTheme={toggleTheme} 
+        />
+      ) : (
+        <EmployeeLayout 
           user={currentUser} 
           onLogout={handleLogout} 
           isDark={isDark} 
