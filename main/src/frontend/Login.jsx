@@ -12,31 +12,49 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     e.preventDefault();
     setError('');
 
-    if (!email || !password) {
-      setError('Please fill in all fields.');
-      return;
-    }
+    setIsLoading(true);
+    setError('');
 
-    if (email === 'admin@wea.com' && password === 'admin123') {
-      setIsLoading(true);
-      // Simulate API verification call
-      setTimeout(() => {
-        setIsLoading(false);
+    setTimeout(() => {
+      setIsLoading(false);
+      if (email === 'admin@wea.com' && password === 'admin123') {
         onLogin({
           name: 'Rodolfo Mirabel Jr.',
           role: 'System Administrator',
           email: 'admin@wea.com',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
         });
-      }, 1200);
-    } else {
-      setError('Invalid credentials. Hint: use admin@wea.com / admin123');
-    }
+      } else if (email === 'pm@wea.com' && password === 'pm123') {
+        onLogin({
+          name: 'Carlos Mendoza',
+          role: 'Project Manager',
+          email: 'pm@wea.com',
+          avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100'
+        });
+      } else if (email === 'employee@wea.com' && password === 'employee123') {
+        onLogin({
+          name: 'Javier Santos',
+          role: 'Employee',
+          email: 'employee@wea.com',
+          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
+        });
+      } else {
+        setError('Invalid credentials. Hint: use pm@wea.com / pm123 or employee@wea.com / employee123');
+      }
+    }, 1200);
   };
 
-  const fillMockCredentials = () => {
-    setEmail('admin@wea.com');
-    setPassword('admin123');
+  const fillMockCredentials = (role) => {
+    if (role === 'admin') {
+      setEmail('admin@wea.com');
+      setPassword('admin123');
+    } else if (role === 'pm') {
+      setEmail('pm@wea.com');
+      setPassword('pm123');
+    } else if (role === 'employee') {
+      setEmail('employee@wea.com');
+      setPassword('employee123');
+    }
     setError('');
   };
 
@@ -159,9 +177,17 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
               <input type="checkbox" style={styles.checkbox} defaultChecked />
               Keep me logged in
             </label>
-            <span onClick={fillMockCredentials} style={styles.demoFill}>
-              Fill Demo Login
+          </div>
+
+          <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Quick Demo Login
             </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" onClick={() => fillMockCredentials('admin')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Admin</button>
+              <button type="button" onClick={() => fillMockCredentials('pm')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>PM</button>
+              <button type="button" onClick={() => fillMockCredentials('employee')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Employee</button>
+            </div>
           </div>
 
           <button
@@ -244,8 +270,8 @@ const styles = {
   switch: {
     position: 'relative',
     display: 'inline-block',
-    width: '44px',
-    height: '24px',
+    width: '40px',
+    height: '20px',
   },
   switchInput: {
     opacity: 0,
@@ -261,7 +287,7 @@ const styles = {
     bottom: 0,
     backgroundColor: '#cbd5e1',
     transition: '.3s',
-    borderRadius: '24px',
+    borderRadius: '20px',
   },
   card: {
     width: '100%',
