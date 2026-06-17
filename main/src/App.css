@@ -1,0 +1,4 @@
+/* Reset local template styles since styles are managed under index.css */
+body {
+  box-sizing: border-box;
+}
