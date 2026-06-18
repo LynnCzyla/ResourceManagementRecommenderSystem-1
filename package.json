@@ -1,0 +1,25 @@
+{
+  "name": "resourcemanagementrecommendersystem",
+  "version": "1.0.0",
+  "description": "A web-based Resource Management Recommender System that uses OCR and NLP to extract employee skills, certifications, and experience from resumes and training documents. The system helps Resource Managers efficiently assign qualified employees to projects based on project requirements and employee availability.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "concurrently \"npm run dev --prefix main\" \"npm run dev --prefix backend\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Maki-code-it/ResourceManagementRecommenderSystem.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Maki-code-it/ResourceManagementRecommenderSystem/issues"
+  },
+  "homepage": "https://github.com/Maki-code-it/ResourceManagementRecommenderSystem#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}
