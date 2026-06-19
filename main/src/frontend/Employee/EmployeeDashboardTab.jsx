@@ -33,7 +33,34 @@ export default function EmployeeDashboardTab() {
         <div style={styles.profileDetails}>
           <h2 style={styles.profileName}>{employeeInfo.name}</h2>
           <span style={styles.profileRolePill}>{employeeInfo.role}</span>
-          <p style={styles.profileMetaText}>🆔 {employeeInfo.id} | 🏢 {employeeInfo.department} | ✉️ {employeeInfo.email}</p>
+          <p style={{ ...styles.profileMetaText, display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle' }}>
+                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                <path d="M7 8h10M7 12h10M7 16h6"></path>
+              </svg>
+              {employeeInfo.id}
+            </span>
+            <span>|</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle' }}>
+                <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                <line x1="9" y1="22" x2="9" y2="16"></line>
+                <line x1="15" y1="22" x2="15" y2="16"></line>
+                <line x1="9" y1="16" x2="15" y2="16"></line>
+                <path d="M8 6h2v2H8zm4 0h2v2h-2zm-4 4h2v2H8zm4 0h2v2h-2zm-4 4h2v2H8zm4 0h2v2h-2z"></path>
+              </svg>
+              {employeeInfo.department}
+            </span>
+            <span>|</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle' }}>
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+              </svg>
+              {employeeInfo.email}
+            </span>
+          </p>
         </div>
       </div>
 

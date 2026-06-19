@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
@@ -16,23 +16,32 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     { id: 3, name: 'Lynn Czyla M. Alpuerto', email: 'lynn.alpuerto@wea.com', role: 'Project Manager', status: 'Active', created: '2026-03-01' },
     { id: 4, name: 'Vincent Miguel P. Soriano', email: 'miguel.soriano@wea.com', role: 'Employee', status: 'Active', created: '2026-03-05' },
     { id: 5, name: 'Engr. Juan Dela Cruz', email: 'juan.cruz@wea.com', role: 'Employee', status: 'Deactivated', created: '2026-04-12' },
+    { id: 6, name: 'Javier Santos', email: 'javier.santos@wea.com', role: 'Employee', status: 'Active', created: '2026-03-12' },
+    { id: 7, name: 'Maria Santos', email: 'maria.santos@wea.com', role: 'Employee', status: 'Active', created: '2026-02-28' },
+    { id: 8, name: 'Ryan Cayabyab', email: 'ryan.cayabyab@wea.com', role: 'Employee', status: 'Active', created: '2026-05-02' },
+    { id: 9, name: 'Clarisse Valenzuela', email: 'clarisse.valenzuela@wea.com', role: 'Employee', status: 'Active', created: '2026-04-20' },
+    { id: 10, name: 'David Lim', email: 'david.lim@wea.com', role: 'Employee', status: 'Active', created: '2026-03-22' },
+    { id: 11, name: 'Elena Guerrero', email: 'elena.guerrero@wea.com', role: 'Employee', status: 'Active', created: '2026-04-05' },
+    { id: 12, name: 'Francis Tolentino', email: 'francis.tolentino@wea.com', role: 'Employee', status: 'Active', created: '2026-01-15' },
+    { id: 13, name: 'Grace Villanueva', email: 'grace.villanueva@wea.com', role: 'Employee', status: 'Active', created: '2026-05-10' },
+    { id: 14, name: 'Ian De Leon', email: 'ian.deleon@wea.com', role: 'Employee', status: 'Active', created: '2026-03-30' },
+    { id: 15, name: 'Jack Forester', email: 'jack.forester@wea.com', role: 'Employee', status: 'Active', created: '2026-04-02' }
   ]);
 
-  const [permissions, setPermissions] = useState({
-    'Admin': { readOCR: true, runOCR: true, assignResource: true, editSettings: true, viewAudit: true, exportReports: true },
-    'Resource Manager': { readOCR: true, runOCR: true, assignResource: true, editSettings: false, viewAudit: true, exportReports: true },
-    'Project Manager': { readOCR: true, runOCR: false, assignResource: false, editSettings: false, viewAudit: false, exportReports: true },
-    'Employee': { readOCR: false, runOCR: false, assignResource: false, editSettings: false, viewAudit: false, exportReports: false }
-  });
+  const [contactRequests, setContactRequests] = useState([
+    { id: 1, email: 'john.smith@wea-external.com', message: 'Hello, I am a new hiring specialist. I need an Admin/Resource Manager account to assist with scheduling.', date: '2026-06-18' },
+    { id: 2, email: 'sarah.jones@wea.com', message: 'Hi! I lost access to my Project Manager credentials. Can you reset them or grant me a new account?', date: '2026-06-17' },
+    { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15' },
+  ]);
 
-  const handlePermissionChange = (role, permissionKey) => {
-    setPermissions(prev => ({
-      ...prev,
-      [role]: {
-        ...prev[role],
-        [permissionKey]: !prev[role][permissionKey]
-      }
-    }));
+  useEffect(() => {
+    if (initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  const deleteRequest = (id) => {
+    setContactRequests(contactRequests.filter(req => req.id !== id));
   };
 
   const handleCreateSubmit = (e) => {
@@ -107,15 +116,15 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           User Accounts
         </button>
         <button 
-          onClick={() => setSubTab('roles')} 
+          onClick={() => setSubTab('requests')} 
           style={{
             ...styles.subTabButton,
-            borderBottomColor: subTab === 'roles' ? 'var(--color-primary)' : 'transparent',
-            color: subTab === 'roles' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: subTab === 'roles' ? '700' : '500'
+            borderBottomColor: subTab === 'requests' ? 'var(--color-primary)' : 'transparent',
+            color: subTab === 'requests' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: subTab === 'requests' ? '700' : '500'
           }}
         >
-          User Roles
+          Contact Requests
         </button>
       </div>
 
@@ -211,100 +220,61 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </div>
       )}
 
-      {subTab === 'roles' && (
-        <div className="glass-card" style={styles.rolesContainer}>
-          <h2 style={styles.tabSectionTitle}>Role Permissions Mapping Matrix</h2>
-          <p style={styles.tabSectionSubtitle}>Assign functional privileges across the system categories.</p>
+      {subTab === 'requests' && (
+        <div className="glass-card">
+          <h2 style={styles.tabSectionTitle}>Contact Administrator Requests</h2>
+          <p style={styles.tabSectionSubtitle}>Incoming messages and account requests from the login portal.</p>
 
-          <div style={styles.matrixWrapper}>
-            {Object.keys(permissions).map(role => (
-              <div key={role} style={styles.roleColumn} className="glass-card">
-                <h3 style={{
-                  ...styles.roleTitle,
-                  color: role === 'Admin' ? 'var(--color-danger)' : role === 'Resource Manager' ? 'var(--color-primary)' : 'var(--color-text-primary)'
-                }}>{role} Role</h3>
-                
-                <div style={styles.permissionList}>
-                  <div style={styles.permissionItem}>
-                    <label style={styles.checkboxLabel}>
-                      <input 
-                        type="checkbox" 
-                        checked={permissions[role].readOCR} 
-                        onChange={() => handlePermissionChange(role, 'readOCR')}
-                        style={styles.checkbox}
-                        disabled={role === 'Admin'}
-                      />
-                      Read Resumes & CVs
-                    </label>
-                  </div>
-
-                  <div style={styles.permissionItem}>
-                    <label style={styles.checkboxLabel}>
-                      <input 
-                        type="checkbox" 
-                        checked={permissions[role].runOCR} 
-                        onChange={() => handlePermissionChange(role, 'runOCR')}
-                        style={styles.checkbox}
-                        disabled={role === 'Admin'}
-                      />
-                      Execute OCR Scanning
-                    </label>
-                  </div>
-
-                  <div style={styles.permissionItem}>
-                    <label style={styles.checkboxLabel}>
-                      <input 
-                        type="checkbox" 
-                        checked={permissions[role].assignResource} 
-                        onChange={() => handlePermissionChange(role, 'assignResource')}
-                        style={styles.checkbox}
-                        disabled={role === 'Admin'}
-                      />
-                      Assign Resources to Projects
-                    </label>
-                  </div>
-
-                  <div style={styles.permissionItem}>
-                    <label style={styles.checkboxLabel}>
-                      <input 
-                        type="checkbox" 
-                        checked={permissions[role].editSettings} 
-                        onChange={() => handlePermissionChange(role, 'editSettings')}
-                        style={styles.checkbox}
-                        disabled={role === 'Admin'}
-                      />
-                      Manage System Configurations
-                    </label>
-                  </div>
-
-                  <div style={styles.permissionItem}>
-                    <label style={styles.checkboxLabel}>
-                      <input 
-                        type="checkbox" 
-                        checked={permissions[role].viewAudit} 
-                        onChange={() => handlePermissionChange(role, 'viewAudit')}
-                        style={styles.checkbox}
-                        disabled={role === 'Admin'}
-                      />
-                      View Audit & Activity Logs
-                    </label>
-                  </div>
-
-                  <div style={styles.permissionItem}>
-                    <label style={styles.checkboxLabel}>
-                      <input 
-                        type="checkbox" 
-                        checked={permissions[role].exportReports} 
-                        onChange={() => handlePermissionChange(role, 'exportReports')}
-                        style={styles.checkbox}
-                        disabled={role === 'Admin'}
-                      />
-                      Generate & Export Reports
-                    </label>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeaderRow}>
+                  <th style={styles.th}>Email Address</th>
+                  <th style={styles.th}>Message / Request Detail</th>
+                  <th style={styles.th}>Date Received</th>
+                  <th style={styles.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contactRequests.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" style={styles.emptyRow}>No contact requests found.</td>
+                  </tr>
+                ) : (
+                  contactRequests.map(req => (
+                    <tr key={req.id} style={styles.tableBodyRow}>
+                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{req.email}</td>
+                      <td style={{ ...styles.td, maxWidth: '400px', whiteSpace: 'normal', lineHeight: '1.4' }}>{req.message}</td>
+                      <td style={styles.td}>{req.date}</td>
+                      <td style={styles.td}>
+                        <div style={styles.actionCell}>
+                          <button 
+                            onClick={() => {
+                              resetForm();
+                              setFormData({ name: '', email: req.email, role: 'Employee', password: '' });
+                              setShowCreateModal(true);
+                            }}
+                            style={styles.createBtn}
+                          >
+                            Create Account
+                          </button>
+                          <button 
+                            onClick={() => deleteRequest(req.id)} 
+                            style={{
+                              ...styles.statusToggleBtn,
+                              color: 'var(--color-danger)',
+                              background: 'var(--color-danger-light)'
+                            }}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

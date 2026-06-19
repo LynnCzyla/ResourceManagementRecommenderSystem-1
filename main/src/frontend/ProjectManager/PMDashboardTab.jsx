@@ -149,7 +149,16 @@ export default function PMDashboardTab() {
                   ))}
                   {emp.certifications.length > 0 && (
                     <span style={styles.certBadge}>
-                      🏆 {emp.certifications.length} Certs
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                          <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                          <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                          <path d="M4 22h16"></path>
+                          <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"></path>
+                          <path d="M12 2a15.3 15.3 0 0 1 4 10H8a15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        {emp.certifications.length} Certs
+                      </span>
                     </span>
                   )}
                 </div>

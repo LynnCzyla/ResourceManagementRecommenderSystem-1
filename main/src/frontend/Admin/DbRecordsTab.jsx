@@ -120,14 +120,7 @@ export default function DbRecordsTab() {
                         </div>
                       </td>
                       <td style={styles.td}>
-                        <input
-                          type="number"
-                          value={emp.hours}
-                          min="0"
-                          max={emp.capacity}
-                          onChange={(e) => handleHoursChange(emp.id, e.target.value)}
-                          style={styles.hoursInput}
-                        />
+                        <span style={{ fontWeight: '700', color: 'var(--color-text-primary)' }}>{emp.hours}</span>
                         <span style={{ marginLeft: 6 }}>hrs</span>
                       </td>
                       <td style={styles.td}>{emp.capacity} hrs</td>
