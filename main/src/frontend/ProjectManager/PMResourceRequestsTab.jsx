@@ -270,7 +270,6 @@ export default function PMResourceRequestsTab() {
                         >
                           <option value="Full-Time (40 hours/week)">Full-Time (40 hours/week)</option>
                           <option value="Part-Time (20 hours/week)">Part-Time (20 hours/week)</option>
-                          <option value="Contract">Contract</option>
                         </select>
                       </div>
                     </div>
