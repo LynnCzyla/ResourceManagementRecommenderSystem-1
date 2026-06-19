@@ -1,38 +1,132 @@
 import React, { useState, useEffect } from 'react';
+import Swal from 'sweetalert2';
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': token ? `Bearer ${token}` : '',
+  };
+};
 
 export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
 
-  const [formData, setFormData] = useState({ name: '', email: '', role: 'Employee', password: '' });
+  const [formData, setFormData] = useState({
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    email: '',
+    role: 'Employee',
+  });
 
-  const [users, setUsers] = useState([
-    { id: 1, name: 'Rodolfo Mirabel Jr.', email: 'admin@wea.com', role: 'Admin', status: 'Active', created: '2026-01-10' },
-    { id: 2, name: 'Romell J. Ebuen', email: 'romell.ebuen@wea.com', role: 'Resource Manager', status: 'Active', created: '2026-02-15' },
-    { id: 3, name: 'Lynn Czyla M. Alpuerto', email: 'lynn.alpuerto@wea.com', role: 'Project Manager', status: 'Active', created: '2026-03-01' },
-    { id: 4, name: 'Vincent Miguel P. Soriano', email: 'miguel.soriano@wea.com', role: 'Employee', status: 'Active', created: '2026-03-05' },
-    { id: 5, name: 'Engr. Juan Dela Cruz', email: 'juan.cruz@wea.com', role: 'Employee', status: 'Deactivated', created: '2026-04-12' },
-    { id: 6, name: 'Javier Santos', email: 'javier.santos@wea.com', role: 'Employee', status: 'Active', created: '2026-03-12' },
-    { id: 7, name: 'Maria Santos', email: 'maria.santos@wea.com', role: 'Employee', status: 'Active', created: '2026-02-28' },
-    { id: 8, name: 'Ryan Cayabyab', email: 'ryan.cayabyab@wea.com', role: 'Employee', status: 'Active', created: '2026-05-02' },
-    { id: 9, name: 'Clarisse Valenzuela', email: 'clarisse.valenzuela@wea.com', role: 'Employee', status: 'Active', created: '2026-04-20' },
-    { id: 10, name: 'David Lim', email: 'david.lim@wea.com', role: 'Employee', status: 'Active', created: '2026-03-22' },
-    { id: 11, name: 'Elena Guerrero', email: 'elena.guerrero@wea.com', role: 'Employee', status: 'Active', created: '2026-04-05' },
-    { id: 12, name: 'Francis Tolentino', email: 'francis.tolentino@wea.com', role: 'Employee', status: 'Active', created: '2026-01-15' },
-    { id: 13, name: 'Grace Villanueva', email: 'grace.villanueva@wea.com', role: 'Employee', status: 'Active', created: '2026-05-10' },
-    { id: 14, name: 'Ian De Leon', email: 'ian.deleon@wea.com', role: 'Employee', status: 'Active', created: '2026-03-30' },
-    { id: 15, name: 'Jack Forester', email: 'jack.forester@wea.com', role: 'Employee', status: 'Active', created: '2026-04-02' }
-  ]);
+  const [users, setUsers] = useState([]);
 
   const [contactRequests, setContactRequests] = useState([
     { id: 1, email: 'john.smith@wea-external.com', message: 'Hello, I am a new hiring specialist. I need an Admin/Resource Manager account to assist with scheduling.', date: '2026-06-18' },
     { id: 2, email: 'sarah.jones@wea.com', message: 'Hi! I lost access to my Project Manager credentials. Can you reset them or grant me a new account?', date: '2026-06-17' },
     { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15' },
   ]);
+
+  // Custom SweetAlert design configuration
+  const showSuccessAlert = (message, title = 'Success!') => {
+    Swal.fire({
+      title: title,
+      text: message,
+      icon: 'success',
+      confirmButtonColor: 'var(--color-primary)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-success)',
+      customClass: {
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm'
+      }
+    });
+  };
+
+  const showErrorAlert = (message, title = 'Error!') => {
+    Swal.fire({
+      title: title,
+      text: message,
+      icon: 'error',
+      confirmButtonColor: 'var(--color-danger)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-danger)',
+      customClass: {
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm'
+      }
+    });
+  };
+
+  const showConfirmationAlert = (title, text, confirmText = 'Yes, proceed!') => {
+    return Swal.fire({
+      title: title,
+      text: text,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: 'var(--color-primary)',
+      cancelButtonColor: 'var(--color-text-muted)',
+      confirmButtonText: confirmText,
+      cancelButtonText: 'Cancel',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-warning)',
+      customClass: {
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm',
+        cancelButton: 'swal-custom-cancel'
+      }
+    });
+  };
+
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const headers = getAuthHeaders();
+      const response = await fetch('http://localhost:5000/api/users', { headers });
+      const data = await response.json();
+
+      if (data.success) {
+        const transformedUsers = data.users.map(profile => ({
+          id: profile.id,
+          name: `${profile.first_name} ${profile.middle_name ? profile.middle_name + ' ' : ''}${profile.last_name}`,
+          email: profile.email || '',
+          role: profile.role,
+          status: profile.status,
+          created: profile.created_at ? new Date(profile.created_at).toISOString().split('T')[0] : '',
+          first_name: profile.first_name,
+          middle_name: profile.middle_name,
+          last_name: profile.last_name,
+        }));
+        
+        setUsers(transformedUsers);
+        setError(null);
+      } else {
+        setError(data.error || 'Failed to fetch users');
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      setError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
 
   useEffect(() => {
     if (initialSubTab) {
@@ -44,60 +138,227 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     setContactRequests(contactRequests.filter(req => req.id !== id));
   };
 
-  const handleCreateSubmit = (e) => {
+  const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.email) return;
+    setLoading(true);
+    setError(null);
 
-    const newUser = {
-      id: Date.now(),
-      name: formData.name,
-      email: formData.email,
-      role: formData.role,
-      status: 'Active',
-      created: new Date().toISOString().split('T')[0]
-    };
+    try {
+      const headers = getAuthHeaders();
+      const response = await fetch('http://localhost:5000/api/users/create', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          first_name: formData.first_name,
+          middle_name: formData.middle_name,
+          last_name: formData.last_name,
+          email: formData.email,
+          role: formData.role,
+        }),
+      });
 
-    setUsers([...users, newUser]);
-    setShowCreateModal(false);
-    resetForm();
-  };
+      const data = await response.json();
 
-  const handleEditSubmit = (e) => {
-    e.preventDefault();
-    setUsers(users.map(u => u.id === selectedUser.id ? { ...u, name: formData.name, email: formData.email, role: formData.role } : u));
-    setShowEditModal(false);
-    resetForm();
-  };
-
-  const toggleUserStatus = (userId) => {
-    setUsers(users.map(u => {
-      if (u.id === userId) {
-        const newStatus = u.status === 'Active' ? 'Deactivated' : 'Active';
-        return { ...u, status: newStatus };
+      if (data.success) {
+        setShowCreateModal(false);
+        resetForm();
+        setError(null);
+        await fetchUsers();
+        
+        // Success alert
+        showSuccessAlert(
+          `User ${formData.first_name} ${formData.last_name} has been created successfully!`,
+          'Account Created!'
+        );
+      } else {
+        const errorMsg = data.error || 'Failed to create user';
+        setError(errorMsg);
+        showErrorAlert(errorMsg);
       }
-      return u;
-    }));
+    } catch (error) {
+      console.error('Error creating user:', error);
+      setError(error.message);
+      showErrorAlert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    
+    // Show confirmation before saving
+    const result = await showConfirmationAlert(
+      'Confirm Changes',
+      `Are you sure you want to update ${formData.first_name} ${formData.last_name}'s information?`,
+      'Yes, Save Changes'
+    );
+
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const headers = getAuthHeaders();
+      const response = await fetch(`http://localhost:5000/api/users/${selectedUser.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          first_name: formData.first_name,
+          middle_name: formData.middle_name,
+          last_name: formData.last_name,
+          role: formData.role,
+          email: formData.email
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShowEditModal(false);
+        resetForm();
+        setError(null);
+        await fetchUsers();
+        
+        // Success alert
+        showSuccessAlert(
+          `User ${formData.first_name} ${formData.last_name} has been updated successfully!`,
+          'Changes Saved!'
+        );
+      } else {
+        const errorMsg = data.error || 'Failed to update user';
+        setError(errorMsg);
+        showErrorAlert(errorMsg);
+      }
+    } catch (error) {
+      console.error('Error updating user:', error);
+      setError(error.message);
+      showErrorAlert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleUserStatus = async (userId) => {
+    const user = users.find(u => u.id === userId);
+    const action = user.status === 'Active' ? 'deactivate' : 'activate';
+    const actionDisplay = user.status === 'Active' ? 'Deactivate' : 'Activate';
+    
+    // Show confirmation
+    const result = await showConfirmationAlert(
+      `Confirm ${actionDisplay}`,
+      `Are you sure you want to ${action} ${user.name}'s account?`,
+      `Yes, ${actionDisplay} Account`
+    );
+
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    const newStatus = user.status === 'Active' ? 'Deactivated' : 'Active';
+    
+    try {
+      setLoading(true);
+      const headers = getAuthHeaders();
+      const response = await fetch(`http://localhost:5000/api/users/${userId}/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setUsers(users.map(u => {
+          if (u.id === userId) {
+            return { ...u, status: newStatus };
+          }
+          return u;
+        }));
+        setError(null);
+        
+        // Success alert
+        showSuccessAlert(
+          `User ${user.name} has been ${action}ed successfully!`,
+          `Account ${actionDisplay}ed!`
+        );
+      } else {
+        const errorMsg = data.error || 'Failed to update user status';
+        setError(errorMsg);
+        showErrorAlert(errorMsg);
+      }
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      setError(error.message);
+      showErrorAlert(error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const openEditModal = (user) => {
     setSelectedUser(user);
-    setFormData({ name: user.name, email: user.email, role: user.role, password: '' });
+    setFormData({
+      first_name: user.first_name || '',
+      middle_name: user.middle_name || '',
+      last_name: user.last_name || '',
+      email: user.email || '',
+      role: user.role || 'Employee',
+      password: ''
+    });
     setShowEditModal(true);
   };
 
   const resetForm = () => {
-    setFormData({ name: '', email: '', role: 'Employee', password: '' });
+    setFormData({
+      first_name: '',
+      middle_name: '',
+      last_name: '',
+      email: '',
+      role: 'Employee',
+    });
     setSelectedUser(null);
+    setError(null);
   };
 
   const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    u.email.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    u.role.toLowerCase().includes(searchQuery.toLowerCase())
+    u.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    u.email?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    u.role?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div>
+      {error && (
+        <div style={{
+          backgroundColor: 'var(--color-danger-light)',
+          color: 'var(--color-danger)',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span>❌ {error}</span>
+          <button 
+            onClick={() => setError(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              fontSize: '18px',
+              cursor: 'pointer',
+              color: 'var(--color-danger)'
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div style={styles.header}>
         <h1 style={styles.title}>User Management</h1>
         <p style={styles.subtitle}>Configure user accounts, roles permissions, and credentials.</p>
@@ -113,7 +374,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             fontWeight: subTab === 'accounts' ? '700' : '500'
           }}
         >
-          User Accounts
+          User Accounts {loading && '...'}
         </button>
         <button 
           onClick={() => setSubTab('requests')} 
@@ -144,7 +405,11 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 style={styles.searchInput}
               />
             </div>
-            <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn}>
+            <button 
+              onClick={() => { resetForm(); setShowCreateModal(true); }} 
+              style={styles.createBtn}
+              disabled={loading}
+            >
               + Create User Account
             </button>
           </div>
@@ -162,7 +427,11 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.length === 0 ? (
+                {loading && filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" style={styles.emptyRow}>Loading users...</td>
+                  </tr>
+                ) : filteredUsers.length === 0 ? (
                   <tr>
                     <td colSpan="6" style={styles.emptyRow}>No user accounts found.</td>
                   </tr>
@@ -206,6 +475,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                               background: u.status === 'Active' ? 'var(--color-danger-light)' : 'var(--color-primary-light)'
                             }}
                             title={u.status === 'Active' ? 'Deactivate account' : 'Activate account'}
+                            disabled={loading}
                           >
                             {u.status === 'Active' ? 'Deactivate' : 'Activate'}
                           </button>
@@ -251,7 +521,15 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                           <button 
                             onClick={() => {
                               resetForm();
-                              setFormData({ name: '', email: req.email, role: 'Employee', password: '' });
+                              setFormData({ 
+                                ...formData, 
+                                first_name: '',
+                                middle_name: '',
+                                last_name: '',
+                                email: req.email, 
+                                role: 'Employee', 
+                                password: '' 
+                              });
                               setShowCreateModal(true);
                             }}
                             style={styles.createBtn}
@@ -288,19 +566,54 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             </div>
             <form onSubmit={handleCreateSubmit} style={{ marginTop: 16 }}>
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Full Name</label>
-                <input 
-                  type="text" 
-                  value={formData.name} 
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
-                  style={styles.modalInput} 
-                  placeholder="Romell J. Ebuen"
+                <label style={styles.formLabel}>First Name *</label>
+                <input
+                  type="text"
+                  value={formData.first_name}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      first_name: e.target.value
+                    })
+                  }
+                  style={styles.modalInput}
                   required
                 />
               </div>
 
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Email Address</label>
+                <label style={styles.formLabel}>Middle Name</label>
+                <input
+                  type="text"
+                  value={formData.middle_name}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      middle_name: e.target.value
+                    })
+                  }
+                  style={styles.modalInput}
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Last Name *</label>
+                <input
+                  type="text"
+                  value={formData.last_name}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      last_name: e.target.value
+                    })
+                  }
+                  style={styles.modalInput}
+                  required
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Email Address *</label>
                 <input 
                   type="email" 
                   value={formData.email} 
@@ -312,11 +625,12 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
 
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Assign Role</label>
+                <label style={styles.formLabel}>Assign Role *</label>
                 <select 
                   value={formData.role} 
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })} 
                   style={styles.modalSelect}
+                  required
                 >
                   <option value="Admin">Admin</option>
                   <option value="Resource Manager">Resource Manager</option>
@@ -325,21 +639,13 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 </select>
               </div>
 
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Initial Password</label>
-                <input 
-                  type="password" 
-                  value={formData.password} 
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                  style={styles.modalInput} 
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Create Account</button>
+                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>
+                  Cancel
+                </button>
+                <button type="submit" style={styles.saveBtn} disabled={loading}>
+                  {loading ? 'Creating...' : 'Create Account'}
+                </button>
               </div>
             </form>
           </div>
@@ -355,18 +661,39 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             </div>
             <form onSubmit={handleEditSubmit} style={{ marginTop: 16 }}>
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Full Name</label>
+                <label style={styles.formLabel}>First Name *</label>
                 <input 
                   type="text" 
-                  value={formData.name} 
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
+                  value={formData.first_name} 
+                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} 
                   style={styles.modalInput} 
                   required
                 />
               </div>
 
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Email Address</label>
+                <label style={styles.formLabel}>Middle Name</label>
+                <input 
+                  type="text" 
+                  value={formData.middle_name} 
+                  onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })} 
+                  style={styles.modalInput} 
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Last Name *</label>
+                <input 
+                  type="text" 
+                  value={formData.last_name} 
+                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} 
+                  style={styles.modalInput} 
+                  required
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Email Address *</label>
                 <input 
                   type="email" 
                   value={formData.email} 
@@ -377,11 +704,12 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
 
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>System Role</label>
+                <label style={styles.formLabel}>System Role *</label>
                 <select 
                   value={formData.role} 
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })} 
                   style={styles.modalSelect}
+                  required
                 >
                   <option value="Admin">Admin</option>
                   <option value="Resource Manager">Resource Manager</option>
@@ -391,8 +719,12 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
 
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Save Changes</button>
+                <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>
+                  Cancel
+                </button>
+                <button type="submit" style={styles.saveBtn} disabled={loading}>
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
               </div>
             </form>
           </div>

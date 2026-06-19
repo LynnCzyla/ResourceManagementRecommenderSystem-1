@@ -1,88 +1,123 @@
+// frontend/Login.jsx
 import React, { useState } from 'react';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
+import { supabase } from '../lib/supabaseClient';
 
 export default function Login({ onLogin, isDark, toggleTheme }) {
-  const [email, setEmail] = useState('admin@wea.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
     setIsLoading(true);
-    setError('');
 
-    setTimeout(() => {
-      setIsLoading(false);
-      if (email === 'admin@wea.com' && password === 'admin123') {
-        onLogin({
-          name: 'Rodolfo Mirabel Jr.',
-          role: 'System Administrator',
-          email: 'admin@wea.com',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
-        });
-      } else if (email === 'pm@wea.com' && password === 'pm123') {
-        onLogin({
-          name: 'Carlos Mendoza',
-          role: 'Project Manager',
-          email: 'pm@wea.com',
-          avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100'
-        });
-      } else if (email === 'rm@wea.com' && password === 'rm123') {
-        onLogin({
-          name: 'Romell J. Ebuen',
-          role: 'Resource Manager',
-          email: 'rm@wea.com',
-          avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100'
-        });
-      } else if (email === 'employee@wea.com' && password === 'employee123') {
-        onLogin({
-          name: 'Javier Santos',
-          role: 'Employee',
-          email: 'employee@wea.com',
-          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
-        });
-      } else {
-        setError('Invalid credentials. Hint: use admin@wea.com / admin123, pm@wea.com / pm123, rm@wea.com / rm123, or employee@wea.com / employee123');
+    try {
+      console.log('🔐 Attempting login for:', email);
+
+      // Sign in with Supabase
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (authError) {
+        throw new Error(authError.message);
       }
-    }, 1200);
+
+      if (!authData.user) {
+        throw new Error('No user data returned');
+      }
+
+      console.log('✅ User authenticated:', authData.user.email);
+
+      // Get user profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError && profileError.code !== 'PGRST116') {
+        console.warn('Profile fetch warning:', profileError);
+      }
+
+      console.log('📋 Profile data:', profileData);
+
+      // Get role directly from database
+      const userRole = profileData?.role || 'Employee';
+      console.log('📋 Role from database:', userRole);
+
+      // Store token and user info
+      localStorage.setItem('token', authData.session.access_token);
+      localStorage.setItem('user', JSON.stringify({
+        id: authData.user.id,
+        email: authData.user.email,
+        role: userRole
+      }));
+
+      // Prepare user data - pass the role exactly as from database
+      const user = {
+        id: authData.user.id,
+        name: profileData ? 
+          `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}` : 
+          authData.user.email,
+        email: authData.user.email,
+        role: userRole, // Pass exactly as from database: 'Admin', 'Project Manager', etc.
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
+        employee_id: profileData?.employee_id,
+        profile: profileData || {}
+      };
+
+      console.log('👤 Final user object:', user);
+      console.log('🎯 Role being sent to App:', user.role);
+
+      // Call onLogin with user data
+      onLogin(user);
+
+    } catch (error) {
+      console.error('Login error:', error);
+      setError(error.message || 'Invalid credentials. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // Pre-fill credentials for testing
   const fillMockCredentials = (role) => {
-    if (role === 'admin') {
-      setEmail('admin@wea.com');
-      setPassword('admin123');
-    } else if (role === 'pm') {
-      setEmail('pm@wea.com');
-      setPassword('pm123');
-    } else if (role === 'rm') {
-      setEmail('rm@wea.com');
-      setPassword('rm123');
-    } else if (role === 'employee') {
-      setEmail('employee@wea.com');
-      setPassword('employee123');
+    const credentials = {
+      admin: { email: 'admin@wea.com', password: 'admin123' },
+      pm: { email: 'pm@wea.com', password: 'pm123' },
+      rm: { email: 'rm@wea.com', password: 'rm123' },
+      employee: { email: 'employee@wea.com', password: 'employee123' }
+    };
+    
+    const cred = credentials[role];
+    if (cred) {
+      setEmail(cred.email);
+      setPassword(cred.password);
     }
     setError('');
   };
 
   return (
     <div style={styles.container}>
-      {/* Background elements for depth */}
+      {/* Blobs */}
       <div style={{ ...styles.blob, ...styles.blob1 }}></div>
       <div style={{ ...styles.blob, ...styles.blob2 }}></div>
 
-      {/* Floating Theme Switch Container */}
+      {/* Theme Toggle */}
       <div style={styles.themeToggleContainer}>
         <span style={{ display: 'flex', alignItems: 'center', color: 'var(--color-text-secondary)', marginRight: '6px' }}>
           {isDark ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ display: 'block' }} title="Dark Mode">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ display: 'block' }} title="Light Mode">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <circle cx="12" cy="12" r="5"></circle>
               <line x1="12" y1="1" x2="12" y2="3"></line>
               <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -96,16 +131,12 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           )}
         </span>
         <label className="theme-switch" style={styles.switch}>
-          <input
-            type="checkbox"
-            checked={isDark}
-            onChange={toggleTheme}
-            style={styles.switchInput}
-          />
+          <input type="checkbox" checked={isDark} onChange={toggleTheme} style={styles.switchInput} />
           <span className="theme-slider" style={styles.switchSlider}></span>
         </label>
       </div>
 
+      {/* Login Card */}
       <div className="glass-card" style={styles.card}>
         <div style={styles.logoContainer}>
           <img src={weaLogo} alt="WEA Logo" style={styles.logo} />
@@ -137,7 +168,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@wea.com"
+                placeholder="Enter your email"
                 style={styles.input}
                 required
                 disabled={isLoading}
@@ -156,7 +187,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="Enter your password"
                 style={styles.input}
                 required
                 disabled={isLoading}
@@ -165,7 +196,6 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 style={styles.eyeBtn}
-                title={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -186,28 +216,30 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             <a
               href="#forgot-password"
               style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600', fontSize: '13px' }}
-              onClick={(e) => { e.preventDefault(); alert('Please contact the System Administrator to reset your password.'); }}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!email) {
+                  setError('Please enter your email address to reset password.');
+                  return;
+                }
+                try {
+                  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: `${window.location.origin}/reset-password`,
+                  });
+                  if (error) throw error;
+                  alert('Password reset email sent! Please check your inbox.');
+                } catch (error) {
+                  setError(error.message);
+                }
+              }}
             >
               Forgot password?
             </a>
           </div>
 
-          <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Quick Demo Login
-            </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button type="button" onClick={() => fillMockCredentials('admin')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Admin</button>
-              <button type="button" onClick={() => fillMockCredentials('pm')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>PM</button>
-              <button type="button" onClick={() => fillMockCredentials('rm')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>RM</button>
-              <button type="button" onClick={() => fillMockCredentials('employee')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Employee</button>
-            </div>
-          </div>
-
           <button
             type="submit"
             style={styles.submitBtn}
-            className="glow-primary"
             disabled={isLoading}
           >
             {isLoading ? (
@@ -220,11 +252,9 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             )}
           </button>
           <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-            Don’t have an account? <a href="#contact-admin" style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}>Contact Administrator</a>
+            Don't have an account? <a href="#contact-admin" style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}>Contact Administrator</a>
           </div>
         </form>
-
-
       </div>
     </div>
   );
@@ -378,10 +408,6 @@ const styles = {
     fontSize: '15px',
     outline: 'none',
     transition: 'all 0.3s ease',
-    '&:focus': {
-      borderColor: 'var(--color-primary)',
-      boxShadow: '0 0 0 3px var(--color-primary-light)',
-    }
   },
   eyeBtn: {
     position: 'absolute',
@@ -396,26 +422,10 @@ const styles = {
   },
   optionsRow: {
     display: 'flex',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     fontSize: '13px',
     marginBottom: '24px',
-  },
-  rememberLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    cursor: 'pointer',
-    color: 'var(--color-text-secondary)',
-  },
-  checkbox: {
-    marginRight: '8px',
-    accentColor: 'var(--color-primary)',
-  },
-  demoFill: {
-    color: 'var(--color-primary)',
-    cursor: 'pointer',
-    fontWeight: '600',
-    transition: 'color 0.2s',
   },
   submitBtn: {
     width: '100%',
@@ -443,14 +453,9 @@ const styles = {
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
   },
-  footer: {
-    marginTop: '32px',
-    fontSize: '11px',
-    color: 'var(--color-text-muted)',
-  }
 };
 
-// Add standard keyframe spin styles for inline spinner
+// Add keyframe styles
 if (typeof document !== 'undefined') {
   const style = document.createElement('style');
   style.innerHTML = `

@@ -1,3 +1,4 @@
+// server.js
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -6,6 +7,14 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Import routes    
+const userRoutes = require("./routes/Admin/createUsers");
+const userManagementRoutes = require("./routes/Admin/userManagement");
+
+// Use routes
+app.use("/api/users", userRoutes);
+app.use("/api/users", userManagementRoutes);
 
 app.get("/", (req, res) => {
     res.json({
