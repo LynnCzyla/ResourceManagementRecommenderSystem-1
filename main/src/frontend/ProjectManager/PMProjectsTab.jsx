@@ -362,8 +362,8 @@ export default function PMProjectsTab() {
                           required
                         >
                           <option value="Select Type" disabled>Select Type</option>
-                          <option value="Full-time">Full-time</option>
-                          <option value="Part-time">Part-time</option>
+                          <option value="Full-time">Full-time(40 hours/week)</option>
+                          <option value="Part-time">Part-time(20 hours/week)</option>
                         </select>
                       </div>
                     </div>
