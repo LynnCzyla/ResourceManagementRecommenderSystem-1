@@ -364,7 +364,6 @@ export default function PMProjectsTab() {
                           <option value="Select Type" disabled>Select Type</option>
                           <option value="Full-time">Full-time</option>
                           <option value="Part-time">Part-time</option>
-                          <option value="Contract">Contract</option>
                         </select>
                       </div>
                     </div>
