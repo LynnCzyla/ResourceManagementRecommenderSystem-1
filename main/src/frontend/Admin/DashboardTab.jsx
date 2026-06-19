@@ -52,7 +52,6 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
           </div>
           <div style={styles.actionTextContainer}>
             <h3 style={styles.actionTitle}>Create User Account</h3>
-            <p style={styles.actionDesc}>Provision new manager or employee profile.</p>
           </div>
         </div>
 
@@ -65,7 +64,6 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
           </div>
           <div style={styles.actionTextContainer}>
             <h3 style={styles.actionTitle}>Edit System Settings</h3>
-            <p style={styles.actionDesc}>Modify NLP weights, OCR settings, timeouts.</p>
           </div>
         </div>
 
@@ -81,7 +79,6 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
           </div>
           <div style={styles.actionTextContainer}>
             <h3 style={styles.actionTitle}>Generate System Report</h3>
-            <p style={styles.actionDesc}>Compile accuracy and processing logs.</p>
           </div>
         </div>
 
@@ -94,7 +91,6 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
           </div>
           <div style={styles.actionTextContainer}>
             <h3 style={styles.actionTitle}>Monitor OCR/NLP Logs</h3>
-            <p style={styles.actionDesc}>Verify extraction algorithms accuracy.</p>
           </div>
         </div>
       </div>

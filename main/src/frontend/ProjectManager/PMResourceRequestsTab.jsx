@@ -5,14 +5,20 @@ export default function PMResourceRequestsTab() {
   const [requests, setRequests] = useState([]);
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [formData, setFormData] = useState({
-    projectId: '',
+  const initialResources = [{
+    role: '',
+    quantity: 1,
+    experience: 'Intermediate',
+    assignment: 'Full-Time (40 hours/week)',
     skills: '',
-    timeline: 'Full-Time',
-    duration: '60 days',
     startDate: '',
     endDate: '',
-    quantity: 1
+    justification: ''
+  }];
+
+  const [formData, setFormData] = useState({
+    projectId: '',
+    resources: initialResources
   });
 
   useEffect(() => {
@@ -20,40 +26,93 @@ export default function PMResourceRequestsTab() {
     setProjects(getProjects());
   }, []);
 
+  const handleResourceChange = (index, field, value) => {
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, resources: updated };
+    });
+  };
+
+  const handleAddResource = () => {
+    setFormData(prev => ({
+      ...prev,
+      resources: [
+        ...prev.resources,
+        {
+          role: '',
+          quantity: 1,
+          experience: 'Intermediate',
+          assignment: 'Full-Time (40 hours/week)',
+          skills: '',
+          startDate: '',
+          endDate: '',
+          justification: ''
+        }
+      ]
+    }));
+  };
+
+  const handleRemoveResource = (index) => {
+    if (formData.resources.length <= 1) return;
+    setFormData(prev => ({
+      ...prev,
+      resources: prev.resources.filter((_, i) => i !== index)
+    }));
+  };
+
+  const resetFormData = () => {
+    setFormData({
+      projectId: '',
+      resources: [{
+        role: '',
+        quantity: 1,
+        experience: 'Intermediate',
+        assignment: 'Full-Time (40 hours/week)',
+        skills: '',
+        startDate: '',
+        endDate: '',
+        justification: ''
+      }]
+    });
+  };
+
   const handleCreateSubmit = (e) => {
     e.preventDefault();
     const selectedProj = projects.find(p => p.id === parseInt(formData.projectId)) || { name: 'Unknown Project' };
 
-    const skillsArray = formData.skills
-      ? formData.skills.split(',').map(s => s.trim()).filter(s => s.length > 0)
-      : [];
+    const newRequests = formData.resources.map((res, idx) => {
+      const skillsArray = res.skills
+        ? res.skills.split(',').map(s => s.trim()).filter(s => s.length > 0)
+        : [];
 
-    const newRequest = {
-      id: Date.now(),
-      projectName: selectedProj.name,
-      skills: skillsArray,
-      timeline: formData.timeline,
-      duration: formData.duration,
-      startDate: formData.startDate || new Date().toISOString().split('T')[0],
-      endDate: formData.endDate || new Date().toISOString().split('T')[0],
-      status: 'Pending',
-      quantity: parseInt(formData.quantity) || 1
-    };
+      // Compute duration description from dates if present
+      let durationDesc = '60 days';
+      if (res.startDate && res.endDate) {
+        const diffTime = Math.abs(new Date(res.endDate) - new Date(res.startDate));
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        durationDesc = `${diffDays} days`;
+      }
 
-    const updated = [newRequest, ...requests];
+      return {
+        id: Date.now() + idx,
+        projectName: selectedProj.name,
+        skills: skillsArray,
+        timeline: res.assignment,
+        duration: durationDesc,
+        startDate: res.startDate || new Date().toISOString().split('T')[0],
+        endDate: res.endDate || new Date().toISOString().split('T')[0],
+        status: 'Pending',
+        quantity: parseInt(res.quantity) || 1
+      };
+    });
+
+    const updated = [...newRequests, ...requests];
     setRequests(updated);
     saveRequests(updated);
 
     setShowCreateModal(false);
-    setFormData({
-      projectId: '',
-      skills: '',
-      timeline: 'Full-Time',
-      duration: '60 days',
-      startDate: '',
-      endDate: '',
-      quantity: 1
-    });
+    resetFormData();
   };
 
   return (
@@ -125,95 +184,148 @@ export default function PMResourceRequestsTab() {
         <div style={styles.modalOverlay}>
           <div className="glass-card" style={styles.modalCard}>
             <div style={styles.modalHeader}>
-              <h2 style={{ margin: 0, fontSize: 20 }}>Request Manpower</h2>
+              <h2 style={{ margin: 0, fontSize: 18 }}>New Resource Request</h2>
               <button onClick={() => setShowCreateModal(false)} style={styles.closeModalBtn}>&times;</button>
             </div>
+            
             <form onSubmit={handleCreateSubmit} style={{ marginTop: 16 }}>
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Select Project</label>
+                <label style={styles.formLabel}>Project <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <select 
                   value={formData.projectId} 
                   onChange={(e) => setFormData({ ...formData, projectId: e.target.value })} 
                   style={styles.modalSelect}
                   required
                 >
-                  <option value="">-- Select Project --</option>
+                  <option value="">Select a project</option>
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
               </div>
 
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Required Skills / Certifications</label>
-                <input 
-                  type="text" 
-                  value={formData.skills} 
-                  onChange={(e) => setFormData({ ...formData, skills: e.target.value })} 
-                  style={styles.modalInput} 
-                  placeholder="e.g. React, Docker, GCP Professional Architect"
-                  required
-                />
-              </div>
+              {/* Resource Requirements Section */}
+              <div style={{ ...styles.sectionContainer, marginTop: '20px' }}>
+                <div style={styles.sectionHeader}>
+                  <span style={styles.sectionTitle}>Resource Requirements</span>
+                </div>
 
-              <div style={styles.formRow}>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>Quantity</label>
-                  <input 
-                    type="number" 
-                    min="1"
-                    value={formData.quantity} 
-                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })} 
-                    style={styles.modalInput} 
-                  />
-                </div>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>Timeline</label>
-                  <select 
-                    value={formData.timeline} 
-                    onChange={(e) => setFormData({ ...formData, timeline: e.target.value })} 
-                    style={styles.modalSelect}
-                  >
-                    <option value="Full-Time">Full-Time</option>
-                    <option value="Part-Time">Part-Time</option>
-                    <option value="Contract">Contract</option>
-                  </select>
-                </div>
-              </div>
+                {formData.resources.map((res, index) => (
+                  <div key={index} style={styles.resourceCard}>
+                    <div style={styles.resourceCardHeader}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontWeight: '600', fontSize: '13px' }}>
+                        Resource #{index + 1}
+                      </div>
+                      {formData.resources.length > 1 && (
+                        <button type="button" onClick={() => handleRemoveResource(index)} style={styles.removeBtn}>Remove</button>
+                      )}
+                    </div>
 
-              <div style={styles.formRow}>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>Start Date</label>
-                  <input 
-                    type="date" 
-                    value={formData.startDate} 
-                    onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} 
-                    style={styles.modalInput} 
-                    required
-                  />
-                </div>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>End Date</label>
-                  <input 
-                    type="date" 
-                    value={formData.endDate} 
-                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} 
-                    style={styles.modalInput} 
-                    required
-                  />
-                </div>
-              </div>
+                    <div style={styles.formRow}>
+                      <div style={{ ...styles.formGroup, flex: 2 }}>
+                        <label style={styles.formLabel}>Position/Role <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <input 
+                          type="text" 
+                          value={res.role} 
+                          onChange={(e) => handleResourceChange(index, 'role', e.target.value)} 
+                          style={styles.modalInput} 
+                          placeholder="e.g., Frontend Developer"
+                          required
+                        />
+                      </div>
+                      <div style={{ ...styles.formGroup, flex: 1 }}>
+                        <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <input 
+                          type="number" 
+                          min="1"
+                          value={res.quantity} 
+                          onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)} 
+                          style={styles.modalInput} 
+                          required
+                        />
+                      </div>
+                    </div>
 
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Duration Description</label>
-                <input 
-                  type="text" 
-                  value={formData.duration} 
-                  onChange={(e) => setFormData({ ...formData, duration: e.target.value })} 
-                  style={styles.modalInput} 
-                  placeholder="e.g. 60 days, 3 months"
-                  required
-                />
+                    <div style={styles.formRow}>
+                      <div style={{ ...styles.formGroup, flex: 1 }}>
+                        <label style={styles.formLabel}>Experience Level <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <select 
+                          value={res.experience} 
+                          onChange={(e) => handleResourceChange(index, 'experience', e.target.value)} 
+                          style={styles.modalSelect}
+                          required
+                        >
+                          <option value="Junior">Junior</option>
+                          <option value="Intermediate">Intermediate</option>
+                          <option value="Senior">Senior</option>
+                        </select>
+                      </div>
+                      <div style={{ ...styles.formGroup, flex: 1 }}>
+                        <label style={styles.formLabel}>Assignment Type <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <select 
+                          value={res.assignment} 
+                          onChange={(e) => handleResourceChange(index, 'assignment', e.target.value)} 
+                          style={styles.modalSelect}
+                          required
+                        >
+                          <option value="Full-Time (40 hours/week)">Full-Time (40 hours/week)</option>
+                          <option value="Part-Time (20 hours/week)">Part-Time (20 hours/week)</option>
+                          <option value="Contract">Contract</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Required Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                      <input 
+                        type="text" 
+                        value={res.skills} 
+                        onChange={(e) => handleResourceChange(index, 'skills', e.target.value)} 
+                        style={styles.modalInput} 
+                        placeholder="e.g., High-Voltage Wiring, Circuit Calibration, LOTO Protocol"
+                        required
+                      />
+                      <span style={styles.inputHelp}>Separate multiple skills with commas</span>
+                    </div>
+
+                    <div style={styles.formRow}>
+                      <div style={{ ...styles.formGroup, flex: 1 }}>
+                        <label style={styles.formLabel}>Start Date <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <input 
+                          type="date" 
+                          value={res.startDate} 
+                          onChange={(e) => handleResourceChange(index, 'startDate', e.target.value)} 
+                          style={styles.modalInput} 
+                          required
+                        />
+                      </div>
+                      <div style={{ ...styles.formGroup, flex: 1 }}>
+                        <label style={styles.formLabel}>End Date <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <input 
+                          type="date" 
+                          value={res.endDate} 
+                          onChange={(e) => handleResourceChange(index, 'endDate', e.target.value)} 
+                          style={styles.modalInput} 
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Justification / Requirements</label>
+                      <textarea 
+                        value={res.justification} 
+                        onChange={(e) => handleResourceChange(index, 'justification', e.target.value)} 
+                        style={styles.modalTextarea} 
+                        placeholder="Why do you need this resource? Provide details about the work they will be doing..."
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <button type="button" onClick={handleAddResource} style={styles.addResourceBtn}>
+                  + Add Another Resource
+                </button>
               </div>
 
               <div style={styles.modalActions}>
@@ -328,7 +440,9 @@ const styles = {
   },
   modalCard: {
     width: '100%',
-    maxWidth: '480px',
+    maxWidth: '760px',
+    maxHeight: '85vh',
+    overflowY: 'auto',
     padding: '28px',
   },
   modalHeader: {
@@ -337,6 +451,7 @@ const styles = {
     alignItems: 'center',
     borderBottom: '1px solid var(--color-border)',
     paddingBottom: '12px',
+    marginBottom: '20px',
   },
   closeModalBtn: {
     background: 'transparent',
@@ -344,6 +459,64 @@ const styles = {
     fontSize: '24px',
     cursor: 'pointer',
     color: 'var(--color-text-muted)',
+  },
+  sectionContainer: {
+    backgroundColor: 'var(--color-bg-card-hover)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '8px',
+    padding: '20px',
+    textAlign: 'left',
+  },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '16px',
+    borderBottom: '1px solid var(--color-border)',
+    paddingBottom: '8px',
+  },
+  sectionTitle: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  resourceCard: {
+    backgroundColor: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '16px',
+  },
+  resourceCardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '12px',
+    borderBottom: '1px dotted var(--color-border)',
+    paddingBottom: '8px',
+  },
+  removeBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-danger)',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  addResourceBtn: {
+    width: '100%',
+    padding: '12px',
+    border: '2px dashed var(--color-primary)',
+    background: 'transparent',
+    color: 'var(--color-primary)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '700',
+    fontSize: '13px',
+    transition: 'all 0.2s',
+    marginTop: '8px',
   },
   formGroup: {
     marginBottom: '16px',
@@ -380,6 +553,24 @@ const styles = {
     color: 'var(--color-text-primary)',
     fontSize: '14px',
     outline: 'none',
+  },
+  modalTextarea: {
+    width: '100%',
+    height: '100px',
+    padding: '10px 12px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
+    outline: 'none',
+    resize: 'none',
+  },
+  inputHelp: {
+    fontSize: '10px',
+    color: 'var(--color-text-muted)',
+    marginTop: '4px',
+    display: 'block',
   },
   modalActions: {
     display: 'flex',

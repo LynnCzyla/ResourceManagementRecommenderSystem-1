@@ -1,9 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function LogsTab({ activeSubTab: initialSubTab }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'ocr');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOcrLog, setSelectedOcrLog] = useState(null);
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   const ocrLogs = [
     {
@@ -148,7 +154,6 @@ export default function LogsTab({ activeSubTab: initialSubTab }) {
                   <th style={styles.th}>Scanned File</th>
                   <th style={styles.th}>Timestamp</th>
                   <th style={styles.th}>Status</th>
-                  <th style={styles.th}>OCR Confidence</th>
                   <th style={styles.th}>Identified Role</th>
                   <th style={styles.th}>Actions</th>
                 </tr>
@@ -166,18 +171,6 @@ export default function LogsTab({ activeSubTab: initialSubTab }) {
                       }}>
                         {log.status}
                       </span>
-                    </td>
-                    <td style={styles.td}>
-                      <div style={styles.progressContainer}>
-                        <div style={styles.progressBarBg}>
-                          <div style={{ 
-                            ...styles.progressBarFill, 
-                            width: `${log.confidence}%`,
-                            backgroundColor: log.confidence > 90 ? 'var(--color-success)' : log.confidence > 70 ? 'var(--color-warning)' : 'var(--color-danger)'
-                          }}></div>
-                        </div>
-                        <span style={{ marginLeft: 8, fontWeight: '600' }}>{log.confidence}%</span>
-                      </div>
                     </td>
                     <td style={styles.td}>{log.role}</td>
                     <td style={styles.td}>
@@ -227,7 +220,6 @@ export default function LogsTab({ activeSubTab: initialSubTab }) {
                   <th style={styles.th}>Action</th>
                   <th style={styles.th}>System Category</th>
                   <th style={styles.th}>Log Description</th>
-                  <th style={styles.th}>Source IP</th>
                 </tr>
               </thead>
               <tbody>
@@ -244,7 +236,6 @@ export default function LogsTab({ activeSubTab: initialSubTab }) {
                       }}>{log.category}</span>
                     </td>
                     <td style={styles.td}>{log.desc}</td>
-                    <td style={styles.td}>{log.ip}</td>
                   </tr>
                 ))}
               </tbody>

@@ -7,8 +7,6 @@ export default function EmployeeProfileTab() {
   const [ocrResult, setOcrResult] = useState(null);
   
   // Forms states
-  const [skillInput, setSkillInput] = useState('');
-  const [certForm, setCertForm] = useState({ name: '', issuer: '', date: '', expiry: '' });
   const [profileForm, setProfileForm] = useState({ name: '', email: '', department: '', role: '' });
   
   useEffect(() => {
@@ -42,7 +40,18 @@ export default function EmployeeProfileTab() {
     // Simulate OCR + NLP Extraction
     setTimeout(() => {
       setOcrLoading(false);
-      const extractedSkills = ['React', 'TypeScript', 'Node.js', 'PostgreSQL', 'Docker', 'AWS'];
+      const extractedSkills = [
+        'AutoCAD 2D & 3D',
+        'Dialux Lighting Calculation',
+        'Electrical drawings and product drawings using AutoCAD 2D',
+        'Lighting design and calculations using Dialux, Relux and AGI32',
+        'Multi-Cable Transit Design using Hawke Transit Software',
+        'UPS installation and Commissioning',
+        'Maintenance & Troubleshooting',
+        'Design and Application',
+        'Sales Quotation and Proposal preparation',
+        'Product Knowledge'
+      ];
       setOcrResult({
         fileName: file.name,
         confidence: '97.8%',
@@ -60,36 +69,22 @@ export default function EmployeeProfileTab() {
     }, 2500);
   };
 
-  const handleAddSkill = (e) => {
-    e.preventDefault();
-    if (!skillInput.trim()) return;
-    if (employeeInfo.skills.includes(skillInput.trim())) return;
+  const handleCertUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-    const updatedSkills = [...employeeInfo.skills, skillInput.trim()];
-    updateGlobalEmployee({ ...employeeInfo, skills: updatedSkills });
-    setSkillInput('');
-  };
-
-  const handleRemoveSkill = (skillToRemove) => {
-    const updatedSkills = employeeInfo.skills.filter(s => s !== skillToRemove);
-    updateGlobalEmployee({ ...employeeInfo, skills: updatedSkills });
-  };
-
-  const handleAddCert = (e) => {
-    e.preventDefault();
-    if (!certForm.name || !certForm.issuer) return;
-
+    // Simulate OCR certification parsing by extracting filename without extension
+    const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
     const newCert = {
       id: Date.now(),
-      name: certForm.name,
-      issuer: certForm.issuer,
-      date: certForm.date || new Date().toISOString().split('T')[0],
-      expiry: certForm.expiry || 'N/A'
+      name: nameWithoutExt,
+      issuer: 'Verified Issuer (via OCR)',
+      date: new Date().toISOString().split('T')[0],
+      expiry: 'N/A'
     };
 
     const updatedCerts = [...employeeInfo.certifications, newCert];
     updateGlobalEmployee({ ...employeeInfo, certifications: updatedCerts });
-    setCertForm({ name: '', issuer: '', date: '', expiry: '' });
   };
 
   const handleRemoveCert = (certId) => {
@@ -153,7 +148,15 @@ export default function EmployeeProfileTab() {
             {ocrResult && (
               <div style={styles.ocrResultCard}>
                 <div style={styles.ocrResultHeader}>
-                  <span>📄 {ocrResult.fileName}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                    </svg>
+                    {ocrResult.fileName}
+                  </span>
                   <span style={styles.ocrConfidence}>Confidence: {ocrResult.confidence}</span>
                 </div>
                 <div style={styles.ocrSkillsExtracted}>
@@ -169,33 +172,29 @@ export default function EmployeeProfileTab() {
 
             {employeeInfo.resumeName && !ocrLoading && !ocrResult && (
               <div style={styles.activeResumeRow}>
-                <span>📄 Current CV: <strong>{employeeInfo.resumeName}</strong></span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                  </svg>
+                  Current CV: <strong>{employeeInfo.resumeName}</strong>
+                </span>
                 <span style={styles.resumeDate}>Uploaded on {employeeInfo.resumeUploadedAt}</span>
               </div>
             )}
           </div>
 
-          {/* Skills Management */}
+          {/* Skills Portfolio */}
           <div className="glass-card" style={styles.card}>
             <h2 style={styles.sectionTitle}>Skills Portfolio</h2>
-            <p style={styles.sectionSubtitle}>Manually append or remove skills from your engineering records.</p>
-            
-            <form onSubmit={handleAddSkill} style={styles.skillInputRow}>
-              <input 
-                type="text" 
-                placeholder="e.g. AWS, Python, Kubernetes" 
-                value={skillInput}
-                onChange={(e) => setSkillInput(e.target.value)}
-                style={styles.skillInput}
-              />
-              <button type="submit" style={styles.addSkillBtn}>Add</button>
-            </form>
+            <p style={styles.sectionSubtitle}>Verified skills extracted automatically from your resume profile.</p>
 
             <div style={styles.skillsList}>
               {employeeInfo.skills.map((skill, idx) => (
-                <span key={idx} style={styles.skillPill}>
+                <span key={idx} style={{ ...styles.skillPill, paddingRight: '12px' }}>
                   {skill}
-                  <button type="button" onClick={() => handleRemoveSkill(skill)} style={styles.removeSkillBtn}>&times;</button>
                 </span>
               ))}
             </div>
@@ -260,45 +259,25 @@ export default function EmployeeProfileTab() {
           {/* Certifications Management */}
           <div className="glass-card" style={styles.card}>
             <h2 style={styles.sectionTitle}>Certifications</h2>
-            <p style={styles.sectionSubtitle}>Add formal certifications for verification matches.</p>
+            <p style={styles.sectionSubtitle}>Upload PDF/image to automatically parse and append certifications.</p>
 
-            <form onSubmit={handleAddCert} style={styles.certForm}>
-              <div style={styles.formRow}>
+            <div style={{ ...styles.uploadZone, marginBottom: '20px' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <label style={styles.uploadBtnLabel}>
+                Upload Certificate
                 <input 
-                  type="text" 
-                  placeholder="Cert Name (e.g. AWS Architect)" 
-                  value={certForm.name}
-                  onChange={(e) => setCertForm({ ...certForm, name: e.target.value })}
-                  style={styles.certInput}
-                  required
+                  type="file" 
+                  accept=".pdf,.png,.jpg,.jpeg" 
+                  onChange={handleCertUpload} 
+                  style={{ display: 'none' }} 
                 />
-                <input 
-                  type="text" 
-                  placeholder="Issuer (e.g. Amazon)" 
-                  value={certForm.issuer}
-                  onChange={(e) => setCertForm({ ...certForm, issuer: e.target.value })}
-                  style={styles.certInput}
-                  required
-                />
-              </div>
-              <div style={styles.formRow}>
-                <input 
-                  type="date" 
-                  value={certForm.date}
-                  onChange={(e) => setCertForm({ ...certForm, date: e.target.value })}
-                  style={styles.certInput}
-                  title="Issue Date"
-                />
-                <input 
-                  type="text" 
-                  placeholder="Expiry (e.g. 2028-08-14 or N/A)" 
-                  value={certForm.expiry}
-                  onChange={(e) => setCertForm({ ...certForm, expiry: e.target.value })}
-                  style={styles.certInput}
-                />
-              </div>
-              <button type="submit" style={styles.addCertBtn}>Add Certification</button>
-            </form>
+              </label>
+              <span style={styles.uploadHelper}>Supported formats: PDF, PNG, JPG (Max 5MB)</span>
+            </div>
 
             <div style={styles.certsList}>
               {employeeInfo.certifications.length === 0 ? (
@@ -307,7 +286,16 @@ export default function EmployeeProfileTab() {
                 employeeInfo.certifications.map(cert => (
                   <div key={cert.id} style={styles.certItem}>
                     <div style={styles.certMeta}>
-                      <h4 style={styles.certName}>🏆 {cert.name}</h4>
+                      <h4 style={{ ...styles.certName, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                          <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                          <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                          <path d="M4 22h16"></path>
+                          <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"></path>
+                          <path d="M12 2a15.3 15.3 0 0 1 4 10H8a15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        {cert.name}
+                      </h4>
                       <span style={styles.certIssuer}>{cert.issuer} | Issued: {cert.date} | Expiry: {cert.expiry}</span>
                     </div>
                     <button type="button" onClick={() => handleRemoveCert(cert.id)} style={styles.removeCertBtn}>Delete</button>

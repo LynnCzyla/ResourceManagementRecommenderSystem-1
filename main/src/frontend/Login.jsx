@@ -31,6 +31,13 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           email: 'pm@wea.com',
           avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100'
         });
+      } else if (email === 'rm@wea.com' && password === 'rm123') {
+        onLogin({
+          name: 'Romell J. Ebuen',
+          role: 'Resource Manager',
+          email: 'rm@wea.com',
+          avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100'
+        });
       } else if (email === 'employee@wea.com' && password === 'employee123') {
         onLogin({
           name: 'Javier Santos',
@@ -39,7 +46,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
         });
       } else {
-        setError('Invalid credentials. Hint: use pm@wea.com / pm123 or employee@wea.com / employee123');
+        setError('Invalid credentials. Hint: use admin@wea.com / admin123, pm@wea.com / pm123, rm@wea.com / rm123, or employee@wea.com / employee123');
       }
     }, 1200);
   };
@@ -51,6 +58,9 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     } else if (role === 'pm') {
       setEmail('pm@wea.com');
       setPassword('pm123');
+    } else if (role === 'rm') {
+      setEmail('rm@wea.com');
+      setPassword('rm123');
     } else if (role === 'employee') {
       setEmail('employee@wea.com');
       setPassword('employee123');
@@ -173,10 +183,13 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           </div>
 
           <div style={styles.optionsRow}>
-            <label style={styles.rememberLabel}>
-              <input type="checkbox" style={styles.checkbox} defaultChecked />
-              Keep me logged in
-            </label>
+            <a
+              href="#forgot-password"
+              style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600', fontSize: '13px' }}
+              onClick={(e) => { e.preventDefault(); alert('Please contact the System Administrator to reset your password.'); }}
+            >
+              Forgot password?
+            </a>
           </div>
 
           <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -186,6 +199,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             <div style={{ display: 'flex', gap: '8px' }}>
               <button type="button" onClick={() => fillMockCredentials('admin')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Admin</button>
               <button type="button" onClick={() => fillMockCredentials('pm')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>PM</button>
+              <button type="button" onClick={() => fillMockCredentials('rm')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>RM</button>
               <button type="button" onClick={() => fillMockCredentials('employee')} style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card-hover)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Employee</button>
             </div>
           </div>
@@ -205,14 +219,12 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
               'Login'
             )}
           </button>
+          <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+            Don’t have an account? <a href="#contact-admin" style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}>Contact Administrator</a>
+          </div>
         </form>
 
-        <div style={styles.footer}>
-          <p>© {new Date().getFullYear()} WEA Industrial Distribution. All rights reserved.</p>
-          <p style={{ marginTop: 4, fontSize: '10px', color: 'var(--color-text-muted)' }}>
-            System Security: ISO/IEC 25010 Evaluated | AY 2026-2027
-          </p>
-        </div>
+
       </div>
     </div>
   );

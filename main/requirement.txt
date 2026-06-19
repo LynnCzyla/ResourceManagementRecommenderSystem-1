@@ -1,0 +1,12 @@
+
+Download node.js, install the Long term support prebuilt version
+
+New cmd (not terminal or powershell use cmd)
+
+then type this:
+
+npm create vite@latest aking-react-app -- --template react
+
+npm install
+
+npm run dev
