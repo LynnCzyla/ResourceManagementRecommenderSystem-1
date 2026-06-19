@@ -1,3 +1,4 @@
+// App.jsx
 import React, { useState, useEffect } from 'react';
 import Login from './frontend/Login';
 import AdminLayout from './frontend/Admin/AdminLayout';
@@ -9,9 +10,8 @@ import './App.css';
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [isDark, setIsDark] = useState(true); // Default to Dark Theme matching the reference image
+  const [isDark, setIsDark] = useState(true);
 
-  // Apply default dark theme to body element on startup
   useEffect(() => {
     if (isDark) {
       document.body.classList.add('dark-theme');
@@ -25,13 +25,38 @@ function App() {
   };
 
   const handleLogin = (userProfile) => {
+    console.log('🔍 User logged in:', userProfile);
+    console.log('🔍 User role:', userProfile.role);
     setCurrentUser(userProfile);
     setIsLoggedIn(true);
   };
 
   const handleLogout = () => {
+    // Clear session
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setCurrentUser(null);
     setIsLoggedIn(false);
+  };
+
+  // Render the appropriate layout based on role
+  const renderLayout = () => {
+    if (!currentUser) return null;
+
+    const role = currentUser.role;
+    console.log('Rendering layout for role:', role);
+
+    // Check role and render appropriate layout
+    switch (role) {
+      case 'Admin':
+        return <AdminLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+      case 'Project Manager':
+        return <PMLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+      case 'Resource Manager':
+        return <RMLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+      default:
+        return <EmployeeLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+    }
   };
 
   return (
@@ -42,34 +67,8 @@ function App() {
           isDark={isDark} 
           toggleTheme={toggleTheme} 
         />
-      ) : currentUser.role === 'System Administrator' ? (
-        <AdminLayout 
-          user={currentUser} 
-          onLogout={handleLogout} 
-          isDark={isDark} 
-          toggleTheme={toggleTheme} 
-        />
-      ) : currentUser.role === 'Project Manager' ? (
-        <PMLayout 
-          user={currentUser} 
-          onLogout={handleLogout} 
-          isDark={isDark} 
-          toggleTheme={toggleTheme} 
-        />
-      ) : currentUser.role === 'Resource Manager' ? (
-        <RMLayout 
-          user={currentUser} 
-          onLogout={handleLogout} 
-          isDark={isDark} 
-          toggleTheme={toggleTheme} 
-        />
       ) : (
-        <EmployeeLayout 
-          user={currentUser} 
-          onLogout={handleLogout} 
-          isDark={isDark} 
-          toggleTheme={toggleTheme} 
-        />
+        renderLayout()
       )}
     </>
   );
