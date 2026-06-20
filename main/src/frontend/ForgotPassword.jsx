@@ -23,14 +23,20 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
     try {
       console.log('🔐 Sending password reset email to:', email);
 
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            email,
+            redirectOrigin: window.location.origin   // ← NEW: e.g. "http://localhost:3000"
+        }),
+        });
 
-      if (resetError) {
-        throw new Error(resetError.message);
-      }
+        const result = await response.json();
 
+        if (!result.success) {
+        throw new Error(result.error || 'Failed to send reset email');
+        }
       console.log('✅ Password reset email sent');
       setSuccess(true);
     } catch (err) {
