@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import { supabase, getSession } from '../lib/supabaseClient';
+import ForgotPassword from './ForgotPassword';
+import ContactAdmin from './ContactAdmin';
 
 export default function Login({ onLogin, isDark, toggleTheme }) {
   const [email, setEmail] = useState('');
@@ -10,6 +12,12 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // View state: toggles between the login form and the forgot-password page
+  const [view, setView] = useState('login'); // 'login' | 'forgot-password'
+
+  // Modal state for the Contact Administrator popup
+  const [showContactModal, setShowContactModal] = useState(false);
 
   // Check if user is already logged in
   useEffect(() => {
@@ -138,6 +146,19 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           <p style={{ color: 'var(--color-text-secondary)' }}>Checking session...</p>
         </div>
       </div>
+    );
+  }
+
+  // Show the Forgot Password page instead of the login form
+  if (view === 'forgot-password') {
+    return (
+      <>
+        <ForgotPassword
+          onBackToLogin={() => setView('login')}
+          isDark={isDark}
+          toggleTheme={toggleTheme}
+        />
+      </>
     );
   }
 
@@ -336,23 +357,12 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
 
           <div style={styles.optionsRow}>
             <a
-              href="#forgot-password"
+              href="#"
               style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600', fontSize: '13px' }}
-              onClick={async (e) => {
+              onClick={(e) => {
                 e.preventDefault();
-                if (!email) {
-                  setError('Please enter your email address to reset password.');
-                  return;
-                }
-                try {
-                  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                    redirectTo: `${window.location.origin}/reset-password`,
-                  });
-                  if (error) throw error;
-                  alert('Password reset email sent! Please check your inbox.');
-                } catch (error) {
-                  setError(error.message);
-                }
+                setError('');
+                setView('forgot-password');
               }}
             >
               Forgot password?
@@ -374,10 +384,26 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             )}
           </button>
           <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-            Don't have an account? <a href="#contact-admin" style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}>Contact Administrator</a>
+            Don't have an account?{' '}
+            <a
+              href="#"
+              style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}
+              onClick={(e) => {
+                e.preventDefault();
+                setShowContactModal(true);
+              }}
+            >
+              Contact Administrator
+            </a>
           </div>
         </form>
       </div>
+
+      {/* Contact Administrator modal */}
+      <ContactAdmin
+        isOpen={showContactModal}
+        onClose={() => setShowContactModal(false)}
+      />
     </div>
   );
 }
