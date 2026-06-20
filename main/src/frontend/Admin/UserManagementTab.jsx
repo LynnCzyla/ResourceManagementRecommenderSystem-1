@@ -30,9 +30,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [users, setUsers] = useState([]);
 
   const [contactRequests, setContactRequests] = useState([
-    { id: 1, email: 'john.smith@wea-external.com', message: 'Hello, I am a new hiring specialist. I need an Admin/Resource Manager account to assist with scheduling.', date: '2026-06-18' },
-    { id: 2, email: 'sarah.jones@wea.com', message: 'Hi! I lost access to my Project Manager credentials. Can you reset them or grant me a new account?', date: '2026-06-17' },
-    { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15' },
+    { id: 1, email: 'john.smith@wea-external.com', message: 'Hello, I am a new hiring specialist. I need an Admin/Resource Manager account to assist with scheduling.', date: '2026-06-18', requestType: 'Account Request', status: 'Pending' },
+    { id: 2, email: 'sarah.jones@wea.com', message: 'Hi! I lost access to my Project Manager credentials. Can you reset them or grant me a new account?', date: '2026-06-17', requestType: 'Password Reset', status: 'Pending' },
+    { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15', requestType: 'Account Request', status: 'Pending' },
   ]);
 
   // Custom SweetAlert design configuration
@@ -110,7 +110,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           middle_name: profile.middle_name,
           last_name: profile.last_name,
         }));
-        
+
         setUsers(transformedUsers);
         setError(null);
       } else {
@@ -136,6 +136,15 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
   const deleteRequest = (id) => {
     setContactRequests(contactRequests.filter(req => req.id !== id));
+  };
+
+  const updateRequestStatus = (id, newStatus) => {
+    setContactRequests(contactRequests.map(req => {
+      if (req.id === id) {
+        return { ...req, status: newStatus };
+      }
+      return req;
+    }));
   };
 
   const handleCreateSubmit = async (e) => {
@@ -522,52 +531,137 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               <thead>
                 <tr style={styles.tableHeaderRow}>
                   <th style={styles.th}>Email Address</th>
+                  <th style={styles.th}>Request Type</th>
                   <th style={styles.th}>Message / Request Detail</th>
                   <th style={styles.th}>Date Received</th>
+                  <th style={styles.th}>Status</th>
                   <th style={styles.th}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {contactRequests.length === 0 ? (
                   <tr>
-                    <td colSpan="4" style={styles.emptyRow}>No contact requests found.</td>
+                    <td colSpan="6" style={styles.emptyRow}>No contact requests found.</td>
                   </tr>
                 ) : (
                   contactRequests.map(req => (
                     <tr key={req.id} style={styles.tableBodyRow}>
                       <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{req.email}</td>
+                      <td style={styles.td}>
+                        <span style={{
+                          ...styles.requestTypeBadge,
+                          backgroundColor: req.requestType === 'Account Request' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                          color: req.requestType === 'Account Request' ? 'var(--color-primary)' : 'var(--color-warning)'
+                        }}>
+                          {req.requestType}
+                        </span>
+                      </td>
                       <td style={{ ...styles.td, maxWidth: '400px', whiteSpace: 'normal', lineHeight: '1.4' }}>{req.message}</td>
                       <td style={styles.td}>{req.date}</td>
                       <td style={styles.td}>
+                        <span style={{
+                          ...styles.statusBadge,
+                          backgroundColor: req.status === 'Pending' ? 'var(--color-warning-light)' : req.status === 'Approved' ? 'var(--color-primary-light)' : req.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-text-muted)',
+                          color: req.status === 'Pending' ? 'var(--color-warning)' : req.status === 'Approved' ? 'var(--color-success)' : req.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-text-secondary)'
+                        }}>
+                          {req.status}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
                         <div style={styles.actionCell}>
-                          <button 
-                            onClick={() => {
-                              resetForm();
-                              setFormData({ 
-                                ...formData, 
-                                first_name: '',
-                                middle_name: '',
-                                last_name: '',
-                                email: req.email, 
-                                role: 'Employee', 
-                                password: '' 
-                              });
-                              setShowCreateModal(true);
-                            }}
-                            style={styles.createBtn}
-                          >
-                            Create Account
-                          </button>
-                          <button 
-                            onClick={() => deleteRequest(req.id)} 
-                            style={{
-                              ...styles.statusToggleBtn,
-                              color: 'var(--color-danger)',
-                              background: 'var(--color-danger-light)'
-                            }}
-                          >
-                            Dismiss
-                          </button>
+                          {req.status === 'Pending' ? (
+                            <>
+                              <button
+                                onClick={() => {
+                                  resetForm();
+                                  setFormData({
+                                    ...formData,
+                                    first_name: '',
+                                    middle_name: '',
+                                    last_name: '',
+                                    email: req.email,
+                                    role: 'Employee',
+                                    password: ''
+                                  });
+                                  setShowCreateModal(true);
+                                }}
+                                style={{
+                                  ...styles.statusToggleBtn,
+                                  color: 'var(--color-primary)',
+                                  background: 'var(--color-primary-light)'
+                                }}
+                              >
+                                Create Account
+                              </button>
+                              <button
+                                onClick={() => updateRequestStatus(req.id, 'Approved')}
+                                style={{
+                                  ...styles.statusToggleBtn,
+                                  color: 'var(--color-success)',
+                                  background: 'var(--color-primary-light)'
+                                }}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => updateRequestStatus(req.id, 'Rejected')}
+                                style={{
+                                  ...styles.statusToggleBtn,
+                                  color: 'var(--color-danger)',
+                                  background: 'var(--color-danger-light)'
+                                }}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : req.status === 'Approved' ? (
+                            <>
+                              <button
+                                onClick={() => updateRequestStatus(req.id, 'Closed')}
+                                style={{
+                                  ...styles.statusToggleBtn,
+                                  color: 'var(--color-text-secondary)',
+                                  background: 'var(--color-bg-card-hover)'
+                                }}
+                              >
+                                Close
+                              </button>
+                            </>
+                          ) : req.status === 'Rejected' ? (
+                            <>
+                              <button
+                                onClick={() => updateRequestStatus(req.id, 'Pending')}
+                                style={{
+                                  ...styles.statusToggleBtn,
+                                  color: 'var(--color-warning)',
+                                  background: 'var(--color-warning-light)'
+                                }}
+                              >
+                                Reopen
+                              </button>
+                              <button
+                                onClick={() => deleteRequest(req.id)}
+                                style={{
+                                  ...styles.statusToggleBtn,
+                                  color: 'var(--color-danger)',
+                                  background: 'var(--color-danger-light)'
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => deleteRequest(req.id)}
+                              style={{
+                                ...styles.statusToggleBtn,
+                                color: 'var(--color-danger)',
+                                background: 'var(--color-danger-light)'
+                              }}
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -882,6 +976,13 @@ const styles = {
     fontWeight: '700',
     padding: '3px 8px',
     borderRadius: '4px',
+  },
+  requestTypeBadge: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '3px 8px',
+    borderRadius: '4px',
+    whiteSpace: 'nowrap',
   },
   actionCell: {
     display: 'flex',

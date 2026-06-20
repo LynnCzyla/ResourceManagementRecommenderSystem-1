@@ -5,6 +5,14 @@ export default function RMEmployeeDirectoryTab() {
   const [employees, setEmployees] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState('All');
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [assignForm, setAssignForm] = useState({
+    projectId: '',
+    estimatedHours: 8,
+    startDate: new Date().toISOString().split('T')[0],
+    notes: ''
+  });
 
   useEffect(() => {
     setEmployees(getEmployees());
@@ -19,6 +27,28 @@ export default function RMEmployeeDirectoryTab() {
     });
     setEmployees(updated);
     saveEmployees(updated);
+  };
+
+  const handleOpenAssignModal = (emp) => {
+    setSelectedEmployee(emp);
+    setAssignForm({
+      projectId: '',
+      estimatedHours: 8,
+      startDate: new Date().toISOString().split('T')[0],
+      notes: ''
+    });
+    setShowAssignModal(true);
+  };
+
+  const handleCloseAssignModal = () => {
+    setShowAssignModal(false);
+    setSelectedEmployee(null);
+  };
+
+  const handleAssignSubmit = (e) => {
+    e.preventDefault();
+    alert(`Assigned ${selectedEmployee.name} to project`);
+    handleCloseAssignModal();
   };
 
   const filteredEmployees = employees.filter(emp => {
@@ -37,7 +67,7 @@ export default function RMEmployeeDirectoryTab() {
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>Employee Directory</h1>
-        <p style={styles.subtitle}>Verify employee profiles, view skills, and check credentials parsed by OCR & NLP.</p>
+        <p style={styles.subtitle}>View employee profiles, skills, and assign resources to projects.</p>
       </div>
 
       {/* Filter Row */}
@@ -55,7 +85,7 @@ export default function RMEmployeeDirectoryTab() {
             style={styles.searchInput}
           />
         </div>
-        <select 
+        <select
           value={selectedRole}
           onChange={(e) => setSelectedRole(e.target.value)}
           style={styles.selectFilter}
@@ -93,7 +123,7 @@ export default function RMEmployeeDirectoryTab() {
 
               {/* Skills Section */}
               <div style={styles.section}>
-                <h4 style={styles.sectionHeader}>NLP Extracted Skills</h4>
+                <h4 style={styles.sectionHeader}>Core Skills</h4>
                 <div style={styles.skillsList}>
                   {emp.skills.map((skill, idx) => (
                     <span key={idx} style={styles.skillPill}>{skill}</span>
@@ -103,7 +133,7 @@ export default function RMEmployeeDirectoryTab() {
 
               {/* Certifications Section */}
               <div style={styles.section}>
-                <h4 style={styles.sectionHeader}>OCR Parsed Certifications</h4>
+                <h4 style={styles.sectionHeader}>Certifications</h4>
                 <div style={styles.certList}>
                   {emp.certifications.length === 0 ? (
                     <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No certifications verified.</span>
@@ -131,22 +161,117 @@ export default function RMEmployeeDirectoryTab() {
 
               {/* Footer / Actions */}
               <div style={styles.cardFooter}>
-                <button 
-                  onClick={() => handleToggleVerify(emp.id)}
-                  style={{
-                    ...styles.actionVerifyBtn,
-                    backgroundColor: emp.isVerified ? 'var(--color-danger-light)' : 'var(--color-primary-light)',
-                    color: emp.isVerified ? 'var(--color-danger)' : 'var(--color-success)',
-                    borderColor: emp.isVerified ? 'var(--color-danger)' : 'var(--color-primary)'
-                  }}
+                <button
+                  onClick={() => handleOpenAssignModal(emp)}
+                  style={styles.assignBtn}
                 >
-                  {emp.isVerified ? 'Revoke Profile Verification' : '✓ Verify Profile Details'}
+                  Assign to Project
                 </button>
               </div>
             </div>
           ))
         )}
       </div>
+
+      {/* Assign to Project Modal */}
+      {showAssignModal && selectedEmployee && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            {/* Modal Header */}
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Assign Employee to Project</h2>
+              <button
+                onClick={handleCloseAssignModal}
+                style={styles.modalCloseBtn}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <p style={styles.modalSubtitle}>(These info and credentials is only example from our old prototype)</p>
+
+            {/* Employee Profile Card */}
+            <div style={styles.modalProfileCard}>
+              <div style={styles.modalProfileBadge}>[{selectedEmployee.department}]</div>
+              <h3 style={styles.modalProfileName}>{selectedEmployee.name}</h3>
+              <div style={styles.modalProfileRole}>{selectedEmployee.role}</div>
+            </div>
+
+            {/* Form Fields */}
+            <form onSubmit={handleAssignSubmit} style={styles.modalForm}>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Select Project</label>
+                <select
+                  value={assignForm.projectId}
+                  onChange={(e) => setAssignForm({ ...assignForm, projectId: e.target.value })}
+                  style={styles.formSelect}
+                  required
+                >
+                  <option value="">-- Select a project --</option>
+                  <option value="1">Project Alpha</option>
+                  <option value="2">Project Beta</option>
+                  <option value="3">Project Gamma</option>
+                </select>
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Estimated Hours per Week</label>
+                <input
+                  type="number"
+                  value={assignForm.estimatedHours}
+                  onChange={(e) => setAssignForm({ ...assignForm, estimatedHours: parseInt(e.target.value) || 0 })}
+                  style={styles.formInput}
+                  min="1"
+                  max="40"
+                  required
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Start Date</label>
+                <input
+                  type="date"
+                  value={assignForm.startDate}
+                  onChange={(e) => setAssignForm({ ...assignForm, startDate: e.target.value })}
+                  style={styles.formInput}
+                  required
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Notes (Optional)</label>
+                <textarea
+                  value={assignForm.notes}
+                  onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
+                  style={styles.formTextarea}
+                  placeholder="Add any additional notes..."
+                  rows="3"
+                />
+              </div>
+
+              {/* Footer Buttons */}
+              <div style={styles.modalFooter}>
+                <button
+                  type="button"
+                  onClick={handleCloseAssignModal}
+                  style={styles.modalCancelBtn}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={styles.modalSubmitBtn}
+                >
+                  ✓ Assign to Project
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -312,15 +437,173 @@ const styles = {
     display: 'flex',
     justifyContent: 'stretch',
   },
-  actionVerifyBtn: {
+  assignBtn: {
     flex: 1,
     padding: '10px',
     borderRadius: '6px',
-    border: '1px solid',
+    border: 'none',
+    backgroundColor: 'var(--color-primary)',
+    color: '#ffffff',
     fontWeight: '700',
     fontSize: '13px',
     cursor: 'pointer',
     textAlign: 'center',
+    transition: 'all 0.2s',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  modal: {
+    backgroundColor: 'var(--color-bg-card)',
+    borderRadius: 'var(--radius-lg)',
+    width: '90%',
+    maxWidth: '500px',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '24px 24px 16px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  modalTitle: {
+    fontSize: '20px',
+    fontWeight: '800',
+    margin: 0,
+    color: 'var(--color-text-primary)',
+  },
+  modalCloseBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    padding: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'color 0.2s',
+  },
+  modalSubtitle: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+    padding: '0 24px 16px',
+    margin: 0,
+  },
+  modalProfileCard: {
+    margin: '0 24px 20px',
+    padding: '16px',
+    background: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-md)',
+    textAlign: 'center',
+  },
+  modalProfileBadge: {
+    display: 'inline-block',
+    fontSize: '11px',
+    fontWeight: '700',
+    color: 'var(--color-primary)',
+    backgroundColor: 'var(--color-primary-light)',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    marginBottom: '8px',
+  },
+  modalProfileName: {
+    fontSize: '18px',
+    fontWeight: '800',
+    margin: '0 0 4px',
+    color: 'var(--color-text-primary)',
+  },
+  modalProfileRole: {
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+    fontWeight: '600',
+  },
+  modalForm: {
+    padding: '0 24px 24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+  formGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  formLabel: {
+    fontSize: '12px',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    color: 'var(--color-text-secondary)',
+  },
+  formInput: {
+    padding: '10px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
+    outline: 'none',
+  },
+  formSelect: {
+    padding: '10px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
+    outline: 'none',
+  },
+  formTextarea: {
+    padding: '10px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
+    outline: 'none',
+    resize: 'vertical',
+  },
+  modalFooter: {
+    display: 'flex',
+    gap: '12px',
+    marginTop: '8px',
+  },
+  modalCancelBtn: {
+    flex: 1,
+    padding: '10px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontWeight: '700',
+    fontSize: '13px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  modalSubmitBtn: {
+    flex: 1,
+    padding: '10px',
+    borderRadius: '6px',
+    border: 'none',
+    backgroundColor: 'var(--color-primary)',
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: '13px',
+    cursor: 'pointer',
     transition: 'all 0.2s',
   }
 };
