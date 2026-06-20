@@ -182,8 +182,12 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
           <h2 style={styles.chartTitle}>Recent Portal Activity</h2>
           <p style={styles.chartSubtitle}>Live trail of audit changes on WEA recommender database</p>
           <div style={styles.activityList}>
-            {activities.map(act => (
-              <div key={act.id} style={styles.activityItem}>
+            {activities.map((act, index) => (
+              <div key={act.id} style={{
+                ...styles.activityItem,
+                borderBottom: index === activities.length - 1 ? 'none' : '1px solid var(--color-border)',
+                paddingBottom: index === activities.length - 1 ? 0 : '12px'
+              }}>
                 <div style={styles.actMeta}>
                   <span style={{ 
                     ...styles.actBadge, 
@@ -354,13 +358,7 @@ const styles = {
     paddingRight: '8px',
   },
   activityItem: {
-    borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '12px',
     textAlign: 'left',
-    '&:last-child': {
-      borderBottom: 'none',
-      paddingBottom: 0,
-    }
   },
   actMeta: {
     display: 'flex',
