@@ -104,7 +104,6 @@ router.put("/:id", async (req, res) => {
 
     if (profileError) throw profileError;
 
-    // If email is being updated, update auth user
     if (email) {
       const { error: authError } = await supabase.auth.admin.updateUserById(id, {
         email: email
