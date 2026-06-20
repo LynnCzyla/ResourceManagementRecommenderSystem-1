@@ -8,12 +8,15 @@ import SystemSettingsTab from './SystemSettingsTab';
 import LogsTab from './LogsTab';
 import ReportsTab from './ReportsTab';
 import DbRecordsTab from './DbRecordsTab';
+import ProfileSettings from '../ProfileSettings';
 
 export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [isProfileHovered, setIsProfileHovered] = useState(false);
+
   // Submenu states
   const [userMgmtOpen, setUserMgmtOpen] = useState(true);
   const [logsOpen, setLogsOpen] = useState(true);
@@ -392,10 +395,26 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
 
             {/* Profile Info */}
             <div style={styles.profilePill}>
-              <img src={user.avatar} alt="Profile avatar" style={styles.avatar} />
-              <div style={styles.profileInfo}>
-                <span style={styles.profileName}>{user.name}</span>
-                <span style={styles.profileRole}>{user.role}</span>
+              <div
+                onClick={() => setShowProfileSettings(true)}
+                onMouseEnter={() => setIsProfileHovered(true)}
+                onMouseLeave={() => setIsProfileHovered(false)}
+                style={{
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '4px 8px',
+                  borderRadius: '20px',
+                  backgroundColor: isProfileHovered ? 'var(--color-bg-card-hover)' : 'transparent',
+                  transition: 'background-color 0.2s ease'
+                }}
+              >
+                <img src={user.avatar} alt="Profile avatar" style={styles.avatar} />
+                <div style={styles.profileInfo}>
+                  <span style={styles.profileName}>{user.name}</span>
+                  <span style={styles.profileRole}>{user.role}</span>
+                </div>
               </div>
               <button onClick={onLogout} style={styles.logoutBtn} title="Log Out" className="hover-logout">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -413,6 +432,13 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
           {renderContent()}
         </main>
       </div>
+
+      {/* Profile Settings Modal */}
+      <ProfileSettings
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        user={user}
+      />
     </div>
   );
 }

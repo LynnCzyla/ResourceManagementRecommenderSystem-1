@@ -244,9 +244,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
   const toggleUserStatus = async (userId) => {
     const user = users.find(u => u.id === userId);
-    const action = user.status === 'Active' ? 'deactivate' : 'activate';
-    const actionDisplay = user.status === 'Active' ? 'Deactivate' : 'Activate';
-    
+    const action = user.status === 'Active' ? 'lock' : 'unlock';
+    const actionDisplay = user.status === 'Active' ? 'Lock' : 'Unlock';
+
     // Show confirmation
     const result = await showConfirmationAlert(
       `Confirm ${actionDisplay}`,
@@ -259,7 +259,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     }
 
     const newStatus = user.status === 'Active' ? 'Deactivated' : 'Active';
-    
+
     try {
       setLoading(true);
       const headers = getAuthHeaders();
@@ -279,7 +279,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           return u;
         }));
         setError(null);
-        
+
         // Success alert
         showSuccessAlert(
           `User ${user.name} has been ${action}ed successfully!`,
@@ -466,6 +466,28 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                               <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                             </svg>
+                          </button>
+                          <button 
+                            onClick={() => toggleUserStatus(u.id)} 
+                            style={{
+                              ...styles.lockIconBtn,
+                              color: u.status === 'Active' ? 'var(--color-warning)' : 'var(--color-success)',
+                              background: u.status === 'Active' ? 'rgba(245, 158, 11, 0.1)' : 'var(--color-primary-light)'
+                            }}
+                            title={u.status === 'Active' ? 'Lock account' : 'Unlock account'}
+                            disabled={loading}
+                          >
+                            {u.status === 'Active' ? (
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                              </svg>
+                            ) : (
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                              </svg>
+                            )}
                           </button>
                           <button 
                             onClick={() => toggleUserStatus(u.id)} 
@@ -869,6 +891,19 @@ const styles = {
   editIconBtn: {
     background: 'var(--color-accent-light)',
     color: 'var(--color-accent)',
+    border: 'none',
+    width: '30px',
+    height: '30px',
+    borderRadius: '6px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  lockIconBtn: {
+    background: 'var(--color-warning-light)',
+    color: 'var(--color-warning)',
     border: 'none',
     width: '30px',
     height: '30px',

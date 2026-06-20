@@ -230,6 +230,15 @@ a {
   transform: scale(1.05);
 }
 
+div.hover-profile {
+  transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+div.hover-profile:hover {
+  background-color: var(--color-bg-card-hover) !important;
+  transform: scale(1.02) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
 /* Generic button hovers */
 button {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);

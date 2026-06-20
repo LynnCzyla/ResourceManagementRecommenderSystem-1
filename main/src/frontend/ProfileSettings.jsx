@@ -1,31 +1,31 @@
-// frontend/ContactAdmin.jsx
+// frontend/ProfileSettings.jsx
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
 
-export default function ContactAdmin({ isOpen, onClose }) {
-  const [name, setName] = useState('');
+export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
-  const [purpose, setPurpose] = useState('');
-  const [message, setMessage] = useState('');
   const [phone, setPhone] = useState('');
   const [department, setDepartment] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  // Reset state whenever the modal is opened fresh
+  // Populate form with user data when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setName('');
-      setEmail('');
-      setPurpose('');
-      setMessage('');
-      setPhone('');
-      setDepartment('');
+    if (isOpen && user) {
+      const nameParts = user.name ? user.name.split(' ') : ['', '', ''];
+      setFirstName(nameParts[0] || '');
+      setMiddleName(nameParts[1] || '');
+      setLastName(nameParts.slice(2).join(' ') || '');
+      setEmail(user.email || '');
+      setPhone(user.phone || '');
+      setDepartment(user.department || '');
       setError('');
       setSuccess(false);
     }
-  }, [isOpen]);
+  }, [isOpen, user]);
 
   // Close on Escape key
   useEffect(() => {
@@ -42,7 +42,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
     e.preventDefault();
     setError('');
 
-    if (!name || !email || !purpose || !message) {
+    if (!firstName || !lastName || !email) {
       setError('Please fill in all required fields.');
       return;
     }
@@ -50,23 +50,23 @@ export default function ContactAdmin({ isOpen, onClose }) {
     setIsLoading(true);
 
     try {
-      console.log('📩 Sending contact admin request:', { name, email, purpose, phone, department });
+      const updatedUser = {
+        ...user,
+        name: `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim(),
+        email,
+        phone,
+        department
+      };
 
-      // Insert into a 'admin_requests' / 'contact_messages' table in Supabase.
-      // Adjust the table name and columns to match your schema.
-      const { error: insertError } = await supabase
-        .from('contact_messages')
-        .insert([{ name, email, purpose, message, phone, department }]);
-
-      if (insertError) {
-        throw new Error(insertError.message);
+      // Call the update callback (would connect to backend in production)
+      if (onUpdate) {
+        await onUpdate(updatedUser);
       }
 
-      console.log('✅ Message sent to admin');
       setSuccess(true);
     } catch (err) {
-      console.error('❌ Contact admin error:', err);
-      setError(err.message || 'Failed to send message. Please try again.');
+      console.error('Profile update error:', err);
+      setError(err.message || 'Failed to update profile. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -90,13 +90,14 @@ export default function ContactAdmin({ isOpen, onClose }) {
           <>
             <div style={styles.iconWrapper}>
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
 
-            <h2 style={styles.title}>Contact Administrator</h2>
+            <h2 style={styles.title}>Profile Settings</h2>
             <p style={styles.subtitle}>
-              Need an account or having trouble logging in? Send a message and an administrator will get back to you.
+              Update your personal information and contact details.
             </p>
 
             {error && (
@@ -113,12 +114,35 @@ export default function ContactAdmin({ isOpen, onClose }) {
             <form onSubmit={handleSubmit} style={styles.form}>
               <div style={styles.row}>
                 <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Full Name</label>
+                  <label style={styles.label}>First Name *</label>
                   <input
                     type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Juan Dela Cruz"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="Juan"
+                    style={styles.input}
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+                <div style={{ ...styles.inputGroup, flex: 1 }}>
+                  <label style={styles.label}>Middle Name</label>
+                  <input
+                    type="text"
+                    value={middleName}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    placeholder="Dela"
+                    style={styles.input}
+                    disabled={isLoading}
+                  />
+                </div>
+                <div style={{ ...styles.inputGroup, flex: 1 }}>
+                  <label style={styles.label}>Last Name *</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Cruz"
                     style={styles.input}
                     required
                     disabled={isLoading}
@@ -127,7 +151,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
               </div>
 
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Email Address</label>
+                <label style={styles.label}>Email Address *</label>
                 <input
                   type="email"
                   value={email}
@@ -139,22 +163,9 @@ export default function ContactAdmin({ isOpen, onClose }) {
                 />
               </div>
 
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Purpose of Request</label>
-                <input
-                  type="text"
-                  value={purpose}
-                  onChange={(e) => setPurpose(e.target.value)}
-                  placeholder="e.g. Request for account access"
-                  style={styles.input}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-
               <div style={styles.row}>
                 <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Phone Number <span style={{ color: 'var(--color-text-muted)', fontWeight: '400' }}>(Optional)</span></label>
+                  <label style={styles.label}>Phone Number</label>
                   <input
                     type="tel"
                     value={phone}
@@ -165,29 +176,16 @@ export default function ContactAdmin({ isOpen, onClose }) {
                   />
                 </div>
                 <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Department <span style={{ color: 'var(--color-text-muted)', fontWeight: '400' }}>(Optional)</span></label>
+                  <label style={styles.label}>Department</label>
                   <input
                     type="text"
                     value={department}
                     onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="e.g. IT, HR, Finance"
+                    placeholder="e.g. IT, HR, Engineering"
                     style={styles.input}
                     disabled={isLoading}
                   />
                 </div>
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Message</label>
-                <textarea
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Describe your issue or request..."
-                  style={styles.textarea}
-                  rows={4}
-                  required
-                  disabled={isLoading}
-                />
               </div>
 
               <div style={styles.btnRow}>
@@ -207,10 +205,10 @@ export default function ContactAdmin({ isOpen, onClose }) {
                   {isLoading ? (
                     <span style={styles.spinnerWrapper}>
                       <span style={styles.spinner}></span>
-                      Sending...
+                      Saving...
                     </span>
                   ) : (
-                    'Send Message'
+                    'Save Changes'
                   )}
                 </button>
               </div>
@@ -224,9 +222,9 @@ export default function ContactAdmin({ isOpen, onClose }) {
                 <polyline points="22 4 12 14.01 9 11.01"></polyline>
               </svg>
             </div>
-            <h2 style={styles.title}>Message Sent</h2>
+            <h2 style={styles.title}>Profile Updated</h2>
             <p style={styles.subtitle}>
-              Thanks, {name}. Your message has been sent to the administrator. We'll get back to you at <strong style={{ color: 'var(--color-text-primary)' }}>{email}</strong> shortly.
+              Your profile information has been successfully updated.
             </p>
             <button type="button" onClick={onClose} style={styles.submitBtn}>
               Close
@@ -258,7 +256,7 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '480px',
+    maxWidth: '520px',
     maxHeight: '90vh',
     overflowY: 'auto',
     position: 'relative',
@@ -349,20 +347,6 @@ const styles = {
     transition: 'all 0.3s ease',
     boxSizing: 'border-box',
   },
-  textarea: {
-    width: '100%',
-    padding: '12px 14px',
-    borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--color-border)',
-    background: 'var(--color-bg-root)',
-    color: 'var(--color-text-primary)',
-    fontSize: '14px',
-    outline: 'none',
-    transition: 'all 0.3s ease',
-    resize: 'vertical',
-    fontFamily: 'inherit',
-    boxSizing: 'border-box',
-  },
   btnRow: {
     display: 'flex',
     gap: '12px',
@@ -424,9 +408,9 @@ const styles = {
 };
 
 // Add keyframe styles
-if (typeof document !== 'undefined' && !document.getElementById('contact-admin-keyframes')) {
+if (typeof document !== 'undefined' && !document.getElementById('profile-settings-keyframes')) {
   const style = document.createElement('style');
-  style.id = 'contact-admin-keyframes';
+  style.id = 'profile-settings-keyframes';
   style.innerHTML = `
     @keyframes spin {
       to { transform: rotate(360deg); }
