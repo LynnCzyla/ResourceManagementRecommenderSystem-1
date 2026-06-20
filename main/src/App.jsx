@@ -1,6 +1,7 @@
 // App.jsx
 import React, { useState, useEffect } from 'react';
 import Login from './frontend/Login';
+import ResetPassword from './frontend/ResetPassword';
 import AdminLayout from './frontend/Admin/AdminLayout';
 import PMLayout from './frontend/ProjectManager/PMLayout';
 import RMLayout from './frontend/ResourceManager/RMLayout';
@@ -14,6 +15,11 @@ function App() {
   const [isDark, setIsDark] = useState(true);
   const [loading, setLoading] = useState(true); // Add loading state
 
+  // NEW: tracks whether the user arrived via a password-recovery link.
+  // When true, we show ResetPassword instead of Login/dashboard,
+  // regardless of isLoggedIn state.
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+
   useEffect(() => {
     // Apply dark theme
     if (isDark) {
@@ -22,6 +28,31 @@ function App() {
       document.body.classList.remove('dark-theme');
     }
   }, [isDark]);
+
+  // NEW: Detect password recovery links as early as possible.
+  // Supabase puts #access_token=...&type=recovery in the URL when the
+  // user clicks the "Reset Password" link from their email. We check
+  // both the URL hash directly (fastest, no async wait) and the
+  // PASSWORD_RECOVERY auth event (fires once Supabase parses it).
+  useEffect(() => {
+    // 1. Immediate check on the URL hash itself
+    const hash = window.location.hash;
+    if (hash && hash.includes('type=recovery')) {
+      console.log('🔑 Recovery link detected in URL hash');
+      setIsPasswordRecovery(true);
+    }
+
+    // 2. Also listen for the PASSWORD_RECOVERY auth event, in case the
+    // hash check above runs before Supabase has parsed/attached the session
+    const { data: { subscription: recoverySub } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log('🔑 PASSWORD_RECOVERY event received');
+        setIsPasswordRecovery(true);
+      }
+    });
+
+    return () => recoverySub.unsubscribe();
+  }, []);
 
   // Check for existing session on app load
   useEffect(() => {
@@ -170,6 +201,16 @@ function App() {
     setIsLoggedIn(false);
   };
 
+  // NEW: Called when the user finishes resetting their password (or
+  // cancels out) from the ResetPassword screen. Clears the recovery
+  // flag and the URL hash, then drops them back at the login screen.
+  const handleBackToLoginFromReset = () => {
+    setIsPasswordRecovery(false);
+    // Clean up the #access_token=...&type=recovery hash so refreshing
+    // the page doesn't re-trigger recovery mode
+    window.history.replaceState(null, '', window.location.pathname);
+  };
+
   // Show loading screen while checking session
   if (loading) {
     return (
@@ -213,6 +254,19 @@ function App() {
         return <EmployeeLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
     }
   };
+
+  // NEW: Password recovery takes priority over everything else.
+  // If the user clicked the reset link in their email, show the
+  // ResetPassword screen no matter what isLoggedIn/currentUser say.
+  if (isPasswordRecovery) {
+    return (
+      <ResetPassword
+        onBackToLogin={handleBackToLoginFromReset}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
+      />
+    );
+  }
 
   return (
     <>
