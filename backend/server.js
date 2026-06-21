@@ -11,15 +11,14 @@ app.use(express.json());
 // Import routes    
 const userRoutes = require("./routes/Admin/createUsers");
 const userManagementRoutes = require("./routes/Admin/userManagement");
-// with the other route imports
 const forgotPasswordRoutes = require("./routes/Auth/forgotPassword");
-
-// with the other app.use lines
-app.use("/api/auth", forgotPasswordRoutes);
+const systemSettingsRoutes = require("./routes/Admin/systemSettings"); // Add this
 
 // Use routes
+app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/users", userManagementRoutes);
+app.use("/api/settings", systemSettingsRoutes); // Add system settings routes
 
 app.get("/", (req, res) => {
     res.json({
