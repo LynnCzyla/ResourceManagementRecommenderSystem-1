@@ -10,7 +10,31 @@ export default function ProtectedRoute({ children }) {
     const checkAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        
         if (session) {
+          // Check if session hasn't expired
+          const loginTime = localStorage.getItem('loginTime');
+          if (loginTime) {
+            // Fetch session timeout from backend
+            const response = await fetch('http://localhost:5000/api/settings/system-settings');
+            const result = await response.json();
+            
+            if (result.success) {
+              const timeout = result.data.sessionTimeout || 30;
+              const elapsedMinutes = (Date.now() - parseInt(loginTime)) / (1000 * 60);
+              
+              if (elapsedMinutes >= timeout) {
+                console.log('⏰ Session expired');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('loginTime');
+                await supabase.auth.signOut();
+                window.location.href = '/login';
+                return;
+              }
+            }
+          }
+          
           setAuthenticated(true);
         } else {
           window.location.href = '/login';
@@ -25,7 +49,6 @@ export default function ProtectedRoute({ children }) {
 
     checkAuth();
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         window.location.href = '/login';

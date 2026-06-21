@@ -1,4 +1,4 @@
-// frontend/Login.jsx
+// src/frontend/Login.jsx
 import React, { useState, useEffect } from 'react';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import { supabase, getSession } from '../lib/supabaseClient';
@@ -12,107 +12,94 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [checkingAuth, setCheckingAuth] = useState(true);
-
-  // View state: toggles between the login form and the forgot-password page
-  const [view, setView] = useState('login'); // 'login' | 'forgot-password'
-
-  // Modal state for the Contact Administrator popup
+  const [view, setView] = useState('login');
   const [showContactModal, setShowContactModal] = useState(false);
+  const [sessionTimeout, setSessionTimeout] = useState(30);
 
-  // Check if user is already logged in
+  // Fetch session timeout directly
+  useEffect(() => {
+    const fetchSessionTimeout = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/settings/system-settings');
+        const result = await response.json();
+        
+        if (result.success && result.data.sessionTimeout) {
+          setSessionTimeout(result.data.sessionTimeout);
+          console.log(`⏰ Session timeout: ${result.data.sessionTimeout} minutes`);
+        }
+      } catch (error) {
+        console.error('Failed to fetch session timeout:', error);
+      }
+    };
+
+    fetchSessionTimeout();
+  }, []);
+
+  // Check existing session on load
   useEffect(() => {
     const checkExistingSession = async () => {
       try {
-        console.log('🔍 Checking for existing session...');
-        
-        // Check localStorage
         const token = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
+        const loginTime = localStorage.getItem('loginTime');
         
-        if (token && storedUser) {
-          console.log('📦 Found stored user data');
-          const session = await getSession();
+        // If no token or user, show login page
+        if (!token || !storedUser) {
+          setCheckingAuth(false);
+          return;
+        }
+        
+        // Check if session has expired
+        if (loginTime) {
+          const elapsedMinutes = (Date.now() - parseInt(loginTime)) / (1000 * 60);
           
-          if (session) {
-            console.log('✅ Session is valid, redirecting to dashboard');
-            const userData = JSON.parse(storedUser);
-            
-            // Replace the current history entry so back button doesn't go to login
-            window.history.replaceState(null, '', '/dashboard');
-            
-            onLogin(userData);
-            return;
-          } else {
-            console.log('⚠️ Session expired, clearing storage');
+          if (elapsedMinutes >= sessionTimeout) {
+            console.log(`⏰ Session expired (${elapsedMinutes.toFixed(0)} minutes)`);
             localStorage.removeItem('token');
             localStorage.removeItem('user');
+            localStorage.removeItem('loginTime');
+            setCheckingAuth(false);
+            return;
           }
         }
         
-        // Check Supabase session
-        const { data: { session } } = await supabase.auth.getSession();
-        
+        // Verify session with Supabase
+        const session = await getSession();
         if (session) {
-          console.log('✅ Found valid Supabase session');
-          
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-
-          const userRole = profileData?.role || 'Employee';
-          
-          const user = {
-            id: session.user.id,
-            name: profileData ? 
-              `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}` : 
-              session.user.email,
-            email: session.user.email,
-            role: userRole,
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
-            employee_id: profileData?.employee_id,
-            profile: profileData || {}
-          };
-          
-          localStorage.setItem('token', session.access_token);
-          localStorage.setItem('user', JSON.stringify({
-            id: user.id,
-            email: user.email,
-            role: user.role
-          }));
-          
-          // Replace history so back button doesn't work
+          const userData = JSON.parse(storedUser);
           window.history.replaceState(null, '', '/dashboard');
-          onLogin(user);
+          onLogin(userData);
+          return;
+        } else {
+          // Session invalid, clear storage
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          localStorage.removeItem('loginTime');
+          setCheckingAuth(false);
         }
       } catch (error) {
-        console.error('❌ Error checking session:', error);
-      } finally {
+        console.error('Error checking session:', error);
         setCheckingAuth(false);
       }
     };
 
-    checkExistingSession();
-  }, [onLogin]);
+    if (sessionTimeout) {
+      checkExistingSession();
+    }
+  }, [onLogin, sessionTimeout]);
 
   // Prevent back button on login page
   useEffect(() => {
-    // Push a new state to prevent going back
     window.history.pushState(null, '', window.location.href);
     
     const handlePopState = (event) => {
-      // Check if user is logged in
       const token = localStorage.getItem('token');
       const user = localStorage.getItem('user');
       
       if (token && user) {
-        // If logged in, prevent going back by pushing forward
         window.history.pushState(null, '', window.location.href);
-        // Optionally redirect to dashboard
         window.location.href = '/dashboard';
       } else {
-        // If not logged in, allow back button
         window.history.back();
       }
     };
@@ -124,6 +111,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     };
   }, []);
 
+  // Show loading state
   if (checkingAuth) {
     return (
       <div style={{
@@ -143,13 +131,13 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             animation: 'spin 0.8s linear infinite',
             margin: '0 auto 16px'
           }}></div>
-          <p style={{ color: 'var(--color-text-secondary)' }}>Checking session...</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>Loading...</p>
         </div>
       </div>
     );
   }
 
-  // Show the Forgot Password page instead of the login form
+  // Show forgot password view
   if (view === 'forgot-password') {
     return (
       <>
@@ -168,41 +156,30 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     setIsLoading(true);
 
     try {
-      console.log('🔐 Attempting login for:', email);
-
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password
       });
 
-      if (authError) {
-        throw new Error(authError.message);
-      }
+      if (authError) throw new Error(authError.message);
+      if (!authData.user) throw new Error('No user data returned');
 
-      if (!authData.user) {
-        throw new Error('No user data returned');
-      }
-
-      console.log('✅ User authenticated:', authData.user.email);
-
-      const { data: profileData, error: profileError } = await supabase
+      const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', authData.user.id)
         .single();
 
-      if (profileError && profileError.code !== 'PGRST116') {
-        console.warn('Profile fetch warning:', profileError);
-      }
-
       const userRole = profileData?.role || 'Employee';
-
+      
+      const loginTime = Date.now();
       localStorage.setItem('token', authData.session.access_token);
       localStorage.setItem('user', JSON.stringify({
         id: authData.user.id,
         email: authData.user.email,
         role: userRole
       }));
+      localStorage.setItem('loginTime', loginTime.toString());
 
       const user = {
         id: authData.user.id,
@@ -216,9 +193,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         profile: profileData || {}
       };
 
-      // Replace history so back button goes to dashboard not login
       window.history.replaceState(null, '', '/dashboard');
-      
       onLogin(user);
 
     } catch (error) {
@@ -227,23 +202,6 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Pre-fill credentials for testing
-  const fillMockCredentials = (role) => {
-    const credentials = {
-      admin: { email: 'admin@wea.com', password: 'admin123' },
-      pm: { email: 'pm@wea.com', password: 'pm123' },
-      rm: { email: 'rm@wea.com', password: 'rm123' },
-      employee: { email: 'employee@wea.com', password: 'employee123' }
-    };
-    
-    const cred = credentials[role];
-    if (cred) {
-      setEmail(cred.email);
-      setPassword(cred.password);
-    }
-    setError('');
   };
 
   return (
