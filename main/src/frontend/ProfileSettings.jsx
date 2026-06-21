@@ -17,9 +17,6 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showOTP, setShowOTP] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
 
   // Populate form with user data when modal opens
   useEffect(() => {
@@ -39,9 +36,6 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setShowOTP(false);
-      setOtp('');
-      setOtpSent(false);
     }
   }, [isOpen, user]);
 
@@ -105,25 +99,14 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
     }
   };
 
-  const handleSendOTP = () => {
-    setOtpSent(true);
-    setShowOTP(true);
-  };
-
-  const handleVerifyOTP = () => {
-    if (otp === '123456') {
-      setShowOTP(false);
-      setOtp('');
-      setOtpSent(false);
-      alert('OTP verified successfully');
-    } else {
-      setError('Invalid OTP. Please try again.');
-    }
-  };
-
   const handlePasswordChange = (e) => {
     e.preventDefault();
     setError('');
+
+    if (!currentPassword) {
+      setError('Please enter your current password.');
+      return;
+    }
 
     if (newPassword !== confirmPassword) {
       setError('New password and confirm password do not match.');
@@ -327,106 +310,61 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
               </form>
             ) : (
               <form onSubmit={handlePasswordChange} style={styles.form}>
-                {!showOTP ? (
-                  <>
-                    <div style={styles.inputGroup}>
-                      <label style={styles.label}>Current Password</label>
-                      <input
-                        type="password"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        placeholder="Enter current password"
-                        style={styles.input}
-                        required
-                      />
-                    </div>
+                <div style={styles.inputGroup}>
+                  <label style={styles.label}>Current Password</label>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter current password"
+                    style={styles.input}
+                    required
+                  />
+                </div>
 
-                    <div style={styles.inputGroup}>
-                      <label style={styles.label}>New Password</label>
-                      <input
-                        type="password"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Enter new password"
-                        style={styles.input}
-                        required
-                      />
-                    </div>
+                <div style={styles.inputGroup}>
+                  <label style={styles.label}>New Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    style={styles.input}
+                    required
+                  />
+                </div>
 
-                    <div style={styles.inputGroup}>
-                      <label style={styles.label}>Confirm New Password</label>
-                      <input
-                        type="password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Confirm new password"
-                        style={styles.input}
-                        required
-                      />
-                    </div>
+                <div style={styles.inputGroup}>
+                  <label style={styles.label}>Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    style={styles.input}
+                    required
+                  />
+                </div>
 
-                    <div style={styles.btnRow}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCurrentPassword('');
-                          setNewPassword('');
-                          setConfirmPassword('');
-                        }}
-                        style={styles.cancelBtn}
-                      >
-                        Clear
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSendOTP}
-                        style={styles.submitBtn}
-                      >
-                        Send OTP
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={styles.otpSection}>
-                      <p style={styles.otpInfo}>
-                        An OTP has been sent to your email. Please enter the code below to verify.
-                      </p>
-                      <div style={styles.inputGroup}>
-                        <label style={styles.label}>Enter OTP</label>
-                        <input
-                          type="text"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value)}
-                          placeholder="Enter 6-digit OTP"
-                          style={styles.input}
-                          maxLength="6"
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <div style={styles.btnRow}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowOTP(false);
-                          setOtp('');
-                        }}
-                        style={styles.cancelBtn}
-                      >
-                        Back
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleVerifyOTP}
-                        style={styles.submitBtn}
-                      >
-                        Verify & Change Password
-                      </button>
-                    </div>
-                  </>
-                )}
+                <div style={styles.btnRow}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentPassword('');
+                      setNewPassword('');
+                      setConfirmPassword('');
+                    }}
+                    style={styles.cancelBtn}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="submit"
+                    style={styles.submitBtn}
+                  >
+                    Change Password
+                  </button>
+                </div>
               </form>
             )}
           </>
@@ -674,19 +612,6 @@ const styles = {
     cursor: 'pointer',
     border: '2px solid var(--color-bg-card)',
     transition: 'all 0.2s',
-  },
-  otpSection: {
-    padding: '20px',
-    background: 'var(--color-bg-root)',
-    border: '1px solid var(--color-border)',
-    borderRadius: 'var(--radius-md)',
-    marginBottom: '20px',
-  },
-  otpInfo: {
-    fontSize: '13px',
-    color: 'var(--color-text-secondary)',
-    marginBottom: '16px',
-    lineHeight: '1.5',
   },
 };
 
