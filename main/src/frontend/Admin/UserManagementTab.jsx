@@ -14,7 +14,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -32,16 +32,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [loadingLocked, setLoadingLocked] = useState(false);
   const [unlockingId, setUnlockingId] = useState(null);
 
-  const [contactRequests, setContactRequests] = useState([
-    { id: 1, email: 'john.smith@wea-external.com', message: 'Hello, I am a new hiring specialist. I need an Admin/Resource Manager account to assist with scheduling.', date: '2026-06-18', requestType: 'Account Request', status: 'Pending' },
-    { id: 2, email: 'sarah.jones@wea.com', message: 'Hi! I lost access to my Project Manager credentials. Can you reset them or grant me a new account?', date: '2026-06-17', requestType: 'Password Reset', status: 'Pending' },
-    { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15', requestType: 'Account Request', status: 'Pending' },
-  ]);
+  // ── Contact Requests — real data from Supabase ──────────────────────────────
+  const [contactRequests, setContactRequests] = useState([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
 
-  // Custom SweetAlert design configuration
+  // ── SweetAlert helpers ───────────────────────────────────────────────────────
   const showSuccessAlert = (message, title = 'Success!') => {
     Swal.fire({
-      title: title,
+      title,
       text: message,
       icon: 'success',
       confirmButtonColor: 'var(--color-primary)',
@@ -49,16 +47,13 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-success)',
-      customClass: {
-        popup: 'swal-custom-popup',
-        confirmButton: 'swal-custom-confirm'
-      }
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
     });
   };
 
   const showErrorAlert = (message, title = 'Error!') => {
     Swal.fire({
-      title: title,
+      title,
       text: message,
       icon: 'error',
       confirmButtonColor: 'var(--color-danger)',
@@ -66,17 +61,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-danger)',
-      customClass: {
-        popup: 'swal-custom-popup',
-        confirmButton: 'swal-custom-confirm'
-      }
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
     });
   };
 
   const showConfirmationAlert = (title, text, confirmText = 'Yes, proceed!') => {
     return Swal.fire({
-      title: title,
-      text: text,
+      title,
+      text,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: 'var(--color-primary)',
@@ -94,6 +86,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     });
   };
 
+  // ── Fetch users ──────────────────────────────────────────────────────────────
   const fetchUsers = async () => {
     try {
       setLoading(true);
@@ -113,21 +106,20 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           middle_name: profile.middle_name,
           last_name: profile.last_name,
         }));
-
         setUsers(transformedUsers);
         setError(null);
       } else {
         setError(data.error || 'Failed to fetch users');
       }
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      setError(error.message);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch locked accounts from the backend
+  // ── Fetch locked accounts ────────────────────────────────────────────────────
   const fetchLockedAccounts = async () => {
     try {
       setLoadingLocked(true);
@@ -136,14 +128,13 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const data = await response.json();
 
       if (data.success) {
-        // Transform the data to match the expected format
         const transformedLocked = data.data.map(account => {
           const user = account.user || {};
           return {
             id: account.userId,
             user_id: account.userId,
-            name: user.first_name && user.last_name 
-              ? `${user.first_name} ${user.last_name}` 
+            name: user.first_name && user.last_name
+              ? `${user.first_name} ${user.last_name}`
               : 'Unknown User',
             email: user.email || 'N/A',
             role: user.role || 'Employee',
@@ -158,26 +149,104 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       } else {
         setError(data.message || 'Failed to fetch locked accounts');
       }
-    } catch (error) {
-      console.error('Error fetching locked accounts:', error);
+    } catch (err) {
+      console.error('Error fetching locked accounts:', err);
       setError('Failed to load locked accounts. Please try again.');
     } finally {
       setLoadingLocked(false);
     }
   };
 
-  // Unlock a specific account
+  // ── Fetch contact requests from Supabase via backend ────────────────────────
+  const fetchContactRequests = async () => {
+    try {
+      setLoadingRequests(true);
+      const headers = getAuthHeaders();
+      const response = await fetch('http://localhost:5000/api/admin/contact-requests', { headers });
+      const data = await response.json();
+
+      if (data.success) {
+        const transformed = data.requests.map(req => ({
+          id: req.id,
+          email: req.email,
+          name: [req.first_name, req.middle_name, req.last_name].filter(Boolean).join(' '),
+          message: req.message,
+          date: req.created_at ? new Date(req.created_at).toISOString().split('T')[0] : '',
+          requestType: req.request_type || 'Account Request',
+          status: req.status
+            ? req.status.charAt(0).toUpperCase() + req.status.slice(1)
+            : 'Pending',
+          phone: req.phone || '',
+        }));
+        setContactRequests(transformed);
+      } else {
+        console.error('Failed to fetch contact requests:', data.error);
+      }
+    } catch (err) {
+      console.error('Error fetching contact requests:', err);
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  // ── Delete a contact request ─────────────────────────────────────────────────
+  const deleteRequest = async (id) => {
+    const result = await showConfirmationAlert(
+      'Delete Request',
+      'Are you sure you want to permanently delete this contact request?',
+      'Yes, Delete'
+    );
+    if (!result.isConfirmed) return;
+
+    try {
+      const headers = getAuthHeaders();
+      await fetch(`http://localhost:5000/api/admin/contact-requests/${id}`, {
+        method: 'DELETE',
+        headers,
+      });
+      setContactRequests(prev => prev.filter(req => req.id !== id));
+      showSuccessAlert('Contact request deleted successfully.', 'Deleted!');
+    } catch (err) {
+      console.error('Error deleting request:', err);
+      showErrorAlert('Failed to delete request. Please try again.');
+    }
+  };
+
+  // ── Update contact request status ────────────────────────────────────────────
+  const updateRequestStatus = async (id, newStatus) => {
+  try {
+    const headers = getAuthHeaders();
+    const userString = localStorage.getItem('user');
+    const user = userString ? JSON.parse(userString) : null;
+    const adminId = user?.id || null; // current logged-in admin
+
+    await fetch(`http://localhost:5000/api/admin/contact-requests/${id}/status`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        status: newStatus.toLowerCase(),
+        processed_by: adminId,
+        processed_at: new Date().toISOString(),
+      }),
+    });
+
+    setContactRequests(prev =>
+      prev.map(req => req.id === id ? { ...req, status: newStatus } : req)
+    );
+  } catch (err) {
+    console.error('Error updating request status:', err);
+    showErrorAlert('Failed to update status. Please try again.');
+  }
+};
+
+  // ── Unlock account ───────────────────────────────────────────────────────────
   const handleUnlockAccount = async (userId) => {
-    // Show confirmation alert
     const result = await showConfirmationAlert(
       'Unlock Account',
       'Are you sure you want to unlock this account? The user will be able to login again.',
       'Yes, Unlock'
     );
-
-    if (!result.isConfirmed) {
-      return;
-    }
+    if (!result.isConfirmed) return;
 
     try {
       setUnlockingId(userId);
@@ -187,68 +256,51 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         headers,
         body: JSON.stringify({ userId }),
       });
-
       const data = await response.json();
 
       if (data.success) {
-        showSuccessAlert(
-          'Account unlocked successfully! The user can now login.',
-          'Account Unlocked!'
-        );
-        // Refresh the locked accounts list
+        showSuccessAlert('Account unlocked successfully! The user can now login.', 'Account Unlocked!');
         await fetchLockedAccounts();
       } else {
         showErrorAlert(data.message || 'Failed to unlock account');
       }
-    } catch (error) {
-      console.error('Error unlocking account:', error);
+    } catch (err) {
+      console.error('Error unlocking account:', err);
       showErrorAlert('Failed to unlock account. Please try again.');
     } finally {
       setUnlockingId(null);
     }
   };
 
-  // Lock a specific account (manual admin lock)
+  // ── Lock account ─────────────────────────────────────────────────────────────
   const handleLockAccount = async (userId) => {
     const result = await showConfirmationAlert(
       'Lock Account',
       'Are you sure you want to lock this account? The user will not be able to login until unlocked.',
       'Yes, Lock Account'
     );
-
-    if (!result.isConfirmed) {
-      return;
-    }
+    if (!result.isConfirmed) return;
 
     try {
       setLoading(true);
       const headers = getAuthHeaders();
-      const adminId = localStorage.getItem('userId'); // Get current admin ID
-      
+      const adminId = localStorage.getItem('userId');
       const response = await fetch('http://localhost:5000/api/admin/lock-user', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ 
-          userId,
-          adminId 
-        }),
+        body: JSON.stringify({ userId, adminId }),
       });
-
       const data = await response.json();
 
       if (data.success) {
-        showSuccessAlert(
-          'Account locked successfully! The user cannot login until unlocked.',
-          'Account Locked!'
-        );
-        // Refresh the users list and locked accounts
+        showSuccessAlert('Account locked successfully! The user cannot login until unlocked.', 'Account Locked!');
         await fetchUsers();
         await fetchLockedAccounts();
       } else {
         showErrorAlert(data.message || 'Failed to lock account');
       }
-    } catch (error) {
-      console.error('Error locking account:', error);
+    } catch (err) {
+      console.error('Error locking account:', err);
       showErrorAlert('Failed to lock account. Please try again.');
     } finally {
       setLoading(false);
@@ -258,27 +310,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   useEffect(() => {
     fetchUsers();
     fetchLockedAccounts();
+    fetchContactRequests();
   }, []);
 
   useEffect(() => {
-    if (initialSubTab) {
-      setSubTab(initialSubTab);
-    }
+    if (initialSubTab) setSubTab(initialSubTab);
   }, [initialSubTab]);
 
-  const deleteRequest = (id) => {
-    setContactRequests(contactRequests.filter(req => req.id !== id));
-  };
-
-  const updateRequestStatus = (id, newStatus) => {
-    setContactRequests(contactRequests.map(req => {
-      if (req.id === id) {
-        return { ...req, status: newStatus };
-      }
-      return req;
-    }));
-  };
-
+  // ── Create user ──────────────────────────────────────────────────────────────
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -297,7 +336,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           role: formData.role,
         }),
       });
-
       const data = await response.json();
 
       if (data.success) {
@@ -305,7 +343,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         resetForm();
         setError(null);
         await fetchUsers();
-        
         showSuccessAlert(
           `User ${formData.first_name} ${formData.last_name} has been created successfully!`,
           'Account Created!'
@@ -315,27 +352,25 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         setError(errorMsg);
         showErrorAlert(errorMsg);
       }
-    } catch (error) {
-      console.error('Error creating user:', error);
-      setError(error.message);
-      showErrorAlert(error.message);
+    } catch (err) {
+      console.error('Error creating user:', err);
+      setError(err.message);
+      showErrorAlert(err.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Edit user ────────────────────────────────────────────────────────────────
   const handleEditSubmit = async (e) => {
     e.preventDefault();
-    
+
     const result = await showConfirmationAlert(
       'Confirm Changes',
       `Are you sure you want to update ${formData.first_name} ${formData.last_name}'s information?`,
       'Yes, Save Changes'
     );
-
-    if (!result.isConfirmed) {
-      return;
-    }
+    if (!result.isConfirmed) return;
 
     setLoading(true);
     setError(null);
@@ -350,10 +385,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           middle_name: formData.middle_name,
           last_name: formData.last_name,
           role: formData.role,
-          email: formData.email
+          email: formData.email,
         }),
       });
-
       const data = await response.json();
 
       if (data.success) {
@@ -361,7 +395,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         resetForm();
         setError(null);
         await fetchUsers();
-        
         showSuccessAlert(
           `User ${formData.first_name} ${formData.last_name} has been updated successfully!`,
           'Changes Saved!'
@@ -371,15 +404,16 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         setError(errorMsg);
         showErrorAlert(errorMsg);
       }
-    } catch (error) {
-      console.error('Error updating user:', error);
-      setError(error.message);
-      showErrorAlert(error.message);
+    } catch (err) {
+      console.error('Error updating user:', err);
+      setError(err.message);
+      showErrorAlert(err.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Toggle user status ───────────────────────────────────────────────────────
   const toggleUserStatus = async (userId) => {
     const user = users.find(u => u.id === userId);
     const action = user.status === 'Active' ? 'lock' : 'unlock';
@@ -390,10 +424,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       `Are you sure you want to ${action} ${user.name}'s account?`,
       `Yes, ${actionDisplay} Account`
     );
-
-    if (!result.isConfirmed) {
-      return;
-    }
+    if (!result.isConfirmed) return;
 
     const newStatus = user.status === 'Active' ? 'Deactivated' : 'Active';
 
@@ -405,18 +436,11 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         headers,
         body: JSON.stringify({ status: newStatus }),
       });
-
       const data = await response.json();
 
       if (data.success) {
-        setUsers(users.map(u => {
-          if (u.id === userId) {
-            return { ...u, status: newStatus };
-          }
-          return u;
-        }));
+        setUsers(users.map(u => u.id === userId ? { ...u, status: newStatus } : u));
         setError(null);
-
         showSuccessAlert(
           `User ${user.name} has been ${action}ed successfully!`,
           `Account ${actionDisplay}ed!`
@@ -426,10 +450,10 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         setError(errorMsg);
         showErrorAlert(errorMsg);
       }
-    } catch (error) {
-      console.error('Error updating user status:', error);
-      setError(error.message);
-      showErrorAlert(error.message);
+    } catch (err) {
+      console.error('Error updating user status:', err);
+      setError(err.message);
+      showErrorAlert(err.message);
     } finally {
       setLoading(false);
     }
@@ -449,50 +473,33 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   };
 
   const resetForm = () => {
-    setFormData({
-      first_name: '',
-      middle_name: '',
-      last_name: '',
-      email: '',
-      role: 'Employee',
-    });
+    setFormData({ first_name: '', middle_name: '', last_name: '', email: '', role: 'Employee' });
     setSelectedUser(null);
     setError(null);
   };
 
-  const filteredUsers = users.filter(u => 
-    u.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    u.email?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+  const filteredUsers = users.filter(u =>
+    u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.role?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Format date for display
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    return new Date(dateString).toLocaleString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
     });
   };
 
-  // Get time since locked
   const getTimeSinceLocked = (lockedAt) => {
     if (!lockedAt) return 'N/A';
-    const now = new Date();
-    const locked = new Date(lockedAt);
-    const diffMs = now - locked;
+    const diffMs = new Date() - new Date(lockedAt);
     const diffMins = Math.floor(diffMs / 60000);
-    
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
-    
     const diffHours = Math.floor(diffMins / 60);
     if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    
     const diffDays = Math.floor(diffHours / 24);
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   };
@@ -511,18 +518,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           alignItems: 'center'
         }}>
           <span>❌ {error}</span>
-          <button 
-            onClick={() => setError(null)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              fontSize: '18px',
-              cursor: 'pointer',
-              color: 'var(--color-danger)'
-            }}
-          >
-            ×
-          </button>
+          <button onClick={() => setError(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--color-danger)' }}>×</button>
         </div>
       )}
 
@@ -532,55 +528,29 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       </div>
 
       <div style={styles.subTabsContainer}>
-        <button
-          onClick={() => setSubTab('accounts')}
-          style={{
-            ...styles.subTabButton,
-            borderBottomColor: subTab === 'accounts' ? 'var(--color-primary)' : 'transparent',
-            color: subTab === 'accounts' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: subTab === 'accounts' ? '700' : '500'
-          }}
-        >
+        <button onClick={() => setSubTab('accounts')} style={{ ...styles.subTabButton, borderBottomColor: subTab === 'accounts' ? 'var(--color-primary)' : 'transparent', color: subTab === 'accounts' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'accounts' ? '700' : '500' }}>
           User Accounts {loading && '...'}
         </button>
-        <button
-          onClick={() => setSubTab('requests')}
-          style={{
-            ...styles.subTabButton,
-            borderBottomColor: subTab === 'requests' ? 'var(--color-primary)' : 'transparent',
-            color: subTab === 'requests' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: subTab === 'requests' ? '700' : '500'
-          }}
-        >
+        <button onClick={() => setSubTab('requests')} style={{ ...styles.subTabButton, borderBottomColor: subTab === 'requests' ? 'var(--color-primary)' : 'transparent', color: subTab === 'requests' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'requests' ? '700' : '500' }}>
           Contact Requests
+          {!loadingRequests && contactRequests.filter(r => r.status === 'Pending').length > 0 && (
+            <span style={{ marginLeft: '8px', backgroundColor: 'var(--color-warning)', color: 'white', borderRadius: '50%', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>
+              {contactRequests.filter(r => r.status === 'Pending').length}
+            </span>
+          )}
         </button>
-        <button
-          onClick={() => setSubTab('locked')}
-          style={{
-            ...styles.subTabButton,
-            borderBottomColor: subTab === 'locked' ? 'var(--color-primary)' : 'transparent',
-            color: subTab === 'locked' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: subTab === 'locked' ? '700' : '500'
-          }}
-        >
+        <button onClick={() => setSubTab('locked')} style={{ ...styles.subTabButton, borderBottomColor: subTab === 'locked' ? 'var(--color-primary)' : 'transparent', color: subTab === 'locked' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'locked' ? '700' : '500' }}>
           Locked Accounts
           {loadingLocked && '...'}
           {!loadingLocked && lockedAccounts.length > 0 && (
-            <span style={{
-              marginLeft: '8px',
-              backgroundColor: 'var(--color-danger)',
-              color: 'white',
-              borderRadius: '50%',
-              padding: '2px 8px',
-              fontSize: '11px',
-              fontWeight: '700'
-            }}>
+            <span style={{ marginLeft: '8px', backgroundColor: 'var(--color-danger)', color: 'white', borderRadius: '50%', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>
               {lockedAccounts.length}
             </span>
           )}
         </button>
       </div>
 
+      {/* ── User Accounts Tab ── */}
       {subTab === 'accounts' && (
         <div className="glass-card">
           <div style={styles.tableToolbar}>
@@ -597,11 +567,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 style={styles.searchInput}
               />
             </div>
-            <button 
-              onClick={() => { resetForm(); setShowCreateModal(true); }} 
-              style={styles.createBtn}
-              disabled={loading}
-            >
+            <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn} disabled={loading}>
               + Create User Account
             </button>
           </div>
@@ -620,33 +586,21 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </thead>
               <tbody>
                 {loading && filteredUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={styles.emptyRow}>Loading users...</td>
-                  </tr>
+                  <tr><td colSpan="6" style={styles.emptyRow}>Loading users...</td></tr>
                 ) : filteredUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={styles.emptyRow}>No user accounts found.</td>
-                  </tr>
+                  <tr><td colSpan="6" style={styles.emptyRow}>No user accounts found.</td></tr>
                 ) : (
                   filteredUsers.map(u => (
                     <tr key={u.id} style={styles.tableBodyRow}>
                       <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{u.name}</td>
                       <td style={styles.td}>{u.email}</td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.roleBadge,
-                          backgroundColor: u.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : u.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(2, 132, 199, 0.1)',
-                          color: u.role === 'Admin' ? 'var(--color-danger)' : u.role === 'Resource Manager' ? 'var(--color-primary)' : 'var(--color-accent)'
-                        }}>
+                        <span style={{ ...styles.roleBadge, backgroundColor: u.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : u.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(2, 132, 199, 0.1)', color: u.role === 'Admin' ? 'var(--color-danger)' : u.role === 'Resource Manager' ? 'var(--color-primary)' : 'var(--color-accent)' }}>
                           {u.role}
                         </span>
                       </td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.statusBadge,
-                          backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-danger-light)',
-                          color: u.status === 'Active' ? 'var(--color-success)' : 'var(--color-danger)'
-                        }}>
+                        <span style={{ ...styles.statusBadge, backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-danger-light)', color: u.status === 'Active' ? 'var(--color-success)' : 'var(--color-danger)' }}>
                           {u.status}
                         </span>
                       </td>
@@ -659,38 +613,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                               <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                             </svg>
                           </button>
-                          <button 
-                            onClick={() => toggleUserStatus(u.id)} 
-                            style={{
-                              ...styles.lockIconBtn,
-                              color: u.status === 'Active' ? 'var(--color-warning)' : 'var(--color-success)',
-                              background: u.status === 'Active' ? 'rgba(245, 158, 11, 0.1)' : 'var(--color-primary-light)'
-                            }}
-                            title={u.status === 'Active' ? 'Lock account' : 'Unlock account'}
-                            disabled={loading}
-                          >
+                          <button onClick={() => toggleUserStatus(u.id)} style={{ ...styles.lockIconBtn, color: u.status === 'Active' ? 'var(--color-warning)' : 'var(--color-success)', background: u.status === 'Active' ? 'rgba(245, 158, 11, 0.1)' : 'var(--color-primary-light)' }} title={u.status === 'Active' ? 'Lock account' : 'Unlock account'} disabled={loading}>
                             {u.status === 'Active' ? (
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                              </svg>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
                             ) : (
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
-                              </svg>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
                             )}
                           </button>
-                          <button 
-                            onClick={() => toggleUserStatus(u.id)} 
-                            style={{
-                              ...styles.statusToggleBtn,
-                              color: u.status === 'Active' ? 'var(--color-danger)' : 'var(--color-success)',
-                              background: u.status === 'Active' ? 'var(--color-danger-light)' : 'var(--color-primary-light)'
-                            }}
-                            title={u.status === 'Active' ? 'Deactivate account' : 'Activate account'}
-                            disabled={loading}
-                          >
+                          <button onClick={() => toggleUserStatus(u.id)} style={{ ...styles.statusToggleBtn, color: u.status === 'Active' ? 'var(--color-danger)' : 'var(--color-success)', background: u.status === 'Active' ? 'var(--color-danger-light)' : 'var(--color-primary-light)' }} disabled={loading}>
                             {u.status === 'Active' ? 'Deactivate' : 'Activate'}
                           </button>
                         </div>
@@ -704,6 +634,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </div>
       )}
 
+      {/* ── Contact Requests Tab ── */}
       {subTab === 'requests' && (
         <div className="glass-card">
           <h2 style={styles.tabSectionTitle}>Contact Administrator Requests</h2>
@@ -722,126 +653,68 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 </tr>
               </thead>
               <tbody>
-                {contactRequests.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={styles.emptyRow}>No contact requests found.</td>
-                  </tr>
+                {loadingRequests ? (
+                  <tr><td colSpan="6" style={styles.emptyRow}>Loading contact requests...</td></tr>
+                ) : contactRequests.length === 0 ? (
+                  <tr><td colSpan="6" style={styles.emptyRow}>No contact requests found.</td></tr>
                 ) : (
                   contactRequests.map(req => (
                     <tr key={req.id} style={styles.tableBodyRow}>
-                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{req.email}</td>
+                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>
+                        <div>{req.email}</div>
+                        {req.name && <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>{req.name}</div>}
+                      </td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.requestTypeBadge,
-                          backgroundColor: req.requestType === 'Account Request' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                          color: req.requestType === 'Account Request' ? 'var(--color-primary)' : 'var(--color-warning)'
-                        }}>
+                        <span style={{ ...styles.requestTypeBadge, backgroundColor: req.requestType === 'Account Request' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', color: req.requestType === 'Account Request' ? 'var(--color-primary)' : 'var(--color-warning)' }}>
                           {req.requestType}
                         </span>
                       </td>
                       <td style={{ ...styles.td, maxWidth: '400px', whiteSpace: 'normal', lineHeight: '1.4' }}>{req.message}</td>
                       <td style={styles.td}>{req.date}</td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.statusBadge,
-                          backgroundColor: req.status === 'Pending' ? 'var(--color-warning-light)' : req.status === 'Approved' ? 'var(--color-primary-light)' : req.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-text-muted)',
-                          color: req.status === 'Pending' ? 'var(--color-warning)' : req.status === 'Approved' ? 'var(--color-success)' : req.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-text-secondary)'
-                        }}>
+                        <span style={{ ...styles.statusBadge, backgroundColor: req.status === 'Pending' ? 'var(--color-warning-light)' : req.status === 'Approved' ? 'var(--color-primary-light)' : req.status === 'Rejected' ? 'var(--color-danger-light)' : 'rgba(107,114,128,0.1)', color: req.status === 'Pending' ? 'var(--color-warning)' : req.status === 'Approved' ? 'var(--color-success)' : req.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
                           {req.status}
                         </span>
                       </td>
                       <td style={styles.td}>
                         <div style={styles.actionCell}>
-                          {req.status === 'Pending' ? (
+                          {req.status === 'Pending' && (
                             <>
                               <button
                                 onClick={() => {
                                   resetForm();
-                                  setFormData({
-                                    ...formData,
-                                    first_name: '',
-                                    middle_name: '',
-                                    last_name: '',
-                                    email: req.email,
-                                    role: 'Employee',
-                                    password: ''
-                                  });
+                                  setFormData(prev => ({ ...prev, email: req.email, role: 'Employee' }));
                                   setShowCreateModal(true);
                                 }}
-                                style={{
-                                  ...styles.statusToggleBtn,
-                                  color: 'var(--color-primary)',
-                                  background: 'var(--color-primary-light)'
-                                }}
+                                style={{ ...styles.statusToggleBtn, color: 'var(--color-primary)', background: 'var(--color-primary-light)' }}
                               >
                                 Create Account
                               </button>
-                              <button
-                                onClick={() => updateRequestStatus(req.id, 'Approved')}
-                                style={{
-                                  ...styles.statusToggleBtn,
-                                  color: 'var(--color-success)',
-                                  background: 'var(--color-primary-light)'
-                                }}
-                              >
+                              <button onClick={() => updateRequestStatus(req.id, 'Approved')} style={{ ...styles.statusToggleBtn, color: 'var(--color-success)', background: 'var(--color-primary-light)' }}>
                                 Approve
                               </button>
-                              <button
-                                onClick={() => updateRequestStatus(req.id, 'Rejected')}
-                                style={{
-                                  ...styles.statusToggleBtn,
-                                  color: 'var(--color-danger)',
-                                  background: 'var(--color-danger-light)'
-                                }}
-                              >
+                              <button onClick={() => updateRequestStatus(req.id, 'Rejected')} style={{ ...styles.statusToggleBtn, color: 'var(--color-danger)', background: 'var(--color-danger-light)' }}>
                                 Reject
                               </button>
                             </>
-                          ) : req.status === 'Approved' ? (
+                          )}
+                          {req.status === 'Approved' && (
+                            <button onClick={() => updateRequestStatus(req.id, 'Closed')} style={{ ...styles.statusToggleBtn, color: 'var(--color-text-secondary)', background: 'var(--color-bg-card-hover)' }}>
+                              Close
+                            </button>
+                          )}
+                          {req.status === 'Rejected' && (
                             <>
-                              <button
-                                onClick={() => updateRequestStatus(req.id, 'Closed')}
-                                style={{
-                                  ...styles.statusToggleBtn,
-                                  color: 'var(--color-text-secondary)',
-                                  background: 'var(--color-bg-card-hover)'
-                                }}
-                              >
-                                Close
-                              </button>
-                            </>
-                          ) : req.status === 'Rejected' ? (
-                            <>
-                              <button
-                                onClick={() => updateRequestStatus(req.id, 'Pending')}
-                                style={{
-                                  ...styles.statusToggleBtn,
-                                  color: 'var(--color-warning)',
-                                  background: 'var(--color-warning-light)'
-                                }}
-                              >
+                              <button onClick={() => updateRequestStatus(req.id, 'Pending')} style={{ ...styles.statusToggleBtn, color: 'var(--color-warning)', background: 'var(--color-warning-light)' }}>
                                 Reopen
                               </button>
-                              <button
-                                onClick={() => deleteRequest(req.id)}
-                                style={{
-                                  ...styles.statusToggleBtn,
-                                  color: 'var(--color-danger)',
-                                  background: 'var(--color-danger-light)'
-                                }}
-                              >
+                              <button onClick={() => deleteRequest(req.id)} style={{ ...styles.statusToggleBtn, color: 'var(--color-danger)', background: 'var(--color-danger-light)' }}>
                                 Delete
                               </button>
                             </>
-                          ) : (
-                            <button
-                              onClick={() => deleteRequest(req.id)}
-                              style={{
-                                ...styles.statusToggleBtn,
-                                color: 'var(--color-danger)',
-                                background: 'var(--color-danger-light)'
-                              }}
-                            >
+                          )}
+                          {req.status === 'Closed' && (
+                            <button onClick={() => deleteRequest(req.id)} style={{ ...styles.statusToggleBtn, color: 'var(--color-danger)', background: 'var(--color-danger-light)' }}>
                               Delete
                             </button>
                           )}
@@ -856,13 +729,13 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </div>
       )}
 
+      {/* ── Locked Accounts Tab ── */}
       {subTab === 'locked' && (
         <div className="glass-card">
           <div style={styles.tableToolbar}>
             <h2 style={{ ...styles.tabSectionTitle, marginBottom: 0 }}>Locked Accounts</h2>
-          
           </div>
-          <p style={styles.tabSectionSubtitle}>View and manage accounts that have been locked due to failed login attempts or manual admin action.</p>
+          <p style={styles.tabSectionSubtitle}>View and manage accounts locked due to failed login attempts or manual admin action.</p>
 
           <div style={styles.statsBar}>
             <div style={styles.statItem}>
@@ -887,9 +760,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </thead>
               <tbody>
                 {loadingLocked ? (
-                  <tr>
-                    <td colSpan="8" style={styles.emptyRow}>Loading locked accounts...</td>
-                  </tr>
+                  <tr><td colSpan="8" style={styles.emptyRow}>Loading locked accounts...</td></tr>
                 ) : lockedAccounts.length === 0 ? (
                   <tr>
                     <td colSpan="8" style={styles.emptyRow}>
@@ -908,84 +779,40 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                     <tr key={acc.id} style={styles.tableBodyRow}>
                       <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{
-                            width: '28px',
-                            height: '28px',
-                            borderRadius: '50%',
-                            background: 'var(--color-primary-light)',
-                            color: 'var(--color-primary)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '12px',
-                            fontWeight: '700'
-                          }}>
+                          <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--color-primary-light)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700' }}>
                             {acc.name.charAt(0).toUpperCase()}
                           </div>
                           {acc.name}
                         </div>
                       </td>
+                      <td style={styles.td}><a href={`mailto:${acc.email}`} style={{ color: 'var(--color-text-secondary)', textDecoration: 'none' }}>{acc.email}</a></td>
                       <td style={styles.td}>
-                        <a href={`mailto:${acc.email}`} style={{
-                          color: 'var(--color-text-secondary)',
-                          textDecoration: 'none',
-                          '&:hover': {
-                            color: 'var(--color-primary)',
-                            textDecoration: 'underline'
-                          }
-                        }}>
-                          {acc.email}
-                        </a>
-                      </td>
-                      <td style={styles.td}>
-                        <span style={{
-                          ...styles.roleBadge,
-                          backgroundColor: acc.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : acc.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : acc.role === 'Project Manager' ? 'rgba(2, 132, 199, 0.1)' : 'rgba(107, 114, 128, 0.1)',
-                          color: acc.role === 'Admin' ? 'var(--color-danger)' : acc.role === 'Resource Manager' ? 'var(--color-primary)' : acc.role === 'Project Manager' ? 'var(--color-accent)' : 'var(--color-text-secondary)'
-                        }}>
+                        <span style={{ ...styles.roleBadge, backgroundColor: acc.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : acc.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : acc.role === 'Project Manager' ? 'rgba(2, 132, 199, 0.1)' : 'rgba(107, 114, 128, 0.1)', color: acc.role === 'Admin' ? 'var(--color-danger)' : acc.role === 'Resource Manager' ? 'var(--color-primary)' : acc.role === 'Project Manager' ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
                           {acc.role}
                         </span>
                       </td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.attemptsBadge,
-                          backgroundColor: acc.failedAttempts >= 5 ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                          color: acc.failedAttempts >= 5 ? 'var(--color-danger)' : 'var(--color-warning)'
-                        }}>
+                        <span style={{ ...styles.attemptsBadge, backgroundColor: acc.failedAttempts >= 5 ? 'var(--color-danger-light)' : 'var(--color-warning-light)', color: acc.failedAttempts >= 5 ? 'var(--color-danger)' : 'var(--color-warning)' }}>
                           {acc.failedAttempts} attempts
                         </span>
                       </td>
                       <td style={styles.td}>{formatDate(acc.lockedAt)}</td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.timeBadge,
-                          backgroundColor: 'var(--color-bg-hover)',
-                          color: 'var(--color-text-secondary)'
-                        }}>
+                        <span style={{ ...styles.timeBadge, backgroundColor: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }}>
                           {getTimeSinceLocked(acc.lockedAt)}
                         </span>
                       </td>
-                      <td style={styles.td}>
-                        {acc.lockedBy && acc.lockedBy !== 'System' ? 'Admin' : 'System (Auto-lock)'}
-                      </td>
+                      <td style={styles.td}>{acc.lockedBy && acc.lockedBy !== 'System' ? 'Admin' : 'System (Auto-lock)'}</td>
                       <td style={styles.td}>
                         <div style={styles.actionCell}>
                           <button
                             onClick={() => handleUnlockAccount(acc.user_id || acc.id)}
-                            style={{
-                              ...styles.unlockBtn,
-                              opacity: unlockingId === (acc.user_id || acc.id) ? 0.7 : 1
-                            }}
+                            style={{ ...styles.unlockBtn, opacity: unlockingId === (acc.user_id || acc.id) ? 0.7 : 1 }}
                             disabled={unlockingId === (acc.user_id || acc.id)}
                           >
                             {unlockingId === (acc.user_id || acc.id) ? (
-                              <>
-                                <span style={styles.spinnerSmall}></span>
-                                Unlocking...
-                              </>
-                            ) : (
-                              'Unlock Account'
-                            )}
+                              <><span style={styles.spinnerSmall}></span>Unlocking...</>
+                            ) : 'Unlock Account'}
                           </button>
                         </div>
                       </td>
@@ -998,6 +825,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </div>
       )}
 
+      {/* ── Create Modal ── */}
       {showCreateModal && (
         <div style={styles.modalOverlay}>
           <div className="glass-card" style={styles.modalCard}>
@@ -1008,91 +836,39 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             <form onSubmit={handleCreateSubmit} style={{ marginTop: 16 }}>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>First Name *</label>
-                <input
-                  type="text"
-                  value={formData.first_name}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      first_name: e.target.value
-                    })
-                  }
-                  style={styles.modalInput}
-                  required
-                />
+                <input type="text" value={formData.first_name} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} style={styles.modalInput} required />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Middle Name</label>
-                <input
-                  type="text"
-                  value={formData.middle_name}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      middle_name: e.target.value
-                    })
-                  }
-                  style={styles.modalInput}
-                />
+                <input type="text" value={formData.middle_name} onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })} style={styles.modalInput} />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Last Name *</label>
-                <input
-                  type="text"
-                  value={formData.last_name}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      last_name: e.target.value
-                    })
-                  }
-                  style={styles.modalInput}
-                  required
-                />
+                <input type="text" value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} style={styles.modalInput} required />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Email Address *</label>
-                <input 
-                  type="email" 
-                  value={formData.email} 
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                  style={styles.modalInput} 
-                  placeholder="romell.ebuen@wea.com"
-                  required
-                />
+                <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} placeholder="romell.ebuen@wea.com" required />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Assign Role *</label>
-                <select 
-                  value={formData.role} 
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })} 
-                  style={styles.modalSelect}
-                  required
-                >
+                <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} style={styles.modalSelect} required>
                   <option value="Admin">Admin</option>
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
                 </select>
               </div>
-
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>
-                  Cancel
-                </button>
-                <button type="submit" style={styles.saveBtn} disabled={loading}>
-                  {loading ? 'Creating...' : 'Create Account'}
-                </button>
+                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
+                <button type="submit" style={styles.saveBtn} disabled={loading}>{loading ? 'Creating...' : 'Create Account'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* ── Edit Modal ── */}
       {showEditModal && (
         <div style={styles.modalOverlay}>
           <div className="glass-card" style={styles.modalCard}>
@@ -1103,69 +879,32 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             <form onSubmit={handleEditSubmit} style={{ marginTop: 16 }}>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>First Name *</label>
-                <input 
-                  type="text" 
-                  value={formData.first_name} 
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} 
-                  style={styles.modalInput} 
-                  required
-                />
+                <input type="text" value={formData.first_name} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} style={styles.modalInput} required />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Middle Name</label>
-                <input 
-                  type="text" 
-                  value={formData.middle_name} 
-                  onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })} 
-                  style={styles.modalInput} 
-                />
+                <input type="text" value={formData.middle_name} onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })} style={styles.modalInput} />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Last Name *</label>
-                <input 
-                  type="text" 
-                  value={formData.last_name} 
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} 
-                  style={styles.modalInput} 
-                  required
-                />
+                <input type="text" value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} style={styles.modalInput} required />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Email Address *</label>
-                <input 
-                  type="email" 
-                  value={formData.email} 
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                  style={styles.modalInput} 
-                  required
-                />
+                <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} required />
               </div>
-
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>System Role *</label>
-                <select 
-                  value={formData.role} 
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })} 
-                  style={styles.modalSelect}
-                  required
-                >
+                <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} style={styles.modalSelect} required>
                   <option value="Admin">Admin</option>
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
                 </select>
               </div>
-
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>
-                  Cancel
-                </button>
-                <button type="submit" style={styles.saveBtn} disabled={loading}>
-                  {loading ? 'Saving...' : 'Save Changes'}
-                </button>
+                <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>Cancel</button>
+                <button type="submit" style={styles.saveBtn} disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
               </div>
             </form>
           </div>
