@@ -2,12 +2,13 @@
 import React, { useState, useEffect } from 'react';
 
 export default function ContactAdmin({ isOpen, onClose }) {
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [purpose, setPurpose] = useState('');
   const [message, setMessage] = useState('');
   const [phone, setPhone] = useState('');
-  const [department, setDepartment] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -15,12 +16,13 @@ export default function ContactAdmin({ isOpen, onClose }) {
   // Reset state whenever the modal is opened fresh
   useEffect(() => {
     if (isOpen) {
-      setName('');
+      setFirstName('');
+      setMiddleName('');
+      setLastName('');
       setEmail('');
       setPurpose('');
       setMessage('');
       setPhone('');
-      setDepartment('');
       setError('');
       setSuccess(false);
     }
@@ -41,7 +43,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
     e.preventDefault();
     setError('');
 
-    if (!name || !email || !purpose || !message) {
+    if (!firstName || !lastName || !email || !purpose || !message) {
       setError('Please fill in all required fields.');
       return;
     }
@@ -49,12 +51,12 @@ export default function ContactAdmin({ isOpen, onClose }) {
     setIsLoading(true);
 
     try {
-      console.log('📩 Sending contact admin request:', { name, email, purpose, phone, department });
+      console.log('📩 Sending contact admin request:', { firstName, middleName, lastName, email, purpose, phone });
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/contact-admin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, purpose, message, phone, department }),
+        body: JSON.stringify({ firstName, middleName, lastName, email, purpose, message, phone }),
       });
 
       const result = await response.json();
@@ -114,12 +116,35 @@ export default function ContactAdmin({ isOpen, onClose }) {
             <form onSubmit={handleSubmit} style={styles.form}>
               <div style={styles.row}>
                 <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Full Name</label>
+                  <label style={styles.label}>First Name</label>
                   <input
                     type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Juan Dela Cruz"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="Juan"
+                    style={styles.input}
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+                <div style={{ ...styles.inputGroup, flex: 1 }}>
+                  <label style={styles.label}>Middle Name <span style={{ color: 'var(--color-text-muted)', fontWeight: '400' }}>(Optional)</span></label>
+                  <input
+                    type="text"
+                    value={middleName}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    placeholder="Santos"
+                    style={styles.input}
+                    disabled={isLoading}
+                  />
+                </div>
+                <div style={{ ...styles.inputGroup, flex: 1 }}>
+                  <label style={styles.label}>Last Name</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Dela Cruz"
                     style={styles.input}
                     required
                     disabled={isLoading}
@@ -153,29 +178,16 @@ export default function ContactAdmin({ isOpen, onClose }) {
                 />
               </div>
 
-              <div style={styles.row}>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Phone Number <span style={{ color: 'var(--color-text-muted)', fontWeight: '400' }}>(Optional)</span></label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+63 912 345 6789"
-                    style={styles.input}
-                    disabled={isLoading}
-                  />
-                </div>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Department <span style={{ color: 'var(--color-text-muted)', fontWeight: '400' }}>(Optional)</span></label>
-                  <input
-                    type="text"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="e.g. IT, HR, Finance"
-                    style={styles.input}
-                    disabled={isLoading}
-                  />
-                </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Phone Number <span style={{ color: 'var(--color-text-muted)', fontWeight: '400' }}>(Optional)</span></label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+63 912 345 6789"
+                  style={styles.input}
+                  disabled={isLoading}
+                />
               </div>
 
               <div style={styles.inputGroup}>
@@ -227,7 +239,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
             </div>
             <h2 style={styles.title}>Message Sent</h2>
             <p style={styles.subtitle}>
-              Thanks, {name}. Your message has been sent to the administrator. We'll get back to you at <strong style={{ color: 'var(--color-text-primary)' }}>{email}</strong> shortly.
+              Thanks, {firstName}. Your message has been sent to the administrator. We'll get back to you at <strong style={{ color: 'var(--color-text-primary)' }}>{email}</strong> shortly.
             </p>
             <button type="button" onClick={onClose} style={styles.submitBtn}>
               Close
@@ -313,6 +325,7 @@ const styles = {
   row: {
     display: 'flex',
     gap: '12px',
+    flexWrap: 'wrap',
   },
   errorAlert: {
     display: 'flex',
@@ -328,6 +341,7 @@ const styles = {
   },
   inputGroup: {
     marginBottom: '16px',
+    minWidth: '140px',
   },
   label: {
     display: 'block',
