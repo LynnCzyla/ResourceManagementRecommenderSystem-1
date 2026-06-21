@@ -18,6 +18,9 @@ const forgotPasswordRoutes = require("./routes/Auth/forgotPassword");
 const systemSettingsRoutes = require("./routes/Admin/systemSettings"); // Add this
 
 // Use routes
+
+app.use('/api/admin', require('./routes/Admin/contactAdmin'));
+// with the other app.use lines
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/users", verifyToken, userRoutes);
 app.use("/api/users", verifyToken, userManagementRoutes);
