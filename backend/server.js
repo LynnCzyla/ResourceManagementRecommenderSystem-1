@@ -3,9 +3,6 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
-// Import auth middleware - CORRECT PATH
-const { verifyToken } = require('./routes/Middleware/auth');
-
 const app = express();
 
 app.use(cors());
@@ -22,8 +19,8 @@ const systemSettingsRoutes = require("./routes/Admin/systemSettings"); // Add th
 app.use('/api/admin', require('./routes/Admin/contactAdmin'));
 // with the other app.use lines
 app.use("/api/auth", forgotPasswordRoutes);
-app.use("/api/users", verifyToken, userRoutes);
-app.use("/api/users", verifyToken, userManagementRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/users", userManagementRoutes);
 app.use("/api/settings", systemSettingsRoutes); // Add system settings routes
 
 app.get("/", (req, res) => {
