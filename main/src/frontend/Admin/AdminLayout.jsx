@@ -68,6 +68,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         return <UserManagementTab activeSubTab="accounts" />;
       case 'contact-requests':
         return <UserManagementTab activeSubTab="requests" />;
+      case 'locked-accounts':
+        return <UserManagementTab activeSubTab="locked" />;
       case 'system-settings':
         return <SystemSettingsTab />;
       case 'ocr-logs':
@@ -157,8 +159,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
 
             {userMgmtOpen && (
               <div style={sidebarCollapsed ? styles.collapsedSubmenu : styles.submenu}>
-                <div 
-                  onClick={() => handleNavClick('user-accounts')} 
+                <div
+                  onClick={() => handleNavClick('user-accounts')}
                   style={{
                     ...styles.submenuItem,
                     color: activeTab === 'user-accounts' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
@@ -168,8 +170,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
                 >
                   {!sidebarCollapsed ? '• User Accounts' : 'Accs'}
                 </div>
-                <div 
-                  onClick={() => handleNavClick('contact-requests')} 
+                <div
+                  onClick={() => handleNavClick('contact-requests')}
                   style={{
                     ...styles.submenuItem,
                     color: activeTab === 'contact-requests' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
@@ -178,6 +180,17 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
                   className="hover-submenu-item"
                 >
                   {!sidebarCollapsed ? '• Contact Requests' : 'Reqs'}
+                </div>
+                <div
+                  onClick={() => handleNavClick('locked-accounts')}
+                  style={{
+                    ...styles.submenuItem,
+                    color: activeTab === 'locked-accounts' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                    fontWeight: activeTab === 'locked-accounts' ? '700' : '400'
+                  }}
+                  className="hover-submenu-item"
+                >
+                  {!sidebarCollapsed ? '• Locked Accounts' : 'Locked'}
                 </div>
               </div>
             )}

@@ -11,6 +11,15 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState('profile');
+  const [profilePicture, setProfilePicture] = useState(user?.avatar || '');
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showOTP, setShowOTP] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
 
   // Populate form with user data when modal opens
   useEffect(() => {
@@ -22,8 +31,17 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
       setEmail(user.email || '');
       setPhone(user.phone || '');
       setDepartment(user.department || '');
+      setProfilePicture(user.avatar || '');
       setError('');
       setSuccess(false);
+      setActiveTab('profile');
+      setShowChangePassword(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowOTP(false);
+      setOtp('');
+      setOtpSent(false);
     }
   }, [isOpen, user]);
 
@@ -76,6 +94,54 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
     if (e.target === e.currentTarget) onClose();
   };
 
+  const handleProfilePictureChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfilePicture(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSendOTP = () => {
+    setOtpSent(true);
+    setShowOTP(true);
+  };
+
+  const handleVerifyOTP = () => {
+    if (otp === '123456') {
+      setShowOTP(false);
+      setOtp('');
+      setOtpSent(false);
+      alert('OTP verified successfully');
+    } else {
+      setError('Invalid OTP. Please try again.');
+    }
+  };
+
+  const handlePasswordChange = (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirm password do not match.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+
+    alert('Password changed successfully');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowChangePassword(false);
+  };
+
   return (
     <div style={styles.overlay} onClick={handleOverlayClick}>
       <div className="glass-card" style={styles.modal}>
@@ -100,6 +166,28 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
               Update your personal information and contact details.
             </p>
 
+            {/* Tabs */}
+            <div style={styles.tabs}>
+              <button
+                onClick={() => setActiveTab('profile')}
+                style={{
+                  ...styles.tab,
+                  ...(activeTab === 'profile' ? styles.activeTab : {})
+                }}
+              >
+                Profile
+              </button>
+              <button
+                onClick={() => setActiveTab('password')}
+                style={{
+                  ...styles.tab,
+                  ...(activeTab === 'password' ? styles.activeTab : {})
+                }}
+              >
+                Change Password
+              </button>
+            </div>
+
             {error && (
               <div style={styles.errorAlert}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}>
@@ -111,108 +199,236 @@ export default function ProfileSettings({ isOpen, onClose, user, onUpdate }) {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} style={styles.form}>
-              <div style={styles.row}>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>First Name *</label>
+            {activeTab === 'profile' ? (
+              <form onSubmit={handleSubmit} style={styles.form}>
+                {/* Profile Picture */}
+                <div style={styles.profilePictureSection}>
+                  <div style={styles.profilePictureWrapper}>
+                    <img
+                      src={profilePicture || 'https://via.placeholder.com/100'}
+                      alt="Profile"
+                      style={styles.profilePicture}
+                    />
+                    <label style={styles.profilePictureLabel}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleProfilePictureChange}
+                        style={{ display: 'none' }}
+                      />
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                        <circle cx="12" cy="13" r="4"></circle>
+                      </svg>
+                    </label>
+                  </div>
+                </div>
+
+                <div style={styles.row}>
+                  <div style={{ ...styles.inputGroup, flex: 1 }}>
+                    <label style={styles.label}>First Name *</label>
+                    <input
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="Juan"
+                      style={styles.input}
+                      required
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div style={{ ...styles.inputGroup, flex: 1 }}>
+                    <label style={styles.label}>Middle Name</label>
+                    <input
+                      type="text"
+                      value={middleName}
+                      onChange={(e) => setMiddleName(e.target.value)}
+                      placeholder="Dela"
+                      style={styles.input}
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div style={{ ...styles.inputGroup, flex: 1 }}>
+                    <label style={styles.label}>Last Name *</label>
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      placeholder="Cruz"
+                      style={styles.input}
+                      required
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+
+                <div style={styles.inputGroup}>
+                  <label style={styles.label}>Email Address *</label>
                   <input
-                    type="text"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    placeholder="Juan"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
                     style={styles.input}
                     required
                     disabled={isLoading}
                   />
                 </div>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Middle Name</label>
-                  <input
-                    type="text"
-                    value={middleName}
-                    onChange={(e) => setMiddleName(e.target.value)}
-                    placeholder="Dela"
-                    style={styles.input}
-                    disabled={isLoading}
-                  />
-                </div>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Last Name *</label>
-                  <input
-                    type="text"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    placeholder="Cruz"
-                    style={styles.input}
-                    required
-                    disabled={isLoading}
-                  />
-                </div>
-              </div>
 
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Email Address *</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  style={styles.input}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-
-              <div style={styles.row}>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Phone Number</label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+63 912 345 6789"
-                    style={styles.input}
-                    disabled={isLoading}
-                  />
+                <div style={styles.row}>
+                  <div style={{ ...styles.inputGroup, flex: 1 }}>
+                    <label style={styles.label}>Phone Number</label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+63 912 345 6789"
+                      style={styles.input}
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div style={{ ...styles.inputGroup, flex: 1 }}>
+                    <label style={styles.label}>Department</label>
+                    <input
+                      type="text"
+                      value={department}
+                      onChange={(e) => setDepartment(e.target.value)}
+                      placeholder="e.g. IT, HR, Engineering"
+                      style={styles.input}
+                      disabled={isLoading}
+                    />
+                  </div>
                 </div>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Department</label>
-                  <input
-                    type="text"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="e.g. IT, HR, Engineering"
-                    style={styles.input}
-                    disabled={isLoading}
-                  />
-                </div>
-              </div>
 
-              <div style={styles.btnRow}>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  style={styles.cancelBtn}
-                  disabled={isLoading}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={styles.submitBtn}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <span style={styles.spinnerWrapper}>
-                      <span style={styles.spinner}></span>
-                      Saving...
-                    </span>
-                  ) : (
-                    'Save Changes'
-                  )}
-                </button>
-              </div>
-            </form>
+                <div style={styles.btnRow}>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    style={styles.cancelBtn}
+                    disabled={isLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={styles.submitBtn}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <span style={styles.spinnerWrapper}>
+                        <span style={styles.spinner}></span>
+                        Saving...
+                      </span>
+                    ) : (
+                      'Save Changes'
+                    )}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handlePasswordChange} style={styles.form}>
+                {!showOTP ? (
+                  <>
+                    <div style={styles.inputGroup}>
+                      <label style={styles.label}>Current Password</label>
+                      <input
+                        type="password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="Enter current password"
+                        style={styles.input}
+                        required
+                      />
+                    </div>
+
+                    <div style={styles.inputGroup}>
+                      <label style={styles.label}>New Password</label>
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Enter new password"
+                        style={styles.input}
+                        required
+                      />
+                    </div>
+
+                    <div style={styles.inputGroup}>
+                      <label style={styles.label}>Confirm New Password</label>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password"
+                        style={styles.input}
+                        required
+                      />
+                    </div>
+
+                    <div style={styles.btnRow}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCurrentPassword('');
+                          setNewPassword('');
+                          setConfirmPassword('');
+                        }}
+                        style={styles.cancelBtn}
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSendOTP}
+                        style={styles.submitBtn}
+                      >
+                        Send OTP
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={styles.otpSection}>
+                      <p style={styles.otpInfo}>
+                        An OTP has been sent to your email. Please enter the code below to verify.
+                      </p>
+                      <div style={styles.inputGroup}>
+                        <label style={styles.label}>Enter OTP</label>
+                        <input
+                          type="text"
+                          value={otp}
+                          onChange={(e) => setOtp(e.target.value)}
+                          placeholder="Enter 6-digit OTP"
+                          style={styles.input}
+                          maxLength="6"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div style={styles.btnRow}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowOTP(false);
+                          setOtp('');
+                        }}
+                        style={styles.cancelBtn}
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleVerifyOTP}
+                        style={styles.submitBtn}
+                      >
+                        Verify & Change Password
+                      </button>
+                    </div>
+                  </>
+                )}
+              </form>
+            )}
           </>
         ) : (
           <div style={styles.successWrapper}>
@@ -404,6 +620,73 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     margin: '0 auto 20px',
+  },
+  tabs: {
+    display: 'flex',
+    gap: '8px',
+    marginBottom: '20px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  tab: {
+    padding: '10px 16px',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-text-secondary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    borderBottom: '2px solid transparent',
+    transition: 'all 0.2s',
+  },
+  activeTab: {
+    color: 'var(--color-primary)',
+    borderBottomColor: 'var(--color-primary)',
+  },
+  profilePictureSection: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '20px',
+  },
+  profilePictureWrapper: {
+    position: 'relative',
+    width: '100px',
+    height: '100px',
+  },
+  profilePicture: {
+    width: '100px',
+    height: '100px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '2px solid var(--color-border)',
+  },
+  profilePictureLabel: {
+    position: 'absolute',
+    bottom: '0',
+    right: '0',
+    background: 'var(--color-primary)',
+    color: '#ffffff',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    border: '2px solid var(--color-bg-card)',
+    transition: 'all 0.2s',
+  },
+  otpSection: {
+    padding: '20px',
+    background: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-md)',
+    marginBottom: '20px',
+  },
+  otpInfo: {
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+    marginBottom: '16px',
+    lineHeight: '1.5',
   },
 };
 

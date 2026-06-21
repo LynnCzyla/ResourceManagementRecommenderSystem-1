@@ -35,6 +35,11 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15', requestType: 'Account Request', status: 'Pending' },
   ]);
 
+  const [lockedAccounts, setLockedAccounts] = useState([
+    { id: 1, name: 'John Doe', email: 'john.doe@wea.com', role: 'Employee', loginAttempts: 5, lockedDate: '2026-06-20' },
+    { id: 2, name: 'Jane Smith', email: 'jane.smith@wea.com', role: 'Project Manager', loginAttempts: 3, lockedDate: '2026-06-19' },
+  ]);
+
   // Custom SweetAlert design configuration
   const showSuccessAlert = (message, title = 'Success!') => {
     Swal.fire({
@@ -145,6 +150,21 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       }
       return req;
     }));
+  };
+
+  const unlockAccount = (id) => {
+    const result = showConfirmationAlert(
+      'Unlock Account',
+      'Are you sure you want to unlock this account? The user will be able to login again.',
+      'Yes, Unlock'
+    );
+
+    result.then((result) => {
+      if (result.isConfirmed) {
+        setLockedAccounts(lockedAccounts.filter(acc => acc.id !== id));
+        showSuccessAlert('Account unlocked successfully');
+      }
+    });
   };
 
   const handleCreateSubmit = async (e) => {
@@ -374,8 +394,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       </div>
 
       <div style={styles.subTabsContainer}>
-        <button 
-          onClick={() => setSubTab('accounts')} 
+        <button
+          onClick={() => setSubTab('accounts')}
           style={{
             ...styles.subTabButton,
             borderBottomColor: subTab === 'accounts' ? 'var(--color-primary)' : 'transparent',
@@ -385,8 +405,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         >
           User Accounts {loading && '...'}
         </button>
-        <button 
-          onClick={() => setSubTab('requests')} 
+        <button
+          onClick={() => setSubTab('requests')}
           style={{
             ...styles.subTabButton,
             borderBottomColor: subTab === 'requests' ? 'var(--color-primary)' : 'transparent',
@@ -395,6 +415,17 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           }}
         >
           Contact Requests
+        </button>
+        <button
+          onClick={() => setSubTab('locked')}
+          style={{
+            ...styles.subTabButton,
+            borderBottomColor: subTab === 'locked' ? 'var(--color-primary)' : 'transparent',
+            color: subTab === 'locked' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: subTab === 'locked' ? '700' : '500'
+          }}
+        >
+          Locked Accounts
         </button>
       </div>
 
@@ -662,6 +693,71 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                               Delete
                             </button>
                           )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {subTab === 'locked' && (
+        <div className="glass-card">
+          <h2 style={styles.tabSectionTitle}>Locked Accounts</h2>
+          <p style={styles.tabSectionSubtitle}>View and manage accounts that have been locked due to failed login attempts.</p>
+
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeaderRow}>
+                  <th style={styles.th}>Full Name</th>
+                  <th style={styles.th}>Email Address</th>
+                  <th style={styles.th}>System Role</th>
+                  <th style={styles.th}>Login Attempts</th>
+                  <th style={styles.th}>Locked Date</th>
+                  <th style={styles.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lockedAccounts.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" style={styles.emptyRow}>No locked accounts found.</td>
+                  </tr>
+                ) : (
+                  lockedAccounts.map(acc => (
+                    <tr key={acc.id} style={styles.tableBodyRow}>
+                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{acc.name}</td>
+                      <td style={styles.td}>{acc.email}</td>
+                      <td style={styles.td}>
+                        <span style={{
+                          ...styles.roleBadge,
+                          backgroundColor: acc.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : acc.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : acc.role === 'Project Manager' ? 'rgba(2, 132, 199, 0.1)' : 'rgba(107, 114, 128, 0.1)',
+                          color: acc.role === 'Admin' ? 'var(--color-danger)' : acc.role === 'Resource Manager' ? 'var(--color-primary)' : acc.role === 'Project Manager' ? 'var(--color-accent)' : 'var(--color-text-secondary)'
+                        }}>
+                          {acc.role}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        <span style={{
+                          ...styles.attemptsBadge,
+                          backgroundColor: acc.loginAttempts >= 5 ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                          color: acc.loginAttempts >= 5 ? 'var(--color-danger)' : 'var(--color-warning)'
+                        }}>
+                          {acc.loginAttempts} attempts
+                        </span>
+                      </td>
+                      <td style={styles.td}>{acc.lockedDate}</td>
+                      <td style={styles.td}>
+                        <div style={styles.actionCell}>
+                          <button
+                            onClick={() => unlockAccount(acc.id)}
+                            style={styles.unlockBtn}
+                          >
+                            Unlock Account
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -984,6 +1080,12 @@ const styles = {
     borderRadius: '4px',
     whiteSpace: 'nowrap',
   },
+  attemptsBadge: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '3px 8px',
+    borderRadius: '4px',
+  },
   actionCell: {
     display: 'flex',
     alignItems: 'center',
@@ -1023,6 +1125,17 @@ const styles = {
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s',
+  },
+  unlockBtn: {
+    backgroundColor: 'var(--color-success)',
+    color: '#ffffff',
+    border: 'none',
+    padding: '8px 16px',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s',
   },
   tabSectionTitle: {
     fontSize: '18px',
