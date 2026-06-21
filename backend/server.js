@@ -15,12 +15,11 @@ const forgotPasswordRoutes = require("./routes/Auth/forgotPassword");
 const systemSettingsRoutes = require("./routes/Admin/systemSettings"); // Add this
 const unlockRoutes = require("./routes/Admin/unlockUsers"); // Add this
 const loginRoutes = require("./routes/Auth/login"); // Add this
+const contactAdminRoutes = require('./routes/Admin/contactAdmin');
 
 
-// Use routes
-
-app.use('/api/admin', require('./routes/Admin/contactAdmin'));
 // with the other app.use lines
+app.use('/api/admin', contactAdminRoutes);
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", loginRoutes); // Login route
 app.use("/api/users", userRoutes);
