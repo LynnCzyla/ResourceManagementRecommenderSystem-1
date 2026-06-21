@@ -5,9 +5,15 @@ export default function EmployeeProfileTab() {
   const [employeeInfo, setEmployeeInfo] = useState(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrResult, setOcrResult] = useState(null);
-  
+
   // Forms states
   const [profileForm, setProfileForm] = useState({ name: '', email: '', department: '', role: '' });
+  const [profilePicture, setProfilePicture] = useState('');
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   
   useEffect(() => {
     const emps = getEmployees();
@@ -19,6 +25,7 @@ export default function EmployeeProfileTab() {
       department: currentEmp.department,
       role: currentEmp.role
     });
+    setProfilePicture(currentEmp.avatar || '');
   }, []);
 
   if (!employeeInfo) return <div>Loading Profile...</div>;
@@ -99,9 +106,47 @@ export default function EmployeeProfileTab() {
       name: profileForm.name,
       email: profileForm.email,
       department: profileForm.department,
-      role: profileForm.role
+      role: profileForm.role,
+      avatar: profilePicture
     });
     alert('Profile updated successfully!');
+  };
+
+  const handleProfilePictureChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfilePicture(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePasswordChange = (e) => {
+    e.preventDefault();
+    setPasswordError('');
+
+    if (!currentPassword) {
+      setPasswordError('Please enter your current password.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New password and confirm password do not match.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters long.');
+      return;
+    }
+
+    alert('Password changed successfully');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowChangePassword(false);
   };
 
   return (
@@ -207,24 +252,47 @@ export default function EmployeeProfileTab() {
           <div className="glass-card" style={styles.card}>
             <h2 style={styles.sectionTitle}>Profile Details</h2>
             <form onSubmit={handleSaveProfile} style={styles.profileForm}>
+              {/* Profile Picture */}
+              <div style={styles.profilePictureSection}>
+                <div style={styles.profilePictureWrapper}>
+                  <img
+                    src={profilePicture || 'https://via.placeholder.com/100'}
+                    alt="Profile"
+                    style={styles.profilePicture}
+                  />
+                  <label style={styles.profilePictureLabel}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleProfilePictureChange}
+                      style={{ display: 'none' }}
+                    />
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                      <circle cx="12" cy="13" r="4"></circle>
+                    </svg>
+                  </label>
+                </div>
+              </div>
+
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Full Name</label>
-                <input 
-                  type="text" 
-                  value={profileForm.name} 
-                  onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} 
-                  style={styles.formInput} 
+                <input
+                  type="text"
+                  value={profileForm.name}
+                  onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                  style={styles.formInput}
                   required
                 />
               </div>
 
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Email Address</label>
-                <input 
-                  type="email" 
-                  value={profileForm.email} 
-                  onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} 
-                  style={styles.formInput} 
+                <input
+                  type="email"
+                  value={profileForm.email}
+                  onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                  style={styles.formInput}
                   required
                 />
               </div>
@@ -232,21 +300,21 @@ export default function EmployeeProfileTab() {
               <div style={styles.formRow}>
                 <div style={{ ...styles.formGroup, flex: 1 }}>
                   <label style={styles.formLabel}>Department</label>
-                  <input 
-                    type="text" 
-                    value={profileForm.department} 
-                    onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })} 
-                    style={styles.formInput} 
+                  <input
+                    type="text"
+                    value={profileForm.department}
+                    onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })}
+                    style={styles.formInput}
                     required
                   />
                 </div>
                 <div style={{ ...styles.formGroup, flex: 1 }}>
                   <label style={styles.formLabel}>Role Title</label>
-                  <input 
-                    type="text" 
-                    value={profileForm.role} 
-                    onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })} 
-                    style={styles.formInput} 
+                  <input
+                    type="text"
+                    value={profileForm.role}
+                    onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })}
+                    style={styles.formInput}
                     required
                   />
                 </div>
@@ -254,6 +322,83 @@ export default function EmployeeProfileTab() {
 
               <button type="submit" style={styles.saveProfileBtn}>Update Profile Info</button>
             </form>
+          </div>
+
+          {/* Change Password */}
+          <div className="glass-card" style={styles.card}>
+            <h2 style={styles.sectionTitle}>Change Password</h2>
+            <p style={styles.sectionSubtitle}>Update your password to keep your account secure.</p>
+
+            {!showChangePassword ? (
+              <button onClick={() => setShowChangePassword(true)} style={styles.changePasswordBtn}>
+                Change Password
+              </button>
+            ) : (
+              <form onSubmit={handlePasswordChange} style={styles.passwordForm}>
+                {passwordError && (
+                  <div style={styles.passwordError}>
+                    {passwordError}
+                  </div>
+                )}
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Current Password</label>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter current password"
+                    style={styles.formInput}
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>New Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    style={styles.formInput}
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    style={styles.formInput}
+                    required
+                  />
+                </div>
+
+                <div style={styles.passwordBtnRow}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowChangePassword(false);
+                      setCurrentPassword('');
+                      setNewPassword('');
+                      setConfirmPassword('');
+                      setPasswordError('');
+                    }}
+                    style={styles.cancelPasswordBtn}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={styles.submitPasswordBtn}
+                  >
+                    Change Password
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
 
           {/* Certifications Management */}
@@ -608,6 +753,89 @@ const styles = {
     color: 'var(--color-danger)',
     fontSize: '12px',
     fontWeight: '600',
+    cursor: 'pointer',
+  },
+  profilePictureSection: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '20px',
+  },
+  profilePictureWrapper: {
+    position: 'relative',
+    width: '100px',
+    height: '100px',
+  },
+  profilePicture: {
+    width: '100px',
+    height: '100px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '2px solid var(--color-border)',
+  },
+  profilePictureLabel: {
+    position: 'absolute',
+    bottom: '0',
+    right: '0',
+    background: 'var(--color-primary)',
+    color: '#ffffff',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    border: '2px solid var(--color-bg-card)',
+    transition: 'all 0.2s',
+  },
+  changePasswordBtn: {
+    backgroundColor: 'var(--color-primary)',
+    color: '#ffffff',
+    border: 'none',
+    padding: '12px',
+    borderRadius: '6px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    width: '100%',
+  },
+  passwordForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+  passwordError: {
+    padding: '10px',
+    background: 'var(--color-danger-light)',
+    color: 'var(--color-danger)',
+    border: '1px solid var(--color-danger)',
+    borderRadius: '6px',
+    fontSize: '13px',
+  },
+  passwordBtnRow: {
+    display: 'flex',
+    gap: '12px',
+    marginTop: '8px',
+  },
+  cancelPasswordBtn: {
+    flex: 1,
+    padding: '10px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'transparent',
+    color: 'var(--color-text-secondary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  submitPasswordBtn: {
+    flex: 1,
+    padding: '10px',
+    borderRadius: '6px',
+    border: 'none',
+    backgroundColor: 'var(--color-primary)',
+    color: '#ffffff',
+    fontSize: '13px',
+    fontWeight: '700',
     cursor: 'pointer',
   }
 };
