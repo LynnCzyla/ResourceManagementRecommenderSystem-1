@@ -28,16 +28,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   });
 
   const [users, setUsers] = useState([]);
+  const [lockedAccounts, setLockedAccounts] = useState([]);
+  const [loadingLocked, setLoadingLocked] = useState(false);
+  const [unlockingId, setUnlockingId] = useState(null);
 
   const [contactRequests, setContactRequests] = useState([
     { id: 1, email: 'john.smith@wea-external.com', message: 'Hello, I am a new hiring specialist. I need an Admin/Resource Manager account to assist with scheduling.', date: '2026-06-18', requestType: 'Account Request', status: 'Pending' },
     { id: 2, email: 'sarah.jones@wea.com', message: 'Hi! I lost access to my Project Manager credentials. Can you reset them or grant me a new account?', date: '2026-06-17', requestType: 'Password Reset', status: 'Pending' },
     { id: 3, email: 'robert.davis@wea-partner.com', message: 'Requesting access to the dashboard to monitor system performance reports.', date: '2026-06-15', requestType: 'Account Request', status: 'Pending' },
-  ]);
-
-  const [lockedAccounts, setLockedAccounts] = useState([
-    { id: 1, name: 'John Doe', email: 'john.doe@wea.com', role: 'Employee', loginAttempts: 5, lockedDate: '2026-06-20' },
-    { id: 2, name: 'Jane Smith', email: 'jane.smith@wea.com', role: 'Project Manager', loginAttempts: 3, lockedDate: '2026-06-19' },
   ]);
 
   // Custom SweetAlert design configuration
@@ -129,8 +127,137 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     }
   };
 
+  // Fetch locked accounts from the backend
+  const fetchLockedAccounts = async () => {
+    try {
+      setLoadingLocked(true);
+      const headers = getAuthHeaders();
+      const response = await fetch('http://localhost:5000/api/admin/locked-users', { headers });
+      const data = await response.json();
+
+      if (data.success) {
+        // Transform the data to match the expected format
+        const transformedLocked = data.data.map(account => {
+          const user = account.user || {};
+          return {
+            id: account.userId,
+            user_id: account.userId,
+            name: user.first_name && user.last_name 
+              ? `${user.first_name} ${user.last_name}` 
+              : 'Unknown User',
+            email: user.email || 'N/A',
+            role: user.role || 'Employee',
+            failedAttempts: account.failedAttempts || 0,
+            lockedAt: account.lockedAt,
+            lockedBy: account.lockedBy || 'System',
+            timeSinceLocked: account.timeSinceLocked || 'N/A',
+          };
+        });
+        setLockedAccounts(transformedLocked);
+        setError(null);
+      } else {
+        setError(data.message || 'Failed to fetch locked accounts');
+      }
+    } catch (error) {
+      console.error('Error fetching locked accounts:', error);
+      setError('Failed to load locked accounts. Please try again.');
+    } finally {
+      setLoadingLocked(false);
+    }
+  };
+
+  // Unlock a specific account
+  const handleUnlockAccount = async (userId) => {
+    // Show confirmation alert
+    const result = await showConfirmationAlert(
+      'Unlock Account',
+      'Are you sure you want to unlock this account? The user will be able to login again.',
+      'Yes, Unlock'
+    );
+
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    try {
+      setUnlockingId(userId);
+      const headers = getAuthHeaders();
+      const response = await fetch('http://localhost:5000/api/admin/unlock/unlock-user', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ userId }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showSuccessAlert(
+          'Account unlocked successfully! The user can now login.',
+          'Account Unlocked!'
+        );
+        // Refresh the locked accounts list
+        await fetchLockedAccounts();
+      } else {
+        showErrorAlert(data.message || 'Failed to unlock account');
+      }
+    } catch (error) {
+      console.error('Error unlocking account:', error);
+      showErrorAlert('Failed to unlock account. Please try again.');
+    } finally {
+      setUnlockingId(null);
+    }
+  };
+
+  // Lock a specific account (manual admin lock)
+  const handleLockAccount = async (userId) => {
+    const result = await showConfirmationAlert(
+      'Lock Account',
+      'Are you sure you want to lock this account? The user will not be able to login until unlocked.',
+      'Yes, Lock Account'
+    );
+
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const headers = getAuthHeaders();
+      const adminId = localStorage.getItem('userId'); // Get current admin ID
+      
+      const response = await fetch('http://localhost:5000/api/admin/lock-user', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ 
+          userId,
+          adminId 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showSuccessAlert(
+          'Account locked successfully! The user cannot login until unlocked.',
+          'Account Locked!'
+        );
+        // Refresh the users list and locked accounts
+        await fetchUsers();
+        await fetchLockedAccounts();
+      } else {
+        showErrorAlert(data.message || 'Failed to lock account');
+      }
+    } catch (error) {
+      console.error('Error locking account:', error);
+      showErrorAlert('Failed to lock account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
+    fetchLockedAccounts();
   }, []);
 
   useEffect(() => {
@@ -150,21 +277,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       }
       return req;
     }));
-  };
-
-  const unlockAccount = (id) => {
-    const result = showConfirmationAlert(
-      'Unlock Account',
-      'Are you sure you want to unlock this account? The user will be able to login again.',
-      'Yes, Unlock'
-    );
-
-    result.then((result) => {
-      if (result.isConfirmed) {
-        setLockedAccounts(lockedAccounts.filter(acc => acc.id !== id));
-        showSuccessAlert('Account unlocked successfully');
-      }
-    });
   };
 
   const handleCreateSubmit = async (e) => {
@@ -194,7 +306,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         setError(null);
         await fetchUsers();
         
-        // Success alert
         showSuccessAlert(
           `User ${formData.first_name} ${formData.last_name} has been created successfully!`,
           'Account Created!'
@@ -216,7 +327,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     
-    // Show confirmation before saving
     const result = await showConfirmationAlert(
       'Confirm Changes',
       `Are you sure you want to update ${formData.first_name} ${formData.last_name}'s information?`,
@@ -252,7 +362,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         setError(null);
         await fetchUsers();
         
-        // Success alert
         showSuccessAlert(
           `User ${formData.first_name} ${formData.last_name} has been updated successfully!`,
           'Changes Saved!'
@@ -276,7 +385,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     const action = user.status === 'Active' ? 'lock' : 'unlock';
     const actionDisplay = user.status === 'Active' ? 'Lock' : 'Unlock';
 
-    // Show confirmation
     const result = await showConfirmationAlert(
       `Confirm ${actionDisplay}`,
       `Are you sure you want to ${action} ${user.name}'s account?`,
@@ -309,7 +417,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         }));
         setError(null);
 
-        // Success alert
         showSuccessAlert(
           `User ${user.name} has been ${action}ed successfully!`,
           `Account ${actionDisplay}ed!`
@@ -358,6 +465,37 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     u.email?.toLowerCase().includes(searchQuery.toLowerCase()) || 
     u.role?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  // Get time since locked
+  const getTimeSinceLocked = (lockedAt) => {
+    if (!lockedAt) return 'N/A';
+    const now = new Date();
+    const locked = new Date(lockedAt);
+    const diffMs = now - locked;
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  };
 
   return (
     <div>
@@ -426,6 +564,20 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           }}
         >
           Locked Accounts
+          {loadingLocked && '...'}
+          {!loadingLocked && lockedAccounts.length > 0 && (
+            <span style={{
+              marginLeft: '8px',
+              backgroundColor: 'var(--color-danger)',
+              color: 'white',
+              borderRadius: '50%',
+              padding: '2px 8px',
+              fontSize: '11px',
+              fontWeight: '700'
+            }}>
+              {lockedAccounts.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -706,8 +858,18 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
       {subTab === 'locked' && (
         <div className="glass-card">
-          <h2 style={styles.tabSectionTitle}>Locked Accounts</h2>
-          <p style={styles.tabSectionSubtitle}>View and manage accounts that have been locked due to failed login attempts.</p>
+          <div style={styles.tableToolbar}>
+            <h2 style={{ ...styles.tabSectionTitle, marginBottom: 0 }}>Locked Accounts</h2>
+          
+          </div>
+          <p style={styles.tabSectionSubtitle}>View and manage accounts that have been locked due to failed login attempts or manual admin action.</p>
+
+          <div style={styles.statsBar}>
+            <div style={styles.statItem}>
+              <span style={styles.statLabel}>Total Locked Accounts</span>
+              <span style={styles.statValue}>{lockedAccounts.length}</span>
+            </div>
+          </div>
 
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
@@ -716,21 +878,65 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                   <th style={styles.th}>Full Name</th>
                   <th style={styles.th}>Email Address</th>
                   <th style={styles.th}>System Role</th>
-                  <th style={styles.th}>Login Attempts</th>
-                  <th style={styles.th}>Locked Date</th>
+                  <th style={styles.th}>Failed Attempts</th>
+                  <th style={styles.th}>Locked At</th>
+                  <th style={styles.th}>Time Since Locked</th>
+                  <th style={styles.th}>Locked By</th>
                   <th style={styles.th}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {lockedAccounts.length === 0 ? (
+                {loadingLocked ? (
                   <tr>
-                    <td colSpan="6" style={styles.emptyRow}>No locked accounts found.</td>
+                    <td colSpan="8" style={styles.emptyRow}>Loading locked accounts...</td>
+                  </tr>
+                ) : lockedAccounts.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" style={styles.emptyRow}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 0' }}>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-muted)', marginBottom: '12px' }}>
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text-primary)' }}>No locked accounts</span>
+                        <span style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>All user accounts are currently unlocked</span>
+                      </div>
+                    </td>
                   </tr>
                 ) : (
                   lockedAccounts.map(acc => (
                     <tr key={acc.id} style={styles.tableBodyRow}>
-                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{acc.name}</td>
-                      <td style={styles.td}>{acc.email}</td>
+                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            background: 'var(--color-primary-light)',
+                            color: 'var(--color-primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '12px',
+                            fontWeight: '700'
+                          }}>
+                            {acc.name.charAt(0).toUpperCase()}
+                          </div>
+                          {acc.name}
+                        </div>
+                      </td>
+                      <td style={styles.td}>
+                        <a href={`mailto:${acc.email}`} style={{
+                          color: 'var(--color-text-secondary)',
+                          textDecoration: 'none',
+                          '&:hover': {
+                            color: 'var(--color-primary)',
+                            textDecoration: 'underline'
+                          }
+                        }}>
+                          {acc.email}
+                        </a>
+                      </td>
                       <td style={styles.td}>
                         <span style={{
                           ...styles.roleBadge,
@@ -743,20 +949,43 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                       <td style={styles.td}>
                         <span style={{
                           ...styles.attemptsBadge,
-                          backgroundColor: acc.loginAttempts >= 5 ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                          color: acc.loginAttempts >= 5 ? 'var(--color-danger)' : 'var(--color-warning)'
+                          backgroundColor: acc.failedAttempts >= 5 ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                          color: acc.failedAttempts >= 5 ? 'var(--color-danger)' : 'var(--color-warning)'
                         }}>
-                          {acc.loginAttempts} attempts
+                          {acc.failedAttempts} attempts
                         </span>
                       </td>
-                      <td style={styles.td}>{acc.lockedDate}</td>
+                      <td style={styles.td}>{formatDate(acc.lockedAt)}</td>
+                      <td style={styles.td}>
+                        <span style={{
+                          ...styles.timeBadge,
+                          backgroundColor: 'var(--color-bg-hover)',
+                          color: 'var(--color-text-secondary)'
+                        }}>
+                          {getTimeSinceLocked(acc.lockedAt)}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        {acc.lockedBy && acc.lockedBy !== 'System' ? 'Admin' : 'System (Auto-lock)'}
+                      </td>
                       <td style={styles.td}>
                         <div style={styles.actionCell}>
                           <button
-                            onClick={() => unlockAccount(acc.id)}
-                            style={styles.unlockBtn}
+                            onClick={() => handleUnlockAccount(acc.user_id || acc.id)}
+                            style={{
+                              ...styles.unlockBtn,
+                              opacity: unlockingId === (acc.user_id || acc.id) ? 0.7 : 1
+                            }}
+                            disabled={unlockingId === (acc.user_id || acc.id)}
                           >
-                            Unlock Account
+                            {unlockingId === (acc.user_id || acc.id) ? (
+                              <>
+                                <span style={styles.spinnerSmall}></span>
+                                Unlocking...
+                              </>
+                            ) : (
+                              'Unlock Account'
+                            )}
                           </button>
                         </div>
                       </td>
@@ -975,6 +1204,8 @@ const styles = {
     fontSize: '15px',
     cursor: 'pointer',
     transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
   },
   tableToolbar: {
     display: 'flex',
@@ -1022,6 +1253,31 @@ const styles = {
     transition: 'background-color 0.2s',
     '&:hover': {
       backgroundColor: 'var(--color-primary-hover)',
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
+  },
+  refreshBtn: {
+    backgroundColor: 'var(--color-bg-root)',
+    color: 'var(--color-text-secondary)',
+    border: '1px solid var(--color-border)',
+    padding: '8px 16px',
+    borderRadius: 'var(--radius-md)',
+    fontWeight: '600',
+    fontSize: '13px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: 'var(--color-bg-hover)',
+      borderColor: 'var(--color-text-muted)',
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
     }
   },
   tableWrapper: {
@@ -1066,12 +1322,14 @@ const styles = {
     fontWeight: '700',
     padding: '3px 8px',
     borderRadius: '4px',
+    whiteSpace: 'nowrap',
   },
   statusBadge: {
     fontSize: '11px',
     fontWeight: '700',
     padding: '3px 8px',
     borderRadius: '4px',
+    whiteSpace: 'nowrap',
   },
   requestTypeBadge: {
     fontSize: '11px',
@@ -1085,11 +1343,20 @@ const styles = {
     fontWeight: '700',
     padding: '3px 8px',
     borderRadius: '4px',
+    whiteSpace: 'nowrap',
+  },
+  timeBadge: {
+    fontSize: '11px',
+    fontWeight: '600',
+    padding: '3px 8px',
+    borderRadius: '4px',
+    whiteSpace: 'nowrap',
   },
   actionCell: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
+    flexWrap: 'wrap',
   },
   editIconBtn: {
     background: 'var(--color-accent-light)',
@@ -1116,6 +1383,10 @@ const styles = {
     justifyContent: 'center',
     cursor: 'pointer',
     transition: 'all 0.2s',
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
   },
   statusToggleBtn: {
     border: 'none',
@@ -1125,6 +1396,10 @@ const styles = {
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s',
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
   },
   unlockBtn: {
     backgroundColor: 'var(--color-success)',
@@ -1136,6 +1411,16 @@ const styles = {
     fontWeight: '700',
     cursor: 'pointer',
     transition: 'background-color 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    '&:hover': {
+      backgroundColor: 'var(--color-success-hover)',
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
   },
   tabSectionTitle: {
     fontSize: '18px',
@@ -1148,43 +1433,42 @@ const styles = {
     color: 'var(--color-text-muted)',
     marginBottom: '24px',
   },
-  matrixWrapper: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+  statsBar: {
+    display: 'flex',
     gap: '24px',
+    marginBottom: '20px',
+    padding: '16px 20px',
+    background: 'var(--color-bg-root)',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
   },
-  roleColumn: {
-    padding: '24px',
-  },
-  roleTitle: {
-    fontSize: '16px',
-    fontWeight: '700',
-    marginBottom: '16px',
-    borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '8px',
-  },
-  permissionList: {
+  statItem: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
   },
-  permissionItem: {
-    display: 'flex',
-    alignItems: 'center',
+  statLabel: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
   },
-  checkboxLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    fontSize: '13px',
-    color: 'var(--color-text-secondary)',
-    cursor: 'pointer',
-    lineHeight: '1.4',
+  statValue: {
+    fontSize: '24px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+    marginTop: '4px',
   },
-  checkbox: {
-    marginRight: '10px',
-    width: '16px',
-    height: '16px',
-    accentColor: 'var(--color-primary)',
+  spinnerSmall: {
+    display: 'inline-block',
+    width: '14px',
+    height: '14px',
+    border: '2px solid #ffffff',
+    borderTop: '2px solid transparent',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+    marginRight: '6px',
+    verticalAlign: 'middle',
   },
   modalOverlay: {
     position: 'fixed',
@@ -1269,6 +1553,10 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+    '&:hover': {
+      backgroundColor: 'var(--color-bg-hover)',
+    }
   },
   saveBtn: {
     backgroundColor: 'var(--color-primary)',
@@ -1279,5 +1567,12 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '700',
+    '&:hover': {
+      backgroundColor: 'var(--color-primary-hover)',
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
   }
 };
