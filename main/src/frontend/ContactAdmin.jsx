@@ -1,6 +1,5 @@
 // frontend/ContactAdmin.jsx
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
 
 export default function ContactAdmin({ isOpen, onClose }) {
   const [name, setName] = useState('');
@@ -52,14 +51,16 @@ export default function ContactAdmin({ isOpen, onClose }) {
     try {
       console.log('📩 Sending contact admin request:', { name, email, purpose, phone, department });
 
-      // Insert into a 'admin_requests' / 'contact_messages' table in Supabase.
-      // Adjust the table name and columns to match your schema.
-      const { error: insertError } = await supabase
-        .from('contact_messages')
-        .insert([{ name, email, purpose, message, phone, department }]);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/contact-admin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, purpose, message, phone, department }),
+      });
 
-      if (insertError) {
-        throw new Error(insertError.message);
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to send message');
       }
 
       console.log('✅ Message sent to admin');
