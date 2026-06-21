@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Make sure useEffect is imported
 
 export default function SystemSettingsTab() {
   const [ocrThreshold, setOcrThreshold] = useState(75);
@@ -26,21 +26,91 @@ export default function SystemSettingsTab() {
 
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Fetch settings on component mount
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('http://localhost:5000/api/settings/system-settings');
+      const result = await response.json();
+      
+      if (result.success) {
+        setSettings(prev => ({
+          ...prev,
+          sessionTimeout: result.data.sessionTimeout,
+          maxLoginAttempts: result.data.maxLoginAttempts,
+          maxFileSize: result.data.maxFileSize,
+          minPasswordLength: result.data.minPasswordLength,
+          requireUppercase: result.data.requireUppercase,
+          minUppercase: result.data.minUppercase,
+          requireLowercase: result.data.requireLowercase,
+          minLowercase: result.data.minLowercase,
+          requireNumber: result.data.requireNumber,
+          minNumber: result.data.minNumber,
+          requireSpecial: result.data.requireSpecial,
+          minSpecial: result.data.minSpecial,
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+      setError('Failed to load settings');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleInputChange = (key, value) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSaving(true);
     setSaveSuccess(false);
+    setError(null);
 
-    setTimeout(() => {
+    try {
+      const response = await fetch('http://localhost:5000/api/settings/system-settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionTimeout: settings.sessionTimeout,
+          maxLoginAttempts: settings.maxLoginAttempts,
+          maxFileSize: settings.maxFileSize,
+          minPasswordLength: settings.minPasswordLength,
+          requireUppercase: settings.requireUppercase,
+          minUppercase: settings.minUppercase,
+          requireLowercase: settings.requireLowercase,
+          minLowercase: settings.minLowercase,
+          requireNumber: settings.requireNumber,
+          minNumber: settings.minNumber,
+          requireSpecial: settings.requireSpecial,
+          minSpecial: settings.minSpecial,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+      } else {
+        setError(result.message || 'Failed to save settings');
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      setError('Failed to save settings. Please try again.');
+    } finally {
       setIsSaving(false);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    }, 1000);
+    }
   };
 
   return (
@@ -58,6 +128,17 @@ export default function SystemSettingsTab() {
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
             System configuration parameters successfully saved and synchronized.
+          </div>
+        )}
+
+        {error && (
+          <div style={styles.errorAlert}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            {error}
           </div>
         )}
 
@@ -369,6 +450,18 @@ const styles = {
     marginBottom: '24px',
     fontWeight: '600',
   },
+  errorAlert: {
+    display: 'flex',
+    alignItems: 'center',
+    background: '#fee',
+    color: '#c00',
+    border: '1px solid #fcc',
+    padding: '16px',
+    borderRadius: 'var(--radius-md)',
+    fontSize: '14px',
+    marginBottom: '24px',
+    fontWeight: '600',
+  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
@@ -570,5 +663,22 @@ const styles = {
     fontSize: '11px',
     color: 'var(--color-text-muted)',
     fontStyle: 'italic',
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '60px 20px',
+    minHeight: '300px',
+  },
+  loadingSpinner: {
+    width: '40px',
+    height: '40px',
+    border: '4px solid var(--color-border)',
+    borderTop: '4px solid var(--color-primary)',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '16px',
   },
 };
