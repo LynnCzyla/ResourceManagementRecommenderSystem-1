@@ -1,21 +1,50 @@
 // frontend/ResetPassword.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import { supabase } from '../lib/supabaseClient';
 
-// NOTE: App.jsx is responsible for detecting the password-recovery link
-// (via the #access_token=...&type=recovery URL hash and the
-// PASSWORD_RECOVERY auth event) and only renders this component once
-// that's confirmed. So this component can assume Supabase already has
-// a valid recovery session by the time it mounts.
-export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
+export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, initialError = '' }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [error, setError] = useState(initialError);
   const [success, setSuccess] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+
+  // Wait for recovery session to be established from URL token
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        // Give Supabase time to parse the recovery token from URL
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (session) {
+          console.log('✅ Recovery session established');
+          setSessionReady(true);
+        } else {
+          setError('Recovery link invalid or expired. Please request a new password reset link.');
+          console.error('❌ No recovery session found');
+        }
+      } catch (err) {
+        console.error('Error checking session:', err);
+        setError('Error validating reset link. Please try again.');
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  // Sign out the recovery session THEN go to login
+  const handleCancel = async () => {
+    setIsCancelling(true);
+    await supabase.auth.signOut();
+    onBackToLogin();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,6 +57,11 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
 
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
+      return;
+    }
+
+    if (!sessionReady) {
+      setError('Recovery session not established. Please request a new password reset link.');
       return;
     }
 
@@ -46,7 +80,6 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
 
       console.log('✅ Password updated successfully');
 
-      // Sign out the temporary recovery session so the user logs in fresh
       await supabase.auth.signOut();
 
       setSuccess(true);
@@ -60,7 +93,6 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
 
   return (
     <div style={styles.container}>
-      {/* Blobs */}
       <div style={{ ...styles.blob, ...styles.blob1 }}></div>
       <div style={{ ...styles.blob, ...styles.blob2 }}></div>
 
@@ -191,12 +223,14 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
 
               <p style={styles.hint}>Must be at least 6 characters long.</p>
 
-              <button type="submit" style={styles.submitBtn} disabled={isLoading}>
+              <button type="submit" style={styles.submitBtn} disabled={isLoading || isCancelling || !sessionReady}>
                 {isLoading ? (
                   <span style={styles.spinnerWrapper}>
                     <span style={styles.spinner}></span>
                     Updating Password...
                   </span>
+                ) : !sessionReady ? (
+                  'Validating Reset Link...'
                 ) : (
                   'Update Password'
                 )}
@@ -204,14 +238,24 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
 
               <button
                 type="button"
-                onClick={onBackToLogin}
+                onClick={handleCancel}
+                disabled={isLoading || isCancelling}
                 style={styles.backBtn}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
-                  <line x1="19" y1="12" x2="5" y2="12"></line>
-                  <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-                Cancel
+                {isCancelling ? (
+                  <span style={styles.spinnerWrapper}>
+                    <span style={{ ...styles.spinner, borderTopColor: 'var(--color-text-secondary)', border: '2px solid rgba(0,0,0,0.1)', borderTopColor: 'var(--color-text-secondary)' }}></span>
+                    Cancelling...
+                  </span>
+                ) : (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
+                      <line x1="19" y1="12" x2="5" y2="12"></line>
+                      <polyline points="12 19 5 12 12 5"></polyline>
+                    </svg>
+                    Cancel
+                  </>
+                )}
               </button>
             </form>
           </>
@@ -223,12 +267,12 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
                 <polyline points="22 4 12 14.01 9 11.01"></polyline>
               </svg>
             </div>
-            <h2 style={styles.title}>Password Updated</h2>
+            <h2 style={styles.title}>Password Updated!</h2>
             <p style={styles.subtitle}>
-              Your password has been changed successfully. You can now log in with your new password.
+              Your password has been changed successfully. Please log in with your new password.
             </p>
             <button type="button" onClick={onBackToLogin} style={styles.submitBtn}>
-              Back to Login
+              Go to Login
             </button>
           </div>
         )}
@@ -237,6 +281,7 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
   );
 }
 
+// ─── STYLES ────────────────────────────────────────────────────────────────────
 const styles = {
   container: {
     display: 'flex',
@@ -463,14 +508,10 @@ const styles = {
   },
 };
 
-// Add keyframe styles
+// Keyframes
 if (typeof document !== 'undefined' && !document.getElementById('reset-password-keyframes')) {
   const style = document.createElement('style');
   style.id = 'reset-password-keyframes';
-  style.innerHTML = `
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-  `;
+  style.innerHTML = `@keyframes spin { to { transform: rotate(360deg); } }`;
   document.head.appendChild(style);
 }
