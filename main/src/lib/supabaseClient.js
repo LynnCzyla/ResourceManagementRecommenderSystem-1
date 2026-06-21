@@ -20,10 +20,8 @@ const _isRecovery =
   sessionStorage.getItem('wea_password_recovery') === 'true';
 
 if (_isRecovery) {
-  // Wipe app-level "logged in" state so the UI never treats this as a normal
-  // session. We do NOT rely on Supabase's automatic detectSessionInUrl for
-  // the actual recovery session — that's handled manually below via
-  // establishSessionFromUrl(), which is more reliable.
+  // ONLY wipe storage during recovery mode to prevent conflicts
+  // DON'T remove sb-wea-auth-token during normal operation
   localStorage.removeItem('sb-wea-auth-token');
   localStorage.removeItem('sb-wea-auth-token-code-verifier');
   localStorage.removeItem('token');
@@ -43,12 +41,9 @@ try {
     auth: {
       autoRefreshToken: true,
       persistSession: true,
-      // We handle recovery tokens manually (see establishSessionFromUrl),
-      // so disable automatic parsing during recovery to avoid both paths
-      // racing to consume the same hash. Normal flows keep it enabled.
       detectSessionInUrl: !_isRecovery,
       storage: localStorage,
-      storageKey: 'sb-wea-auth-token'
+      storageKey: 'sb-wea-auth-token' // This is the key Supabase uses
     }
   });
   console.log('✅ Supabase client initialized successfully');
@@ -77,9 +72,6 @@ try {
 export { supabase };
 
 // ── Manually establish a session from a recovery link's URL hash ─────────────
-// Parses #access_token=...&refresh_token=...&type=recovery and explicitly
-// calls setSession(). This avoids relying on detectSessionInUrl's automatic
-// background parsing, which has shown timing/version-dependent inconsistencies.
 export const establishSessionFromUrl = async () => {
   try {
     const rawHash = window.location.hash.startsWith('#')
@@ -101,7 +93,6 @@ export const establishSessionFromUrl = async () => {
       refresh_token
     });
 
-    // Strip the tokens out of the URL now that they've been consumed
     window.history.replaceState(null, '', window.location.pathname);
 
     if (error) {
@@ -116,7 +107,6 @@ export const establishSessionFromUrl = async () => {
     return { success: false, error: err };
   }
 };
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const getSession = async () => {
   try {
