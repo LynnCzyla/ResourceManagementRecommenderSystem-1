@@ -81,6 +81,28 @@ const sendResetEmail = async (email, resetLink) => {
   await transporter.sendMail(mailOptions);
 };
 
+// Detect the specific "no user with this email" case from Supabase's
+// generateLink error. Supabase typically returns a 422/400 with a message
+// like "Unable to validate email address: User not found" or similar,
+// often alongside error.status === 422 / error.code === 'user_not_found'.
+// We check a few known shapes defensively since Supabase's exact wording
+// has changed across versions.
+const isNoAccountError = (error) => {
+  if (!error) return false;
+
+  const code = (error.code || "").toString().toLowerCase();
+  const message = (error.message || "").toString().toLowerCase();
+
+  if (code === "user_not_found") return true;
+
+  return (
+    message.includes("user not found") ||
+    message.includes("unable to validate email") ||
+    message.includes("no user found") ||
+    message.includes("email not found")
+  );
+};
+
 // POST /api/auth/forgot-password
 router.post("/forgot-password", async (req, res) => {
   try {
@@ -109,10 +131,26 @@ router.post("/forgot-password", async (req, res) => {
     });
 
     if (error) {
-      // Don't reveal whether the email exists — respond success either way
       console.error("generateLink error:", error.message);
+
+      if (isNoAccountError(error)) {
+        // Explicitly tell the frontend no account exists for this email.
+        // NOTE: this is an intentional product decision to reveal account
+        // existence on this internal tool — it trades away the standard
+        // enumeration protection. Do not do this on a public-facing app.
+        return res.json({
+          success: false,
+          accountExists: false,
+          error: "No account exists for this email address."
+        });
+      }
+
+      // Any other failure (rate limit, SMTP misconfig, network issue, etc.)
+      // falls back to the generic safe response so we don't leak details
+      // or incorrectly tell a real user they have no account.
       return res.json({
         success: true,
+        accountExists: true,
         message: "If an account exists for this email, a reset link has been sent."
       });
     }
@@ -123,6 +161,7 @@ router.post("/forgot-password", async (req, res) => {
 
     res.json({
       success: true,
+      accountExists: true,
       message: "If an account exists for this email, a reset link has been sent."
     });
 
