@@ -14,7 +14,8 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [view, setView] = useState('login');
   const [showContactModal, setShowContactModal] = useState(false);
-  const [sessionTimeout, setSessionTimeout] = useState(30);
+  const [sessionTimeout, setSessionTimeout] = useState(null); // Start as null
+  const [timeoutLoaded, setTimeoutLoaded] = useState(false);
   
   // Login attempts states
   const [isLocked, setIsLocked] = useState(false);
@@ -30,9 +31,14 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         if (result.success && result.data.sessionTimeout) {
           setSessionTimeout(result.data.sessionTimeout);
           console.log(`⏰ Session timeout: ${result.data.sessionTimeout} minutes`);
+        } else {
+          setSessionTimeout(30); // Default fallback
         }
       } catch (error) {
         console.error('Failed to fetch session timeout:', error);
+        setSessionTimeout(30); // Default fallback
+      } finally {
+        setTimeoutLoaded(true);
       }
     };
 
@@ -47,15 +53,23 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         const storedUser = localStorage.getItem('user');
         const loginTime = localStorage.getItem('loginTime');
         
+        console.log('🔍 Checking session on login page');
+        console.log('📦 Token exists:', !!token);
+        console.log('📦 User exists:', !!storedUser);
+        console.log('📦 Login time:', loginTime);
+        
         // If no token or user, show login page
         if (!token || !storedUser) {
+          console.log('ℹ️ No stored session found');
           setCheckingAuth(false);
           return;
         }
         
-        // Check if session has expired
-        if (loginTime) {
+        // Check if session has expired - only if we have the timeout loaded
+        if (loginTime && timeoutLoaded && sessionTimeout !== null) {
           const elapsedMinutes = (Date.now() - parseInt(loginTime)) / (1000 * 60);
+          console.log(`⏰ Elapsed since login: ${elapsedMinutes.toFixed(1)} minutes`);
+          console.log(`⏰ Session timeout: ${sessionTimeout} minutes`);
           
           if (elapsedMinutes >= sessionTimeout) {
             console.log(`⏰ Session expired (${elapsedMinutes.toFixed(0)} minutes)`);
@@ -68,14 +82,16 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         }
         
         // Verify session with Supabase
+        console.log('🔍 Verifying session with Supabase...');
         const session = await getSession();
         if (session) {
+          console.log('✅ Valid session found, restoring user');
           const userData = JSON.parse(storedUser);
           window.history.replaceState(null, '', '/dashboard');
           onLogin(userData);
           return;
         } else {
-          // Session invalid, clear storage
+          console.log('⚠️ No valid session from Supabase');
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           localStorage.removeItem('loginTime');
@@ -87,10 +103,11 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
       }
     };
 
-    if (sessionTimeout) {
+    // Only check session if timeout is loaded
+    if (timeoutLoaded) {
       checkExistingSession();
     }
-  }, [onLogin, sessionTimeout]);
+  }, [onLogin, sessionTimeout, timeoutLoaded]);
 
   // Prevent back button on login page
   useEffect(() => {
@@ -116,7 +133,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   }, []);
 
   // Show loading state
-  if (checkingAuth) {
+  if (checkingAuth || !timeoutLoaded) {
     return (
       <div style={{
         display: 'flex',
@@ -135,7 +152,9 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             animation: 'spin 0.8s linear infinite',
             margin: '0 auto 16px'
           }}></div>
-          <p style={{ color: 'var(--color-text-secondary)' }}>Loading...</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>
+            {!timeoutLoaded ? 'Loading settings...' : 'Loading...'}
+          </p>
         </div>
       </div>
     );
@@ -255,8 +274,6 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
             {error}
           </div>
         )}
-
-        
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.inputGroup}>

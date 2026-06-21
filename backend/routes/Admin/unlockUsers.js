@@ -9,47 +9,63 @@ const {
   getUserLoginAttempts
 } = require('../../utils/loginAttempts');
 
+// Add a test route
+router.get('/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Unlock routes are working!'
+  });
+});
+
 // Get all locked users
 router.get('/locked-users', async (req, res) => {
+  console.log('🔍 GET /locked-users endpoint called');
+  
   try {
+    console.log('📊 Calling getLockedUsers()...');
     const lockedUsers = await getLockedUsers();
+    console.log(`📊 Found ${lockedUsers.length} locked users`);
     
-    // Get user details for each locked user
-    const usersWithDetails = await Promise.all(
-      lockedUsers.map(async (item) => {
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, email, role')
-          .eq('id', item.user_id)
-          .single();
-        
-        return {
-          userId: item.user_id,
-          user: userData,
-          lockedAt: item.locked_at,
-          lockedBy: item.locked_by,
-          failedAttempts: item.failed_attempts
-        };
-      })
-    );
+    // Transform the data for the frontend
+    const usersWithDetails = lockedUsers.map(item => {
+      const user = item.user || {};
+      return {
+        userId: item.user_id,
+        user: {
+          id: user.id,
+          first_name: user.first_name || 'Unknown',
+          last_name: user.last_name || 'User',
+          email: user.email || 'N/A',
+          role: user.role || 'Employee'
+        },
+        lockedAt: item.locked_at,
+        lockedBy: item.locked_by,
+        failedAttempts: item.failed_attempts || 0
+      };
+    });
+    
+    console.log('✅ Sending response with', usersWithDetails.length, 'users');
     
     res.status(200).json({
       success: true,
       data: usersWithDetails
     });
   } catch (error) {
-    console.error('Error getting locked users:', error);
+    console.error('❌ Error getting locked users:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get locked users'
+      message: 'Failed to get locked users',
+      error: error.message
     });
   }
 });
 
 // Unlock a user account
-router.post('/unlock-user', async (req, res) => {
+router.post('/unlock/unlock-user', async (req, res) => {
+  console.log('🔓 POST /unlock/unlock-user endpoint called');
   try {
     const { userId } = req.body;
+    console.log('📝 Unlocking user:', userId);
     
     if (!userId) {
       return res.status(400).json({
@@ -59,6 +75,7 @@ router.post('/unlock-user', async (req, res) => {
     }
     
     const result = await unlockUserAccount(userId);
+    console.log('✅ Unlock result:', result);
     
     if (result.success) {
       res.status(200).json({
@@ -75,15 +92,18 @@ router.post('/unlock-user', async (req, res) => {
     console.error('Error unlocking user:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to unlock user account'
+      message: 'Failed to unlock user account',
+      error: error.message
     });
   }
 });
 
-// Lock a user account (admin manual lock)
+// Lock a user account
 router.post('/lock-user', async (req, res) => {
+  console.log('🔒 POST /lock-user endpoint called');
   try {
     const { userId, adminId } = req.body;
+    console.log('📝 Locking user:', userId, 'by admin:', adminId);
     
     if (!userId) {
       return res.status(400).json({
@@ -93,6 +113,7 @@ router.post('/lock-user', async (req, res) => {
     }
     
     const result = await lockUserAccount(userId, adminId, 'admin');
+    console.log('✅ Lock result:', result);
     
     if (result.success) {
       res.status(200).json({
@@ -109,13 +130,15 @@ router.post('/lock-user', async (req, res) => {
     console.error('Error locking user:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to lock user account'
+      message: 'Failed to lock user account',
+      error: error.message
     });
   }
 });
 
-// Reset failed attempts for a user (without unlocking if locked)
+// Reset failed attempts
 router.post('/reset-attempts', async (req, res) => {
+  console.log('🔄 POST /reset-attempts endpoint called');
   try {
     const { userId } = req.body;
     
@@ -146,7 +169,8 @@ router.post('/reset-attempts', async (req, res) => {
     console.error('Error resetting attempts:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to reset attempts'
+      message: 'Failed to reset attempts',
+      error: error.message
     });
   }
 });

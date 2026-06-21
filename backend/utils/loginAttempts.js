@@ -255,28 +255,106 @@ const getRemainingAttempts = async (userId) => {
 
 /**
  * Get all locked users (for admin)
+ * Fixed to not use nested select
+ */
+// backend/utils/loginAttempts.js - Updated getLockedUsers function
+
+/**
+ * Get all locked users (for admin)
+ * Fetches from both profiles and auth.users
  */
 const getLockedUsers = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('user_login_attempts')
-      .select(`
-        user_id,
-        locked,
-        locked_by,
-        locked_at,
-        failed_attempts,
-        users:user_id (email, role)
-      `)
-      .eq('locked', true);
-    
-    if (error) throw error;
-    return data;
-  } catch (error) {
-    console.error('Error getting locked users:', error);
-    return [];
-  }
-};
+    try {
+      console.log('🔍 getLockedUsers() called');
+      
+      // First, get all locked user IDs from user_login_attempts
+      const { data: lockedUsers, error } = await supabase
+        .from('user_login_attempts')
+        .select('user_id, locked_by, locked_at, failed_attempts')
+        .eq('locked', true);
+      
+      if (error) {
+        console.error('❌ Error in getLockedUsers:', error);
+        return [];
+      }
+      
+      if (!lockedUsers || lockedUsers.length === 0) {
+        console.log('ℹ️ No locked users found');
+        return [];
+      }
+      
+      console.log(`📊 Found ${lockedUsers.length} locked users`);
+      
+      // Get user IDs
+      const userIds = lockedUsers.map(item => item.user_id);
+      console.log('📊 User IDs:', userIds);
+      
+      // First, try to fetch from profiles table
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, first_name, middle_name, last_name, email, role')
+        .in('id', userIds);
+      
+      if (profileError) {
+        console.error('❌ Error fetching profiles:', profileError);
+      }
+      
+      // Create a map of user_id to profile
+      const profileMap = {};
+      if (profiles) {
+        profiles.forEach(profile => {
+          profileMap[profile.id] = profile;
+        });
+      }
+      
+      // For users without profiles, try to get from auth.users
+      const usersWithoutProfiles = userIds.filter(id => !profileMap[id]);
+      
+      if (usersWithoutProfiles.length > 0) {
+        console.log(`📊 ${usersWithoutProfiles.length} users don't have profiles, fetching from auth.users`);
+        
+        // Get from auth.users using the admin API
+        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+        
+        if (!authError && authUsers) {
+          authUsers.users.forEach(authUser => {
+            // Check if this user ID is in our list of users without profiles
+            if (usersWithoutProfiles.includes(authUser.id)) {
+              // Create a profile-like object from auth user data
+              const userMetadata = authUser.user_metadata || {};
+              profileMap[authUser.id] = {
+                id: authUser.id,
+                first_name: userMetadata.first_name || userMetadata.full_name?.split(' ')[0] || 'Unknown',
+                middle_name: userMetadata.middle_name || '',
+                last_name: userMetadata.last_name || userMetadata.full_name?.split(' ').slice(1).join(' ') || 'User',
+                email: authUser.email || 'N/A',
+                role: userMetadata.role || 'Employee'
+              };
+            }
+          });
+        }
+      }
+      
+      // Combine the data
+      const result = lockedUsers.map(item => {
+        const profile = profileMap[item.user_id];
+        return {
+          user_id: item.user_id,
+          locked_by: item.locked_by,
+          locked_at: item.locked_at,
+          failed_attempts: item.failed_attempts,
+          user: profile || null
+        };
+      });
+      
+      console.log(`✅ Returning ${result.length} users with profiles`);
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Error getting locked users:', error);
+      return [];
+    }
+  };
 
 module.exports = {
   getMaxLoginAttempts,
