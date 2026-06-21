@@ -15,6 +15,10 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   const [view, setView] = useState('login');
   const [showContactModal, setShowContactModal] = useState(false);
   const [sessionTimeout, setSessionTimeout] = useState(30);
+  
+  // Login attempts states
+  const [isLocked, setIsLocked] = useState(false);
+  const [lockMessage, setLockMessage] = useState('');
 
   // Fetch session timeout directly
   useEffect(() => {
@@ -154,51 +158,46 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     e.preventDefault();
     setError('');
     setIsLoading(true);
+    setIsLocked(false);
+    setLockMessage('');
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password
+      // Call backend API for login with attempts tracking
+      const response = await fetch('http://localhost:5000/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
       });
 
-      if (authError) throw new Error(authError.message);
-      if (!authData.user) throw new Error('No user data returned');
+      const data = await response.json();
 
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single();
+      if (data.success) {
+        // Login successful
+        const { user, session } = data;
+        
+        const loginTime = Date.now();
+        localStorage.setItem('token', session.access_token);
+        localStorage.setItem('user', JSON.stringify(user));
+        localStorage.setItem('loginTime', loginTime.toString());
 
-      const userRole = profileData?.role || 'Employee';
-      
-      const loginTime = Date.now();
-      localStorage.setItem('token', authData.session.access_token);
-      localStorage.setItem('user', JSON.stringify({
-        id: authData.user.id,
-        email: authData.user.email,
-        role: userRole
-      }));
-      localStorage.setItem('loginTime', loginTime.toString());
-
-      const user = {
-        id: authData.user.id,
-        name: profileData ? 
-          `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}` : 
-          authData.user.email,
-        email: authData.user.email,
-        role: userRole,
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
-        employee_id: profileData?.employee_id,
-        profile: profileData || {}
-      };
-
-      window.history.replaceState(null, '', '/dashboard');
-      onLogin(user);
-
+        window.history.replaceState(null, '', '/dashboard');
+        onLogin(user);
+      } else {
+        // Handle errors
+        if (data.locked) {
+          setIsLocked(true);
+          setLockMessage(data.message || 'Account locked. Please contact an administrator.');
+          setError('Account locked. Please contact an administrator.');
+        } else {
+          // Just show "Invalid credentials" for any other error
+          setError('Invalid credentials');
+        }
+      }
     } catch (error) {
       console.error('Login error:', error);
-      setError(error.message || 'Invalid credentials. Please try again.');
+      setError('Invalid credentials');
     } finally {
       setIsLoading(false);
     }
@@ -257,6 +256,8 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
           </div>
         )}
 
+        
+
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.inputGroup}>
             <label style={styles.label}>Email Address</label>
@@ -272,7 +273,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
                 placeholder="Enter your email"
                 style={styles.input}
                 required
-                disabled={isLoading}
+                disabled={isLoading || isLocked}
               />
             </div>
           </div>
@@ -291,12 +292,13 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
                 placeholder="Enter your password"
                 style={styles.input}
                 required
-                disabled={isLoading}
+                disabled={isLoading || isLocked}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 style={styles.eyeBtn}
+                disabled={isLocked}
               >
                 {showPassword ? (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -329,14 +331,20 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
 
           <button
             type="submit"
-            style={styles.submitBtn}
-            disabled={isLoading}
+            style={{
+              ...styles.submitBtn,
+              opacity: isLocked ? 0.5 : 1,
+              cursor: isLocked ? 'not-allowed' : 'pointer'
+            }}
+            disabled={isLoading || isLocked}
           >
             {isLoading ? (
               <span style={styles.spinnerWrapper}>
                 <span style={styles.spinner}></span>
                 Verifying Credentials...
               </span>
+            ) : isLocked ? (
+              'Account Locked'
             ) : (
               'Login'
             )}
