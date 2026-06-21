@@ -14,6 +14,8 @@ const userManagementRoutes = require("./routes/Admin/userManagement");
 // with the other route imports
 const forgotPasswordRoutes = require("./routes/Auth/forgotPassword");
 
+
+app.use('/api/admin', require('./routes/Admin/contactAdmin'));
 // with the other app.use lines
 app.use("/api/auth", forgotPasswordRoutes);
 
