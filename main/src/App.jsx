@@ -11,8 +11,6 @@ import Swal from 'sweetalert2';
 import './App.css';
 
 // ── Synchronous boot-time recovery check ──────────────────────────────────────
-// supabaseClient.js already wiped localStorage if recovery was detected.
-// We just need to read the flag here to set initial state correctly.
 const BOOT_IS_RECOVERY =
   window.location.hash.includes('type=recovery') ||
   window.location.hash.includes('access_token') ||
@@ -25,9 +23,7 @@ function App() {
   const [isDark, setIsDark] = useState(true);
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   const [recoveryError, setRecoveryError] = useState('');
-  // Always start in a loading state — recovery now needs an async step too
   const [loading, setLoading] = useState(true);
-
   const [sessionTimeout, setSessionTimeout] = useState(30);
   
   // Ref to track user activity
@@ -45,12 +41,9 @@ function App() {
       if (result.success && result.data.sessionTimeout) {
         const newTimeout = result.data.sessionTimeout;
         
-        // Only update if value changed
         if (newTimeout !== sessionTimeout) {
           console.log(`🔄 Session timeout updated from ${sessionTimeout} to ${newTimeout} minutes`);
           setSessionTimeout(newTimeout);
-          
-          // Show notification to user
           showTimeoutUpdateNotification(newTimeout);
         }
       }
@@ -61,7 +54,6 @@ function App() {
 
   // Show notification when timeout changes
   const showTimeoutUpdateNotification = (newTimeout) => {
-    // Only show if user is logged in
     if (isLoggedIn) {
       Swal.fire({
         title: 'Session Timeout Updated',
@@ -83,10 +75,7 @@ function App() {
 
   // Fetch initially and then every 30 seconds
   useEffect(() => {
-    // Initial fetch
     fetchSessionTimeout();
-
-    // Refresh every 30 seconds
     refreshTimeoutRef.current = setInterval(fetchSessionTimeout, 30000);
 
     return () => {
@@ -94,13 +83,12 @@ function App() {
         clearInterval(refreshTimeoutRef.current);
       }
     };
-  }, []); // Run once on mount
+  }, []);
 
   // Track user activity across all pages
   useEffect(() => {
     const updateActivity = () => {
       userActivityRef.current = Date.now();
-      // Update login time to extend session
       const loginTime = localStorage.getItem('loginTime');
       if (loginTime) {
         localStorage.setItem('loginTime', Date.now().toString());
@@ -108,7 +96,6 @@ function App() {
       }
     };
 
-    // Update activity on user interactions
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart', 'focus'];
     events.forEach(event => {
       window.addEventListener(event, updateActivity);
@@ -127,7 +114,6 @@ function App() {
 
     console.log(`🔔 Session monitoring started with timeout: ${sessionTimeout} minutes`);
 
-    // Clear any existing timers
     if (logoutTimerRef.current) {
       clearInterval(logoutTimerRef.current);
     }
@@ -135,7 +121,6 @@ function App() {
       clearInterval(forceLogoutTimerRef.current);
     }
 
-    // Check inactivity every 10 seconds
     logoutTimerRef.current = setInterval(() => {
       const lastActivity = userActivityRef.current;
       const now = Date.now();
@@ -149,14 +134,12 @@ function App() {
       }
     }, 10000);
 
-    // FORCE CHECK: Also check total session time every 30 seconds
     forceLogoutTimerRef.current = setInterval(() => {
       const loginTime = localStorage.getItem('loginTime');
       if (loginTime) {
         const totalElapsed = (Date.now() - parseInt(loginTime)) / (1000 * 60);
         console.log(`🔍 Total session time: ${totalElapsed.toFixed(1)} minutes (Timeout: ${sessionTimeout} minutes)`);
         
-        // If total session time exceeds timeout, force logout
         if (totalElapsed >= sessionTimeout) {
           console.log('⏰ Total session time exceeded, force logging out...');
           performLogout();
@@ -177,19 +160,15 @@ function App() {
   // Perform logout function
   const performLogout = async () => {
     try {
-      // Clear local storage
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('loginTime');
       
-      // Sign out from Supabase
       await supabase.auth.signOut();
       
-      // Reset state
       setCurrentUser(null);
       setIsLoggedIn(false);
       
-      // Clear timers
       if (logoutTimerRef.current) {
         clearInterval(logoutTimerRef.current);
       }
@@ -200,12 +179,10 @@ function App() {
         clearInterval(refreshTimeoutRef.current);
       }
       
-      // Force redirect to login
       window.location.href = '/login';
       
     } catch (error) {
       console.error('Logout error:', error);
-      // Even if there's an error, force redirect
       window.location.href = '/login';
     }
   };
@@ -255,7 +232,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    // ── Recovery boot path: manually establish the session from the URL ──────
+    // ── Recovery boot path ──────────────────────────────────────────────────────
     if (BOOT_IS_RECOVERY) {
       console.log('🔑 Recovery mode — establishing session from URL');
       (async () => {
@@ -275,7 +252,7 @@ function App() {
 
       return () => { cancelled = true; };
     }
-    // ───────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔄 Auth state changed:', event);
@@ -316,11 +293,10 @@ function App() {
       try {
         const storedUser = localStorage.getItem('user');
         const token = localStorage.getItem('token');
-
         const loginTime = localStorage.getItem('loginTime');
         
         if (storedUser && token) {
-          console.log('📦 Found stored user data');
+          console.log('📦 Found stored user data in localStorage');
           const userData = JSON.parse(storedUser);
           
           // Check if session has expired
@@ -341,12 +317,12 @@ function App() {
           if (cancelled) return;
 
           if (session) {
-            console.log('✅ Session valid, restoring user');
-            console.log('✅ Session is valid, restoring user');
-            // Update activity time
-            userActivityRef.current = Date.now();
+            console.log('✅ Session valid, restoring user:', userData.name);
+            // ✅ Restore FULL user data from localStorage
             setCurrentUser(userData);
             setIsLoggedIn(true);
+            userActivityRef.current = Date.now();
+            setLoading(false);
             return;
           } else {
             console.log('⚠️ Session expired, clearing storage');
@@ -371,6 +347,8 @@ function App() {
           if (cancelled) return;
 
           const userRole = profileData?.role || 'Employee';
+          
+          // ✅ Create FULL user object with all profile data
           const user = {
             id: session.user.id,
             name: profileData ?
@@ -380,19 +358,19 @@ function App() {
             role: userRole,
             avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
             employee_id: profileData?.employee_id,
-            profile: profileData || {}
+            profile: profileData || {},
+            first_name: profileData?.first_name,
+            last_name: profileData?.last_name,
+            middle_name: profileData?.middle_name,
           };
 
+          // ✅ Store FULL user data in localStorage
           localStorage.setItem('token', session.access_token);
-          localStorage.setItem('user', JSON.stringify({
-            id: user.id, email: user.email, role: user.role
-          }));
-
+          localStorage.setItem('user', JSON.stringify(user));
           localStorage.setItem('loginTime', Date.now().toString());
-          
-          // Update activity time
+
           userActivityRef.current = Date.now();
-          
+
           setCurrentUser(user);
           setIsLoggedIn(true);
         } else {
@@ -413,9 +391,6 @@ function App() {
       cancelled = true;
       subscription.unsubscribe();
     };
-    if (sessionTimeout) {
-      checkSession();
-    }
   }, [sessionTimeout]);
 
   useEffect(() => {
@@ -447,12 +422,13 @@ function App() {
   const toggleTheme = () => setIsDark(!isDark);
 
   const handleLogin = (userProfile) => {
-    localStorage.setItem('user', JSON.stringify({
-      id: userProfile.id, email: userProfile.email, role: userProfile.role
-    }));
+    console.log('🔍 User logged in:', userProfile);
+    console.log('🔍 User role:', userProfile.role);
+    
+    // ✅ Store FULL user data in localStorage
+    localStorage.setItem('user', JSON.stringify(userProfile));
     localStorage.setItem('loginTime', Date.now().toString());
     
-    // Update activity time
     userActivityRef.current = Date.now();
     
     setCurrentUser(userProfile);
@@ -468,21 +444,6 @@ function App() {
     );
     if (!result.isConfirmed) return;
 
-    try {
-      await supabase.auth.signOut();
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setCurrentUser(null);
-      setIsLoggedIn(false);
-      showSuccessAlert('You have been successfully logged out.', 'Logged Out!');
-    } catch (error) {
-      console.error('Logout error:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setCurrentUser(null);
-      setIsLoggedIn(false);
-      showErrorAlert('Error logging out. Please try again.', 'Logout Failed');
-    }
     await performLogout();
   };
 
@@ -522,6 +483,8 @@ function App() {
   const renderLayout = () => {
     if (!currentUser) return null;
     const role = currentUser.role;
+    console.log('🎯 Rendering layout for role:', role);
+    
     switch (role) {
       case 'Admin':
         return <AdminLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
