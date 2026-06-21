@@ -8,10 +8,12 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [noAccount, setNoAccount] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setNoAccount(false);
 
     if (!email) {
       setError('Please enter your email address.');
@@ -34,10 +36,19 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
 
         const result = await response.json();
 
+        // Explicit "no account" case from the backend — show a warning
+        // instead of the success screen.
+        if (result.accountExists === false) {
+          console.log('⚠️ No account exists for:', email);
+          setNoAccount(true);
+          setIsLoading(false);
+          return;
+        }
+
         if (!result.success) {
         throw new Error(result.error || 'Failed to send reset email');
         }
-      console.log('✅ Password reset email sent');
+      console.log('✅ Password reset request processed');
       setSuccess(true);
     } catch (err) {
       console.error('❌ Password reset error:', err);
@@ -104,6 +115,19 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
               </div>
             )}
 
+            {noAccount && (
+              <div style={styles.warningAlert}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 10, flexShrink: 0, marginTop: 2 }}>
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <span>
+                  No account found for <strong style={{ wordBreak: 'break-all' }}>{email}</strong>.
+                </span>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} style={styles.form}>
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Email Address</label>
@@ -115,7 +139,7 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => { setEmail(e.target.value); setNoAccount(false); }}
                     placeholder="Enter your email"
                     style={styles.input}
                     required
@@ -159,8 +183,8 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
             </div>
             <h2 style={styles.title}>Check Your Email</h2>
             <p style={styles.subtitle}>
-              We've sent a password reset link to <strong style={{ color: 'var(--color-text-primary)' }}>{email}</strong>.
-              Please check your inbox (and spam folder).
+              If an account exists for <strong style={{ color: 'var(--color-text-primary)' }}>{email}</strong>,
+              we've sent a password reset link to it. Please check your inbox (and spam folder).
             </p>
 
             <button
@@ -298,6 +322,19 @@ const styles = {
     padding: '12px',
     borderRadius: 'var(--radius-sm)',
     fontSize: '13px',
+    marginBottom: '20px',
+    textAlign: 'left',
+  },
+  warningAlert: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    background: 'rgba(245, 158, 11, 0.1)',
+    color: '#f59e0b',
+    border: '1px solid #f59e0b',
+    padding: '12px',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '13px',
+    lineHeight: '1.5',
     marginBottom: '20px',
     textAlign: 'left',
   },
