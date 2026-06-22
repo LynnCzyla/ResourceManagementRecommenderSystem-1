@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Swal from 'sweetalert2';
 import { getProjects, saveProjects, getEmployees } from '../mockState';
 
 export default function RMProjectsTab() {
@@ -6,17 +7,66 @@ export default function RMProjectsTab() {
   const [employees, setEmployees] = useState([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
-  const [assignForm, setAssignForm] = useState({ employeeId: '', hours: '8', role: '' });
+  const [assignForm, setAssignForm] = useState({ employeeId: '', role: '' });
 
   useEffect(() => {
     setProjects(getProjects());
     setEmployees(getEmployees());
   }, []);
 
+  const showSuccessAlert = (message, title = 'Success!') => {
+    Swal.fire({
+      title,
+      text: message,
+      icon: 'success',
+      confirmButtonColor: 'var(--color-primary)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-success)',
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+    });
+  };
+
+  const showErrorAlert = (message, title = 'Error!') => {
+    Swal.fire({
+      title,
+      text: message,
+      icon: 'error',
+      confirmButtonColor: 'var(--color-danger)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-danger)',
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+    });
+  };
+
+  const showConfirmationAlert = (title, text, confirmText = 'Yes, remove') => {
+    return Swal.fire({
+      title,
+      text,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: 'var(--color-primary)',
+      cancelButtonColor: 'var(--color-text-muted)',
+      confirmButtonText: confirmText,
+      cancelButtonText: 'Cancel',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-warning)',
+      customClass: {
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm',
+        cancelButton: 'swal-custom-cancel'
+      }
+    });
+  };
+
   const handleOpenAssignModal = (proj) => {
     setSelectedProject(proj);
     setShowAssignModal(true);
-    setAssignForm({ employeeId: '', hours: '8', role: '' });
+    setAssignForm({ employeeId: '', role: '' });
   };
 
   const handleAssignSubmit = (e) => {
@@ -31,7 +81,7 @@ export default function RMProjectsTab() {
         const currentAssigned = proj.assignedEmployees || [];
         // Check if already assigned
         if (currentAssigned.some(a => a.employeeId === chosenEmp.id)) {
-          alert(`${chosenEmp.name} is already assigned to this project!`);
+          showErrorAlert(`${chosenEmp.name} is already assigned to this project!`);
           return proj;
         }
 
@@ -54,7 +104,7 @@ export default function RMProjectsTab() {
     setProjects(updatedProjects);
     saveProjects(updatedProjects);
     setShowAssignModal(false);
-    alert(`Successfully assigned ${chosenEmp.name} to project!`);
+    showSuccessAlert(`Successfully assigned ${chosenEmp.name} to project!`);
   };
 
   const handleRemoveMember = (projId, empId) => {
@@ -119,8 +169,8 @@ export default function RMProjectsTab() {
               {/* Allocation Stats */}
               <div style={styles.statSection}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: '700' }}>
-                  <span>Manpower Allocated</span>
-                  <span>{assignedList.length} members ({totalAllocatedHours} hrs/day)</span>
+                  <span>Team Members</span>
+                  <span>{assignedList.length} member{assignedList.length === 1 ? '' : 's'}</span>
                 </div>
                 <div style={styles.utilizationBarContainer}>
                   <div style={{ ...styles.utilizationBar, width: `${utilizationPercentage}%`, backgroundColor: utilizationPercentage > 75 ? 'var(--color-success)' : 'var(--color-primary)' }}></div>
@@ -144,9 +194,17 @@ export default function RMProjectsTab() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span style={styles.memberHours}>{member.hoursAllocated}h/day</span>
                           <button 
-                            onClick={() => handleRemoveMember(proj.id, member.employeeId)}
+                            onClick={async () => {
+                              const result = await showConfirmationAlert(
+                                'Remove member?',
+                                `Remove ${member.employeeName} from ${proj.name}?`,
+                                'Yes, remove'
+                              );
+                              if (result.isConfirmed) {
+                                handleRemoveMember(proj.id, member.employeeId);
+                              }
+                            }}
                             style={styles.removeBtn}
                             title="Remove Member"
                           >
@@ -159,12 +217,7 @@ export default function RMProjectsTab() {
                 </div>
               </div>
 
-              <button 
-                onClick={() => handleOpenAssignModal({ ...proj, assignedEmployees: assignedList })}
-                style={styles.assignBtn}
-              >
-                + Assign Employee
-              </button>
+
             </div>
           );
         })}
@@ -194,31 +247,15 @@ export default function RMProjectsTab() {
                 </select>
               </div>
 
-              <div style={styles.formRow}>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>Allocation (Hours/Day)</label>
-                  <select
-                    value={assignForm.hours}
-                    onChange={(e) => setAssignForm({ ...assignForm, hours: e.target.value })}
-                    style={styles.modalSelect}
-                  >
-                    <option value="2">2 Hours</option>
-                    <option value="4">4 Hours</option>
-                    <option value="6">6 Hours</option>
-                    <option value="8">8 Hours (Full-Time)</option>
-                  </select>
-                </div>
-
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>Project Role Overwrite</label>
-                  <input
-                    type="text"
-                    value={assignForm.role}
-                    onChange={(e) => setAssignForm({ ...assignForm, role: e.target.value })}
-                    placeholder="Leave blank to use default role"
-                    style={styles.modalInput}
-                  />
-                </div>
+                    <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Project Role Overwrite</label>
+                <input
+                  type="text"
+                  value={assignForm.role}
+                  onChange={(e) => setAssignForm({ ...assignForm, role: e.target.value })}
+                  placeholder="Leave blank to use default role"
+                  style={styles.modalInput}
+                />
               </div>
 
               <div style={styles.modalActions}>
