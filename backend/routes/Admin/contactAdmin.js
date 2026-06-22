@@ -62,7 +62,9 @@ const sendConfirmationEmail = async ({ fullName, email, purpose, message }) => {
   await transporter.sendMail(mailOptions);
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/admin/contact-admin — submit from login page
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/contact-admin", async (req, res) => {
   try {
     const { firstName, middleName, lastName, email, purpose, message, phone } = req.body;
@@ -78,6 +80,7 @@ router.post("/contact-admin", async (req, res) => {
 
     console.log("📩 New contact admin request:", { firstName, middleName, lastName, email, purpose, phone });
 
+    // 1. Save contact request to database
     const { error: insertError } = await supabase
       .from("contact_requests")
       .insert([{
@@ -101,6 +104,40 @@ router.post("/contact-admin", async (req, res) => {
 
     console.log("✅ Contact request saved");
 
+    // 2. 🔔 Notify all admins about the new contact request
+    try {
+      const { data: admins, error: adminError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'Admin');
+
+      if (adminError) {
+        console.error("❌ Failed to fetch admins:", adminError.message);
+      } else if (admins && admins.length > 0) {
+        const adminNotifications = admins.map(admin => ({
+          recipient_id: admin.id,
+          type: 'alert',
+          text: `📩 New contact request from ${fullName} (${email}) — Purpose: ${purpose}`,
+          read: false
+        }));
+
+        const { error: notifError } = await supabase
+          .from('notifications')
+          .insert(adminNotifications);
+
+        if (notifError) {
+          console.error("❌ Failed to insert admin notifications:", notifError.message);
+        } else {
+          console.log(`✅ Notified ${admins.length} admin(s) about contact request`);
+        }
+      } else {
+        console.log("⚠️ No admin users found to notify");
+      }
+    } catch (notifErr) {
+      console.error("❌ Admin notification error:", notifErr.message);
+    }
+
+    // 3. Send confirmation email to the person who submitted
     try {
       await sendConfirmationEmail({ fullName, email, purpose, message });
       console.log("✅ Confirmation email sent to requester:", email);
@@ -122,7 +159,28 @@ router.post("/contact-admin", async (req, res) => {
   }
 });
 
-// PATCH /api/admin/contact-requests/:id/status
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/contact-requests — fetch all contact requests
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/contact-requests", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("contact_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ success: true, requests: data || [] });
+  } catch (error) {
+    console.error("Error fetching contact requests:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/admin/contact-requests/:id/status — update status
+// ─────────────────────────────────────────────────────────────────────────────
 router.patch("/contact-requests/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
@@ -148,50 +206,9 @@ router.patch("/contact-requests/:id/status", async (req, res) => {
   }
 });
 
-// GET /api/admin/contact-requests — fetch all contact requests
-router.get("/contact-requests", async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from("contact_requests")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) throw error;
-
-    res.json({ success: true, requests: data || [] });
-  } catch (error) {
-    console.error("Error fetching contact requests:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// PATCH /api/admin/contact-requests/:id/status — update status
-router.patch("/contact-requests/:id/status", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, processed_by, processed_at } = req.body;
-
-    const { data, error } = await supabase
-      .from("contact_requests")
-      .update({ 
-        status,
-        processed_by: processed_by || null,
-        processed_at: processed_at || new Date().toISOString()
-      })
-      .eq("id", id)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    res.json({ success: true, request: data });
-  } catch (error) {
-    console.error("Error updating contact request status:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
+// ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/admin/contact-requests/:id — delete a request
+// ─────────────────────────────────────────────────────────────────────────────
 router.delete("/contact-requests/:id", async (req, res) => {
   try {
     const { id } = req.params;
