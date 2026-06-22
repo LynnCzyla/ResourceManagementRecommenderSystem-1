@@ -204,7 +204,15 @@ router.post("/create", async (req, res) => {
       });
     }
 
-    // 3. Send welcome email with temporary password
+    // 3. Create notification for the new user
+      await supabase.from('notifications').insert({
+        recipient_id: authData.user.id,
+        type: 'system',
+        text: `👋 Welcome! Your account has been created with role ${role}.`,
+        read: false  // ✅ add this explicitly
+      });
+
+    // 4. Send welcome email with temporary password
     const emailSent = await sendWelcomeEmail(
       email,
       first_name,
