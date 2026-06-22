@@ -16,9 +16,12 @@ const systemSettingsRoutes = require("./routes/Admin/systemSettings"); // Add th
 const unlockRoutes = require("./routes/Admin/unlockUsers"); // Add this
 const loginRoutes = require("./routes/Auth/login"); // Add this
 const contactAdminRoutes = require('./routes/Admin/contactAdmin');
-
+const departmentsPositionsRoutes = require('./routes/Admin/departmentsPositions'); // Add this
+const notificationsRouter = require('./routes/notifications');
 
 // with the other app.use lines
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/admin', departmentsPositionsRoutes);
 app.use('/api/admin', contactAdminRoutes);
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", loginRoutes); // Login route
@@ -26,6 +29,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/users", userManagementRoutes);
 app.use("/api/admin", unlockRoutes); // Add admin routes
 app.use("/api/settings", systemSettingsRoutes); // Add system settings routes
+
 
 app.get("/", (req, res) => {
     res.json({
