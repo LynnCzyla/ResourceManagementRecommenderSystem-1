@@ -101,6 +101,44 @@ const lockUserAccount = async (userId) => {
     
     if (error) throw error;
     console.log(`🔒 Account locked for user: ${userId}`);
+
+    // ✅ Get the locked user's name
+    const { data: lockedUser } = await supabase
+      .from('profiles')
+      .select('first_name, last_name')
+      .eq('id', userId)
+      .single();
+
+    const userName = lockedUser
+      ? `${lockedUser.first_name} ${lockedUser.last_name}`
+      : 'A user';
+
+    // ✅ Notify the locked user
+    await supabase.from('notifications').insert({
+      recipient_id: userId,
+      type: 'alert',
+      text: '⚠️ Your account has been locked due to too many failed login attempts. Please contact an administrator.',
+      read: false
+    });
+
+    // ✅ Notify all admins
+    const { data: admins } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('role', 'Admin');
+
+    if (admins && admins.length > 0) {
+      const adminNotifications = admins.map(admin => ({
+        recipient_id: admin.id,
+        type: 'alert',
+        text: `🔒 ${userName}'s account has been auto-locked due to 5 failed login attempts.`,
+        read: false
+      }));
+
+      await supabase.from('notifications').insert(adminNotifications);
+      console.log(`✅ Notified ${admins.length} admin(s) about account lock`);
+    }
+
     return { success: true, data };
   } catch (error) {
     console.error('Error locking account:', error);
