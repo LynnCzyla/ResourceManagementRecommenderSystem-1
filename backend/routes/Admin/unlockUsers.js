@@ -78,6 +78,14 @@ router.post('/unlock/unlock-user', async (req, res) => {
     console.log('✅ Unlock result:', result);
     
     if (result.success) {
+      // Create notification for the unlocked user
+      await supabase.from('notifications').insert({
+        recipient_id: userId,
+        type: 'alert',
+        text: 'Your account has been unlocked by an administrator.',
+        read: false 
+      });
+
       res.status(200).json({
         success: true,
         message: 'User account unlocked successfully'
@@ -99,42 +107,47 @@ router.post('/unlock/unlock-user', async (req, res) => {
 });
 
 // Lock a user account
-router.post('/lock-user', async (req, res) => {
-  console.log('🔒 POST /lock-user endpoint called');
-  try {
-    const { userId, adminId } = req.body;
-    console.log('📝 Locking user:', userId, 'by admin:', adminId);
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID is required'
-      });
-    }
-    
-    const result = await lockUserAccount(userId, adminId, 'admin');
-    console.log('✅ Lock result:', result);
-    
-    if (result.success) {
-      res.status(200).json({
-        success: true,
-        message: 'User account locked successfully'
-      });
-    } else {
+  router.post('/lock-user', async (req, res) => {
+    console.log('🔒 POST /lock-user endpoint called');
+    try {
+      const { userId, adminId } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'User ID is required'
+        });
+      }
+      
+      const result = await lockUserAccount(userId, adminId, 'admin');
+      
+      if (result.success) {
+        // ✅ ADD THIS — notify the locked user
+        await supabase.from('notifications').insert({
+          recipient_id: userId,
+          type: 'alert',
+          text: '⚠️ Your account has been locked by an administrator. Please contact support.'
+        });
+
+        res.status(200).json({
+          success: true,
+          message: 'User account locked successfully'
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: result.error || 'Failed to lock user account'
+        });
+      }
+    } catch (error) {
+      console.error('Error locking user:', error);
       res.status(500).json({
         success: false,
-        message: result.error || 'Failed to lock user account'
+        message: 'Failed to lock user account',
+        error: error.message
       });
     }
-  } catch (error) {
-    console.error('Error locking user:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to lock user account',
-      error: error.message
-    });
-  }
-});
+  });
 
 // Reset failed attempts
 router.post('/reset-attempts', async (req, res) => {
