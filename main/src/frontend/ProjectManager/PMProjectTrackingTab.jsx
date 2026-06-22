@@ -8,12 +8,26 @@ export default function PMProjectTrackingTab() {
   
   const [selectedProjectId, setSelectedProjectId] = useState(2); // Default to active project (Inventory Tracker)
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
+  const [showEditProjectModal, setShowEditProjectModal] = useState(false);
+  const [showEditTaskModal, setShowEditTaskModal] = useState(false);
+  const [taskToEdit, setTaskToEdit] = useState(null);
+  const [editProjectData, setEditProjectData] = useState({ id: null, name: '', description: '', startDate: '', endDate: '' });
   const [newTaskData, setNewTaskData] = useState({
     title: '',
     description: '',
     employeeId: '',
     priority: 'Medium',
     dueDate: ''
+  });
+  const [editTaskData, setEditTaskData] = useState({ employeeId: '', status: '', dueDate: '' });
+  const [dailyStatusMap] = useState({
+    'EMP-1014': 'Present',
+    'EMP-1015': 'Absent',
+    'EMP-1016': 'On Leave',
+    'EMP-1017': 'Present',
+    'EMP-1018': 'Present',
+    'EMP-1019': 'Absent',
+    'EMP-1020': 'Present',
   });
 
   useEffect(() => {
@@ -39,7 +53,8 @@ export default function PMProjectTrackingTab() {
       description: newTaskData.description,
       priority: newTaskData.priority,
       status: 'Pending',
-      dueDate: newTaskData.dueDate || new Date().toISOString().split('T')[0]
+      dueDate: newTaskData.dueDate || new Date().toISOString().split('T')[0],
+      progressLogs: []
     };
 
     const updatedTasks = [...tasks, newTask];
@@ -56,9 +71,72 @@ export default function PMProjectTrackingTab() {
     });
   };
 
+  const handleProjectClick = (project) => {
+    setSelectedProjectId(project.id);
+    setEditProjectData({
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      startDate: project.startDate,
+      endDate: project.endDate
+    });
+    setShowEditProjectModal(true);
+  };
+
+  const handleEditProject = (e) => {
+    e.preventDefault();
+    const updatedProjects = projects.map(p => p.id === editProjectData.id ? { ...p, ...editProjectData } : p);
+    setProjects(updatedProjects);
+    saveProjects(updatedProjects);
+    setShowEditProjectModal(false);
+  };
+
+  const handleOpenEditTask = (task) => {
+    setTaskToEdit(task);
+    setEditTaskData({
+      employeeId: task.employeeId,
+      status: task.status,
+      dueDate: task.dueDate
+    });
+    setShowEditTaskModal(true);
+  };
+
+  const handleSaveTaskEdit = (e) => {
+    e.preventDefault();
+    const updatedTasks = tasks.map(t => {
+      if (t.id === taskToEdit.id) {
+        const assignedEmp = employees.find(emp => emp.id === editTaskData.employeeId);
+        return {
+          ...t,
+          employeeId: editTaskData.employeeId,
+          employeeName: assignedEmp ? assignedEmp.name : 'Unassigned',
+          status: editTaskData.status,
+          dueDate: editTaskData.dueDate
+        };
+      }
+      return t;
+    });
+    setTasks(updatedTasks);
+    saveTasks(updatedTasks);
+    setShowEditTaskModal(false);
+    setTaskToEdit(null);
+  };
+
+  const getDailyStatus = (id) => dailyStatusMap[id] || 'Present';
+
+  const getTaskCount = (id) => tasks.filter(t => t.employeeId === id).length;
+
+  const getReplacementCandidates = (excludedEmployeeId) => {
+    return employees
+      .filter(emp => emp.id !== excludedEmployeeId && getDailyStatus(emp.id) === 'Present')
+      .sort((a, b) => getTaskCount(a.id) - getTaskCount(b.id))
+      .slice(0, 3);
+  };
+
   // Filter tasks for current selected project
   const currentProjectTasks = tasks.filter(t => t.projectId === selectedProjectId);
   const currentProjectEmployees = employees; // Simplified: show all engineering pool as mock team members
+  const selectedProject = projects.find(p => p.id === selectedProjectId);
 
   return (
     <div style={styles.container}>
@@ -81,6 +159,22 @@ export default function PMProjectTrackingTab() {
             + Assign Task
           </button>
         </div>
+      </div>
+      <div style={styles.projectCardStrip}>
+        {projects.map(project => (
+          <button
+            key={project.id}
+            onClick={() => handleProjectClick(project)}
+            style={{
+              ...styles.projectCard,
+              borderColor: selectedProjectId === project.id ? 'var(--color-primary)' : 'transparent',
+              background: selectedProjectId === project.id ? 'rgba(59, 130, 246, 0.08)' : 'var(--color-bg-card)'
+            }}
+          >
+            <div style={styles.projectCardName}>{project.name}</div>
+            <div style={styles.projectCardMeta}>{project.status} • {project.startDate} - {project.endDate}</div>
+          </button>
+        ))}
       </div>
 
       <div style={styles.mainGrid}>
@@ -150,6 +244,7 @@ export default function PMProjectTrackingTab() {
                             {task.dueDate}
                           </span>
                         </div>
+                        <button style={styles.editTaskBtn} onClick={() => handleOpenEditTask(task)}>Edit Assignment</button>
                       </div>
                     ))
                   )}
@@ -236,6 +331,145 @@ export default function PMProjectTrackingTab() {
               <div style={styles.modalActions}>
                 <button type="button" onClick={() => setShowCreateTaskModal(false)} style={styles.cancelBtn}>Cancel</button>
                 <button type="submit" style={styles.saveBtn}>Assign Task</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Project Modal */}
+      {showEditProjectModal && (
+        <div style={styles.modalOverlay}>
+          <div className="glass-card" style={styles.modalCard}>
+            <div style={styles.modalHeader}>
+              <h2 style={{ margin: 0, fontSize: 20 }}>Edit Project</h2>
+              <button onClick={() => setShowEditProjectModal(false)} style={styles.closeModalBtn}>&times;</button>
+            </div>
+            <form onSubmit={handleEditProject} style={{ marginTop: 16 }}>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Project Name</label>
+                <input
+                  type="text"
+                  value={editProjectData.name}
+                  onChange={(e) => setEditProjectData(prev => ({ ...prev, name: e.target.value }))}
+                  style={styles.modalInput}
+                  required
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Description</label>
+                <textarea
+                  value={editProjectData.description}
+                  onChange={(e) => setEditProjectData(prev => ({ ...prev, description: e.target.value }))}
+                  style={styles.modalTextarea}
+                  required
+                />
+              </div>
+              <div style={styles.formRow}>
+                <div style={{ ...styles.formGroup, flex: 1 }}>
+                  <label style={styles.formLabel}>Start Date</label>
+                  <input
+                    type="date"
+                    value={editProjectData.startDate}
+                    onChange={(e) => setEditProjectData(prev => ({ ...prev, startDate: e.target.value }))}
+                    style={styles.modalInput}
+                    required
+                  />
+                </div>
+                <div style={{ ...styles.formGroup, flex: 1 }}>
+                  <label style={styles.formLabel}>End Date</label>
+                  <input
+                    type="date"
+                    value={editProjectData.endDate}
+                    onChange={(e) => setEditProjectData(prev => ({ ...prev, endDate: e.target.value }))}
+                    style={styles.modalInput}
+                    required
+                  />
+                </div>
+              </div>
+              <div style={styles.modalActions}>
+                <button type="button" onClick={() => setShowEditProjectModal(false)} style={styles.cancelBtn}>Cancel</button>
+                <button type="submit" style={styles.saveBtn}>Save Project</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Task Modal */}
+      {showEditTaskModal && taskToEdit && (
+        <div style={styles.modalOverlay}>
+          <div className="glass-card" style={styles.modalCard}>
+            <div style={styles.modalHeader}>
+              <h2 style={{ margin: 0, fontSize: 20 }}>Edit Assignment</h2>
+              <button onClick={() => setShowEditTaskModal(false)} style={styles.closeModalBtn}>&times;</button>
+            </div>
+            <form onSubmit={handleSaveTaskEdit} style={{ marginTop: 16 }}>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Task</label>
+                <div style={{ ...styles.modalInput, padding: '12px 14px', background: 'var(--color-bg-card)' }}>
+                  {taskToEdit.title}
+                </div>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Assign To</label>
+                <select
+                  value={editTaskData.employeeId}
+                  onChange={(e) => setEditTaskData(prev => ({ ...prev, employeeId: e.target.value }))}
+                  style={styles.modalSelect}
+                  required
+                >
+                  <option value="">-- Choose replacement --</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
+                  ))}
+                </select>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Status</label>
+                <select
+                  value={editTaskData.status}
+                  onChange={(e) => setEditTaskData(prev => ({ ...prev, status: e.target.value }))}
+                  style={styles.modalSelect}
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Due Date</label>
+                <input
+                  type="date"
+                  value={editTaskData.dueDate}
+                  onChange={(e) => setEditTaskData(prev => ({ ...prev, dueDate: e.target.value }))}
+                  style={styles.modalInput}
+                  required
+                />
+              </div>
+              <div style={styles.suggestionPanel}>
+                <div style={styles.suggestionHeader}>Suggested Temporary Replacements</div>
+                <div style={styles.suggestionList}>
+                  {getReplacementCandidates(taskToEdit.employeeId).map(emp => (
+                    <div key={emp.id} style={styles.suggestionItem}>
+                      <div>
+                        <div style={styles.suggestionName}>{emp.name}</div>
+                        <div style={styles.suggestionMeta}>{emp.role} • {getTaskCount(emp.id)} tasks</div>
+                      </div>
+                      <button
+                        type="button"
+                        style={styles.useSuggestionBtn}
+                        onClick={() => setEditTaskData(prev => ({ ...prev, employeeId: emp.id }))}
+                      >
+                        Use
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={styles.modalActions}>
+                <button type="button" onClick={() => setShowEditTaskModal(false)} style={styles.cancelBtn}>Cancel</button>
+                <button type="submit" style={styles.saveBtn}>Save Assignment</button>
               </div>
             </form>
           </div>
@@ -430,11 +664,93 @@ const styles = {
     marginTop: '6px',
     borderTop: '1px solid var(--color-border)',
     paddingTop: '8px',
+    gap: '10px',
   },
   assignee: {
     fontWeight: '600',
   },
   dueDate: {},
+  editTaskBtn: {
+    width: '100%',
+    border: '1px solid var(--color-border)',
+    background: 'transparent',
+    color: 'var(--color-text-primary)',
+    padding: '10px 12px',
+    borderRadius: '10px',
+    fontSize: '12px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    marginTop: '8px',
+    transition: 'background-color 0.2s',
+  },
+  projectCardStrip: {
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap',
+    marginBottom: '24px',
+  },
+  projectCard: {
+    flex: '1 1 260px',
+    padding: '18px',
+    borderRadius: '18px',
+    border: '1px solid transparent',
+    textAlign: 'left',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    background: 'var(--color-bg-card)',
+  },
+  projectCardName: {
+    fontSize: '14px',
+    fontWeight: '700',
+    marginBottom: '6px',
+    color: 'var(--color-text-primary)',
+  },
+  projectCardMeta: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+  },
+  suggestionPanel: {
+    borderTop: '1px solid var(--color-border)',
+    marginTop: '20px',
+    paddingTop: '16px',
+  },
+  suggestionHeader: {
+    fontSize: '12px',
+    fontWeight: '700',
+    marginBottom: '12px',
+  },
+  suggestionList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  suggestionItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px 14px',
+    borderRadius: '12px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card)',
+  },
+  suggestionName: {
+    fontSize: '13px',
+    fontWeight: '700',
+  },
+  suggestionMeta: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+  },
+  useSuggestionBtn: {
+    background: 'var(--color-primary)',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    fontSize: '11px',
+    fontWeight: '700',
+    cursor: 'pointer',
+  },
   modalOverlay: {
     position: 'fixed',
     top: 0,

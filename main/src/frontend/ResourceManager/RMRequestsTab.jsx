@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { getRequests, saveRequests, getEmployees, getProjects, saveProjects } from '../mockState';
+import Swal from 'sweetalert2';
+import { getRequests, getEmployees, getProjects } from '../mockState';
 
 export default function RMRequestsTab() {
   const [requests, setRequests] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
   const [activeRequestDetails, setActiveRequestDetails] = useState(null);
+  const [recommendationTab, setRecommendationTab] = useState('Recommended');
+  const [selectedCandidateId, setSelectedCandidateId] = useState(null);
 
   useEffect(() => {
     setRequests(getRequests());
@@ -13,20 +16,46 @@ export default function RMRequestsTab() {
     setProjects(getProjects());
   }, []);
 
+  const showSuccessAlert = (message, title = 'Success!') => {
+    Swal.fire({
+      title,
+      text: message,
+      icon: 'success',
+      confirmButtonColor: 'var(--color-primary)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-success)',
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+    });
+  };
+
+  const showErrorAlert = (message, title = 'Error!') => {
+    Swal.fire({
+      title,
+      text: message,
+      icon: 'error',
+      confirmButtonColor: 'var(--color-danger)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-danger)',
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+    });
+  };
+
   const handleReject = (reqId) => {
     const updated = requests.map(req => req.id === reqId ? { ...req, status: 'Rejected' } : req);
     setRequests(updated);
-    saveRequests(updated);
-    alert('Request rejected.');
+    showSuccessAlert('Request rejected.');
   };
 
   const handleAllocateCandidate = (request, candidate) => {
-    // 1. Update Project assigned employees
+    // 1. Update project mock state only
     const targetProjectName = request.projectName;
-    const allProjects = getProjects();
     let projectFound = false;
 
-    const updatedProjects = allProjects.map(proj => {
+    const updatedProjects = projects.map(proj => {
       if (proj.name.toLowerCase() === targetProjectName.toLowerCase()) {
         projectFound = true;
         const currentAssigned = proj.assignedEmployees || [];
@@ -74,42 +103,177 @@ export default function RMRequestsTab() {
       updatedProjects.push(newProj);
     }
 
-    saveProjects(updatedProjects);
     setProjects(updatedProjects);
 
-    // 2. Update Request status to Approved
+    // 2. Update Request status to Approved locally
     const updatedRequests = requests.map(req =>
       req.id === request.id ? { ...req, status: 'Approved' } : req
     );
     setRequests(updatedRequests);
-    saveRequests(updatedRequests);
 
     setActiveRequestDetails(null);
-    alert(`Success! Allocated ${candidate.name} to ${targetProjectName}.`);
+    showSuccessAlert(`Allocated ${candidate.name} to ${targetProjectName}.`);
   };
 
-  // Recommender Engine: dynamically rank candidates based on requested skills overlap
-  const getRankedRecommendations = (reqSkills) => {
-    if (!reqSkills || reqSkills.length === 0) return [];
-
-    const scored = employees.map(emp => {
-      // Find matches: checking if emp skills matches reqSkills (fuzzy check)
-      const matchingSkills = emp.skills.filter(es =>
-        reqSkills.some(rs => es.toLowerCase().includes(rs.toLowerCase()) || rs.toLowerCase().includes(es.toLowerCase()))
-      );
-
-      const matchRate = Math.round((matchingSkills.length / reqSkills.length) * 100);
-
-      return {
-        employee: emp,
-        score: matchRate,
-        matchedSkills: matchingSkills
-      };
-    });
-
-    // Sort by score descending
-    return scored.sort((a, b) => b.score - a.score);
+  const hardcodedRecommendations = {
+    1: {
+      recommended: [
+        {
+          employee: {
+            id: 'EMP-1014',
+            name: 'Javier Santos',
+            role: 'Senior Cad Drafter & Lighting Designer',
+            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 100,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
+        },
+        {
+          employee: {
+            id: 'EMP-1023',
+            name: 'Grace Villanueva',
+            role: 'Technical Associate',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 60,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
+        },
+        {
+          employee: {
+            id: 'EMP-1025',
+            name: 'Jack Forester',
+            role: 'Senior Cad Drafter & Lighting Designer',
+            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 50,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
+        }
+      ],
+      all: [
+        {
+          employee: {
+            id: 'EMP-1014',
+            name: 'Javier Santos',
+            role: 'Senior Cad Drafter & Lighting Designer',
+            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 100,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
+        },
+        {
+          employee: {
+            id: 'EMP-1023',
+            name: 'Grace Villanueva',
+            role: 'Technical Associate',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 60,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
+        },
+        {
+          employee: {
+            id: 'EMP-1025',
+            name: 'Jack Forester',
+            role: 'Senior Cad Drafter & Lighting Designer',
+            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 50,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
+        },
+        {
+          employee: {
+            id: 'EMP-1019',
+            name: 'Clarisse Valenzuela',
+            role: 'Senior Sales Engineer',
+            avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 40,
+          matchedSkills: ['Sales', 'Application Engineering']
+        }
+      ]
+    },
+    2: {
+      recommended: [
+        {
+          employee: {
+            id: 'EMP-1015',
+            name: 'Vincent Miguel P. Soriano',
+            role: 'Inside Sales / UPS Technical Engineer',
+            avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 95,
+          matchedSkills: ['UPS installation and Commissioning', 'Maintenance & Troubleshooting']
+        },
+        {
+          employee: {
+            id: 'EMP-1020',
+            name: 'David Lim',
+            role: 'Sales Engineer',
+            avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 70,
+          matchedSkills: ['Sales', 'Client relationship management']
+        },
+        {
+          employee: {
+            id: 'EMP-1021',
+            name: 'Elena Guerrero',
+            role: 'Inside Sales Engineer',
+            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 55,
+          matchedSkills: ['Sales', 'Technical Documentation']
+        }
+      ],
+      all: [
+        {
+          employee: {
+            id: 'EMP-1015',
+            name: 'Vincent Miguel P. Soriano',
+            role: 'Inside Sales / UPS Technical Engineer',
+            avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 95,
+          matchedSkills: ['UPS installation and Commissioning', 'Maintenance & Troubleshooting']
+        },
+        {
+          employee: {
+            id: 'EMP-1020',
+            name: 'David Lim',
+            role: 'Sales Engineer',
+            avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 70,
+          matchedSkills: ['Sales', 'Client relationship management']
+        },
+        {
+          employee: {
+            id: 'EMP-1021',
+            name: 'Elena Guerrero',
+            role: 'Inside Sales Engineer',
+            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 55,
+          matchedSkills: ['Sales', 'Technical Documentation']
+        },
+        {
+          employee: {
+            id: 'EMP-1022',
+            name: 'Francis Tolentino',
+            role: 'Design Engineer',
+            avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=100'
+          },
+          score: 45,
+          matchedSkills: ['AutoCAD 2D & 3D', 'Lighting Calculation']
+        }
+      ]
+    }
   };
+
+  const recommendationResults = activeRequestDetails ? hardcodedRecommendations[activeRequestDetails.id] || hardcodedRecommendations[1] : { recommended: [], all: [] };
+  const displayedRecommendations = recommendationTab === 'View all'
+    ? recommendationResults.all
+    : recommendationResults.recommended;
 
   return (
     <div style={styles.container}>
@@ -161,7 +325,11 @@ export default function RMRequestsTab() {
 
                   <div style={styles.actions}>
                     <button
-                      onClick={() => setActiveRequestDetails(req)}
+                      onClick={() => {
+                        setActiveRequestDetails(req);
+                        setRecommendationTab('Recommended');
+                        setSelectedCandidateId(null);
+                      }}
                       style={styles.viewRecsBtn}
                       disabled={req.status === 'Approved' || req.status === 'Rejected'}
                     >
@@ -198,56 +366,93 @@ export default function RMRequestsTab() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={styles.recommenderHeader}>
-                <h3 style={{ margin: 0, fontSize: '15px' }}>Ranked Candidates for: {activeRequestDetails.projectName}</h3>
-                <span style={styles.matchingTag}>Skills Required: {activeRequestDetails.skills.length}</span>
+              <div style={styles.tabRow}>
+                <button
+                  onClick={() => setRecommendationTab('Recommended')}
+                  style={{
+                    ...styles.subTabBtn,
+                    ...(recommendationTab === 'Recommended' ? styles.subTabBtnActive : {})
+                  }}
+                >
+                  Recommended
+                </button>
+                <button
+                  onClick={() => setRecommendationTab('View all')}
+                  style={{
+                    ...styles.subTabBtn,
+                    ...(recommendationTab === 'View all' ? styles.subTabBtnActive : {})
+                  }}
+                >
+                  View all
+                </button>
               </div>
 
               <div style={styles.recommendationsList}>
-                {getRankedRecommendations(activeRequestDetails.skills).map((rec, idx) => (
-                  <div key={rec.employee.id} style={styles.recItemCard}>
-                    <div style={styles.rankBadge}>#{idx + 1}</div>
-
-                    <div style={styles.recCardBody}>
-                      <div style={styles.recHeaderRow}>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <img src={rec.employee.avatar} alt={rec.employee.name} style={styles.recAvatar} />
-                          <div>
-                            <div style={styles.recName}>{rec.employee.name}</div>
-                            <div style={styles.recRole}>{rec.employee.role}</div>
-                          </div>
-                        </div>
-                        <div style={{
-                          ...styles.matchScore,
-                          color: rec.score > 75 ? 'var(--color-success)' : rec.score > 40 ? 'var(--color-warning)' : 'var(--color-danger)'
-                        }}>
-                          {rec.score}% Match
-                        </div>
-                      </div>
-
-                      {/* Matching skills check */}
-                      <div style={{ marginTop: '8px' }}>
-                        <span style={styles.skillsHeading}>Matching Extracted Skills:</span>
-                        <div style={styles.miniSkillsList}>
-                          {rec.matchedSkills.length === 0 ? (
-                            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>None matched</span>
-                          ) : (
-                            rec.matchedSkills.map((ms, i) => (
-                              <span key={i} style={styles.matchingSkillPill}>✓ {ms}</span>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => handleAllocateCandidate(activeRequestDetails, rec.employee)}
-                        style={styles.allocateBtn}
-                      >
-                        Approve & Allocate Resource
-                      </button>
-                    </div>
+                {displayedRecommendations.length === 0 ? (
+                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', padding: '20px 0', textAlign: 'center' }}>
+                    No recommended candidates available for this request.
                   </div>
-                ))}
+                ) : (
+                  displayedRecommendations.map((rec, idx) => {
+                    const workloadLabel = idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Limited availability' : 'Fully loaded';
+                    const selected = selectedCandidateId === rec.employee.id;
+                    return (
+                    <div key={rec.employee.id} style={styles.recItemCard}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCandidateId(rec.employee.id)}
+                          style={{
+                            ...styles.checkCircle,
+                            ...(selected ? styles.checkCircleSelected : {})
+                          }}
+                          aria-label={`Select ${rec.employee.name}`}
+                        >
+                          {selected ? '✓' : ''}
+                        </button>
+
+                        <div style={styles.recCardBody}>
+                          <div style={styles.recHeaderRow}>
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                              <img src={rec.employee.avatar} alt={rec.employee.name} style={styles.recAvatar} />
+                              <div>
+                                <div style={styles.recName}>{rec.employee.name}</div>
+                                <div style={styles.recRole}>{rec.employee.role}</div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                              <span style={styles.workloadBadge}>{workloadLabel}</span>
+                              <div style={{
+                                ...styles.matchScore,
+                                color: rec.score > 75 ? 'var(--color-success)' : rec.score > 40 ? 'var(--color-warning)' : 'var(--color-danger)'
+                              }}>
+                                {rec.score}% Match
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: '8px' }}>
+                            <span style={styles.skillsHeading}>Matching Extracted Skills:</span>
+                            <div style={styles.miniSkillsList}>
+                              {rec.matchedSkills.length === 0 ? (
+                                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>None matched</span>
+                              ) : (
+                                rec.matchedSkills.map((ms, i) => (
+                                  <span key={i} style={styles.matchingSkillPill}>✓ {ms}</span>
+                                ))
+                              )}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => handleAllocateCandidate(activeRequestDetails, rec.employee)}
+                            style={styles.allocateBtn}
+                          >
+                            Approve & Allocate Resource
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }))}
               </div>
             </div>
           )}
@@ -400,10 +605,11 @@ const styles = {
   },
   recItemCard: {
     display: 'flex',
-    gap: '16px',
+    alignItems: 'flex-start',
+    gap: '12px',
     padding: '16px',
     background: 'var(--color-bg-card-hover)',
-    borderRadius: '8px',
+    borderRadius: '10px',
     border: '1px solid var(--color-border)',
     position: 'relative',
   },
@@ -424,16 +630,19 @@ const styles = {
   },
   recCardBody: {
     flex: 1,
-    paddingLeft: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
   },
   recHeaderRow: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    gap: '16px',
   },
   recAvatar: {
-    width: '32px',
-    height: '32px',
+    width: '36px',
+    height: '36px',
     borderRadius: '50%',
     objectFit: 'cover',
   },
@@ -457,8 +666,8 @@ const styles = {
   miniSkillsList: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: '4px',
-    marginTop: '4px',
+    gap: '8px',
+    marginTop: '6px',
   },
   matchingSkillPill: {
     fontSize: '10px',
@@ -472,12 +681,77 @@ const styles = {
     backgroundColor: 'var(--color-primary)',
     color: '#ffffff',
     border: 'none',
-    padding: '8px 16px',
-    borderRadius: '6px',
+    padding: '12px 16px',
+    borderRadius: '8px',
+    fontWeight: '700',
+    fontSize: '13px',
+    cursor: 'pointer',
+    marginTop: '14px',
+    width: '100%',
+  },
+  tabRow: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '16px',
+  },
+  subTabBtn: {
+    flex: 1,
+    padding: '10px 14px',
+    borderBottom: '2px solid transparent',
+    borderRadius: '0',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
     fontWeight: '700',
     fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+    transition: 'color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease',
+  },
+  subTabBtnActive: {
+    color: 'var(--color-primary)',
+    borderBottomColor: 'var(--color-primary)',
+  },
+  tabButton: {
+    flex: 1,
+    padding: '10px 14px',
+    borderRadius: '12px',
+    border: '1px solid var(--color-border)',
+    background: 'transparent',
     cursor: 'pointer',
-    marginTop: '12px',
-    width: '100%',
+    fontWeight: '700',
+    fontSize: '12px',
+  },
+  tabButtonActive: {
+    background: 'var(--color-primary)',
+    color: '#ffffff',
+    borderColor: 'var(--color-primary)',
+  },
+  checkCircle: {
+    width: '26px',
+    height: '26px',
+    minWidth: '26px',
+    borderRadius: '50%',
+    border: '2px solid var(--color-border)',
+    background: 'transparent',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  checkCircleSelected: {
+    borderColor: 'var(--color-primary)',
+    background: 'var(--color-primary)',
+    color: '#ffffff',
+  },
+  workloadBadge: {
+    fontSize: '10px',
+    fontWeight: '700',
+    padding: '4px 10px',
+    borderRadius: '999px',
+    backgroundColor: 'var(--color-bg-root)',
+    color: 'var(--color-text-secondary)',
   }
 };

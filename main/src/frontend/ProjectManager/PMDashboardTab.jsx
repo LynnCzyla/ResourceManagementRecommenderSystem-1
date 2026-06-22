@@ -18,6 +18,39 @@ export default function PMDashboardTab() {
   // Calculate average utilization
   const teamUtilization = "78%";
 
+  const dailyStatusMap = {
+    'EMP-1014': 'Present',
+    'EMP-1015': 'Absent',
+    'EMP-1016': 'On Leave',
+    'EMP-1017': 'Present',
+    'EMP-1018': 'Present',
+    'EMP-1019': 'Absent',
+    'EMP-1020': 'Present',
+  };
+
+  const getDailyStatus = (id) => dailyStatusMap[id] || 'Present';
+
+  const getAssignedTasks = (id) => tasks.filter(task => task.employeeId === id);
+  const getTaskCompletion = (id) => {
+    const assigned = getAssignedTasks(id);
+    if (!assigned.length) return 0;
+    const percentages = assigned.map(task => {
+      if (task.progressLogs && task.progressLogs.length) {
+        return task.progressLogs[task.progressLogs.length - 1].percentage || 0;
+      }
+      if (task.status === 'Completed') return 100;
+      if (task.status === 'In Progress') return 55;
+      return 20;
+    });
+    return Math.round(percentages.reduce((sum, value) => sum + value, 0) / percentages.length);
+  };
+
+  const attendanceCounts = employees.reduce((acc, emp) => {
+    const status = getDailyStatus(emp.id);
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, { Present: 0, Absent: 0, 'On Leave': 0 });
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -81,28 +114,30 @@ export default function PMDashboardTab() {
       </div>
 
       <div style={styles.gridContainer}>
-        {/* Weekly Allocation */}
+        {/* Task Assignment Overview */}
         <div className="glass-card" style={styles.mainPanel}>
-          <h2 style={styles.panelTitle}>My Team Weekly Allocation</h2>
-          <p style={styles.panelSubtitle}>Logged hours distribution across current project tasks.</p>
+          <h2 style={styles.panelTitle}>Task Assignment Overview</h2>
+          <p style={styles.panelSubtitle}>Review current employee task assignments, progress percentage, and daily availability.</p>
 
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
                 <tr style={styles.trHeader}>
                   <th style={styles.th}>Employee</th>
-                  <th style={styles.th}>Mon</th>
-                  <th style={styles.th}>Tue</th>
-                  <th style={styles.th}>Wed</th>
-                  <th style={styles.th}>Thu</th>
-                  <th style={styles.th}>Fri</th>
-                  <th style={styles.th}>Total</th>
+                  <th style={styles.th}>Assigned Task</th>
+                  <th style={styles.th}>% Complete</th>
+                  <th style={styles.th}>Task Status</th>
+                  <th style={styles.th}>Attendance</th>
                 </tr>
               </thead>
               <tbody>
                 {employees.map(emp => {
-                  const empTasks = tasks.filter(t => t.employeeId === emp.id);
-                  const isAssigned = empTasks.length > 0;
+                  const assignedTasks = getAssignedTasks(emp.id);
+                  const completion = getTaskCompletion(emp.id);
+                  const attendance = getDailyStatus(emp.id);
+                  const taskLabel = assignedTasks.length ? assignedTasks[0].title : 'No task assigned';
+                  const taskStatus = assignedTasks.length ? assignedTasks[0].status : 'Idle';
+
                   return (
                     <tr key={emp.id} style={styles.trRow}>
                       <td style={styles.tdEmployee}>
@@ -112,13 +147,13 @@ export default function PMDashboardTab() {
                           <div style={styles.empRole}>{emp.role}</div>
                         </div>
                       </td>
-                      <td style={styles.tdVal}>{isAssigned ? '8h' : '0h'}</td>
-                      <td style={styles.tdVal}>{isAssigned ? '8h' : '0h'}</td>
-                      <td style={styles.tdVal}>{isAssigned ? '8h' : '0h'}</td>
-                      <td style={styles.tdVal}>{isAssigned ? '8h' : '0h'}</td>
-                      <td style={styles.tdVal}>{isAssigned ? '8h' : '0h'}</td>
-                      <td style={{ ...styles.tdVal, fontWeight: '700', color: 'var(--color-primary)' }}>
-                        {isAssigned ? '40h' : '0h'}
+                      <td style={styles.tdVal}>{taskLabel}</td>
+                      <td style={styles.tdVal}>{completion}%</td>
+                      <td style={styles.tdVal}>{taskStatus}</td>
+                      <td style={styles.tdVal}>
+                        <span style={{ ...styles.attendanceBadge, backgroundColor: attendance === 'Present' ? 'rgba(16, 185, 129, 0.12)' : attendance === 'Absent' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)', color: attendance === 'Present' ? 'var(--color-success)' : attendance === 'Absent' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
+                          {attendance}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -128,40 +163,33 @@ export default function PMDashboardTab() {
           </div>
         </div>
 
-        {/* Resource Pool / Available members */}
+        {/* Daily Attendance */}
         <div className="glass-card" style={styles.sidePanel}>
-          <h2 style={styles.panelTitle}>Resource Pool Status</h2>
-          <p style={styles.panelSubtitle}>Available skills & certs for project assignments.</p>
+          <h2 style={styles.panelTitle}>Daily Attendance</h2>
+          <p style={styles.panelSubtitle}>Today's employee presence and leave status.</p>
 
-          <div style={styles.poolList}>
+          <div style={styles.attendanceStats}>
+            <div style={styles.attendanceMetric}>
+              <span style={styles.attendanceValue}>{attendanceCounts.Present}</span>
+              <span style={styles.attendanceLabel}>Present</span>
+            </div>
+            <div style={styles.attendanceMetric}>
+              <span style={styles.attendanceValue}>{attendanceCounts.Absent}</span>
+              <span style={styles.attendanceLabel}>Absent</span>
+            </div>
+            <div style={styles.attendanceMetric}>
+              <span style={styles.attendanceValue}>{attendanceCounts['On Leave']}</span>
+              <span style={styles.attendanceLabel}>On Leave</span>
+            </div>
+          </div>
+
+          <div style={styles.attendanceList}>
             {employees.map(emp => (
-              <div key={emp.id} style={styles.poolItem}>
-                <div style={styles.poolHeader}>
-                  <img src={emp.avatar} alt={emp.name} style={styles.poolAvatar} />
-                  <div>
-                    <div style={styles.poolName}>{emp.name}</div>
-                    <div style={styles.poolRole}>{emp.role}</div>
-                  </div>
-                </div>
-                <div style={styles.tagContainer}>
-                  {emp.skills.slice(0, 3).map((skill, idx) => (
-                    <span key={idx} style={styles.skillTag}>{skill}</span>
-                  ))}
-                  {emp.certifications.length > 0 && (
-                    <span style={styles.certBadge}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                          <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-                          <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-                          <path d="M4 22h16"></path>
-                          <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"></path>
-                          <path d="M12 2a15.3 15.3 0 0 1 4 10H8a15.3 15.3 0 0 1 4-10z"></path>
-                        </svg>
-                        {emp.certifications.length} Certs
-                      </span>
-                    </span>
-                  )}
-                </div>
+              <div key={emp.id} style={styles.attendanceRow}>
+                <div style={styles.attendanceName}>{emp.name}</div>
+                <span style={{ ...styles.attendanceBadge, backgroundColor: getDailyStatus(emp.id) === 'Present' ? 'rgba(16, 185, 129, 0.12)' : getDailyStatus(emp.id) === 'Absent' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)', color: getDailyStatus(emp.id) === 'Present' ? 'var(--color-success)' : getDailyStatus(emp.id) === 'Absent' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
+                  {getDailyStatus(emp.id)}
+                </span>
               </div>
             ))}
           </div>
@@ -286,56 +314,81 @@ const styles = {
     fontSize: '13px',
     color: 'var(--color-text-secondary)',
   },
-  poolList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
+  attendanceStats: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: '12px',
+    marginBottom: '18px',
   },
-  poolItem: {
-    padding: '12px',
+  attendanceMetric: {
+    padding: '16px',
+    borderRadius: '14px',
     border: '1px solid var(--color-border)',
-    borderRadius: 'var(--radius-md)',
-    background: 'rgba(255, 255, 255, 0.02)',
+    background: 'var(--color-bg-card)',
+    textAlign: 'center',
   },
-  poolHeader: {
+  attendanceValue: {
+    fontSize: '24px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+    display: 'block',
+    marginBottom: '6px',
+  },
+  attendanceLabel: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.8px',
+  },
+  attendanceList: {
+    display: 'grid',
+    gap: '12px',
+  },
+  attendanceRow: {
     display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: '10px',
-    marginBottom: '10px',
+    padding: '12px 14px',
+    borderRadius: '12px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card)',
   },
-  poolAvatar: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    objectFit: 'cover',
-  },
-  poolName: {
+  attendanceName: {
     fontSize: '13px',
     fontWeight: '600',
+    color: 'var(--color-text-primary)',
+  },
+  attendanceBadge: {
+    padding: '4px 10px',
+    borderRadius: '999px',
+    fontSize: '11px',
+    fontWeight: '700',
+  },
+  poolList: {
+    display: 'none',
+  },
+  poolItem: {
+    display: 'none',
+  },
+  poolHeader: {
+    display: 'none',
+  },
+  poolAvatar: {
+    display: 'none',
+  },
+  poolName: {
+    display: 'none',
   },
   poolRole: {
-    fontSize: '11px',
-    color: 'var(--color-text-muted)',
+    display: 'none',
   },
   tagContainer: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '6px',
+    display: 'none',
   },
   skillTag: {
-    fontSize: '10px',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    background: 'var(--color-primary-light)',
-    color: 'var(--color-primary)',
-    fontWeight: '600',
+    display: 'none',
   },
   certBadge: {
-    fontSize: '10px',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    background: 'rgba(2, 132, 199, 0.1)',
-    color: 'var(--color-accent)',
-    fontWeight: '600',
+    display: 'none',
   }
 };
