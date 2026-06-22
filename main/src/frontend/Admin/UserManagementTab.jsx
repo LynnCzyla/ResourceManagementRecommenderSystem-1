@@ -534,7 +534,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         <button onClick={() => setSubTab('requests')} style={{ ...styles.subTabButton, borderBottomColor: subTab === 'requests' ? 'var(--color-primary)' : 'transparent', color: subTab === 'requests' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'requests' ? '700' : '500' }}>
           Contact Requests
           {!loadingRequests && contactRequests.filter(r => r.status === 'Pending').length > 0 && (
-            <span style={{ marginLeft: '8px', backgroundColor: 'var(--color-warning)', color: 'white', borderRadius: '50%', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>
+            <span style={{ marginLeft: '8px', backgroundColor: 'var(--color-danger)', color: 'white', borderRadius: '50%', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>
               {contactRequests.filter(r => r.status === 'Pending').length}
             </span>
           )}
