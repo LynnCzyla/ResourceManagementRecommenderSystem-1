@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 
 // Tab components from same directory
@@ -9,6 +9,7 @@ import LogsTab from './LogsTab';
 import ReportsTab from './ReportsTab';
 import DbRecordsTab from './DbRecordsTab';
 import ProfileSettings from '../ProfileSettings';
+import DepartmentsTab from './DepartmentsTab';
 
 export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -16,29 +17,72 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
+  const [currentAvatar, setCurrentAvatar] = useState(user.avatar);
 
   // Submenu states
   const [userMgmtOpen, setUserMgmtOpen] = useState(true);
   const [logsOpen, setLogsOpen] = useState(true);
 
-  // Mock notifications
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'ocr', text: 'OCR processing successful for romell_cv.pdf (98.2% Accuracy)', time: '5 mins ago', read: false },
-    { id: 2, type: 'user', text: 'User Romell Ebuen assigned role Resource Manager', time: '1 hour ago', read: false },
-    { id: 3, type: 'system', text: 'Daily database backup successfully completed', time: '12 hours ago', read: true },
-    { id: 4, type: 'alert', text: 'Suspicious login attempt blocked from IP 192.168.1.105', time: '1 day ago', read: true },
-  ]);
+  const [notifications, setNotifications] = useState([]);
+
+    // Add this helper after useState declarations
+    const formatTime = (isoString) => {
+        const diff = Date.now() - new Date(isoString).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''} ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+        const days = Math.floor(hours / 24);
+        return `${days} day${days > 1 ? 's' : ''} ago`;
+      };
+
+      // Add this useEffect to fetch notifications
+      useEffect(() => {
+        if (!user?.id) return;
+
+        const fetchNotifications = async () => {
+          try {
+            const res = await fetch(`http://localhost:5000/api/notifications?userId=${user.id}`);
+            const result = await res.json();
+            if (result.success) {
+              setNotifications(result.data);
+            }
+          } catch (err) {
+            console.error('Failed to fetch notifications:', err);
+          }
+        };
+
+        fetchNotifications();
+        // Poll every 30 seconds for new notifications
+        const interval = setInterval(fetchNotifications, 30000);
+        return () => clearInterval(interval);
+      }, [user?.id]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
+  const markAllRead = async () => {
+    try {
+      await fetch('http://localhost:5000/api/notifications/mark-all-read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch (err) {
+      console.error('Failed to mark all read:', err);
+    }
   };
 
-  const deleteNotification = (id, e) => {
-    e.stopPropagation();
-    setNotifications(notifications.filter(n => n.id !== id));
-  };
+  const deleteNotification = async (id, e) => {
+  e.stopPropagation();
+  try {
+    await fetch(`http://localhost:5000/api/notifications/${id}`, { method: 'DELETE' });
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  } catch (err) {
+    console.error('Failed to delete notification:', err);
+  }
+};
 
   // Nav click helper to expand sidebar automatically
   const handleNavClick = (tabName) => {
@@ -80,6 +124,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         return <ReportsTab />;
       case 'database-records':
         return <DbRecordsTab />;
+      case 'departments':
+        return <DepartmentsTab />;
       default:
         return <DashboardTab setActiveTab={setActiveTab} />;
     }
@@ -265,6 +311,24 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
             )}
           </div>
 
+          {/* Departments & Positions */}
+          <div 
+            onClick={() => handleNavClick('departments')} 
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'departments' ? 'var(--color-primary-light)' : 'transparent',
+              borderLeftColor: activeTab === 'departments' ? 'var(--color-primary)' : 'transparent',
+            }}
+            title="Departments & Positions"
+            className="hover-sidebar-item"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
+              <rect x="2" y="7" width="20" height="14" rx="2"></rect>
+              <path d="M16 7V5a2 2 0 0 0-4 0v2"></path>
+            </svg>
+            {!sidebarCollapsed && <span style={styles.navText}>Departments & Positions</span>}
+          </div>
+
           {/* Reports */}
           <div 
             onClick={() => handleNavClick('reports')} 
@@ -423,7 +487,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
                   transition: 'background-color 0.2s ease'
                 }}
               >
-                <img src={user.avatar} alt="Profile avatar" style={styles.avatar} />
+                <img src={currentAvatar} alt="Profile avatar" style={styles.avatar} />
+
                 <div style={styles.profileInfo}>
                   <span style={styles.profileName}>{user.name}</span>
                   <span style={styles.profileRole}>{user.role}</span>
@@ -447,11 +512,12 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
       </div>
 
       {/* Profile Settings Modal */}
-      <ProfileSettings
-        isOpen={showProfileSettings}
-        onClose={() => setShowProfileSettings(false)}
-        user={user}
-      />
+     <ProfileSettings
+      isOpen={showProfileSettings}
+      onClose={() => setShowProfileSettings(false)}
+      user={user}
+      onAvatarUpdate={(newUrl) => setCurrentAvatar(newUrl)}
+    />
     </div>
   );
 }
