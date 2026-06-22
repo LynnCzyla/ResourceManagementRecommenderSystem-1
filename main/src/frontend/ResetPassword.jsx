@@ -13,6 +13,105 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
   const [error, setError] = useState(initialError);
   const [success, setSuccess] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [passwordRequirements, setPasswordRequirements] = useState(null);
+  const [requirements, setRequirements] = useState({
+    minLength: false,
+    hasUppercase: false,
+    hasLowercase: false,
+    hasNumber: false,
+    hasSpecial: false,
+    minUppercase: false,
+    minLowercase: false,
+    minNumber: false,
+    minSpecial: false,
+  });
+
+  // Fetch password requirements from database
+  useEffect(() => {
+    const fetchRequirements = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('system_settings')
+          .select('*')
+          .limit(1)
+          .single();
+
+        if (error) throw error;
+        setPasswordRequirements(data);
+      } catch (err) {
+        console.error('Error fetching password requirements:', err);
+        // Set default requirements if fetch fails
+        setPasswordRequirements({
+          min_password_length: 6,
+          require_uppercase: true,
+          min_uppercase: 1,
+          require_lowercase: true,
+          min_lowercase: 1,
+          require_number: true,
+          min_number: 1,
+          require_special: true,
+          min_special: 1,
+        });
+      }
+    };
+
+    fetchRequirements();
+  }, []);
+
+  // Validate password in real-time
+  useEffect(() => {
+    if (!passwordRequirements || !password) {
+      setRequirements({
+        minLength: false,
+        hasUppercase: false,
+        hasLowercase: false,
+        hasNumber: false,
+        hasSpecial: false,
+        minUppercase: false,
+        minLowercase: false,
+        minNumber: false,
+        minSpecial: false,
+      });
+      return;
+    }
+
+    const minLength = password.length >= passwordRequirements.min_password_length;
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+    
+    // Count occurrences
+    const uppercaseCount = (password.match(/[A-Z]/g) || []).length;
+    const lowercaseCount = (password.match(/[a-z]/g) || []).length;
+    const numberCount = (password.match(/[0-9]/g) || []).length;
+    const specialCount = (password.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/g) || []).length;
+
+    const minUppercase = passwordRequirements.require_uppercase 
+      ? uppercaseCount >= passwordRequirements.min_uppercase 
+      : true;
+    const minLowercase = passwordRequirements.require_lowercase 
+      ? lowercaseCount >= passwordRequirements.min_lowercase 
+      : true;
+    const minNumber = passwordRequirements.require_number 
+      ? numberCount >= passwordRequirements.min_number 
+      : true;
+    const minSpecial = passwordRequirements.require_special 
+      ? specialCount >= passwordRequirements.min_special 
+      : true;
+
+    setRequirements({
+      minLength,
+      hasUppercase,
+      hasLowercase,
+      hasNumber,
+      hasSpecial,
+      minUppercase,
+      minLowercase,
+      minNumber,
+      minSpecial,
+    });
+  }, [password, passwordRequirements]);
 
   // Wait for recovery session to be established from URL token
   useEffect(() => {
@@ -50,7 +149,15 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
     e.preventDefault();
     setError('');
 
-    if (password.length < 6) {
+    // Validate all requirements before submission
+    if (passwordRequirements) {
+      const isPasswordValid = Object.values(requirements).every(req => req === true);
+      
+      if (!isPasswordValid) {
+        setError('Password does not meet all requirements.');
+        return;
+      }
+    } else if (password.length < 6) {
       setError('Password must be at least 6 characters long.');
       return;
     }
@@ -89,6 +196,84 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Render requirement item with checkmark
+  const renderRequirement = (label, isMet) => (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '4px 0',
+      color: isMet ? 'var(--color-success, #16a34a)' : 'var(--color-text-muted)',
+      fontSize: '13px',
+      transition: 'color 0.3s ease',
+    }}>
+      <span style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '18px',
+        height: '18px',
+        borderRadius: '50%',
+        border: `2px solid ${isMet ? 'var(--color-success, #16a34a)' : 'var(--color-border)'}`,
+        backgroundColor: isMet ? 'var(--color-success, #16a34a)' : 'transparent',
+        color: isMet ? 'white' : 'transparent',
+        transition: 'all 0.3s ease',
+        fontSize: '11px',
+        flexShrink: 0,
+      }}>
+        {isMet && '✓'}
+      </span>
+      {label}
+    </div>
+  );
+
+  // Build requirement labels based on database settings
+  const getRequirementLabels = () => {
+    if (!passwordRequirements) return [];
+
+    const labels = [];
+    
+    // Minimum length
+    labels.push({
+      label: `At least ${passwordRequirements.min_password_length} characters`,
+      met: requirements.minLength
+    });
+
+    // Uppercase requirements
+    if (passwordRequirements.require_uppercase) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_uppercase} uppercase letter${passwordRequirements.min_uppercase > 1 ? 's' : ''}`,
+        met: requirements.minUppercase
+      });
+    }
+
+    // Lowercase requirements
+    if (passwordRequirements.require_lowercase) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_lowercase} lowercase letter${passwordRequirements.min_lowercase > 1 ? 's' : ''}`,
+        met: requirements.minLowercase
+      });
+    }
+
+    // Number requirements
+    if (passwordRequirements.require_number) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_number} number${passwordRequirements.min_number > 1 ? 's' : ''}`,
+        met: requirements.minNumber
+      });
+    }
+
+    // Special character requirements
+    if (passwordRequirements.require_special) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_special} special character${passwordRequirements.min_special > 1 ? 's' : ''}`,
+        met: requirements.minSpecial
+      });
+    }
+
+    return labels;
   };
 
   return (
@@ -185,6 +370,17 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
                 </div>
               </div>
 
+              {/* Password Requirements */}
+              {password && passwordRequirements && (
+                <div style={styles.requirementsContainer}>
+                  {getRequirementLabels().map((req, index) => (
+                    <div key={index}>
+                      {renderRequirement(req.label, req.met)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Confirm New Password</label>
                 <div style={styles.inputWrapper}>
@@ -220,8 +416,6 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
                   </button>
                 </div>
               </div>
-
-              <p style={styles.hint}>Must be at least 6 characters long.</p>
 
               <button type="submit" style={styles.submitBtn} disabled={isLoading || isCancelling || !sessionReady}>
                 {isLoading ? (
@@ -444,11 +638,13 @@ const styles = {
     alignItems: 'center',
     padding: '4px',
   },
-  hint: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted)',
-    marginTop: '-12px',
+  requirementsContainer: {
+    marginTop: '-10px',
     marginBottom: '20px',
+    padding: '12px 16px',
+    backgroundColor: 'var(--color-bg-card)',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--color-border)',
   },
   submitBtn: {
     width: '100%',
@@ -506,6 +702,8 @@ const styles = {
     justifyContent: 'center',
     margin: '0 auto 20px',
   },
+
+
 };
 
 // Keyframes
