@@ -194,6 +194,10 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
   const handleChangePassword = async () => {
     setPasswordAlert({ type: '', message: '' });
 
+    if (!passwordForm.currentPassword) {
+      setPasswordAlert({ type: 'error', message: 'Current password is required.' });
+      return;
+    }
     if (!passwordForm.newPassword) {
       setPasswordAlert({ type: 'error', message: 'New password is required.' });
       return;
@@ -407,6 +411,26 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
               message={passwordAlert.message}
               onClose={() => setPasswordAlert({ type: '', message: '' })}
             />
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>CURRENT PASSWORD <span style={styles.req}>*</span></label>
+              <div style={styles.passwordWrapper}>
+                <input
+                  type={showPasswords.current ? 'text' : 'password'}
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm(f => ({ ...f, currentPassword: e.target.value }))}
+                  style={{ ...styles.input, paddingRight: 44 }}
+                  placeholder="Enter current password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(p => ({ ...p, current: !p.current }))}
+                  style={styles.eyeBtn}
+                >
+                  {showPasswords.current ? <EyeOff /> : <EyeOn />}
+                </button>
+              </div>
+            </div>
 
             <div style={styles.formGroup}>
               <label style={styles.label}>NEW PASSWORD <span style={styles.req}>*</span></label>
