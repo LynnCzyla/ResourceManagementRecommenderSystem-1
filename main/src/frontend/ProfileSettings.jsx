@@ -36,6 +36,108 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
   });
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordAlert, setPasswordAlert] = useState({ type: '', message: '' });
+  
+  // ── Password requirements state ────────────────────────────────────────────
+  const [passwordRequirements, setPasswordRequirements] = useState(null);
+  const [requirements, setRequirements] = useState({
+    minLength: false,
+    hasUppercase: false,
+    hasLowercase: false,
+    hasNumber: false,
+    hasSpecial: false,
+    minUppercase: false,
+    minLowercase: false,
+    minNumber: false,
+    minSpecial: false,
+  });
+
+  // ── Load password requirements ─────────────────────────────────────────────
+  useEffect(() => {
+    const fetchRequirements = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('system_settings')
+          .select('*')
+          .limit(1)
+          .single();
+
+        if (error) throw error;
+        setPasswordRequirements(data);
+      } catch (err) {
+        console.error('Error fetching password requirements:', err);
+        // Set default requirements if fetch fails
+        setPasswordRequirements({
+          min_password_length: 8,
+          require_uppercase: true,
+          min_uppercase: 1,
+          require_lowercase: true,
+          min_lowercase: 1,
+          require_number: true,
+          min_number: 1,
+          require_special: true,
+          min_special: 1,
+        });
+      }
+    };
+
+    fetchRequirements();
+  }, []);
+
+  // ── Validate password in real-time ────────────────────────────────────────
+  useEffect(() => {
+    if (!passwordRequirements || !passwordForm.newPassword) {
+      setRequirements({
+        minLength: false,
+        hasUppercase: false,
+        hasLowercase: false,
+        hasNumber: false,
+        hasSpecial: false,
+        minUppercase: false,
+        minLowercase: false,
+        minNumber: false,
+        minSpecial: false,
+      });
+      return;
+    }
+
+    const password = passwordForm.newPassword;
+    const minLength = password.length >= passwordRequirements.min_password_length;
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+    
+    // Count occurrences
+    const uppercaseCount = (password.match(/[A-Z]/g) || []).length;
+    const lowercaseCount = (password.match(/[a-z]/g) || []).length;
+    const numberCount = (password.match(/[0-9]/g) || []).length;
+    const specialCount = (password.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/g) || []).length;
+
+    const minUppercase = passwordRequirements.require_uppercase 
+      ? uppercaseCount >= passwordRequirements.min_uppercase 
+      : true;
+    const minLowercase = passwordRequirements.require_lowercase 
+      ? lowercaseCount >= passwordRequirements.min_lowercase 
+      : true;
+    const minNumber = passwordRequirements.require_number 
+      ? numberCount >= passwordRequirements.min_number 
+      : true;
+    const minSpecial = passwordRequirements.require_special 
+      ? specialCount >= passwordRequirements.min_special 
+      : true;
+
+    setRequirements({
+      minLength,
+      hasUppercase,
+      hasLowercase,
+      hasNumber,
+      hasSpecial,
+      minUppercase,
+      minLowercase,
+      minNumber,
+      minSpecial,
+    });
+  }, [passwordForm.newPassword, passwordRequirements]);
 
   // ── Load data on open ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -47,37 +149,42 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
     setAvatarPreview(null);
     loadProfile();
     loadDepartments();
+    // Reset password form when opening
+    setPasswordForm({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    });
   }, [isOpen]);
 
-    const loadProfile = async () => {
-  try {
-    // Use user prop directly — no auth call needed
-    if (!user?.id) return;
+  const loadProfile = async () => {
+    try {
+      if (!user?.id) return;
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
 
-    if (profile) {
-      setProfileForm({
-        first_name: profile.first_name || '',
-        middle_name: profile.middle_name || '',
-        last_name: profile.last_name || '',
-        email: user.email || '',
-        contact_number: profile.contact_number || '',
-        department_id: profile.department_id || '',
-      });
+      if (profile) {
+        setProfileForm({
+          first_name: profile.first_name || '',
+          middle_name: profile.middle_name || '',
+          last_name: profile.last_name || '',
+          email: user.email || '',
+          contact_number: profile.contact_number || '',
+          department_id: profile.department_id || '',
+        });
 
-      if (profile.avatar_url) {
-        setAvatarUrl(profile.avatar_url);
+        if (profile.avatar_url) {
+          setAvatarUrl(profile.avatar_url);
+        }
       }
+    } catch (err) {
+      console.error('Error loading profile:', err);
     }
-  } catch (err) {
-    console.error('Error loading profile:', err);
-  }
-};
+  };
 
   const loadDepartments = async () => {
     try {
@@ -96,19 +203,16 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       setProfileAlert({ type: 'error', message: 'Please select an image file (JPG, PNG, WEBP).' });
       return;
     }
-    // Validate file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
       setProfileAlert({ type: 'error', message: 'Image must be smaller than 2MB.' });
       return;
     }
 
     setAvatarFile(file);
-    // Show local preview immediately
     const reader = new FileReader();
     reader.onload = (ev) => setAvatarPreview(ev.target.result);
     reader.readAsDataURL(file);
@@ -121,14 +225,12 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
     const fileExt = avatarFile.name.split('.').pop();
     const filePath = `avatars/${userId}/avatar.${fileExt}`;
 
-    // Upload to Supabase Storage bucket "avatars"
     const { error: uploadError } = await supabase.storage
       .from('avatars')
       .upload(filePath, avatarFile, { upsert: true });
 
     if (uploadError) throw uploadError;
 
-    // Get public URL
     const { data } = supabase.storage
       .from('avatars')
       .getPublicUrl(filePath);
@@ -137,77 +239,102 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
   };
 
   const handleSaveProfile = async () => {
-  if (!profileForm.first_name.trim() || !profileForm.last_name.trim()) {
-    setProfileAlert({ type: 'error', message: 'First name and last name are required.' });
-    return;
-  }
-
-  // Use user prop directly — no auth call needed
-  if (!user?.id) {
-    setProfileAlert({ type: 'error', message: 'Session error. Please re-login.' });
-    return;
-  }
-
-  setProfileLoading(true);
-  setProfileAlert({ type: '', message: '' });
-
-  try {
-    // 1. Upload avatar if selected
-    let newAvatarUrl = avatarUrl;
-    if (avatarFile) {
-      newAvatarUrl = await uploadAvatar(user.id);
+    if (!profileForm.first_name.trim() || !profileForm.last_name.trim()) {
+      setProfileAlert({ type: 'error', message: 'First name and last name are required.' });
+      return;
     }
 
-    // 2. Update profile
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        first_name: profileForm.first_name.trim(),
-        middle_name: profileForm.middle_name.trim() || null,
-        last_name: profileForm.last_name.trim(),
-        contact_number: profileForm.contact_number.trim() || null,
-        department_id: profileForm.department_id ? parseInt(profileForm.department_id) : null, // ← parse to int or null
-        avatar_url: newAvatarUrl || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id);
-
-    if (profileError) throw profileError;
-
-    if (newAvatarUrl) {
-      setAvatarUrl(newAvatarUrl);
-      onAvatarUpdate?.(newAvatarUrl);  // ← notify AdminLayout
+    if (!user?.id) {
+      setProfileAlert({ type: 'error', message: 'Session error. Please re-login.' });
+      return;
     }
-    setAvatarFile(null);
-    setAvatarPreview(null);
-    setProfileAlert({ type: 'success', message: 'Profile updated successfully.' });
 
-  } catch (err) {
-    console.error('Save profile error:', err);
-    setProfileAlert({ type: 'error', message: err.message || 'Failed to save profile.' });
-  } finally {
-    setProfileLoading(false);
-  }
-};
+    setProfileLoading(true);
+    setProfileAlert({ type: '', message: '' });
+
+    try {
+      let newAvatarUrl = avatarUrl;
+      if (avatarFile) {
+        newAvatarUrl = await uploadAvatar(user.id);
+      }
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          first_name: profileForm.first_name.trim(),
+          middle_name: profileForm.middle_name.trim() || null,
+          last_name: profileForm.last_name.trim(),
+          contact_number: profileForm.contact_number.trim() || null,
+          department_id: profileForm.department_id ? parseInt(profileForm.department_id) : null,
+          avatar_url: newAvatarUrl || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
+
+      if (newAvatarUrl) {
+        setAvatarUrl(newAvatarUrl);
+        onAvatarUpdate?.(newAvatarUrl);
+      }
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      setProfileAlert({ type: 'success', message: 'Profile updated successfully.' });
+
+    } catch (err) {
+      console.error('Save profile error:', err);
+      setProfileAlert({ type: 'error', message: err.message || 'Failed to save profile.' });
+    } finally {
+      setProfileLoading(false);
+    }
+  };
 
   // ── Change Password ────────────────────────────────────────────────────────
   const handleChangePassword = async () => {
     setPasswordAlert({ type: '', message: '' });
 
+    // Validate current password
     if (!passwordForm.currentPassword) {
       setPasswordAlert({ type: 'error', message: 'Current password is required.' });
       return;
     }
+
+    // Validate new password
     if (!passwordForm.newPassword) {
       setPasswordAlert({ type: 'error', message: 'New password is required.' });
       return;
     }
-    if (passwordForm.newPassword.length < 8) {
+
+    // Check password requirements
+    if (passwordRequirements) {
+      const isPasswordValid = Object.values(requirements).every(req => req === true);
+      if (!isPasswordValid) {
+        setPasswordAlert({ type: 'error', message: 'New password does not meet all requirements.' });
+        return;
+      }
+    } else if (passwordForm.newPassword.length < 8) {
       setPasswordAlert({ type: 'error', message: 'Password must be at least 8 characters.' });
       return;
     }
+
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordAlert({ type: 'error', message: 'New passwords do not match.' });
+      return;
+    }
+
+    // Verify current password matches
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: passwordForm.currentPassword,
+      });
+
+      if (signInError) {
+        setPasswordAlert({ type: 'error', message: 'Current password is incorrect.' });
+        return;
+      }
+    } catch (err) {
+      setPasswordAlert({ type: 'error', message: 'Failed to verify current password. Please try again.' });
       return;
     }
 
@@ -221,6 +348,9 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
 
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setPasswordAlert({ type: 'success', message: 'Password changed successfully.' });
+      
+      // Sign out after password change (optional - user can stay logged in)
+      // await supabase.auth.signOut();
     } catch (err) {
       console.error('Change password error:', err);
       setPasswordAlert({ type: 'error', message: err.message || 'Failed to change password.' });
@@ -236,6 +366,79 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
   const clearAlert = (tab) => {
     if (tab === 'profile') setProfileAlert({ type: '', message: '' });
     else setPasswordAlert({ type: '', message: '' });
+  };
+
+  // ── Render requirement item ───────────────────────────────────────────────
+  const renderRequirement = (label, isMet) => (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '3px 0',
+      color: isMet ? 'var(--color-success, #16a34a)' : 'var(--color-text-muted)',
+      fontSize: '12px',
+      transition: 'color 0.3s ease',
+    }}>
+      <span style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '16px',
+        height: '16px',
+        borderRadius: '50%',
+        border: `2px solid ${isMet ? 'var(--color-success, #16a34a)' : 'var(--color-border)'}`,
+        backgroundColor: isMet ? 'var(--color-success, #16a34a)' : 'transparent',
+        color: isMet ? 'white' : 'transparent',
+        transition: 'all 0.3s ease',
+        fontSize: '10px',
+        flexShrink: 0,
+      }}>
+        {isMet && '✓'}
+      </span>
+      {label}
+    </div>
+  );
+
+  // ── Get requirement labels ────────────────────────────────────────────────
+  const getRequirementLabels = () => {
+    if (!passwordRequirements) return [];
+
+    const labels = [];
+    
+    labels.push({
+      label: `At least ${passwordRequirements.min_password_length} characters`,
+      met: requirements.minLength
+    });
+
+    if (passwordRequirements.require_uppercase) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_uppercase} uppercase letter${passwordRequirements.min_uppercase > 1 ? 's' : ''}`,
+        met: requirements.minUppercase
+      });
+    }
+
+    if (passwordRequirements.require_lowercase) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_lowercase} lowercase letter${passwordRequirements.min_lowercase > 1 ? 's' : ''}`,
+        met: requirements.minLowercase
+      });
+    }
+
+    if (passwordRequirements.require_number) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_number} number${passwordRequirements.min_number > 1 ? 's' : ''}`,
+        met: requirements.minNumber
+      });
+    }
+
+    if (passwordRequirements.require_special) {
+      labels.push({
+        label: `At least ${passwordRequirements.min_special} special character${passwordRequirements.min_special > 1 ? 's' : ''}`,
+        met: requirements.minSpecial
+      });
+    }
+
+    return labels;
   };
 
   if (!isOpen) return null;
@@ -358,6 +561,7 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
                 onChange={(e) => setProfileForm(f => ({ ...f, email: e.target.value }))}
                 style={styles.input}
                 placeholder="your@email.com"
+                disabled
               />
             </div>
 
@@ -412,6 +616,7 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
               onClose={() => setPasswordAlert({ type: '', message: '' })}
             />
 
+            {/* Current Password */}
             <div style={styles.formGroup}>
               <label style={styles.label}>CURRENT PASSWORD <span style={styles.req}>*</span></label>
               <div style={styles.passwordWrapper}>
@@ -432,6 +637,7 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
               </div>
             </div>
 
+            {/* New Password */}
             <div style={styles.formGroup}>
               <label style={styles.label}>NEW PASSWORD <span style={styles.req}>*</span></label>
               <div style={styles.passwordWrapper}>
@@ -452,6 +658,18 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
               </div>
             </div>
 
+            {/* Password Requirements */}
+            {passwordForm.newPassword && passwordRequirements && (
+              <div style={styles.requirementsContainer}>
+                {getRequirementLabels().map((req, index) => (
+                  <div key={index}>
+                    {renderRequirement(req.label, req.met)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Confirm Password */}
             <div style={styles.formGroup}>
               <label style={styles.label}>CONFIRM NEW PASSWORD <span style={styles.req}>*</span></label>
               <div style={styles.passwordWrapper}>
@@ -471,11 +689,6 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
                 </button>
               </div>
             </div>
-
-            {/* Password strength hint */}
-            {passwordForm.newPassword && (
-              <PasswordStrength password={passwordForm.newPassword} />
-            )}
 
             <div style={styles.actions}>
               <button onClick={onClose} style={styles.cancelBtn}>Cancel</button>
@@ -500,19 +713,28 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
 function Alert({ type, message, onClose }) {
   if (!message) return null;
   const isSuccess = type === 'success';
+  
   return (
     <div style={{
       display: 'flex',
       alignItems: 'center',
       padding: '12px 14px',
-      borderRadius: 8,
+      borderRadius: 'var(--radius-md, 8px)',
       fontSize: 13,
       fontWeight: 600,
       marginBottom: 16,
       gap: 8,
-      background: isSuccess ? 'var(--color-primary-light)' : '#fee2e2',
-      color: isSuccess ? 'var(--color-success)' : '#b91c1c',
-      border: `1px solid ${isSuccess ? 'var(--color-primary)' : '#fca5a5'}`,
+      backgroundColor: isSuccess 
+        ? 'var(--color-success-light, #dcfce7)' 
+        : 'var(--color-danger-light, #fee2e2)',
+      color: isSuccess 
+        ? 'var(--color-success, #16a34a)' 
+        : 'var(--color-danger, #dc2626)',
+      border: `1px solid ${
+        isSuccess 
+          ? 'var(--color-success, #16a34a)' 
+          : 'var(--color-danger, #dc2626)'
+      }`,
     }}>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
         {isSuccess
@@ -521,40 +743,20 @@ function Alert({ type, message, onClose }) {
         }
       </svg>
       <span style={{ flex: 1 }}>{message}</span>
-      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 14, opacity: 0.7 }}>✕</button>
-    </div>
-  );
-}
-
-function PasswordStrength({ password }) {
-  const checks = [
-    { label: 'At least 8 characters', pass: password.length >= 8 },
-    { label: 'Uppercase letter (A-Z)', pass: /[A-Z]/.test(password) },
-    { label: 'Lowercase letter (a-z)', pass: /[a-z]/.test(password) },
-    { label: 'Number (0-9)', pass: /[0-9]/.test(password) },
-    { label: 'Special character (!@#$...)', pass: /[^A-Za-z0-9]/.test(password) },
-  ];
-  const passed = checks.filter(c => c.pass).length;
-  const strength = passed <= 2 ? 'Weak' : passed <= 3 ? 'Fair' : passed <= 4 ? 'Good' : 'Strong';
-  const strengthColor = passed <= 2 ? '#ef4444' : passed <= 3 ? '#f59e0b' : passed <= 4 ? '#0ea5e9' : '#10b981';
-
-  return (
-    <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 8, background: 'var(--color-bg-root)', border: '1px solid var(--color-border)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Password Strength</span>
-        <span style={{ fontSize: 12, fontWeight: 700, color: strengthColor }}>{strength}</span>
-      </div>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-        {[1, 2, 3, 4, 5].map(i => (
-          <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= passed ? strengthColor : 'var(--color-border)', transition: 'background-color 0.2s' }} />
-        ))}
-      </div>
-      {checks.map((c, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: c.pass ? 'var(--color-success)' : 'var(--color-text-muted)', marginBottom: 3 }}>
-          <span style={{ fontSize: 13 }}>{c.pass ? '✓' : '○'}</span>
-          {c.label}
-        </div>
-      ))}
+      <button 
+        onClick={onClose} 
+        style={{ 
+          background: 'none', 
+          border: 'none', 
+          cursor: 'pointer', 
+          color: 'inherit', 
+          fontSize: 14, 
+          opacity: 0.7,
+          padding: '0 4px',
+        }}
+      >
+        ✕
+      </button>
     </div>
   );
 }
@@ -656,7 +858,6 @@ const styles = {
     color: '#fff',
     opacity: 0,
     transition: 'opacity 0.2s',
-    // CSS hover handled via className or inline — we use a workaround below
   },
   avatarHint: {
     fontSize: 11,
@@ -749,6 +950,14 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     padding: 0,
+  },
+  requirementsContainer: {
+    marginTop: '-8px',
+    marginBottom: 16,
+    padding: '12px 16px',
+    backgroundColor: 'var(--color-bg-card)',
+    borderRadius: 8,
+    border: '1px solid var(--color-border)',
   },
 
   // Actions
