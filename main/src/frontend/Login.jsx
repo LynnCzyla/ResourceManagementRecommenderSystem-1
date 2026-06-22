@@ -132,34 +132,6 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     };
   }, []);
 
-  // Show loading state
-  if (checkingAuth || !timeoutLoaded) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: 'var(--color-bg-root)'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            border: '4px solid var(--color-border)',
-            borderTopColor: 'var(--color-primary)',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-            margin: '0 auto 16px'
-          }}></div>
-          <p style={{ color: 'var(--color-text-secondary)' }}>
-            {!timeoutLoaded ? 'Loading settings...' : 'Loading...'}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   // Show forgot password view
   if (view === 'forgot-password') {
     return (
