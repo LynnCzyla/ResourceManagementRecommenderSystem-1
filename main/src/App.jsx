@@ -10,12 +10,10 @@ import { supabase, getSession, establishSessionFromUrl } from './lib/supabaseCli
 import Swal from 'sweetalert2';
 import './App.css';
 
-// ── Synchronous boot-time recovery check ──────────────────────────────────────
 const BOOT_IS_RECOVERY =
   window.location.hash.includes('type=recovery') ||
   window.location.hash.includes('access_token') ||
   sessionStorage.getItem('wea_password_recovery') === 'true';
-// ─────────────────────────────────────────────────────────────────────────────
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -26,7 +24,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [sessionTimeout, setSessionTimeout] = useState(30);
   const [sessionChecked, setSessionChecked] = useState(false);
-  
+
   const userActivityRef = useRef(Date.now());
   const logoutTimerRef = useRef(null);
   const forceLogoutTimerRef = useRef(null);
@@ -36,10 +34,8 @@ function App() {
     try {
       const response = await fetch('http://localhost:5000/api/settings/system-settings');
       const result = await response.json();
-      
       if (result.success && result.data.sessionTimeout) {
         const newTimeout = result.data.sessionTimeout;
-        
         if (newTimeout !== sessionTimeout) {
           console.log(`🔄 Session timeout updated from ${sessionTimeout} to ${newTimeout} minutes`);
           setSessionTimeout(newTimeout);
@@ -63,10 +59,7 @@ function App() {
         color: 'var(--color-text-primary)',
         timer: 5000,
         timerProgressBar: true,
-        customClass: {
-          popup: 'swal-custom-popup',
-          confirmButton: 'swal-custom-confirm'
-        }
+        customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
       });
     }
   };
@@ -74,11 +67,8 @@ function App() {
   useEffect(() => {
     fetchSessionTimeout();
     refreshTimeoutRef.current = setInterval(fetchSessionTimeout, 30000);
-
     return () => {
-      if (refreshTimeoutRef.current) {
-        clearInterval(refreshTimeoutRef.current);
-      }
+      if (refreshTimeoutRef.current) clearInterval(refreshTimeoutRef.current);
     };
   }, []);
 
@@ -91,38 +81,22 @@ function App() {
         console.log('🔄 Activity detected - session extended');
       }
     };
-
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart', 'focus'];
-    events.forEach(event => {
-      window.addEventListener(event, updateActivity);
-    });
-
-    return () => {
-      events.forEach(event => {
-        window.removeEventListener(event, updateActivity);
-      });
-    };
+    events.forEach(event => window.addEventListener(event, updateActivity));
+    return () => events.forEach(event => window.removeEventListener(event, updateActivity));
   }, []);
 
   useEffect(() => {
     if (!sessionTimeout || !isLoggedIn) return;
-
     console.log(`🔔 Session monitoring started with timeout: ${sessionTimeout} minutes`);
-
-    if (logoutTimerRef.current) {
-      clearInterval(logoutTimerRef.current);
-    }
-    if (forceLogoutTimerRef.current) {
-      clearInterval(forceLogoutTimerRef.current);
-    }
+    if (logoutTimerRef.current) clearInterval(logoutTimerRef.current);
+    if (forceLogoutTimerRef.current) clearInterval(forceLogoutTimerRef.current);
 
     logoutTimerRef.current = setInterval(() => {
       const lastActivity = userActivityRef.current;
       const now = Date.now();
       const inactiveMinutes = (now - lastActivity) / (1000 * 60);
-      
       console.log(`⏱️ Inactive for: ${inactiveMinutes.toFixed(1)} minutes (Timeout: ${sessionTimeout} minutes)`);
-
       if (inactiveMinutes >= sessionTimeout) {
         console.log('⏰ Session expired due to inactivity, logging out...');
         performLogout();
@@ -134,7 +108,6 @@ function App() {
       if (loginTime) {
         const totalElapsed = (Date.now() - parseInt(loginTime)) / (1000 * 60);
         console.log(`🔍 Total session time: ${totalElapsed.toFixed(1)} minutes (Timeout: ${sessionTimeout} minutes)`);
-        
         if (totalElapsed >= sessionTimeout) {
           console.log('⏰ Total session time exceeded, force logging out...');
           performLogout();
@@ -143,40 +116,23 @@ function App() {
     }, 30000);
 
     return () => {
-      if (logoutTimerRef.current) {
-        clearInterval(logoutTimerRef.current);
-      }
-      if (forceLogoutTimerRef.current) {
-        clearInterval(forceLogoutTimerRef.current);
-      }
+      if (logoutTimerRef.current) clearInterval(logoutTimerRef.current);
+      if (forceLogoutTimerRef.current) clearInterval(forceLogoutTimerRef.current);
     };
   }, [sessionTimeout, isLoggedIn]);
 
   const performLogout = async () => {
     try {
-      // Only remove our custom tokens
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('loginTime');
-      
-      // Let Supabase handle its own sign out - DON'T remove sb-wea-auth-token manually
       await supabase.auth.signOut();
-      
       setCurrentUser(null);
       setIsLoggedIn(false);
-      
-      if (logoutTimerRef.current) {
-        clearInterval(logoutTimerRef.current);
-      }
-      if (forceLogoutTimerRef.current) {
-        clearInterval(forceLogoutTimerRef.current);
-      }
-      if (refreshTimeoutRef.current) {
-        clearInterval(refreshTimeoutRef.current);
-      }
-      
+      if (logoutTimerRef.current) clearInterval(logoutTimerRef.current);
+      if (forceLogoutTimerRef.current) clearInterval(forceLogoutTimerRef.current);
+      if (refreshTimeoutRef.current) clearInterval(refreshTimeoutRef.current);
       window.location.href = '/';
-      
     } catch (error) {
       console.error('Logout error:', error);
       window.location.href = '/';
@@ -232,18 +188,15 @@ function App() {
       (async () => {
         const result = await establishSessionFromUrl();
         if (cancelled) return;
-
         if (result.success) {
           console.log('✅ Recovery session ready');
         } else {
           console.error('❌ Could not establish recovery session:', result.error);
           setRecoveryError('This password reset link is invalid or has expired. Please request a new one.');
         }
-
         setIsPasswordRecovery(true);
         setLoading(false);
       })();
-
       return () => { cancelled = true; };
     }
 
@@ -253,7 +206,6 @@ function App() {
       if (event === 'PASSWORD_RECOVERY') {
         console.log('🔑 PASSWORD_RECOVERY event');
         sessionStorage.setItem('wea_password_recovery', 'true');
-        // DON'T remove sb-wea-auth-token here
         setIsPasswordRecovery(true);
         setIsLoggedIn(false);
         setCurrentUser(null);
@@ -264,7 +216,6 @@ function App() {
       if (event === 'SIGNED_OUT') {
         if (cancelled) return;
         console.log('👋 User signed out');
-        // Only remove our custom tokens
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         localStorage.removeItem('loginTime');
@@ -284,12 +235,12 @@ function App() {
     const checkSession = async () => {
       console.log('🔍 App: Checking for existing session...');
       try {
-        // FIRST: Check if Supabase has a session (using sb-wea-auth-token)
+        // FIRST: Check if Supabase has a live session
         const { data: { session }, error } = await supabase.auth.getSession();
-        
+
         if (session && !error) {
           console.log('✅ App: Found valid Supabase session');
-          
+
           const { data: profileData } = await supabase
             .from('profiles')
             .select('*')
@@ -297,15 +248,17 @@ function App() {
             .single();
 
           const userRole = profileData?.role || 'Employee';
-          
+
           const user = {
             id: session.user.id,
-            name: profileData ?
-              `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}` :
-              session.user.email,
+            name: profileData
+              ? `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}`
+              : session.user.email,
             email: session.user.email,
             role: userRole,
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
+            // ✅ Use avatar_url from DB, fallback to placeholder
+            avatar: profileData?.avatar_url ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
             employee_id: profileData?.employee_id,
             profile: profileData || {},
             first_name: profileData?.first_name,
@@ -316,7 +269,6 @@ function App() {
           localStorage.setItem('token', session.access_token);
           localStorage.setItem('user', JSON.stringify(user));
           localStorage.setItem('loginTime', Date.now().toString());
-
           userActivityRef.current = Date.now();
 
           setCurrentUser(user);
@@ -326,23 +278,23 @@ function App() {
           return;
         }
 
-        // If no Supabase session, check our custom localStorage
+        // SECOND: Fall back to localStorage
         const storedUser = localStorage.getItem('user');
         const token = localStorage.getItem('token');
         const loginTime = localStorage.getItem('loginTime');
-        
+
         console.log('📦 App: Stored user:', storedUser ? 'Found' : 'Not found');
         console.log('📦 App: Stored token:', token ? 'Found' : 'Not found');
         console.log('📦 App: Login time:', loginTime);
-        
+
         if (storedUser && token) {
           console.log('📦 App: Found stored user data in localStorage');
           const userData = JSON.parse(storedUser);
-          
+
           if (loginTime) {
             const elapsedMinutes = (Date.now() - parseInt(loginTime)) / (1000 * 60);
             console.log(`⏰ App: Time elapsed since login: ${elapsedMinutes.toFixed(1)} minutes`);
-            
+
             if (sessionTimeout && elapsedMinutes >= sessionTimeout) {
               console.log(`⏰ App: Session expired (${elapsedMinutes.toFixed(0)} minutes), clearing...`);
               localStorage.removeItem('token');
@@ -353,12 +305,34 @@ function App() {
               return;
             }
           }
-          
+
+          // ✅ Re-fetch latest avatar_url from DB before restoring
+          try {
+            const { data: freshProfile } = await supabase
+              .from('profiles')
+              .select('avatar_url, first_name, middle_name, last_name')
+              .eq('id', userData.id)
+              .single();
+
+            if (freshProfile?.avatar_url) {
+              userData.avatar = freshProfile.avatar_url;
+            }
+            if (freshProfile?.first_name) {
+              userData.name = `${freshProfile.first_name} ${freshProfile.middle_name ? freshProfile.middle_name + ' ' : ''}${freshProfile.last_name}`;
+              userData.first_name = freshProfile.first_name;
+              userData.middle_name = freshProfile.middle_name;
+              userData.last_name = freshProfile.last_name;
+            }
+          } catch (_) {
+            console.log('Could not refresh profile data, using cached version');
+          }
+
           console.log('✅ App: Restoring user from localStorage:', userData.name);
           setCurrentUser(userData);
           setIsLoggedIn(true);
           userActivityRef.current = Date.now();
           localStorage.setItem('loginTime', Date.now().toString());
+          localStorage.setItem('user', JSON.stringify(userData)); // ✅ Update cache with fresh avatar
           setLoading(false);
           setSessionChecked(true);
           return;
@@ -376,11 +350,9 @@ function App() {
     };
 
     if (!BOOT_IS_RECOVERY) {
-      setTimeout(() => {
-        checkSession();
-      }, 200);
+      setTimeout(() => { checkSession(); }, 200);
     }
-    
+
     return () => {
       cancelled = true;
       subscription.unsubscribe();
@@ -390,7 +362,6 @@ function App() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('🔄 App Auth state changed:', event);
-      
       if (event === 'SIGNED_IN' && session) {
         console.log('✅ User signed in');
         localStorage.setItem('loginTime', Date.now().toString());
@@ -404,12 +375,9 @@ function App() {
         setIsLoggedIn(false);
       } else if (event === 'TOKEN_REFRESHED') {
         console.log('🔄 Token refreshed');
-        if (session) {
-          localStorage.setItem('token', session.access_token);
-        }
+        if (session) localStorage.setItem('token', session.access_token);
       }
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -418,12 +386,9 @@ function App() {
   const handleLogin = (userProfile) => {
     console.log('🔍 User logged in:', userProfile);
     console.log('🔍 User role:', userProfile.role);
-    
     localStorage.setItem('user', JSON.stringify(userProfile));
     localStorage.setItem('loginTime', Date.now().toString());
-    
     userActivityRef.current = Date.now();
-    
     setCurrentUser(userProfile);
     setIsLoggedIn(true);
   };
@@ -435,7 +400,6 @@ function App() {
       'Yes, Logout'
     );
     if (!result.isConfirmed) return;
-
     await performLogout();
   };
 
@@ -476,7 +440,6 @@ function App() {
     if (!currentUser) return null;
     const role = currentUser.role;
     console.log('🎯 Rendering layout for role:', role);
-    
     switch (role) {
       case 'Admin':
         return <AdminLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
