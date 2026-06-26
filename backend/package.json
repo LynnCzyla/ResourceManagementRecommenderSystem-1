@@ -19,6 +19,9 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "nodemailer": "^9.0.1"
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.1",
+    "python-shell": "^5.0.0",
+    "uuid": "^14.0.1"
   }
 }

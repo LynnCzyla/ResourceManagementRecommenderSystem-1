@@ -5,6 +5,7 @@ export default function RMDashboardTab() {
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
   const [showReport, setShowReport] = useState(false);
+  const [workloadFilter, setWorkloadFilter] = useState('All');
 
   useEffect(() => {
     setEmployees(getEmployees());
@@ -12,19 +13,19 @@ export default function RMDashboardTab() {
   }, []);
 
   // Compute workload allocations
-  // Let's assume some employees are fully allocated, some are available, etc.
   const totalEmployees = employees.length;
   const activeProjectsCount = projects.filter(p => p.status === 'Active').length;
 
-  // Mock allocation categorizations
-  const availableCount = employees.filter((_, idx) => idx % 3 === 0).length; // Available (0-4h)
-  const partialCount = employees.filter((_, idx) => idx % 3 === 1).length;   // Partial (4-7h)
-  const fullyCount = employees.filter((_, idx) => idx % 3 === 2).length;     // Fully Allocated (8h)
+  // Mock workload categorizations
+  const availableCount = employees.filter((_, idx) => idx % 3 === 0).length;
+  const limitedCount = employees.filter((_, idx) => idx % 3 === 1).length;
+  const fullyLoadedCount = employees.filter((_, idx) => idx % 3 === 2).length;
 
-  // Identify underutilized employees: Those with fewer than 3 skills or whose role is technical associate / design engineer with no active project
-  const underutilized = employees.filter(emp => 
-    emp.role === 'Technical Associate' || emp.role === 'Design Engineer' || emp.skills.length <= 1
-  );
+  const filteredEmployees = employees.filter((emp, idx) => {
+    if (workloadFilter === 'All') return true;
+    const status = idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Limited availability' : 'Fully loaded';
+    return status === workloadFilter;
+  });
 
   const handleGenerateReport = () => {
     setShowReport(true);
@@ -72,7 +73,7 @@ export default function RMDashboardTab() {
           </div>
           <div>
             <div style={styles.cardVal}>{availableCount}</div>
-            <div style={styles.cardLabel}>Available (0-4h)</div>
+            <div style={styles.cardLabel}>Available</div>
           </div>
         </div>
 
@@ -83,8 +84,8 @@ export default function RMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.cardVal}>{partialCount}</div>
-            <div style={styles.cardLabel}>Partial (4-7h)</div>
+            <div style={styles.cardVal}>{limitedCount}</div>
+            <div style={styles.cardLabel}>Limited availability</div>
           </div>
         </div>
 
@@ -95,8 +96,8 @@ export default function RMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.cardVal}>{fullyCount}</div>
-            <div style={styles.cardLabel}>Fully Allocated (8h)</div>
+            <div style={styles.cardVal}>{fullyLoadedCount}</div>
+            <div style={styles.cardLabel}>Fully loaded</div>
           </div>
         </div>
       </div>
@@ -110,6 +111,20 @@ export default function RMDashboardTab() {
             <button onClick={handleGenerateReport} style={styles.reportBtn}>Generate Utilization Report</button>
           </div>
 
+          <div style={styles.filterRow}>
+            <label style={styles.filterLabel}>Filter by workload:</label>
+            <select
+              value={workloadFilter}
+              onChange={(e) => setWorkloadFilter(e.target.value)}
+              style={styles.selectFilterCompact}
+            >
+              <option value="All">All</option>
+              <option value="Available">Available</option>
+              <option value="Limited availability">Limited availability</option>
+              <option value="Fully loaded">Fully loaded</option>
+            </select>
+          </div>
+
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
@@ -121,8 +136,9 @@ export default function RMDashboardTab() {
                 </tr>
               </thead>
               <tbody>
-                {employees.map((emp, idx) => {
+                {filteredEmployees.map((emp, idx) => {
                   const rate = idx % 3 === 0 ? '25%' : idx % 3 === 1 ? '60%' : '100%';
+                  const statusLabel = idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Limited availability' : 'Fully loaded';
                   const statusColor = idx % 3 === 0 ? 'var(--color-success)' : idx % 3 === 1 ? 'var(--color-warning)' : 'var(--color-danger)';
                   const statusBg = idx % 3 === 0 ? 'var(--color-primary-light)' : idx % 3 === 1 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)';
                   return (
@@ -139,7 +155,7 @@ export default function RMDashboardTab() {
                       <td style={styles.td}>{emp.role}</td>
                       <td style={styles.td}>
                         <span style={{ ...styles.statusBadge, color: statusColor, backgroundColor: statusBg }}>
-                          {idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Partially Busy' : 'Fully Allocated'}
+                          {statusLabel}
                         </span>
                       </td>
                       <td style={styles.td}>
@@ -153,36 +169,6 @@ export default function RMDashboardTab() {
                 })}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        {/* Right Side: Underutilized List */}
-        <div className="glass-card" style={styles.panel}>
-          <h2 style={styles.panelTitle}>Underutilized Resource Pool</h2>
-          <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-            The following engineering specialists are available for new substation tasks or deployment requests:
-          </p>
-
-          <div style={styles.poolList}>
-            {underutilized.map(emp => (
-              <div key={emp.id} style={styles.poolItem}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <img src={emp.avatar} alt={emp.name} style={styles.poolAvatar} />
-                  <div>
-                    <h4 style={styles.poolName}>{emp.name}</h4>
-                    <span style={styles.poolRole}>{emp.role}</span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                  <span style={styles.poolStatus}>Idle Allocation</span>
-                  <div style={styles.skillsSummary}>
-                    {emp.skills.slice(0, 2).map((s, i) => (
-                      <span key={i} style={styles.miniPill}>{s}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       </div>
@@ -206,7 +192,7 @@ export default function RMDashboardTab() {
                     <strong>Average Utilization Rate:</strong> 61.5%
                   </div>
                   <div>
-                    <strong>Underutilized Count:</strong> {underutilized.length} employees
+                    <strong>Available Count:</strong> {availableCount} employees
                   </div>
                   <div>
                     <strong>LOTO/Safety Compliance:</strong> 100% Certified
@@ -292,7 +278,7 @@ const styles = {
   },
   mainGrid: {
     display: 'grid',
-    gridTemplateColumns: '1.8fr 1.2fr',
+    gridTemplateColumns: '1fr',
     gap: '24px',
   },
   panel: {
@@ -484,6 +470,21 @@ const styles = {
     padding: '12px',
     borderRadius: '6px',
     border: '1px solid var(--color-border)',
+  },
+  filterLabel: {
+    fontSize: '12px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    marginRight: '10px',
+  },
+  selectFilterCompact: {
+    padding: '8px 12px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card)',
+    color: 'var(--color-text-primary)',
+    outline: 'none',
+    fontSize: '13px',
   },
   reportRow: {
     display: 'flex',
