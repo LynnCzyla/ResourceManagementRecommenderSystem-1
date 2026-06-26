@@ -4,3 +4,6 @@ npm install -D nodemon
 
 npm install @supabase/supabase-js
 npm install nodemailer
+npm install multer
+npm install python-shell
+npm install uuid

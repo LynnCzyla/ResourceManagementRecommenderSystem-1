@@ -5,10 +5,21 @@ export default function EmployeeAssignmentsTab() {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
 
-  // Log Progress Form States
-  const [logHours, setLogHours] = useState('');
+  // Weekly Log Progress Form States
+  const [logWeek, setLogWeek] = useState('');
+  const [logPercentage, setLogPercentage] = useState('');
   const [logDesc, setLogDesc] = useState('');
   const [activeLogTaskId, setActiveLogTaskId] = useState(null);
+
+  const getCurrentWeek = () => {
+    const now = new Date();
+    const target = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const dayNum = target.getUTCDay() || 7;
+    target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((target - yearStart) / 86400000) + 1) / 7);
+    return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     setProjects(getProjects());
@@ -31,7 +42,7 @@ export default function EmployeeAssignmentsTab() {
 
   const handleLogProgress = (e, taskId) => {
     e.preventDefault();
-    if (!logHours || !logDesc) return;
+    if (!logWeek || !logPercentage || !logDesc) return;
 
     const allTasks = getTasks();
     const updatedTasks = allTasks.map(t => {
@@ -39,7 +50,8 @@ export default function EmployeeAssignmentsTab() {
         const logs = t.progressLogs || [];
         const newLog = {
           id: Date.now(),
-          hours: parseFloat(logHours),
+          week: logWeek,
+          percentage: parseInt(logPercentage, 10),
           description: logDesc,
           date: new Date().toISOString().split('T')[0]
         };
@@ -52,7 +64,8 @@ export default function EmployeeAssignmentsTab() {
     });
 
     saveTasks(updatedTasks);
-    setLogHours('');
+    setLogWeek('');
+    setLogPercentage('');
     setLogDesc('');
     setActiveLogTaskId(null);
     loadEmployeeTasks();
@@ -90,8 +103,8 @@ export default function EmployeeAssignmentsTab() {
 
       {/* Daily Tasks Tracker */}
       <div className="glass-card" style={styles.card}>
-        <h2 style={styles.sectionTitle}>Assigned Daily Tasks</h2>
-        <p style={styles.sectionSubtitle}>Select task progress status to sync updates with your Project Manager.</p>
+        <h2 style={styles.sectionTitle}>Assigned Weekly Tasks</h2>
+        <p style={styles.sectionSubtitle}>Log progress for the Monday–Friday workweek and share completion percentage with your Project Manager.</p>
 
         <div style={styles.taskList}>
           {tasks.length === 0 ? (
@@ -119,16 +132,12 @@ export default function EmployeeAssignmentsTab() {
                     <div style={styles.logsList}>
                       {task.progressLogs.map(log => (
                         <div key={log.id} style={styles.logItem}>
-                          <span style={{ ...styles.logDate, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle' }}>
-                              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                              <line x1="16" y1="2" x2="16" y2="6"></line>
-                              <line x1="8" y1="2" x2="8" y2="6"></line>
-                              <line x1="3" y1="10" x2="21" y2="10"></line>
-                            </svg>
-                            {log.date}
-                          </span>
-                          <span style={styles.logHoursBadge}>{log.hours} hrs</span>
+                          <div style={styles.logMetaRow}>
+                            <span style={styles.logWeekBadge}>{log.week || 'N/A'}</span>
+                            <span style={styles.logPercentBadge}>{log.percentage}% complete</span>
+                            <span style={styles.logDate}>{log.date}</span>
+                          </div>
+                          <span style={styles.logPercentBadge}>{log.percentage}% complete</span>
                           <span style={styles.logDescription}>{log.description}</span>
                         </div>
                       ))}
@@ -149,7 +158,8 @@ export default function EmployeeAssignmentsTab() {
                           setActiveLogTaskId(null);
                         } else {
                           setActiveLogTaskId(task.id);
-                          setLogHours('');
+                          setLogWeek(getCurrentWeek());
+                          setLogPercentage('');
                           setLogDesc('');
                         }
                       }}
@@ -160,7 +170,7 @@ export default function EmployeeAssignmentsTab() {
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle' }}>
                             <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
                           </svg>
-                          Log Progress
+                          Log Weekly Progress
                         </span>
                       )}
                     </button>
@@ -182,36 +192,46 @@ export default function EmployeeAssignmentsTab() {
                   </div>
                 </div>
 
-                {/* Collapsible log form */}
+                {/* Collapsible weekly log form */}
                 {activeLogTaskId === task.id && (
                   <form onSubmit={(e) => handleLogProgress(e, task.id)} style={styles.logForm}>
                     <div style={styles.logFormRow}>
-                      <div style={{ width: '120px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={styles.logLabel}>Hours Worked</label>
+                      <div style={{ width: '180px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={styles.logLabel}>Week</label>
+                        <input
+                          type="week"
+                          value={logWeek}
+                          onChange={(e) => setLogWeek(e.target.value)}
+                          style={styles.logInput}
+                          required
+                        />
+                      </div>
+                      <div style={{ width: '130px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={styles.logLabel}>% Complete</label>
                         <input
                           type="number"
-                          step="0.5"
-                          min="0.5"
-                          max="24"
-                          value={logHours}
-                          onChange={(e) => setLogHours(e.target.value)}
-                          placeholder="e.g. 4.5"
+                          step="1"
+                          min="0"
+                          max="100"
+                          value={logPercentage}
+                          onChange={(e) => setLogPercentage(e.target.value)}
+                          placeholder="e.g. 65"
                           style={styles.logInput}
                           required
                         />
                       </div>
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={styles.logLabel}>Task Progress Description</label>
+                        <label style={styles.logLabel}>Weekly Summary</label>
                         <input
                           type="text"
                           value={logDesc}
                           onChange={(e) => setLogDesc(e.target.value)}
-                          placeholder="Describe what you worked on..."
+                          placeholder="Summarize this week's work..."
                           style={styles.logInput}
                           required
                         />
                       </div>
-                      <button type="submit" style={styles.logSubmitBtn}>Submit Log</button>
+                      <button type="submit" style={styles.logSubmitBtn}>Submit Weekly Log</button>
                     </div>
                   </form>
                 )}
@@ -447,17 +467,30 @@ const styles = {
     fontSize: '11px',
     color: 'var(--color-text-muted)',
   },
-  logHoursBadge: {
-    backgroundColor: 'var(--color-primary-light)',
-    color: 'var(--color-success)',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    fontSize: '11px',
-    fontWeight: '700',
-  },
   logDescription: {
     flex: 1,
     minWidth: '150px',
+  },
+  logMetaRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '10px',
+    alignItems: 'center',
+    marginBottom: '6px',
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+  },
+  logWeekBadge: {
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  logPercentBadge: {
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    color: 'var(--color-primary)',
+    padding: '2px 6px',
+    borderRadius: '6px',
+    fontSize: '11px',
+    fontWeight: '700',
   },
   emptyText: {
     textAlign: 'center',

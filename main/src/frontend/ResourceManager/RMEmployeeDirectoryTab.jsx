@@ -9,7 +9,6 @@ export default function RMEmployeeDirectoryTab() {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [assignForm, setAssignForm] = useState({
     projectId: '',
-    estimatedHours: 8,
     startDate: new Date().toISOString().split('T')[0],
     notes: ''
   });
@@ -33,7 +32,6 @@ export default function RMEmployeeDirectoryTab() {
     setSelectedEmployee(emp);
     setAssignForm({
       projectId: '',
-      estimatedHours: 8,
       startDate: new Date().toISOString().split('T')[0],
       notes: ''
     });
@@ -215,19 +213,6 @@ export default function RMEmployeeDirectoryTab() {
                   <option value="2">Project Beta</option>
                   <option value="3">Project Gamma</option>
                 </select>
-              </div>
-
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Estimated Hours per Week</label>
-                <input
-                  type="number"
-                  value={assignForm.estimatedHours}
-                  onChange={(e) => setAssignForm({ ...assignForm, estimatedHours: parseInt(e.target.value) || 0 })}
-                  style={styles.formInput}
-                  min="1"
-                  max="40"
-                  required
-                />
               </div>
 
               <div style={styles.formGroup}>

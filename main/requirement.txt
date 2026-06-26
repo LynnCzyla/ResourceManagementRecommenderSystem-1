@@ -10,3 +10,5 @@ npm install
 
 npm install sweetalert2
 npm install @supabase/supabase-js
+npm install axios
+
