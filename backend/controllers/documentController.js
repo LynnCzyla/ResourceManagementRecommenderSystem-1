@@ -3,73 +3,201 @@ const storageService = require('../services/storageService');
 const supabase = require('../supabase');
 const path = require('path');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 
-/**
- * Process document with OCR + NLP
- * POST /api/employee/process-document
- */
+// Helper: get full profile from token (includes name)
+const getProfileFromToken = async (userId) => {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, employee_id, first_name, middle_name, last_name')
+        .eq('id', userId)
+        .single();
+    return { data, error };
+};
+
+// Helper: best-effort guess at a person's name in the document, for DISPLAY only
+// (e.g. "Found: 'Carlo Reyes'" in a confirmation prompt). Never used for security decisions.
+const extractPossibleName = (rawText) => {
+    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 15);
+
+    // Prefer an explicit "Name:" style label, common on certificates/forms
+    for (const line of lines) {
+        const labelMatch = line.match(/^(?:NAME|FULL NAME|APPLICANT)\s*[:\-]\s*(.+)$/i);
+        if (labelMatch && labelMatch[1].trim().length > 1) {
+            return labelMatch[1].trim();
+        }
+    }
+
+    // Otherwise guess: a short line of 2-4 Title Case words (common resume/cert header pattern)
+    const namePattern = /^([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,3})$/;
+    for (const line of lines) {
+        if (namePattern.test(line) && line.length < 50) {
+            return line;
+        }
+    }
+
+    return null;
+};
+
+// Helper: check if document content contains the employee's name
+const checkNameInContent = (rawText, firstName, middleName, lastName) => {
+    const text = rawText.toUpperCase();
+    const first = (firstName || '').toUpperCase().trim();
+    const middle = (middleName || '').toUpperCase().trim();
+    const last = (lastName || '').toUpperCase().trim();
+
+    // Check combinations — at minimum first + last must appear
+    const hasFirst = first && text.includes(first);
+    const hasLast = last && text.includes(last);
+    const hasMiddle = middle && text.includes(middle);
+
+    // Must have at least first name AND last name in the document
+    if (hasFirst && hasLast) return true;
+
+    // Also accept: last name + middle name (some certificates use middle initial)
+    if (hasLast && hasMiddle) return true;
+
+    return false;
+};
+
 exports.processDocument = async (req, res) => {
     try {
-        const { employeeId, documentType } = req.body;
         const file = req.file;
+        if (!file) return res.status(400).json({ success: false, error: 'No file uploaded' });
 
-        if (!file) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'No file uploaded' 
-            });
+        const { documentType } = req.body;
+
+        // ✅ STEP 1: Get logged-in employee from token (with full name)
+        const { data: profileData, error: profileError } = await getProfileFromToken(req.user.id);
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found for logged-in user' });
         }
 
-        console.log(`📄 Processing document: ${file.originalname}`);
-        console.log(`📏 File size: ${(file.size / 1024).toFixed(2)} KB`);
-        console.log(`👤 Employee: ${employeeId}`);
-        console.log(`📋 Type: ${documentType}`);
-        console.log(`📁 MIME Type: ${file.mimetype}`);
+        const employeeId = profileData.employee_id;
+        const employeeIdUpper = employeeId.toUpperCase();
+        const firstName = profileData.first_name || '';
+        const middleName = profileData.middle_name || '';
+        const lastName = profileData.last_name || '';
 
-        // 1. Upload file to Supabase Storage
-        console.log('📤 Uploading file to Supabase Storage...');
-        const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
+        // FormData sends booleans as strings, so check for both
+        const confirmMismatch = req.body.confirmMismatch === 'true' || req.body.confirmMismatch === true;
 
-        // 2. Save file locally for Python processing
-        const tempPath = path.join(__dirname, '../../shared-data/uploads', file.originalname);
-        const uploadDir = path.dirname(tempPath);
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
+        // ✅ LAYER 1 SECURITY: Check filename for EMP-XXX pattern
+        const filename = file.originalname;
+        const filenameUpper = filename.toUpperCase();
+        const filenameMatch = filenameUpper.match(/^(EMP-\d+)/);
+
+        if (filenameMatch) {
+            const fileEmployeeId = filenameMatch[1];
+            if (fileEmployeeId !== employeeIdUpper) {
+                if (!confirmMismatch) {
+                    console.log(`⚠️ Filename ID mismatch — expected "${employeeIdUpper}", filename says "${fileEmployeeId}". Awaiting user confirmation.`);
+
+                    return res.status(409).json({
+                        success: false,
+                        error: 'DOCUMENT_MISMATCH',
+                        requiresConfirmation: true,
+                        data: {
+                            reason: 'filename_id',
+                            expected: employeeIdUpper,
+                            found: fileEmployeeId,
+                            employeeId
+                        },
+                        message: `The file name suggests this document belongs to ${fileEmployeeId}, but you're signed in as ${employeeId}. The document doesn't appear to align with your information — are you sure you want to upload it?`
+                    });
+                }
+                console.log(`⚠️ Filename ID mismatch overridden by user (${employeeId}) — proceeding with upload`);
+            }
+        }
+
+        console.log(`📄 Processing: ${filename} for employee: ${employeeId}`);
+
+        // Save file temporarily for Python/OCR processing
+        const tempPath = path.join(__dirname, '../../shared-data/uploads', filename);
+        if (!fs.existsSync(path.dirname(tempPath))) {
+            fs.mkdirSync(path.dirname(tempPath), { recursive: true });
         }
         fs.writeFileSync(tempPath, file.buffer);
-        console.log(`📁 File saved to: ${tempPath}`);
 
-        // 3. Process with Python
-        console.log('🐍 Processing document with Python...');
-        console.log('⏳ This may take a moment...');
-        const result = await pythonService.processDocument(
-            tempPath,
-            employeeId,
-            documentType
-        );
+        // Run OCR + NLP via Python
+        const result = await pythonService.processDocument(tempPath, employeeId, documentType);
 
-        // 4. Clean up temp file
-        try {
-            if (fs.existsSync(tempPath)) {
-                fs.unlinkSync(tempPath);
-                console.log('🗑️ Temp file cleaned up');
-            }
-        } catch (e) {
-            console.warn('Could not delete temp file:', e);
-        }
+        // Clean up temp file
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e) {}
 
         if (!result || !result.success) {
-            return res.status(500).json({ 
-                success: false, 
-                error: result?.error || 'Python processing failed'
-            });
+            return res.status(500).json({ success: false, error: result?.error || 'Python processing failed' });
         }
 
-        // ============ STEP 5: SAVE DOCUMENT ONLY (NO SKILLS YET) ============
-        console.log('💾 Saving document to Supabase (skills pending approval)...');
-        
-        // Insert document record - WITHOUT skills
+        const rawText = result.ocr?.raw_text || result.ocr?.cleaned_text || '';
+        const rawTextUpper = rawText.toUpperCase();
+
+        // ✅ LAYER 2 SECURITY: Check EMP-XXX IDs in document content
+        const contentMatches = [...rawTextUpper.matchAll(/EMP-\d+/g)].map(m => m[0]);
+        const uniqueIds = [...new Set(contentMatches)];
+
+        console.log(`🔍 Employee IDs found in document: ${uniqueIds.join(', ') || 'none'}`);
+
+        if (uniqueIds.length > 0) {
+            const foreignIds = uniqueIds.filter(id => id !== employeeIdUpper);
+            if (foreignIds.length > 0) {
+                if (!confirmMismatch) {
+                    console.log(`⚠️ Content ID mismatch — expected "${employeeIdUpper}", document mentions "${foreignIds.join(', ')}". Awaiting user confirmation.`);
+
+                    return res.status(409).json({
+                        success: false,
+                        error: 'DOCUMENT_MISMATCH',
+                        requiresConfirmation: true,
+                        data: {
+                            reason: 'content_id',
+                            expected: employeeIdUpper,
+                            found: foreignIds.join(', '),
+                            employeeId
+                        },
+                        message: `This document mentions ID(s) ${foreignIds.join(', ')}, but you're signed in as ${employeeId}. The document doesn't appear to align with your information — are you sure you want to upload it?`
+                    });
+                }
+                console.log(`⚠️ Content ID mismatch overridden by user (${employeeId}) — proceeding with upload`);
+            }
+        }
+
+        // ✅ LAYER 3 SECURITY: Check employee name in document content
+        // Only applies when no EMP-XXX found (e.g. certificates)
+        if (uniqueIds.length === 0 && rawText.length > 50) {
+            console.log(`🔍 No EMP-ID found — checking name: ${firstName} ${lastName}`);
+
+            const nameFound = checkNameInContent(rawText, firstName, middleName, lastName);
+
+            if (!nameFound) {
+                if (!confirmMismatch) {
+                    const foundName = extractPossibleName(rawText);
+                    console.log(`⚠️ Name mismatch — expected "${firstName} ${lastName}", best guess "${foundName || 'none'}". Awaiting user confirmation.`);
+
+                    return res.status(409).json({
+                        success: false,
+                        error: 'DOCUMENT_MISMATCH',
+                        requiresConfirmation: true,
+                        data: {
+                            reason: 'name',
+                            expected: `${firstName} ${lastName}`.trim(),
+                            found: foundName || null,
+                            employeeId
+                        },
+                        message: foundName
+                            ? `This document appears to belong to "${foundName}", but your profile name is "${firstName} ${lastName}". The document doesn't appear to align with your information — are you sure you want to upload it?`
+                            : `This document doesn't appear to mention your name (${firstName} ${lastName}). The document doesn't appear to align with your information — are you sure you want to upload it?`
+                    });
+                }
+
+                console.log(`⚠️ Name mismatch overridden by user (${employeeId}) — proceeding with upload`);
+            } else {
+                console.log(`✅ Name check passed — "${firstName} ${lastName}" found in document`);
+            }
+        }
+
+        // ✅ ALL CHECKS PASSED — Upload to Supabase Storage
+        const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
+
+        // Save document record to database
         const { data: documentData, error: docError } = await supabase
             .from('documents')
             .insert({
@@ -87,31 +215,27 @@ exports.processDocument = async (req, res) => {
                 document_hash: result.ocr?.document_hash || '',
                 processed_at: new Date().toISOString(),
                 extraction_method: result.ocr?.method || 'unknown',
-                // ============ ADD THESE NEW FIELDS ============
-                extracted_skills: result.nlp?.skills || [],           // Store extracted skills for review
-                skills_approved: false,                               // Skills not yet approved
-                feedback_pending: true,                               // Waiting for feedback
-                approved_skills: [],                                  // Will be filled after feedback
-                rejected_skills: []                                   // Will be filled after feedback
+                extracted_skills: result.nlp?.skills || [],
+                skills_approved: false,
+                feedback_pending: true,
+                approved_skills: [],
+                rejected_skills: []
             })
             .select()
             .single();
 
-        if (docError) {
+        if (docError || !documentData) {
             console.error('Error saving document:', docError);
+            return res.status(docError?.status || 500).json({
+                success: false,
+                error: docError?.message || 'Failed to save document record'
+            });
         }
 
-        // ============ STEP 6: DO NOT SAVE SKILLS - WAIT FOR FEEDBACK ============
-        // Skills will be saved in the feedback controller when user approves
-
-        console.log(`📋 Document saved with ID: ${documentData?.id}`);
-        console.log(`📊 Extracted ${result.nlp?.skills?.length || 0} skills - pending approval`);
-
-        // ============ STEP 7: Return response with skills for feedback ============
         return res.json({
             success: true,
             data: {
-                documentId: documentData?.id || result.document_id,
+                documentId: documentData.id,
                 fileUrl: uploadResult.publicUrl,
                 ocr: result.ocr,
                 nlp: {
@@ -121,7 +245,6 @@ exports.processDocument = async (req, res) => {
                     prc_verified: result.nlp?.prc_verified || false
                 },
                 summary: result.summary,
-                // ============ ADD PENDING STATUS ============
                 feedback_required: true,
                 pending_skills: result.nlp?.skills || []
             },
@@ -130,75 +253,49 @@ exports.processDocument = async (req, res) => {
 
     } catch (error) {
         console.error('Document processing error:', error);
-        
-        try {
-            const tempPath = path.join(__dirname, '../../shared-data/uploads', req.file?.originalname);
-            if (fs.existsSync(tempPath)) {
-                fs.unlinkSync(tempPath);
-            }
-        } catch (e) {
-            // Ignore cleanup errors
-        }
-        
-        res.status(500).json({ 
-            success: false, 
-            error: error.message || 'Internal server error'
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Get employee documents
- * GET /api/employee/documents
- */
 exports.getDocuments = async (req, res) => {
     try {
-        const { employeeId } = req.query;
+        const { data: profileData, error } = await getProfileFromToken(req.user.id);
+        if (error || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
 
-        if (!employeeId) {
-            return res.status(400).json({
-                success: false,
-                error: 'employeeId is required'
-            });
-        }
-
-        const { data, error } = await supabase
+        const { data, error: fetchError } = await supabase
             .from('documents')
             .select('*')
-            .eq('employee_id', employeeId)
+            .eq('employee_id', profileData.employee_id)
             .order('created_at', { ascending: false });
 
-        if (error) {
-            throw error;
-        }
-
-        res.json({
-            success: true,
-            data: data
-        });
+        if (fetchError) throw fetchError;
+        res.json({ success: true, data });
 
     } catch (error) {
-        console.error('Get documents error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Get employee profile by employee_id
- * GET /api/employee/profile/:employeeId
- */
+exports.getCurrentProfile = async (req, res) => {
+    try {
+        const { data: profileData, error } = await getProfileFromToken(req.user.id);
+        if (error || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
+
+        res.json({ success: true, data: profileData });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 exports.getProfile = async (req, res) => {
     try {
         const { employeeId } = req.params;
 
-        if (!employeeId) {
-            return res.status(400).json({
-                success: false,
-                error: 'employeeId is required'
-            });
+        const { data: ownProfile, error: ownError } = await getProfileFromToken(req.user.id);
+        if (ownError || !ownProfile) return res.status(403).json({ success: false, error: 'Profile not found' });
+
+        if (ownProfile.employee_id !== employeeId) {
+            return res.status(403).json({ success: false, error: 'You can only view your own profile' });
         }
 
         const { data, error } = await supabase
@@ -207,74 +304,25 @@ exports.getProfile = async (req, res) => {
             .eq('employee_id', employeeId)
             .single();
 
-        if (error) {
-            console.error('Supabase error:', error);
-            if (error.code === 'PGRST116') {
-                return res.json({
-                    success: true,
-                    data: {
-                        employee_id: employeeId,
-                        first_name: 'Employee',
-                        last_name: 'Not Found',
-                        email: '',
-                        department: '',
-                        role: '',
-                        avatar_url: '',
-                        status: 'Active',
-                        availability_status: 'Available'
-                    }
-                });
-            }
-            throw error;
-        }
-
-        res.json({
-            success: true,
-            data: data
-        });
+        if (error) throw error;
+        res.json({ success: true, data });
 
     } catch (error) {
-        console.error('Get profile error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Update employee profile
- * PUT /api/employee/profile
- */
 exports.updateProfile = async (req, res) => {
     try {
-        const { 
-            employeeId, 
-            first_name, 
-            last_name, 
-            email, 
-            department, 
-            role, 
-            avatar_url,
-            contact_number,
-            location,
-            years_experience
-        } = req.body;
+        const { data: ownProfile, error: ownError } = await getProfileFromToken(req.user.id);
+        if (ownError || !ownProfile) return res.status(403).json({ success: false, error: 'Profile not found' });
 
-        if (!employeeId) {
-            return res.status(400).json({
-                success: false,
-                error: 'employeeId is required'
-            });
-        }
+        const employeeId = ownProfile.employee_id;
+        const { first_name, last_name, department, role, avatar_url, contact_number, location, years_experience } = req.body;
 
-        const updateData = {
-            updated_at: new Date().toISOString()
-        };
-
+        const updateData = { updated_at: new Date().toISOString() };
         if (first_name !== undefined) updateData.first_name = first_name;
         if (last_name !== undefined) updateData.last_name = last_name;
-        if (email !== undefined) updateData.email = email;
         if (department !== undefined) updateData.department = department;
         if (role !== undefined) updateData.role = role;
         if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
@@ -289,210 +337,39 @@ exports.updateProfile = async (req, res) => {
             .select()
             .single();
 
-        if (error) {
-            console.error('Supabase update error:', error);
-            throw error;
-        }
-
-        res.json({
-            success: true,
-            data: data,
-            message: 'Profile updated successfully'
-        });
+        if (error) throw error;
+        res.json({ success: true, data, message: 'Profile updated successfully' });
 
     } catch (error) {
-        console.error('Update profile error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Get employee skills
- * GET /api/employee/skills
- */
 exports.getSkills = async (req, res) => {
     try {
-        const { employeeId } = req.query;
+        const { data: ownProfile, error } = await getProfileFromToken(req.user.id);
+        if (error || !ownProfile) return res.json({ success: true, data: [] });
 
-        if (!employeeId) {
-            return res.status(400).json({
-                success: false,
-                error: 'employeeId is required'
-            });
-        }
-
-        const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('employee_id', employeeId)
-            .single();
-
-        if (profileError) {
-            console.error('Profile fetch error:', profileError);
-            return res.json({
-                success: true,
-                data: []
-            });
-        }
-
-        const { data, error } = await supabase
+        const { data, error: skillsError } = await supabase
             .from('employee_skills')
-            .select(`
-                id,
-                skill_id,
-                skills (
-                    id,
-                    skill_name,
-                    created_at
-                )
-            `)
-            .eq('profile_id', profileData.id);
+            .select(`id, skill_id, skills ( id, skill_name, created_at )`)
+            .eq('profile_id', ownProfile.id);
 
-        if (error) {
-            console.error('Skills fetch error:', error);
-            throw error;
-        }
+        if (skillsError) throw skillsError;
 
-        const skills = data
-            .map(item => item.skills)
-            .filter(skill => skill !== null);
-
-        res.json({
-            success: true,
-            data: skills
-        });
+        const skills = data.map(item => item.skills).filter(Boolean);
+        res.json({ success: true, data: skills });
 
     } catch (error) {
-        console.error('Get skills error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Get processing stats
- * GET /api/employee/stats
- */
 exports.getStats = async (req, res) => {
     try {
         const stats = await pythonService.getStats();
-        res.json({
-            success: true,
-            stats: stats
-        });
+        res.json({ success: true, stats });
     } catch (error) {
-        console.error('Stats error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-};
-
-/**
- * Process OCR only
- * POST /api/employee/process-ocr
- */
-exports.processOCR = async (req, res) => {
-    try {
-        const { employeeId, documentType } = req.body;
-        const file = req.file;
-
-        if (!file) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'No file uploaded' 
-            });
-        }
-
-        const uploadPath = path.join(__dirname, '../../shared-data/uploads', file.originalname);
-        fs.writeFileSync(uploadPath, file.buffer);
-
-        const result = await pythonService.processOCR(uploadPath, employeeId, documentType);
-
-        try {
-            fs.unlinkSync(uploadPath);
-        } catch (e) {
-            console.warn('Could not delete temp file:', e);
-        }
-
-        res.json({
-            success: true,
-            data: result
-        });
-
-    } catch (error) {
-        console.error('OCR processing error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
-        });
-    }
-};
-
-/**
- * Process NLP only
- * POST /api/employee/process-nlp
- */
-exports.processNLP = async (req, res) => {
-    try {
-        const { text, employeeId } = req.body;
-
-        if (!text) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Text is required' 
-            });
-        }
-
-        const result = await pythonService.processNLP(text, employeeId);
-
-        res.json({
-            success: true,
-            data: result
-        });
-
-    } catch (error) {
-        console.error('NLP processing error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
-        });
-    }
-};
-
-/**
- * Validate accuracy
- * POST /api/employee/validate-accuracy
- */
-exports.validateAccuracy = async (req, res) => {
-    try {
-        const { groundTruth, ocrOutput } = req.body;
-
-        if (!groundTruth || !ocrOutput) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Ground truth and OCR output required' 
-            });
-        }
-
-        const result = await pythonService.validateAccuracy(groundTruth, ocrOutput);
-
-        res.json({
-            success: true,
-            metrics: result.metrics
-        });
-
-    } catch (error) {
-        console.error('Validation error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
