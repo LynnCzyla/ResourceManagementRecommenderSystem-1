@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { supabase } from '../../lib/supabaseClient';
 
 const API_URL = 'http://localhost:5000/api';
 
@@ -18,6 +19,13 @@ export default function SkillFeedbackModal({
     const [submitting, setSubmitting] = useState(false);
     const [hasExistingFeedback, setHasExistingFeedback] = useState(false);
 
+    const getAuthHeader = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) return { Authorization: `Bearer ${session.access_token}` };
+        const token = localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('sb-wea-auth-token');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    };
+
     // Initialize with all skills as pending
     useEffect(() => {
         if (isOpen && extractedSkills) {
@@ -32,8 +40,10 @@ export default function SkillFeedbackModal({
 
     const fetchExistingFeedback = async () => {
         try {
+            const authHeader = await getAuthHeader();
             const response = await axios.get(
-                `${API_URL}/employee/pending-feedback/${documentId}?employeeId=${employeeId}`
+                `${API_URL}/employee/pending-feedback/${documentId}?employeeId=${employeeId}`,
+                { headers: authHeader }
             );
             if (response.data.success && response.data.data.has_feedback) {
                 const data = response.data.data;
@@ -64,13 +74,17 @@ export default function SkillFeedbackModal({
     const handleSubmit = async () => {
         setSubmitting(true);
         try {
-            const response = await axios.post(`${API_URL}/employee/skill-feedback`, {
-                employeeId: employeeId,
-                documentId: documentId,
-                approved_skills: approved,
-                rejected_skills: rejected,
-                document_type: documentType
-            });
+            const authHeader = await getAuthHeader();
+                    const response = await axios.post(
+                `${API_URL}/employee/skill-feedback`,
+                {
+                    documentId,
+                    approved_skills: approved,
+                    rejected_skills: rejected,
+                    document_type: documentType
+                },
+                { headers: authHeader }
+            );
 
             if (response.data.success) {
                 // Callback with approved skills
@@ -100,6 +114,7 @@ export default function SkillFeedbackModal({
     const pendingSkills = extractedSkills.filter(s => 
         !approved.includes(s) && !rejected.includes(s)
     );
+    const canSave = !!documentId && !submitting;
 
     if (!isOpen) return null;
 
@@ -228,10 +243,10 @@ export default function SkillFeedbackModal({
                             onClick={handleSubmit} 
                             style={{
                                 ...modalStyles.submitBtn,
-                                opacity: pendingSkills.length > 0 ? 0.5 : 1,
-                                cursor: pendingSkills.length > 0 ? 'not-allowed' : 'pointer'
+                                opacity: canSave ? 1 : 0.5,
+                                cursor: canSave ? 'pointer' : 'not-allowed'
                             }}
-                            disabled={submitting || pendingSkills.length > 0}
+                            disabled={!canSave}
                         >
                             {submitting ? '💾 Saving...' : '💾 Save Feedback'}
                         </button>
