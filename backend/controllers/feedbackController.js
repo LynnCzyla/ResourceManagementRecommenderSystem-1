@@ -1,294 +1,373 @@
+const pythonService = require('../services/pythonService');
+const storageService = require('../services/storageService');
 const supabase = require('../supabase');
+const path = require('path');
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
-/**
- * Save skill feedback - THIS IS WHERE SKILLS ARE ACTUALLY SAVED
- * POST /api/employee/skill-feedback
- */
-exports.saveSkillFeedback = async (req, res) => {
+exports.processDocument = async (req, res) => {
     try {
-        const { 
-            employeeId, 
-            documentId, 
-            approved_skills, 
-            rejected_skills,
-            document_type 
-        } = req.body;
-
-        console.log('📝 Saving skill feedback...');
-        console.log(`   Employee: ${employeeId}`);
-        console.log(`   Document: ${documentId}`);
-        console.log(`   Approved: ${approved_skills?.length || 0}`);
-        console.log(`   Rejected: ${rejected_skills?.length || 0}`);
-
-        if (!employeeId || !documentId) {
-            return res.status(400).json({
-                success: false,
-                error: 'employeeId and documentId are required'
-            });
+        const file = req.file;
+        if (!file) {
+            return res.status(400).json({ success: false, error: 'No file uploaded' });
         }
 
-        // ============ SAVE SKILLS ONLY IF APPROVED ============
-        if (approved_skills && approved_skills.length > 0) {
-            console.log(`✅ Saving ${approved_skills.length} approved skills...`);
-            
-            // Get employee profile_id
-            const { data: profileData, error: profileError } = await supabase
-                .from('profiles')
-                .select('id')
-                .eq('employee_id', employeeId)
-                .single();
+        const { documentType } = req.body;
 
-            if (profileError) {
-                console.error('Error fetching profile:', profileError);
-                return res.status(500).json({
-                    success: false,
-                    error: 'Profile not found'
-                });
-            }
+        // SECURITY: Get employeeId from token, not body
+        const loggedInEmail = req.user.email;
+        const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('employee_id')
+            .eq('email', loggedInEmail)
+            .single();
 
-            // Add each approved skill
-            let skillsSaved = 0;
-            for (const skillName of approved_skills) {
-                // Check if skill exists
-                const { data: existingSkill } = await supabase
-                    .from('skills')
-                    .select('id')
-                    .eq('skill_name', skillName)
-                    .maybeSingle();
-
-                let skillId;
-                if (existingSkill) {
-                    skillId = existingSkill.id;
-                } else {
-                    // Insert new skill
-                    const { data: newSkill } = await supabase
-                        .from('skills')
-                        .insert({ skill_name: skillName })
-                        .select()
-                        .single();
-                    skillId = newSkill?.id;
-                    if (skillId) {
-                        console.log(`   ✅ Added new skill: ${skillName}`);
-                    }
-                }
-
-                if (skillId) {
-                    // Check if already linked to employee
-                    const { data: existingLink } = await supabase
-                        .from('employee_skills')
-                        .select('id')
-                        .eq('profile_id', profileData.id)
-                        .eq('skill_id', skillId)
-                        .maybeSingle();
-
-                    if (!existingLink) {
-                        await supabase
-                            .from('employee_skills')
-                            .insert({
-                                profile_id: profileData.id,
-                                skill_id: skillId
-                            });
-                        skillsSaved++;
-                    }
-                }
-            }
-            console.log(`✅ Saved ${skillsSaved} skills to employee profile`);
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found for logged-in user' });
         }
 
-        // ============ SAVE FEEDBACK RECORD ============
-        const { data: feedbackData, error: feedbackError } = await supabase
-            .from('skill_feedback')
+        const employeeId = profileData.employee_id;
+
+        console.log(`📄 Processing: ${file.originalname}`);
+        console.log(`👤 Verified Employee: ${employeeId}`);
+
+        const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
+
+        const tempPath = path.join(__dirname, '../../shared-data/uploads', file.originalname);
+        const uploadDir = path.dirname(tempPath);
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        fs.writeFileSync(tempPath, file.buffer);
+
+        const result = await pythonService.processDocument(tempPath, employeeId, documentType);
+
+        try {
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        } catch (e) {}
+
+        if (!result || !result.success) {
+            return res.status(500).json({ success: false, error: result?.error || 'Python processing failed' });
+        }
+
+        const { data: documentData, error: docError } = await supabase
+            .from('documents')
             .insert({
-                id: uuidv4(),
                 employee_id: employeeId,
-                document_id: documentId,
-                approved_skills: approved_skills || [],
-                rejected_skills: rejected_skills || [],
-                document_type: document_type || 'Resume',
-                created_at: new Date().toISOString(),
-                processed: true,
-                processed_at: new Date().toISOString()
+                document_type: documentType,
+                file_name: uploadResult.fileName,
+                file_path: uploadResult.filePath,
+                file_size: uploadResult.fileSize,
+                mime_type: uploadResult.mimeType,
+                raw_ocr_text: result.ocr?.raw_text || '',
+                cleaned_ocr_text: result.ocr?.cleaned_text || '',
+                ocr_confidence: result.ocr?.confidence || 0,
+                word_count: result.ocr?.word_count || 0,
+                char_count: result.ocr?.char_count || 0,
+                document_hash: result.ocr?.document_hash || '',
+                processed_at: new Date().toISOString(),
+                extraction_method: result.ocr?.method || 'unknown',
+                extracted_skills: result.nlp?.skills || [],
+                skills_approved: false,
+                feedback_pending: true,
+                approved_skills: [],
+                rejected_skills: []
             })
             .select()
             .single();
 
-        if (feedbackError) {
-            console.error('Error saving feedback:', feedbackError);
-            return res.status(500).json({
-                success: false,
-                error: feedbackError.message
-            });
-        }
+        if (docError) console.error('Error saving document:', docError);
 
-        // ============ UPDATE DOCUMENT WITH APPROVED SKILLS ============
-        const { error: docError } = await supabase
-            .from('documents')
-            .update({
-                approved_skills: approved_skills || [],
-                rejected_skills: rejected_skills || [],
-                skills_approved: true,
-                feedback_pending: false,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', documentId);
-
-        if (docError) {
-            console.error('Error updating document:', docError);
-        }
-
-        res.json({
+        return res.json({
             success: true,
-            data: feedbackData,
-            message: `✅ ${approved_skills?.length || 0} skills saved successfully!`
+            data: {
+                documentId: documentData?.id || result.document_id,
+                fileUrl: uploadResult.publicUrl,
+                ocr: result.ocr,
+                nlp: {
+                    skills: result.nlp?.skills || [],
+                    categorized_skills: result.nlp?.categorized_skills || [],
+                    prc_license: result.nlp?.prc_license || null,
+                    prc_verified: result.nlp?.prc_verified || false
+                },
+                summary: result.summary,
+                feedback_required: true,
+                pending_skills: result.nlp?.skills || []
+            },
+            message: 'Document processed. Please review and approve skills.'
         });
 
     } catch (error) {
-        console.error('Save feedback error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        console.error('Document processing error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Internal server error' });
     }
 };
 
-/**
- * Get pending feedback for a document
- * GET /api/employee/pending-feedback/:documentId
- */
+exports.getDocuments = async (req, res) => {
+    try {
+        const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('employee_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
+        }
+
+        const { data, error } = await supabase
+            .from('documents')
+            .select('*')
+            .eq('employee_id', profileData.employee_id)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        res.json({ success: true, data: data });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.getProfile = async (req, res) => {
+    try {
+        const { employeeId } = req.params;
+
+        const { data: ownProfile, error: ownError } = await supabase
+            .from('profiles')
+            .select('employee_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (ownError || !ownProfile) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
+        }
+
+        if (ownProfile.employee_id !== employeeId) {
+            return res.status(403).json({ success: false, error: 'You can only view your own profile' });
+        }
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('employee_id', employeeId)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                return res.json({
+                    success: true,
+                    data: {
+                        employee_id: employeeId,
+                        first_name: 'Employee',
+                        last_name: 'Not Found',
+                        email: '', department: '', role: '',
+                        avatar_url: '', status: 'Active',
+                        availability_status: 'Available'
+                    }
+                });
+            }
+            throw error;
+        }
+
+        res.json({ success: true, data: data });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.updateProfile = async (req, res) => {
+    try {
+        const { data: ownProfile, error: ownError } = await supabase
+            .from('profiles')
+            .select('employee_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (ownError || !ownProfile) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
+        }
+
+        const employeeId = ownProfile.employee_id;
+        const {
+            first_name, last_name, email, department,
+            role, avatar_url, contact_number, location, years_experience
+        } = req.body;
+
+        const updateData = { updated_at: new Date().toISOString() };
+        if (first_name !== undefined) updateData.first_name = first_name;
+        if (last_name !== undefined) updateData.last_name = last_name;
+        if (email !== undefined) updateData.email = email;
+        if (department !== undefined) updateData.department = department;
+        if (role !== undefined) updateData.role = role;
+        if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
+        if (contact_number !== undefined) updateData.contact_number = contact_number;
+        if (location !== undefined) updateData.location = location;
+        if (years_experience !== undefined) updateData.years_experience = years_experience;
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .update(updateData)
+            .eq('employee_id', employeeId)
+            .select()
+            .single();
+
+        if (error) throw error;
+        res.json({ success: true, data: data, message: 'Profile updated successfully' });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.getSkills = async (req, res) => {
+    try {
+        const { data: ownProfile, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, employee_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (profileError || !ownProfile) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const { data, error } = await supabase
+            .from('employee_skills')
+            .select(`id, skill_id, skills ( id, skill_name, created_at )`)
+            .eq('profile_id', ownProfile.id);
+
+        if (error) throw error;
+
+        const skills = data.map(item => item.skills).filter(Boolean);
+        res.json({ success: true, data: skills });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.getStats = async (req, res) => {
+    try {
+        const stats = await pythonService.getStats();
+        res.json({ success: true, stats: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 exports.getPendingFeedback = async (req, res) => {
     try {
         const { documentId } = req.params;
-        const { employeeId } = req.query;
 
-        if (!documentId) {
-            return res.status(400).json({
-                success: false,
-                error: 'documentId is required'
-            });
+        const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('employee_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
         }
 
-        // Get the document
-        const { data: docData, error: docError } = await supabase
+        const { data: document, error: documentError } = await supabase
             .from('documents')
-            .select('*')
+            .select('id, employee_id, approved_skills, rejected_skills, feedback_pending')
             .eq('id', documentId)
             .single();
 
-        if (docError) {
-            console.error('Error fetching document:', docError);
-            return res.status(500).json({
-                success: false,
-                error: docError.message
-            });
+        if (documentError) {
+            if (documentError.code === 'PGRST116') {
+                return res.status(404).json({ success: false, error: 'Document not found' });
+            }
+            throw documentError;
         }
 
-        // Check if feedback already exists
-        const { data: existingFeedback, error: feedbackError } = await supabase
-            .from('skill_feedback')
-            .select('*')
-            .eq('document_id', documentId)
-            .eq('employee_id', employeeId)
-            .maybeSingle();
+        if (!document) {
+            return res.status(404).json({ success: false, error: 'Document not found' });
+        }
 
-        // Get extracted skills from document
-        const extractedSkills = docData.extracted_skills || [];
-
-        if (existingFeedback) {
-            const approved = existingFeedback.approved_skills || [];
-            const rejected = existingFeedback.rejected_skills || [];
-            const pending = extractedSkills.filter(
-                s => !approved.includes(s) && !rejected.includes(s)
-            );
-
-            return res.json({
-                success: true,
-                data: {
-                    document_id: documentId,
-                    extracted_skills: extractedSkills,
-                    approved_skills: approved,
-                    rejected_skills: rejected,
-                    pending_skills: pending,
-                    has_feedback: true,
-                    feedback: existingFeedback
-                }
-            });
+        if (document.employee_id !== profileData.employee_id) {
+            return res.status(403).json({ success: false, error: 'You can only view feedback for your own documents' });
         }
 
         res.json({
             success: true,
             data: {
-                document_id: documentId,
-                extracted_skills: extractedSkills,
-                approved_skills: [],
-                rejected_skills: [],
-                pending_skills: extractedSkills,
-                has_feedback: false
+                has_feedback: document.feedback_pending === false,
+                approved_skills: document.approved_skills || [],
+                rejected_skills: document.rejected_skills || []
             }
         });
-
     } catch (error) {
-        console.error('Get pending feedback error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        console.error('Error fetching pending feedback:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Get feedback statistics
- * GET /api/employee/feedback-stats
- */
-exports.getFeedbackStats = async (req, res) => {
+exports.saveSkillFeedback = async (req, res) => {
     try {
-        const { employeeId } = req.query;
+        const { documentId, approved_skills = [], rejected_skills = [], document_type } = req.body;
 
-        let query = supabase.from('skill_feedback').select('*');
-
-        if (employeeId) {
-            query = query.eq('employee_id', employeeId);
+        if (!documentId) {
+            return res.status(400).json({ success: false, error: 'Document ID is required' });
         }
 
-        const { data, error } = await query;
+        const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, employee_id')
+            .eq('id', req.user.id)
+            .single();
 
-        if (error) {
-            console.error('Error fetching feedback stats:', error);
-            return res.status(500).json({
-                success: false,
-                error: error.message
-            });
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
         }
 
-        const totalFeedback = data.length;
-        const totalApproved = data.reduce((sum, f) => sum + (f.approved_skills?.length || 0), 0);
-        const totalRejected = data.reduce((sum, f) => sum + (f.rejected_skills?.length || 0), 0);
+        const { data: document, error: documentError } = await supabase
+            .from('documents')
+            .select('id, employee_id')
+            .eq('id', documentId)
+            .single();
 
-        const allApproved = new Set();
-        const allRejected = new Set();
-        data.forEach(f => {
-            (f.approved_skills || []).forEach(s => allApproved.add(s));
-            (f.rejected_skills || []).forEach(s => allRejected.add(s));
-        });
+        if (documentError || !document) {
+            return res.status(404).json({ success: false, error: 'Document not found' });
+        }
+
+        if (document.employee_id !== profileData.employee_id) {
+            return res.status(403).json({ success: false, error: 'You can only save feedback for your own documents' });
+        }
+
+        const updatePayload = {
+            approved_skills: approved_skills || [],
+            rejected_skills: rejected_skills || [],
+            feedback_pending: false,
+            skills_approved: true,
+            updated_at: new Date().toISOString()
+        };
+
+        if (document_type !== undefined) {
+            updatePayload.document_type = document_type;
+        }
+
+        const { data: updatedDocument, error: updateError } = await supabase
+            .from('documents')
+            .update(updatePayload)
+            .eq('id', documentId)
+            .select()
+            .single();
+
+        if (updateError) {
+            throw updateError;
+        }
 
         res.json({
             success: true,
-            data: {
-                total_feedback_sessions: totalFeedback,
-                total_approved_skills: totalApproved,
-                total_rejected_skills: totalRejected,
-                unique_approved_skills: allApproved.size,
-                unique_rejected_skills: allRejected.size,
-                approved_skills_list: Array.from(allApproved),
-                rejected_skills_list: Array.from(allRejected)
-            }
+            data: { documentId: updatedDocument.id },
+            message: 'Feedback saved successfully'
         });
-
     } catch (error) {
-        console.error('Get feedback stats error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        console.error('Error saving skill feedback:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 };
