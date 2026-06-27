@@ -169,9 +169,18 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         const { user, session } = data;
         
         const loginTime = Date.now();
-        localStorage.setItem('token', session.access_token);
         localStorage.setItem('user', JSON.stringify(user));
+        if (session?.access_token) {
+          localStorage.setItem('token', session.access_token);
+        }
         localStorage.setItem('loginTime', loginTime.toString());
+
+        if (session?.access_token && session?.refresh_token) {
+          await supabase.auth.setSession({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token
+          });
+        }
 
         window.history.replaceState(null, '', '/dashboard');
         onLogin(user);
