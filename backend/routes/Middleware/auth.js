@@ -1,7 +1,9 @@
 // middleware/auth.js
-const supabase = require("../../supabase");
+const path = require('path');
+const supabase = require(path.join(__dirname, '../../supabase'));
 
-// Cache session timeout (refresh every 5 minutes)
+console.log('✅ Auth middleware loaded, supabase:', !!supabase); // debug
+
 let cachedSessionTimeout = 30;
 let lastFetchTime = 0;
 
