@@ -344,7 +344,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         setError(null);
         await fetchUsers();
         showSuccessAlert(
-          `User ${formData.first_name} ${formData.last_name} has been created successfully!`,
+          `User ${formData.first_name} ${formData.last_name} has been created successfully! The temporary password is ${data.temporary_password}`,
           'Account Created!'
         );
       } else {

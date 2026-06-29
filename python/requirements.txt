@@ -1,5 +1,6 @@
 
 
+pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.7.1/en_core_web_md-3.7.1-py3-none-any.whl
 
 # Module 1: Image Pre-Processing & OCR
 opencv-python==4.7.0.72
@@ -24,7 +25,8 @@ joblib==1.2.0
 # Accuracy Metrics
 python-Levenshtein==0.21.1
 scikit-learn==1.2.2
-
+pip install PyPDF2 pdfplumber
+pip install pdf2image
 
 
 # Database (if using Python DB connections)

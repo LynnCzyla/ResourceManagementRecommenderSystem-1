@@ -21,6 +21,16 @@ const upload = multer({
     }
 });
 
+// ============ LOAD FEEDBACK CONTROLLER ============
+let feedbackController;
+try {
+    feedbackController = require('../../controllers/feedbackController');
+    console.log('✅ Feedback controller loaded');
+} catch (error) {
+    console.log('⚠️ Feedback controller not found');
+    feedbackController = null;
+}
+
 // ============ DOCUMENT ROUTES (ALL PROTECTED) ============
 router.post('/process-document', verifyToken, upload.single('document'), documentController.processDocument);
 router.get('/documents', verifyToken, documentController.getDocuments);
@@ -35,28 +45,43 @@ router.get('/skills', verifyToken, documentController.getSkills);
 router.get('/stats', verifyToken, documentController.getStats);
 
 // ============ FEEDBACK ROUTES ============
-let feedbackController;
-try {
-    feedbackController = require('../../controllers/feedbackController');
-    console.log('✅ Feedback controller loaded');
-} catch (error) {
-    console.log('⚠️ Feedback controller not found');
-    feedbackController = null;
-}
-
 if (feedbackController) {
+    // Save skill feedback (triggers auto-sync)
     if (typeof feedbackController.saveSkillFeedback === 'function') {
         router.post('/skill-feedback', verifyToken, feedbackController.saveSkillFeedback);
         console.log('✅ POST /skill-feedback route added');
     }
+    
+    // Get pending feedback
     if (typeof feedbackController.getPendingFeedback === 'function') {
         router.get('/pending-feedback/:documentId', verifyToken, feedbackController.getPendingFeedback);
         console.log('✅ GET /pending-feedback/:documentId route added');
     }
+    
+    // Get feedback stats
     if (typeof feedbackController.getFeedbackStats === 'function') {
         router.get('/feedback-stats', verifyToken, feedbackController.getFeedbackStats);
         console.log('✅ GET /feedback-stats route added');
     }
+    
+    // Clean up duplicate skills in database
+    if (typeof feedbackController.cleanupDuplicateSkills === 'function') {
+        router.post('/cleanup-duplicates', feedbackController.cleanupDuplicateSkills);
+        console.log('✅ POST /cleanup-duplicates route added');
+    }
+    
+    // ============ 🔥 MOVE THIS HERE ============
+    // Manually sync skills from learned_skills.json to database
+    if (typeof feedbackController.syncSkills === 'function') {
+        router.post('/sync-skills', verifyToken, feedbackController.syncSkills);
+        console.log('✅ POST /sync-skills route added');
+    }
+
+    if (typeof feedbackController.resetSkillsFromJson === 'function') {
+        router.post('/reset-skills', verifyToken, feedbackController.resetSkillsFromJson);
+        console.log('✅ POST /reset-skills route added');
+    }
+    // ==========================================
 }
 
 module.exports = router;

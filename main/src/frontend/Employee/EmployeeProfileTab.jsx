@@ -195,7 +195,7 @@ export default function EmployeeProfileTab() {
     try {
       const authHeader = await getAuthHeader();
       let actualEmployeeId = employeeId;
-
+  
       if (!actualEmployeeId || !/^EMP-\d+/i.test(actualEmployeeId)) {
         const res = await axios.get(`${API_URL}/employee/profile`, { headers: authHeader });
         if (res.data.success) {
@@ -205,9 +205,9 @@ export default function EmployeeProfileTab() {
           throw new Error(res.data.error || 'Failed to resolve current profile');
         }
       }
-
+  
       if (!actualEmployeeId) throw new Error('Unable to determine employee ID');
-
+  
       const profileRes = await axios.get(`${API_URL}/employee/profile/${actualEmployeeId}`, { headers: authHeader });
       if (profileRes.data.success) {
         const d = profileRes.data.data;
@@ -229,13 +229,23 @@ export default function EmployeeProfileTab() {
           role: ''
         });
       }
-
+  
       const skillsRes = await axios.get(`${API_URL}/employee/skills?employeeId=${actualEmployeeId}`, { headers: authHeader });
       if (skillsRes.data.success) setEmployeeSkills(skillsRes.data.data.map(s => s.skill_name || s));
-
+  
+      // ============ FIX: Separate documents by type ============
       const docsRes = await axios.get(`${API_URL}/employee/documents?employeeId=${actualEmployeeId}`, { headers: authHeader });
-      if (docsRes.data.success) setEmployeeDocuments(docsRes.data.data);
-
+      if (docsRes.data.success) {
+        const allDocs = docsRes.data.data;
+        
+        // Separate into resumes and certificates
+        const resumes = allDocs.filter(doc => doc.document_type === 'Resume');
+        const certificates = allDocs.filter(doc => doc.document_type === 'Certificate');
+        
+        setEmployeeDocuments(resumes); // Only resumes for CV section
+        setCertifications(certificates); // Certificates for certifications section
+      }
+  
     } catch (err) {
       console.error('❌ Error fetching employee data:', err);
       if (err.response?.status === 404) {
