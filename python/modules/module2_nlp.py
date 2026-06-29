@@ -264,15 +264,27 @@ class NLPProcessor:
         
         # Learn new skills
         new_skills = []
-        for skill in skills:
-            if skill not in self.learned_skills:
-                self.learned_skills.add(skill)
-                new_skills.append(skill)
-                self.stats['new_skills_learned'] += 1
+
+        # ============ DISABLE AUTO-LEARNING ============
+        # for skill in skills:
+        #    if skill not in self.learned_skills:
+        #     self.learned_skills.add(skill)
+        #       new_skills.append(skill)
+        #       self.stats['new_skills_learned'] += 1
         
         # Re-discover categories periodically
         if len(new_skills) > 0 or len(self.learned_skills) % 10 == 0:
             self._discover_categories()
+        
+        # ============ ADD SYNONYM DETECTION ============
+        # Check for synonyms every 5 documents
+        if self.stats['documents_analyzed'] > 0:
+            if len(self.learned_skills) > 5:
+                print(f"[NLP] Checking for synonyms after {self.stats['documents_analyzed']} documents...")
+                merged = self.merge_synonyms_dynamically()
+                if merged > 0:
+                    print(f"[NLP] Successfully merged {merged} duplicate skills!")
+        # ==============================================
         
         self.stats['documents_analyzed'] += 1
         
@@ -356,6 +368,161 @@ class NLPProcessor:
             
         except Exception as e:
             print(f"[NLP] Category discovery error: {e}")
+    
+    # ============ DYNAMIC SYNONYM DETECTION ============
+    def _calculate_similarity(self, skill1, skill2):
+        """Calculate semantic similarity between two skills using word vectors"""
+        try:
+            doc1 = self.nlp(skill1)
+            doc2 = self.nlp(skill2)
+            
+            if not doc1.vector.any() or not doc2.vector.any():
+                return 0.0
+            
+            return doc1.similarity(doc2)
+        except:
+            return 0.0
+
+    def _find_synonym_groups(self, threshold=0.75):
+        """Dynamically discover synonym groups from learned skills"""
+        if len(self.learned_skills) < 3:
+            return []
+        
+        skills_list = list(self.learned_skills)
+        n = len(skills_list)
+        
+        # Find similar pairs using word vectors
+        synonym_groups = []
+        used = set()
+        
+        for i in range(n):
+            if skills_list[i] in used:
+                continue
+            
+            group = [skills_list[i]]
+            used.add(skills_list[i])
+            
+            for j in range(i + 1, n):
+                if skills_list[j] in used:
+                    continue
+                
+                sim = self._calculate_similarity(skills_list[i], skills_list[j])
+                if sim > threshold:
+                    group.append(skills_list[j])
+                    used.add(skills_list[j])
+            
+            if len(group) > 1:
+                synonym_groups.append(group)
+        
+        # Also check by word overlap (for phrases with shared core words)
+        for skill in skills_list:
+            if skill in used:
+                continue
+            
+            skill_words = set(skill.lower().split())
+            if len(skill_words) < 2:
+                continue
+            
+            group = [skill]
+            used.add(skill)
+            
+            for other in skills_list:
+                if other in used:
+                    continue
+                
+                other_words = set(other.lower().split())
+                overlap = len(skill_words & other_words)
+                
+                # If they share 2+ words, they're likely related
+                if overlap >= 2:
+                    group.append(other)
+                    used.add(other)
+            
+            if len(group) > 1:
+                # Check if this group should merge with existing groups
+                merged = False
+                for existing_group in synonym_groups:
+                    if set(existing_group) & set(group):
+                        existing_group.extend([s for s in group if s not in existing_group])
+                        merged = True
+                        break
+                
+                if not merged:
+                    synonym_groups.append(group)
+        
+        return synonym_groups
+
+    def merge_synonyms_dynamically(self):
+        """Dynamically merge synonym skills without hardcoding"""
+        if len(self.learned_skills) < 3:
+            return 0
+        
+        # Find synonym groups
+        synonym_groups = self._find_synonym_groups(threshold=0.75)
+        
+        if not synonym_groups:
+            return 0
+        
+        merged_count = 0
+        merged_skills = []
+        
+        for group in synonym_groups:
+            if len(group) <= 1:
+                continue
+            
+            # Use the shortest/most common skill name as the master
+            # Prefer the one with most words (more descriptive)
+            master = max(group, key=lambda x: len(x.split()))
+            
+            # Also prefer existing in dictionary
+            for skill in group:
+                if skill in self.skill_dictionary:
+                    master = skill
+                    break
+            
+            # Remove duplicates from learned_skills
+            for skill in group:
+                if skill != master and skill in self.learned_skills:
+                    self.learned_skills.remove(skill)
+                    merged_count += 1
+                    merged_skills.append(f"{skill} → {master}")
+                    
+                    # Update dictionary
+                    if skill in self.skill_dictionary:
+                        # Keep the master's category or use the skill's category
+                        if master not in self.skill_dictionary:
+                            self.skill_dictionary[master] = self.skill_dictionary[skill]
+                        del self.skill_dictionary[skill]
+                    
+                    # Update skill_candidates
+                    for word in skill.split():
+                        if word in self.skill_candidates:
+                            # Transfer to master
+                            for master_word in master.split():
+                                if master_word not in self.skill_candidates:
+                                    self.skill_candidates[master_word] = self.skill_candidates[word]
+            
+            # Ensure master is in learned_skills
+            if master not in self.learned_skills:
+                self.learned_skills.add(master)
+            
+            # Update categories
+            if master not in self.skill_dictionary:
+                self.skill_dictionary[master] = 'Other'
+        
+        # Save after merging
+        if merged_count > 0:
+            # Re-discover categories after merging
+            self._discover_categories()
+            self._save_data()
+            print(f"[NLP] Dynamically merged {merged_count} duplicate skills:")
+            for merged in merged_skills[:5]:  # Show first 5
+                print(f"   {merged}")
+            if len(merged_skills) > 5:
+                print(f"   ... and {len(merged_skills) - 5} more")
+        
+        return merged_count
+    # ==================================================
     
     def _extract_phrases(self, text):
         """Extract 2-3 word phrases"""

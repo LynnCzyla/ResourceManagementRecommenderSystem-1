@@ -230,7 +230,10 @@ router.post("/create", async (req, res) => {
         email: authData.user.email // Get email from auth data
       },
       auth_user: authData.user,
-      email_sent: emailSent
+      email_sent: emailSent,
+
+      // Add this
+      temporary_password: generatedPassword
     });
 
   } catch (error) {

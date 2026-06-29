@@ -130,6 +130,55 @@ class PythonService {
             reject = (...args) => { clearTimeout(timeout); originalReject(...args); };
         });
     }
+
+
+    async cleanupLearnedSkills() {
+        console.log('🧹 Cleaning up learned skills...');
+        
+        return new Promise((resolve, reject) => {
+            const args = [
+                '-u',
+                path.join(this.scriptPath, 'runner.py'),
+                'cleanup_learned_skills'
+            ];
+            
+            const pythonProcess = spawn(this.pythonPath, args, {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            });
+            
+            let stdoutData = '';
+            let stderrData = '';
+            
+            pythonProcess.stdout.on('data', (data) => {
+                stdoutData += data.toString();
+            });
+            
+            pythonProcess.stderr.on('data', (data) => {
+                stderrData += data.toString();
+                console.log(`🐍 ${data.toString().trim()}`);
+            });
+            
+            pythonProcess.on('close', (code) => {
+                if (code !== 0) {
+                    reject(new Error(stderrData));
+                } else {
+                    try {
+                        const result = JSON.parse(stdoutData);
+                        resolve(result);
+                    } catch (e) {
+                        resolve({ success: true });
+                    }
+                }
+            });
+            
+            pythonProcess.on('error', (err) => {
+                reject(err);
+            });
+        });
+    }
 }
+
+
 
 module.exports = new PythonService();
