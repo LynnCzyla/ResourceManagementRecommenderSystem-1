@@ -1,5 +1,5 @@
-//backend\controllers\feedbackController.js
-const { spawn } = require('child_process');  // ← ADD THIS LINE
+//backend/controllers/feedbackController.js
+const { spawn } = require('child_process');
 const pythonService = require('../services/pythonService');
 const storageService = require('../services/storageService');
 const supabase = require('../supabase');
@@ -69,7 +69,6 @@ async function updateLearningSystem(approved_skills, rejected_skills) {
     });
 }
 
-
 async function cleanupDatabaseDuplicates() {
     try {
         console.log('🧹 Cleaning database duplicates...');
@@ -90,7 +89,6 @@ async function cleanupDatabaseDuplicates() {
             if (!uniqueSkills[key]) {
                 uniqueSkills[key] = skill.id;
             } else {
-                // Update employee_skills to use master
                 const { error: updateError } = await supabase
                     .from('employee_skills')
                     .update({ skill_id: uniqueSkills[key] })
@@ -124,14 +122,10 @@ async function cleanupDatabaseDuplicates() {
     }
 }
 
-
-
-// ============ ADD THIS NEW FUNCTION ============
 async function syncSkillsFromJsonToDatabase() {
     try {
         console.log('🔄 Syncing skills from learned_skills.json to database...');
         
-        // 1. Read the learned_skills.json file
         const jsonPath = path.join(__dirname, '../../shared-data/skills_db/learned_skills.json');
         
         if (!fs.existsSync(jsonPath)) {
@@ -151,14 +145,12 @@ async function syncSkillsFromJsonToDatabase() {
             return { added: 0, updated: 0 };
         }
         
-        // 2. Get all skills currently in database
         const { data: dbSkills, error: fetchError } = await supabase
             .from('skills')
             .select('id, skill_name');
         
         if (fetchError) throw fetchError;
         
-        // Create lookup maps
         const dbSkillMap = new Map();
         dbSkills.forEach(s => dbSkillMap.set(s.skill_name.toLowerCase().trim(), {
             id: s.id,
@@ -169,18 +161,13 @@ async function syncSkillsFromJsonToDatabase() {
         let updated = 0;
         let skipped = 0;
         
-        // 3. Process each skill from JSON
         for (const skillName of learnedSkills) {
             const normalizedName = skillName.toLowerCase().trim();
             const category = dictionary[skillName] || 'Other';
             
             if (dbSkillMap.has(normalizedName)) {
-                // Skill exists in database
                 const existing = dbSkillMap.get(normalizedName);
-                
-                // Check if category needs update
                 if (existing.category !== category) {
-                    // Update category
                     const { error: updateError } = await supabase
                         .from('skills')
                         .update({ 
@@ -197,7 +184,6 @@ async function syncSkillsFromJsonToDatabase() {
                     skipped++;
                 }
             } else {
-                // New skill - insert
                 const { error: insertError } = await supabase
                     .from('skills')
                     .insert({
@@ -222,17 +208,66 @@ async function syncSkillsFromJsonToDatabase() {
         return { added: 0, updated: 0, error: error.message };
     }
 }
-// ==================================================
 
-/**
- * Clean up duplicate skills in database
- * POST /api/employee/cleanup-duplicates
- */
+// ============ RETRAIN ML HELPER ============
+async function retrainMLPython(texts, labels) {
+    return new Promise((resolve, reject) => {
+        const rootPath = path.join(__dirname, '../..');
+        const pythonPath = process.platform === 'win32'
+            ? path.join(rootPath, 'python', 'venv', 'Scripts', 'python.exe')
+            : path.join(rootPath, 'python', 'venv', 'bin', 'python');
+        const scriptPath = path.join(rootPath, 'python', 'scripts');
+        
+        const args = [
+            '-u',
+            path.join(scriptPath, 'runner.py'),
+            'retrain_ml',
+            JSON.stringify(texts),
+            JSON.stringify(labels)
+        ];
+        
+        const pythonProcess = spawn(pythonPath, args, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        });
+        
+        let stdoutData = '';
+        let stderrData = '';
+        
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+        
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+            console.log(`🐍 ${data.toString().trim()}`);
+        });
+        
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(stderrData));
+            } else {
+                try {
+                    const result = JSON.parse(stdoutData);
+                    resolve(result);
+                } catch (e) {
+                    resolve({ success: true });
+                }
+            }
+        });
+        
+        pythonProcess.on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
+// ============ EXPORTS ============
+
 exports.cleanupDuplicateSkills = async (req, res) => {
     try {
         const { employeeId } = req.query;
         
-        // 1. Get all skills
         const { data: allSkills, error: skillsError } = await supabase
             .from('skills')
             .select('id, skill_name')
@@ -240,7 +275,6 @@ exports.cleanupDuplicateSkills = async (req, res) => {
         
         if (skillsError) throw skillsError;
         
-        // 2. Find duplicates by skill_name (case-insensitive)
         const duplicates = {};
         const uniqueSkills = {};
         const toDelete = [];
@@ -252,7 +286,6 @@ exports.cleanupDuplicateSkills = async (req, res) => {
                 uniqueSkills[key] = skill.id;
                 toKeep[skill.id] = skill.skill_name;
             } else {
-                // This is a duplicate
                 if (!duplicates[key]) {
                     duplicates[key] = [];
                 }
@@ -268,10 +301,8 @@ exports.cleanupDuplicateSkills = async (req, res) => {
         console.log(`🔍 Found ${toDelete.length} duplicate skills`);
         console.log(`📊 ${Object.keys(duplicates).length} duplicate groups`);
         
-        // 3. For each duplicate, update employee_skills to point to master
         for (const [key, dupList] of Object.entries(duplicates)) {
             for (const dup of dupList) {
-                // Update employee_skills to use master skill_id
                 const { error: updateError } = await supabase
                     .from('employee_skills')
                     .update({ skill_id: dup.master_id })
@@ -285,7 +316,6 @@ exports.cleanupDuplicateSkills = async (req, res) => {
             }
         }
         
-        // 4. Delete duplicate skills
         if (toDelete.length > 0) {
             const { error: deleteError } = await supabase
                 .from('skills')
@@ -299,7 +329,6 @@ exports.cleanupDuplicateSkills = async (req, res) => {
             }
         }
         
-        // 5. Also clean up learned_skills.json
         try {
             const pythonService = require('../services/pythonService');
             await pythonService.cleanupLearnedSkills();
@@ -335,7 +364,6 @@ exports.processDocument = async (req, res) => {
 
         const { documentType } = req.body;
 
-        // SECURITY: Get employeeId from token, not body
         const loggedInEmail = req.user.email;
         const { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -730,7 +758,7 @@ exports.saveSkillFeedback = async (req, res) => {
             throw updateError;
         }
 
-        // ============ UPDATE LEARNING SYSTEM (WITH AUTO-MERGE) ============
+        // ============ UPDATE LEARNING SYSTEM ============
         let merged = 0;
         try {
             const result = await updateLearningSystem(approved_skills || [], rejected_skills || []);
@@ -740,6 +768,7 @@ exports.saveSkillFeedback = async (req, res) => {
             console.error('⚠️ Learning system update failed:', learningError.message);
         }
 
+        // ============ SYNC JSON TO DATABASE ============
         try {
             console.log('🔄 Syncing learned_skills.json to database...');
             const syncResult = await syncSkillsFromJsonToDatabase();
@@ -748,7 +777,62 @@ exports.saveSkillFeedback = async (req, res) => {
             console.error('⚠️ Database sync failed:', syncError.message);
         }
 
-        // ============ 🔥 AUTO-CLEAN DATABASE ============
+        // ============ SAVE TO FEEDBACK TRAINING TABLE ============
+        try {
+            console.log('📊 Saving feedback to training table...');
+            
+            // Save approved skills as positive examples
+            for (const skill of approved_skills) {
+                const { data: existing } = await supabase
+                    .from('feedback_training')
+                    .select('id')
+                    .eq('phrase', skill)
+                    .eq('label', 'Skill')
+                    .eq('reviewed_by', profileData.id)
+                    .maybeSingle();
+                
+                if (!existing) {
+                    await supabase
+                        .from('feedback_training')
+                        .insert({
+                            phrase: skill,
+                            label: 'Skill',
+                            reviewed_by: profileData.id,
+                            document_id: documentId,
+                            employee_id: profileData.employee_id
+                        });
+                }
+            }
+            
+            // Save rejected skills as negative examples
+            for (const skill of rejected_skills) {
+                const { data: existing } = await supabase
+                    .from('feedback_training')
+                    .select('id')
+                    .eq('phrase', skill)
+                    .eq('label', 'Not Skill')
+                    .eq('reviewed_by', profileData.id)
+                    .maybeSingle();
+                
+                if (!existing) {
+                    await supabase
+                        .from('feedback_training')
+                        .insert({
+                            phrase: skill,
+                            label: 'Not Skill',
+                            reviewed_by: profileData.id,
+                            document_id: documentId,
+                            employee_id: profileData.employee_id
+                        });
+                }
+            }
+            
+            console.log(`✅ Feedback saved to training table!`);
+        } catch (feedbackError) {
+            console.error('⚠️ Error saving feedback to training table:', feedbackError.message);
+        }
+
+        // ============ AUTO-CLEAN DATABASE ============
         if (merged > 0 || approved_skills.length > 5) {
             try {
                 console.log('🧹 Auto-cleaning database duplicates...');
@@ -762,7 +846,7 @@ exports.saveSkillFeedback = async (req, res) => {
         res.json({
             success: true,
             data: { documentId: updatedDocument.id },
-            message: `✅ ${approved_skills?.length || 0} skills saved and ${merged} duplicates merged!`
+            message: `✅ ${approved_skills?.length || 0} skills saved!`
         });
 
     } catch (error) {
@@ -771,17 +855,10 @@ exports.saveSkillFeedback = async (req, res) => {
     }
 };
 
-
-// ============ ADD THIS EXPORT ============
-/**
- * Manually sync skills from learned_skills.json to database
- * POST /api/employee/sync-skills
- */
+// ============ SYNC SKILLS ============
 exports.syncSkills = async (req, res) => {
     try {
         const result = await syncSkillsFromJsonToDatabase();
-        
-        // Also clean up duplicates after sync
         const cleanupResult = await cleanupDatabaseDuplicates();
         
         res.json({
@@ -799,16 +876,11 @@ exports.syncSkills = async (req, res) => {
     }
 };
 
-
-/**
- * Reset database skills to match learned_skills.json
- * POST /api/employee/reset-skills
- */
+// ============ RESET SKILLS ============
 exports.resetSkillsFromJson = async (req, res) => {
     try {
         console.log('🔄 Resetting database to match learned_skills.json...');
         
-        // 1. Read normalized skills from JSON
         const jsonPath = path.join(__dirname, '../../shared-data/skills_db/learned_skills.json');
         
         if (!fs.existsSync(jsonPath)) {
@@ -821,7 +893,6 @@ exports.resetSkillsFromJson = async (req, res) => {
         
         console.log(`📊 Found ${normalizedSkills.length} normalized skills in JSON`);
         
-        // 2. Get current skills in database
         const { data: dbSkills, error: fetchError } = await supabase
             .from('skills')
             .select('id, skill_name');
@@ -830,7 +901,6 @@ exports.resetSkillsFromJson = async (req, res) => {
         
         console.log(`📊 Found ${dbSkills.length} skills in database`);
         
-        // 3. Find which skills are in database but NOT in normalized list
         const normalizedSet = new Set(normalizedSkills.map(s => s.toLowerCase().trim()));
         const dbSkillMap = {};
         dbSkills.forEach(s => {
@@ -850,10 +920,8 @@ exports.resetSkillsFromJson = async (req, res) => {
             }
         }
         
-        // 4. Delete skills not in normalized list
         let deleted = 0;
         if (toDelete.length > 0) {
-            // First, update employee_skills to remove references
             for (const id of toDelete) {
                 await supabase
                     .from('employee_skills')
@@ -861,7 +929,6 @@ exports.resetSkillsFromJson = async (req, res) => {
                     .eq('skill_id', id);
             }
             
-            // Then delete the skills
             const { error: deleteError } = await supabase
                 .from('skills')
                 .delete()
@@ -873,7 +940,6 @@ exports.resetSkillsFromJson = async (req, res) => {
             }
         }
         
-        // 5. Add missing normalized skills
         let added = 0;
         for (const skillName of normalizedSkills) {
             const key = skillName.toLowerCase().trim();
@@ -889,7 +955,6 @@ exports.resetSkillsFromJson = async (req, res) => {
             }
         }
         
-        // 6. Get final count
         const { data: finalSkills } = await supabase
             .from('skills')
             .select('id, skill_name');
@@ -907,6 +972,98 @@ exports.resetSkillsFromJson = async (req, res) => {
         
     } catch (error) {
         console.error('❌ Reset error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============ RETRAIN ML ============
+exports.retrainML = async (req, res) => {
+    try {
+        // Get count of feedback items
+        const { count: totalCount, error: countError } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true });
+        
+        if (countError) throw countError;
+        
+        if (totalCount < 10) {
+            return res.status(400).json({
+                success: false,
+                error: `Need at least 10 feedback items. Currently have ${totalCount}.`
+            });
+        }
+        
+        // Get all feedback data
+        const { data: feedbackData, error: fetchError } = await supabase
+            .from('feedback_training')
+            .select('phrase, label');
+        
+        if (fetchError) throw fetchError;
+        
+        console.log(`📊 Retraining ML with ${feedbackData.length} feedback items...`);
+        
+        // Prepare training data
+        const texts = feedbackData.map(row => row.phrase);
+        const labels = feedbackData.map(row => row.label === 'Skill' ? 1 : 0);
+        
+        // Call Python to retrain
+        const result = await retrainMLPython(texts, labels);
+        
+        res.json({
+            success: true,
+            data: {
+                total_feedback: feedbackData.length,
+                skills: labels.filter(l => l === 1).length,
+                not_skills: labels.filter(l => l === 0).length,
+                retrained: result.success
+            },
+            message: `✅ ML retrained with ${feedbackData.length} feedback items!`
+        });
+        
+    } catch (error) {
+        console.error('Retrain error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============ GET FEEDBACK STATS ============
+exports.getFeedbackStats = async (req, res) => {
+    try {
+        // Get total feedback count
+        const { count: totalCount } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true });
+        
+        // Get skill counts
+        const { count: skillCount } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true })
+            .eq('label', 'Skill');
+        
+        const { count: notSkillCount } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true })
+            .eq('label', 'Not Skill');
+        
+        // Get recent feedback
+        const { data: recent } = await supabase
+            .from('feedback_training')
+            .select('phrase, label, created_at')
+            .order('created_at', { ascending: false })
+            .limit(10);
+        
+        res.json({
+            success: true,
+            data: {
+                total: totalCount || 0,
+                skills: skillCount || 0,
+                not_skills: notSkillCount || 0,
+                recent: recent || []
+            }
+        });
+        
+    } catch (error) {
+        console.error('Feedback stats error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

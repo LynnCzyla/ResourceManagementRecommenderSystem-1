@@ -40,11 +40,9 @@ class Runner:
     def learn_feedback(self, approved_skills, rejected_skills):
         """Update learning from user feedback"""
         try:
-            # Lazy load NLP processor
             if self.nlp is None:
                 self.nlp = NLPProcessor()
             
-            # Parse if strings, otherwise use as is
             if isinstance(approved_skills, str):
                 approved = json.loads(approved_skills)
             else:
@@ -72,29 +70,82 @@ class Runner:
                     self.nlp.non_skill_patterns[skill] += 1
                     print(f"[LEARN] Marked as non-skill: {skill}", file=sys.stderr)
             
+            # ============ 🔥 FIX: ACCUMULATE FEEDBACK ============
+            # Log approved skills (APPEND to existing, don't replace!)
+            if 'approved' not in self.nlp.feedback_log:
+                self.nlp.feedback_log['approved'] = []
+            
+            for skill in approved:
+                if skill and skill not in self.nlp.feedback_log['approved']:
+                    self.nlp.feedback_log['approved'].append(skill)
+                    print(f"[FEEDBACK] Added approved: {skill}", file=sys.stderr)
+            
+            # Log rejected skills (APPEND to existing, don't replace!)
+            if 'rejected' not in self.nlp.feedback_log:
+                self.nlp.feedback_log['rejected'] = []
+            
+            for skill in rejected:
+                if skill and skill not in self.nlp.feedback_log['rejected']:
+                    self.nlp.feedback_log['rejected'].append(skill)
+                    print(f"[FEEDBACK] Added rejected: {skill}", file=sys.stderr)
+            
+            print(f"[LEARN] Feedback log totals: {len(self.nlp.feedback_log.get('approved', []))} approved, {len(self.nlp.feedback_log.get('rejected', []))} rejected", file=sys.stderr)
+            # ===================================================
+            
             # Increment documents_analyzed
             self.nlp.stats['documents_analyzed'] = self.nlp.stats.get('documents_analyzed', 0) + 1
             
-            # ============ 🔥 ADD AUTO-MERGE HERE ============
-            # Run synonym detection after learning new skills
+            # Auto-merge duplicates
+            merged = 0
             if len(self.nlp.learned_skills) > 5:
                 print(f"[LEARN] Auto-merging duplicates...", file=sys.stderr)
                 merged = self.nlp.merge_synonyms_dynamically()
                 if merged > 0:
                     print(f"[LEARN] ✅ Auto-merged {merged} duplicate skills!", file=sys.stderr)
-            # ============================================
             
             # Save the updated data
             self.nlp._save_data()
             
-            return {"success": True, "skills_learned": skills_learned}
+            return {"success": True, "skills_learned": skills_learned, "merged": merged}
+            
         except Exception as e:
             print(f"[LEARN] Error: {str(e)}", file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
             return {"success": False, "error": str(e)}
     
-    # ============ FIXED: cleanup_learned_skills method ============
+    # ============ RETRAIN ML ============
+    def retrain_ml(self, texts, labels):
+        """Retrain ML from feedback data"""
+        try:
+            # Lazy load NLP processor
+            if self.nlp is None:
+                self.nlp = NLPProcessor()
+            
+            print(f"[ML] Retraining with {len(texts)} samples...", file=sys.stderr)
+            
+            # Check if we have enough data
+            if len(texts) < 10:
+                return {"success": False, "error": "Need 10+ samples"}
+            
+            # Train
+            self.nlp.classifier.train(texts, labels)
+            self.nlp.use_ml = self.nlp.classifier.is_trained
+            
+            if self.nlp.use_ml:
+                print(f"[ML] ✅ Retrained successfully!", file=sys.stderr)
+                # Save the updated data
+                self.nlp._save_data()
+                return {"success": True, "samples": len(texts)}
+            else:
+                return {"success": False, "error": "Training failed"}
+                
+        except Exception as e:
+            print(f"[ML] Error: {str(e)}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return {"success": False, "error": str(e)}
+    
     def cleanup_learned_skills(self):
         """Clean duplicate skills from learned_skills.json"""
         try:
@@ -115,7 +166,6 @@ class Runner:
             import traceback
             traceback.print_exc(file=sys.stderr)
             return {"success": False, "error": str(e)}
-    # ============================================================
 
 def main():
     if len(sys.argv) < 2:
@@ -138,12 +188,17 @@ def main():
         sys.stdout.write(json.dumps(result))
         sys.stdout.flush()
     
-    # ============ ADD THIS COMMAND ============
+    elif cmd == "retrain_ml" and len(sys.argv) >= 4:
+        texts = json.loads(sys.argv[2])
+        labels = json.loads(sys.argv[3])
+        result = runner.retrain_ml(texts, labels)
+        sys.stdout.write(json.dumps(result))
+        sys.stdout.flush()
+    
     elif cmd == "cleanup_learned_skills":
         result = runner.cleanup_learned_skills()
         sys.stdout.write(json.dumps(result))
         sys.stdout.flush()
-    # ============================================
     
     else:
         sys.stdout.write(json.dumps({"error": f"Unknown command: {cmd}"}))

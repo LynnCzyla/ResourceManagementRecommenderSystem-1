@@ -70,18 +70,23 @@ if (feedbackController) {
         console.log('✅ POST /cleanup-duplicates route added');
     }
     
-    // ============ 🔥 MOVE THIS HERE ============
     // Manually sync skills from learned_skills.json to database
     if (typeof feedbackController.syncSkills === 'function') {
         router.post('/sync-skills', verifyToken, feedbackController.syncSkills);
         console.log('✅ POST /sync-skills route added');
     }
 
-    if (typeof feedbackController.resetSkillsFromJson === 'function') {
-        router.post('/reset-skills', verifyToken, feedbackController.resetSkillsFromJson);
-        console.log('✅ POST /reset-skills route added');
+    // 🔥 RESET ROUTE DISABLED (prevents data loss)
+    // if (typeof feedbackController.resetSkillsFromJson === 'function') {
+    //     router.post('/reset-skills', verifyToken, feedbackController.resetSkillsFromJson);
+    //     console.log('✅ POST /reset-skills route added');
+    // }
+    
+    // Retrain ML from feedback data
+    if (typeof feedbackController.retrainML === 'function') {
+        router.post('/retrain-ml', verifyToken, feedbackController.retrainML);
+        console.log('✅ POST /retrain-ml route added');
     }
-    // ==========================================
 }
 
 module.exports = router;
