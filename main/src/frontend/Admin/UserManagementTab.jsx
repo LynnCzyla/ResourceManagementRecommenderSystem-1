@@ -1174,12 +1174,13 @@ const styles = {
   },
   statsBar: {
     display: 'flex',
-    gap: '24px',
-    marginBottom: '20px',
-    padding: '16px 20px',
+    gap: '16px',
+    marginBottom: '16px',
+    padding: '10px 16px',
     background: 'var(--color-bg-root)',
-    borderRadius: 'var(--radius-md)',
+    borderRadius: 'var(--radius-sm)',
     border: '1px solid var(--color-border)',
+    width: 'fit-content',
   },
   statItem: {
     display: 'flex',
@@ -1193,10 +1194,10 @@ const styles = {
     letterSpacing: '0.5px',
   },
   statValue: {
-    fontSize: '24px',
-    fontWeight: '800',
+    fontSize: '18px',
+    fontWeight: '700',
     color: 'var(--color-text-primary)',
-    marginTop: '4px',
+    marginTop: '2px',
   },
   spinnerSmall: {
     display: 'inline-block',
