@@ -92,16 +92,10 @@ export default function DbRecordsTab() {
                   <th style={styles.th}>Employee Name</th>
                   <th style={styles.th}>Role Classification</th>
                   <th style={styles.th}>Verified Competencies</th>
-                  <th style={styles.th}>Active Certifications</th>
-                  <th style={styles.th}>Allocated Hours (C)</th>
-                  <th style={styles.th}>Capacity</th>
-                  <th style={styles.th}>Workload (A%)</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredEmployees.map(emp => {
-                  const utilization = Math.round((emp.hours / emp.capacity) * 100);
-                  return (
+                {filteredEmployees.map(emp => (
                     <tr key={emp.id} style={styles.tableBodyRow}>
                       <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{emp.name}</td>
                       <td style={styles.td}>{emp.role}</td>
@@ -112,32 +106,8 @@ export default function DbRecordsTab() {
                           ))}
                         </div>
                       </td>
-                      <td style={styles.td}>
-                        <div style={styles.badgeWrapper}>
-                          {emp.certs.map((c, i) => (
-                            <span key={i} style={styles.certBadge}>{c}</span>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={styles.td}>
-                        <span style={{ fontWeight: '700', color: 'var(--color-text-primary)' }}>{emp.hours}</span>
-                        <span style={{ marginLeft: 6 }}>hrs</span>
-                      </td>
-                      <td style={styles.td}>{emp.capacity} hrs</td>
-                      <td style={styles.td}>
-                        <div style={styles.capacityWrapper}>
-                          <span style={{ 
-                            ...styles.utilPercent,
-                            color: utilization > 90 ? 'var(--color-danger)' : utilization > 50 ? 'var(--color-warning)' : 'var(--color-success)'
-                          }}>{utilization}%</span>
-                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginLeft: 4 }}>
-                            {utilization > 80 ? '(Allocated)' : utilization < 30 ? '(Underutilized)' : '(Optimal)'}
-                          </span>
-                        </div>
-                      </td>
                     </tr>
-                  );
-                })}
+                  ))}
               </tbody>
             </table>
           </div>
