@@ -27,7 +27,7 @@ try {
     feedbackController = require('../../controllers/feedbackController');
     console.log('✅ Feedback controller loaded');
 } catch (error) {
-    console.log('⚠️ Feedback controller not found');
+    console.log('⚠️ Feedback controller not found:', error.message);
     feedbackController = null;
 }
 
@@ -37,16 +37,32 @@ router.get('/documents', verifyToken, documentController.getDocuments);
 router.get('/profile', verifyToken, documentController.getCurrentProfile);
 router.get('/profile/:employeeId', verifyToken, documentController.getProfile);
 router.put('/profile', verifyToken, documentController.updateProfile);
-
-// ============ SKILL ROUTES ============
 router.get('/skills', verifyToken, documentController.getSkills);
-
-// ============ STATS ROUTES ============
 router.get('/stats', verifyToken, documentController.getStats);
+
+// ============ ML STATUS ROUTE ============
+if (feedbackController && typeof feedbackController.getMLStatus === 'function') {
+    router.get('/ml-status', verifyToken, feedbackController.getMLStatus);
+    console.log('✅ GET /ml-status route added');
+} else {
+    console.log('⚠️ ML Status route not available - feedbackController.getMLStatus missing');
+    // Placeholder route
+    router.get('/ml-status', verifyToken, (req, res) => {
+        res.json({
+            success: true,
+            data: {
+                ml_active: false,
+                ml_trained: false,
+                status: 'unavailable',
+                message: 'ML Status service is being configured. Please check server logs.'
+            }
+        });
+    });
+}
 
 // ============ FEEDBACK ROUTES ============
 if (feedbackController) {
-    // Save skill feedback (triggers auto-sync)
+    // Save skill feedback
     if (typeof feedbackController.saveSkillFeedback === 'function') {
         router.post('/skill-feedback', verifyToken, feedbackController.saveSkillFeedback);
         console.log('✅ POST /skill-feedback route added');
@@ -64,25 +80,19 @@ if (feedbackController) {
         console.log('✅ GET /feedback-stats route added');
     }
     
-    // Clean up duplicate skills in database
+    // Clean up duplicate skills
     if (typeof feedbackController.cleanupDuplicateSkills === 'function') {
         router.post('/cleanup-duplicates', feedbackController.cleanupDuplicateSkills);
         console.log('✅ POST /cleanup-duplicates route added');
     }
     
-    // Manually sync skills from learned_skills.json to database
+    // Manually sync skills
     if (typeof feedbackController.syncSkills === 'function') {
         router.post('/sync-skills', verifyToken, feedbackController.syncSkills);
         console.log('✅ POST /sync-skills route added');
     }
-
-    // 🔥 RESET ROUTE DISABLED (prevents data loss)
-    // if (typeof feedbackController.resetSkillsFromJson === 'function') {
-    //     router.post('/reset-skills', verifyToken, feedbackController.resetSkillsFromJson);
-    //     console.log('✅ POST /reset-skills route added');
-    // }
     
-    // Retrain ML from feedback data
+    // Retrain ML
     if (typeof feedbackController.retrainML === 'function') {
         router.post('/retrain-ml', verifyToken, feedbackController.retrainML);
         console.log('✅ POST /retrain-ml route added');

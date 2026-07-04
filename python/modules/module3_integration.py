@@ -35,7 +35,7 @@ class DocumentProcessor:
         
         try:
             # Step 1: Module 1 - OCR Processing
-            print(f"📦 Module 1: Processing document {doc_id}")
+            print(f" Module 1: Processing document {doc_id}")
             ocr_result = self.ocr.process_document(
                 image_path, doc_id, employee_id, document_type
             )
@@ -48,7 +48,14 @@ class DocumentProcessor:
             log_entry['ocr_word_count'] = ocr_result['ocr_data']['word_count']
             
             # Step 2: Module 2 - NLP Processing
-            print(f"🤖 Module 2: NLP processing for {doc_id}")
+            print(f" Module 2: NLP processing for {doc_id}")
+            
+            # ============ FIX: Get full NLP result with auto_approved/needs_review ============
+            nlp_full_result = self.nlp.extract_skills_with_categories(
+                ocr_result['ocr_data']['cleaned_ocr_text']
+            )
+            
+            # Prepare database records
             nlp_result = self.nlp.prepare_db_records(
                 employee_id, 
                 ocr_result['ocr_data']['cleaned_ocr_text']
@@ -58,7 +65,13 @@ class DocumentProcessor:
             log_entry['skills_found'] = nlp_result['summary']['total_skills_found']
             log_entry['licenses_found'] = nlp_result['summary']['licenses_found']
             
-            # Combine results
+            # ============ FIX: Log the separation ============
+            print(f"[INTEGRATION] Auto-approved: {len(nlp_full_result.get('auto_approved', []))}")
+            print(f"[INTEGRATION] Needs review: {len(nlp_full_result.get('needs_review', []))}")
+            if nlp_full_result.get('auto_approved'):
+                print(f"[INTEGRATION] Auto-approved samples: {nlp_full_result.get('auto_approved', [])[:5]}")
+            
+            # Combine results with CORRECT data
             result = {
                 'success': True,
                 'document_id': doc_id,
@@ -74,10 +87,13 @@ class DocumentProcessor:
                     'processing_time': ocr_result['ocr_data']['processing_time_seconds']
                 },
                 'nlp': {
-                    'skills': nlp_result['skills_master'],
-                    'categorized_skills': nlp_result['employee_update']['skills_extracted'],
-                    'prc_license': nlp_result['employee_update']['prc_license_num'],
-                    'prc_verified': nlp_result['employee_update']['prc_verified']
+                    # ============ FIX: Use actual skill names, not objects ============
+                    'skills': nlp_full_result.get('skills', []),
+                    'categorized_skills': nlp_full_result.get('categorized', {}),
+                    'auto_approved': nlp_full_result.get('auto_approved', []),
+                    'needs_review': nlp_full_result.get('needs_review', []),
+                    'prc_license': nlp_full_result.get('licenses', [None])[0] if nlp_full_result.get('licenses') else None,
+                    'prc_verified': bool(nlp_full_result.get('licenses'))
                 },
                 'db_records': {
                     'documents_table': ocr_result['ocr_data'],

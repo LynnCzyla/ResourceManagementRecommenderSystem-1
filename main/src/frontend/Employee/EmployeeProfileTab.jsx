@@ -25,6 +25,11 @@ export default function EmployeeProfileTab() {
   const [certLoading, setCertLoading] = useState(false);
   const [certOcrResult, setCertOcrResult] = useState(null);
 
+  // In EmployeeProfileTab.jsx
+  const [pendingSkills, setPendingSkills] = useState([]);
+  const [autoApprovedSkills, setAutoApprovedSkills] = useState([]);
+  const [needsReviewSkills, setNeedsReviewSkills] = useState([]);
+
   // Progress states
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState('');
@@ -34,7 +39,6 @@ export default function EmployeeProfileTab() {
   // Feedback modal states
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [pendingDocumentId, setPendingDocumentId] = useState(null);
-  const [pendingSkills, setPendingSkills] = useState([]);
   const [pendingDocumentType, setPendingDocumentType] = useState('');
 
   // Document mismatch confirmation — shown via SweetAlert2, generic message only
@@ -231,7 +235,15 @@ export default function EmployeeProfileTab() {
       }
   
       const skillsRes = await axios.get(`${API_URL}/employee/skills?employeeId=${actualEmployeeId}`, { headers: authHeader });
-      if (skillsRes.data.success) setEmployeeSkills(skillsRes.data.data.map(s => s.skill_name || s));
+        if (skillsRes.data.success) {
+            // ============ FIX: Extract skill names from objects ============
+            const skillNames = skillsRes.data.data.map(s => {
+                if (typeof s === 'string') return s;
+                return s.skill_name || s.skill_tag || s.skill || String(s);
+            });
+            console.log('📊 Processed skills:', skillNames);
+            setEmployeeSkills(skillNames);
+        }
   
       // ============ FIX: Separate documents by type ============
       const docsRes = await axios.get(`${API_URL}/employee/documents?employeeId=${actualEmployeeId}`, { headers: authHeader });
@@ -276,115 +288,162 @@ export default function EmployeeProfileTab() {
     setProcessingStep('uploading');
     setShowProgressDetails(true);
     try {
-      const response = await submitDocumentWithMismatchConfirm({
-        file,
-        documentType: 'Resume',
-        employeeId,
-        onUploadProgress: (progressEvent) => {
-          const pct = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(pct);
-          if (pct < 30) setProcessingStatus('Uploading file...');
-          else if (pct < 60) setProcessingStatus('Uploading file to server...');
-          else if (pct < 90) setProcessingStatus('Processing upload...');
-        }
-      });
-      if (response.data.success) {
-        const { data } = response.data;
-        if (!data?.documentId) {
-          throw new Error('Document processed but did not return a valid document ID. Please try again.');
-        }
-        const extractedSkills = data.nlp?.categorized_skills || [];
-        setOcrResult({
-          fileName: file.name,
-          confidence: data.ocr?.confidence ? `${(data.ocr.confidence * 100).toFixed(1)}%` : 'N/A',
-          extractedSkills,
-          method: data.ocr?.method || 'unknown',
-          processingTime: data.ocr?.processing_time || 0
+        const response = await submitDocumentWithMismatchConfirm({
+            file,
+            documentType: 'Resume',
+            employeeId,
+            onUploadProgress: (progressEvent) => {
+                const pct = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                setUploadProgress(pct);
+                if (pct < 30) setProcessingStatus('Uploading file...');
+                else if (pct < 60) setProcessingStatus('Uploading file to server...');
+                else if (pct < 90) setProcessingStatus('Processing upload...');
+            }
         });
-        if (extractedSkills.length > 0) {
-          setPendingDocumentId(data.documentId);
-          setPendingSkills(extractedSkills);
-          setPendingDocumentType('Resume');
-          setShowFeedbackModal(true);
+        if (response.data.success) {
+            const { data } = response.data;
+            if (!data?.documentId) {
+                throw new Error('Document processed but did not return a valid document ID. Please try again.');
+            }
+            
+            // ============ FIX: Properly extract data ============
+            const nlp = data.nlp || {};
+            
+            // FIX: Ensure these are always arrays
+            const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
+            const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
+            const needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+            const categorizedSkills = nlp.categorized_skills || {};
+            
+            // FIX: If needsReview is empty but we have skills, use all skills
+            const finalNeedsReview = needsReview.length > 0 ? needsReview : allSkills;
+            const finalAutoApproved = autoApproved.length > 0 ? autoApproved : [];
+            
+            console.log('📊 Skill Data:', {
+                allSkills: allSkills.length,
+                autoApproved: finalAutoApproved.length,
+                needsReview: finalNeedsReview.length,
+                categorized: Object.keys(categorizedSkills).length
+            });
+            
+            // ============ Set OCR Result for display ============
+            setOcrResult({
+                fileName: file.name,
+                confidence: data.ocr?.confidence ? `${(data.ocr.confidence * 100).toFixed(1)}%` : 'N/A',
+                extractedSkills: allSkills,  // ← Must be an array
+                needsReview: finalNeedsReview,
+                autoApproved: finalAutoApproved,
+                method: data.ocr?.method || 'unknown',
+                processingTime: data.ocr?.processing_time || 0
+            });
+            
+            // ============ Store for modal ============
+            setAutoApprovedSkills(finalAutoApproved);
+            setNeedsReviewSkills(finalNeedsReview);
+            setPendingSkills(finalNeedsReview);
+            
+            // ============ Show modal if there are skills ============
+            if (finalNeedsReview.length > 0 || finalAutoApproved.length > 0) {
+                setPendingDocumentId(data.documentId);
+                setPendingDocumentType('Resume');
+                setShowFeedbackModal(true);
+                console.log('🎯 Opening feedback modal with:', {
+                    needsReview: finalNeedsReview.length,
+                    autoApproved: finalAutoApproved.length
+                });
+            } else {
+                // No skills found
+                await fetchEmployeeData();
+                setProcessingStatus('Done!');
+                setProcessingStep('complete');
+                setTimeout(() => setShowProgressDetails(false), 3000);
+                alert('No skills were extracted from this document.');
+            }
         } else {
-          await fetchEmployeeData();
-          setProcessingStatus('Done!');
-          setProcessingStep('complete');
-          setTimeout(() => setShowProgressDetails(false), 3000);
+            throw new Error(response.data.error || 'Processing failed');
         }
-      } else {
-        throw new Error(response.data.error || 'Processing failed');
-      }
     } catch (error) {
-      let msg = 'Failed to process document';
-      if (error.isMismatchCancelled) msg = error.message;
-      else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = '⏱️ Processing is taking longer than expected. Please try with a smaller file.';
-      else if (error.response?.status === 500) msg = 'Server error. Please check the backend logs.';
-      else if (error.response?.data?.error) msg = error.response.data.error;
-      else if (error.message) msg = error.message;
-      setUploadError(msg);
-      setProcessingStatus(error.isMismatchCancelled ? 'Cancelled' : 'Error: ' + msg);
-      setProcessingStep(error.isMismatchCancelled ? 'cancelled' : 'error');
-      setTimeout(() => setShowProgressDetails(false), error.isMismatchCancelled ? 3000 : 10000);
+        let msg = 'Failed to process document';
+        if (error.isMismatchCancelled) msg = error.message;
+        else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = '⏱️ Processing is taking longer than expected. Please try with a smaller file.';
+        else if (error.response?.status === 500) msg = 'Server error. Please check the backend logs.';
+        else if (error.response?.data?.error) msg = error.response.data.error;
+        else if (error.message) msg = error.message;
+        setUploadError(msg);
+        setProcessingStatus(error.isMismatchCancelled ? 'Cancelled' : 'Error: ' + msg);
+        setProcessingStep(error.isMismatchCancelled ? 'cancelled' : 'error');
+        setTimeout(() => setShowProgressDetails(false), error.isMismatchCancelled ? 3000 : 10000);
     } finally {
-      setOcrLoading(false);
+        setOcrLoading(false);
     }
-  };
+};
 
-  const handleCertUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!employeeId) { setUploadError('Please log in to upload certificates'); return; }
-    setCertLoading(true);
-    setCertOcrResult(null);
-    setUploadError(null);
-    try {
+const handleCertUpload = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!employeeId) { setUploadError('Please log in to upload certificates'); return; }
+  setCertLoading(true);
+  setCertOcrResult(null);
+  setUploadError(null);
+  try {
       const response = await submitDocumentWithMismatchConfirm({ file, documentType: 'Certificate' });
       if (response.data.success) {
-        const { data } = response.data;
-        if (!data?.documentId) {
-          throw new Error('Document processed but did not return a valid document ID. Please try again.');
-        }
-        const extractedSkills = data.nlp?.categorized_skills || [];
-        if (extractedSkills.length > 0) {
-          setCertOcrResult({
-            fileName: file.name,
-            confidence: data.ocr?.confidence ? `${(data.ocr.confidence * 100).toFixed(1)}%` : 'N/A',
-            extractedSkills,
-            method: data.ocr?.method || 'unknown',
-            processingTime: data.ocr?.processing_time || 0
-          });
-          setPendingDocumentId(data.documentId);
-          setPendingSkills(extractedSkills);
-          setPendingDocumentType('Certificate');
-          setShowFeedbackModal(true);
-        } else {
-          setCertOcrResult(null);
-          setCertifications([...certifications, {
-            id: Date.now(),
-            name: file.name,
-            issuer: data.nlp?.organizations?.[0] || 'Verified (via OCR)',
-            date: new Date().toISOString().split('T')[0],
-            expiry: 'N/A',
-            skills: []
-          }]);
-          await fetchEmployeeData();
-          alert('Certificate uploaded successfully!');
-        }
+          const { data } = response.data;
+          if (!data?.documentId) {
+              throw new Error('Document processed but did not return a valid document ID. Please try again.');
+          }
+          
+          // ============ FIX: Properly extract data ============
+          const nlp = data.nlp || {};
+          const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
+          const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
+          const needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+          
+          const finalNeedsReview = needsReview.length > 0 ? needsReview : allSkills;
+          const finalAutoApproved = autoApproved.length > 0 ? autoApproved : [];
+          
+          if (allSkills.length > 0) {
+              setCertOcrResult({
+                  fileName: file.name,
+                  confidence: data.ocr?.confidence ? `${(data.ocr.confidence * 100).toFixed(1)}%` : 'N/A',
+                  extractedSkills: allSkills,
+                  needsReview: finalNeedsReview,
+                  autoApproved: finalAutoApproved,
+                  method: data.ocr?.method || 'unknown',
+                  processingTime: data.ocr?.processing_time || 0,
+              });
+              
+              setPendingDocumentId(data.documentId);
+              setPendingSkills(finalNeedsReview);
+              setPendingDocumentType('Certificate');
+              setShowFeedbackModal(true);
+          } else {
+              setCertOcrResult(null);
+              setCertifications([...certifications, {
+                  id: Date.now(),
+                  name: file.name,
+                  issuer: nlp.organizations?.[0] || 'Verified (via OCR)',
+                  date: new Date().toISOString().split('T')[0],
+                  expiry: 'N/A',
+                  skills: []
+              }]);
+              await fetchEmployeeData();
+              alert('Certificate uploaded successfully!');
+          }
       } else {
-        throw new Error(response.data.error || 'Processing failed');
+          throw new Error(response.data.error || 'Processing failed');
       }
-    } catch (error) {
+  } catch (error) {
       let msg = 'Failed to process certificate';
       if (error.isMismatchCancelled) msg = error.message;
       else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = '⏱️ Processing is taking longer than expected. Please try with a smaller file.';
       else if (error.response?.data?.error) msg = error.response.data.error;
       else if (error.message) msg = error.message;
       setUploadError(msg);
-    } finally {
+  } finally {
       setCertLoading(false);
-    }
-  };
+  }
+};
 
   const handleFeedbackSubmitted = async (approvedSkills) => {
     if (approvedSkills?.length > 0) {
@@ -485,7 +544,9 @@ export default function EmployeeProfileTab() {
         onClose={() => { setShowFeedbackModal(false); handleSkipFeedback(); }}
         documentId={pendingDocumentId}
         employeeId={employeeId}
-        extractedSkills={pendingSkills}
+        // ✅ FIX: Use the separated lists
+        needsReview={needsReviewSkills || []}
+        autoApproved={autoApprovedSkills || []}                               // ← No auto-approved yet
         documentType={pendingDocumentType}
         onFeedbackSubmitted={handleFeedbackSubmitted}
         onSkip={handleSkipFeedback}
@@ -560,9 +621,14 @@ export default function EmployeeProfileTab() {
                   <div style={styles.ocrSkillsExtracted}>
                     <strong>Extracted Skills:</strong>
                     <div style={styles.ocrSkillsList}>
-                      {ocrResult.extractedSkills.map((sk, idx) => (
-                        <span key={idx} style={styles.extractedTag}>+{sk}</span>
-                      ))}
+                          {Array.isArray(ocrResult.extractedSkills) && ocrResult.extractedSkills.map((sk, idx) => {
+                              // ============ FIX: Handle both string and object skills ============
+                              let skillName = sk;
+                              if (typeof sk === 'object' && sk !== null) {
+                                  skillName = sk.skill_name || sk.skill_tag || sk.skill || String(sk);
+                              }
+                              return <span key={idx} style={styles.extractedTag}>+{String(skillName)}</span>;
+                          })}
                     </div>
                   </div>
                 </div>
@@ -589,10 +655,18 @@ export default function EmployeeProfileTab() {
               <h2 style={styles.sectionTitle}>Skills Portfolio</h2>
               <p style={styles.sectionSubtitle}>Verified skills extracted automatically from your resume profile.</p>
               <div style={styles.skillsList}>
-                {skills.length > 0
-                  ? skills.map((skill, idx) => <span key={idx} style={styles.skillPill}>{skill}</span>)
-                  : <p style={styles.noSkills}>No skills extracted yet. Upload a resume to get started.</p>
-                }
+                  {skills.length > 0
+                      ? skills.map((skill, idx) => {
+                          // ============ FIX: Handle both string and object skills ============
+                          let skillName = skill;
+                          if (typeof skill === 'object' && skill !== null) {
+                              // If it's an object, extract the skill name
+                              skillName = skill.skill_name || skill.skill_tag || skill.skill || String(skill);
+                          }
+                          return <span key={idx} style={styles.skillPill}>{skillName}</span>;
+                        })
+                      : <p style={styles.noSkills}>No skills extracted yet. Upload a resume to get started.</p>
+                  }
               </div>
             </div>
           </div>
@@ -636,9 +710,14 @@ export default function EmployeeProfileTab() {
                   <div style={styles.ocrSkillsExtracted}>
                     <strong>Extracted Skills:</strong>
                     <div style={styles.ocrSkillsList}>
-                      {certOcrResult.extractedSkills.map((sk, idx) => (
-                        <span key={idx} style={styles.extractedTag}>+{sk}</span>
-                      ))}
+                        {Array.isArray(certOcrResult.extractedSkills) && certOcrResult.extractedSkills.map((sk, idx) => {
+                            // ============ FIX: Handle both string and object skills ============
+                            let skillName = sk;
+                            if (typeof sk === 'object' && sk !== null) {
+                                skillName = sk.skill_name || sk.skill_tag || sk.skill || String(sk);
+                            }
+                            return <span key={idx} style={styles.extractedTag}>+{String(skillName)}</span>;
+                        })}
                     </div>
                   </div>
                 </div>
