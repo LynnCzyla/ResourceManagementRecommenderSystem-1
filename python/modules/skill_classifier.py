@@ -1,6 +1,7 @@
 """
 Module 2.5: Skill Classifier (Machine Learning)
-Trains on labeled data to predict if a phrase is a skill
+Trains ONLY on human-verified data from Supabase feedback_training table
+Uses the same Supabase client as your Node.js backend
 """
 import pickle
 import numpy as np
@@ -11,26 +12,56 @@ from sklearn.metrics import classification_report, accuracy_score
 from pathlib import Path
 import json
 import re
+import os
+from datetime import datetime
+
+# Import your Supabase client (same as backend)
+try:
+    from modules.supabase_client import supabase
+    HAS_SUPABASE = True
+except ImportError:
+    HAS_SUPABASE = False
+    print("[ML]  Supabase client not found. Using fallback.")
+
 
 class SkillClassifier:
-    """Machine Learning classifier for skill vs non-skill detection"""
+    """
+    Machine Learning classifier trained ONLY on human-verified feedback.
+    Ground truth data comes exclusively from Supabase feedback_training table.
+    """
     
     def __init__(self, model_path=None):
         self.model_path = model_path or self._get_default_model_path()
+        
         self.vectorizer = TfidfVectorizer(
             max_features=5000,
             ngram_range=(1, 3),
-            stop_words='english'
+            stop_words='english',
+            min_df=2,
+            max_df=0.95
         )
         self.model = LogisticRegression(
             C=1.0,
             max_iter=1000,
-            random_state=42
+            random_state=42,
+            class_weight='balanced'
         )
         self.is_trained = False
+        self.training_stats = {
+            'total_samples': 0,
+            'skill_samples': 0,
+            'not_skill_samples': 0,
+            'accuracy': None,
+            'trained_at': None
+        }
         
         # Try to load existing model
-        self._load_model()
+        if not self._load_model():
+            print("[ML] No trained model found.")
+            # Auto-train if data available in Supabase
+            if self._has_training_data():
+                print("[ML] Found training data in Supabase. Auto-training...")
+                self.train_from_supabase()
     
     def _get_default_model_path(self):
         """Get default path for model storage"""
@@ -40,7 +71,7 @@ class SkillClassifier:
         return model_dir / 'skill_classifier.pkl'
     
     def _load_model(self):
-        """Load trained model if exists"""
+        """Load trained model from disk"""
         if Path(self.model_path).exists():
             try:
                 with open(self.model_path, 'rb') as f:
@@ -48,82 +79,196 @@ class SkillClassifier:
                     self.model = data['model']
                     self.vectorizer = data['vectorizer']
                     self.is_trained = True
-                print(f"[ML] Loaded trained model from {self.model_path}")
+                    self.training_stats = data.get('training_stats', {})
+                print(f"[ML]  Loaded trained model from {self.model_path}")
+                print(f"[ML]    Trained on {self.training_stats.get('total_samples', 0)} human-verified samples")
                 return True
             except Exception as e:
                 print(f"[ML] Error loading model: {e}")
         
-        print("[ML] No trained model found. Training required.")
         return False
     
     def _save_model(self):
-        """Save trained model"""
+        """Save trained model to disk"""
         try:
             with open(self.model_path, 'wb') as f:
                 pickle.dump({
                     'model': self.model,
-                    'vectorizer': self.vectorizer
+                    'vectorizer': self.vectorizer,
+                    'training_stats': self.training_stats,
+                    'trained_at': datetime.now().isoformat(),
+                    'source': 'supabase_feedback_training'
                 }, f)
-            print(f"[ML] Model saved to {self.model_path}")
+            print(f"[ML]  Model saved to {self.model_path}")
             return True
         except Exception as e:
             print(f"[ML] Error saving model: {e}")
             return False
     
+    def _has_training_data(self):
+        """Check if there's training data in Supabase feedback_training table"""
+        if not HAS_SUPABASE:
+            return False
+        
+        try:
+            client = supabase.get_client()
+            if not client:
+                return False
+            
+            # Use the same pattern as your JavaScript: supabase.from('feedback_training').select()
+            response = client.table('feedback_training') \
+                .select('id', count='exact') \
+                .neq('label', 'null') \
+                .neq('phrase', 'null') \
+                .execute()
+            
+            return len(response.data) >= 10
+        except Exception as e:
+            print(f"[ML] Error checking training data: {e}")
+            return False
+    
+    def train_from_supabase(self):
+        """
+        Train ML classifier using ONLY human-verified data from Supabase.
+        This is the ONLY source of training data - ground truth.
+        """
+        if not HAS_SUPABASE:
+            print("[ML] Supabase not available")
+            return False
+        
+        client = supabase.get_client()
+        if not client:
+            print("[ML] Supabase client not connected")
+            return False
+        
+        print("[ML] Training from human-verified feedback data...")
+        print("=" * 60)
+        
+        try:
+            # Get ALL human-verified labels from feedback_training
+            # Matches your JavaScript: supabase.from('feedback_training').select('phrase, label')
+            response = client.table('feedback_training') \
+                .select('phrase, label') \
+                .neq('label', 'null') \
+                .neq('phrase', 'null') \
+                .order('created_at', desc=True) \
+                .execute()
+            
+            data = response.data
+            
+            if len(data) < 10:
+                print(f"[ML] Need at least 10 samples. Have {len(data)}")
+                return False
+            
+            texts = []
+            labels = []
+            for row in data:
+                phrase = row.get('phrase', '').strip()
+                label = row.get('label')
+                if phrase and label:
+                    texts.append(phrase)
+                    labels.append(1 if label == 'Skill' else 0)
+            
+            print(f"[ML]  Loaded {len(texts)} human-verified samples")
+            print(f"   Skills: {sum(labels)}")
+            print(f"   Not Skills: {len(labels) - sum(labels)}")
+            print(f"   Ratio: {sum(labels)/len(labels):.1%} skills")
+            
+            # Train the model
+            success = self.train(texts, labels)
+            
+            # Update stats
+            if success:
+                self.training_stats = {
+                    'total_samples': len(texts),
+                    'skill_samples': sum(labels),
+                    'not_skill_samples': len(labels) - sum(labels),
+                    'source': 'supabase_feedback_training',
+                    'trained_at': datetime.now().isoformat()
+                }
+                self._save_model()
+            
+            return success
+            
+        except Exception as e:
+            print(f"[ML] Error training from Supabase: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def train(self, texts, labels):
         """
         Train the classifier on labeled data.
-        
-        Args:
-            texts: List of candidate phrases
-            labels: List of labels (1 = skill, 0 = not skill)
+        All data should be human-verified ground truth.
         """
         if len(texts) < 10:
             print(f"[ML] Need at least 10 samples. Got {len(texts)}")
             return False
         
-        print(f"[ML] Training with {len(texts)} samples...")
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_texts = []
+        unique_labels = []
+        for text, label in zip(texts, labels):
+            text_clean = text.strip().lower()
+            if text_clean and text_clean not in seen:
+                seen.add(text_clean)
+                unique_texts.append(text_clean)
+                unique_labels.append(label)
+        
+        if len(unique_texts) < 10:
+            print(f"[ML] Need at least 10 unique samples. Got {len(unique_texts)}")
+            return False
+        
+        print(f"[ML] Training with {len(unique_texts)} unique human-verified samples...")
         
         # Vectorize
-        X = self.vectorizer.fit_transform(texts)
-        y = np.array(labels)
+        X = self.vectorizer.fit_transform(unique_texts)
+        y = np.array(unique_labels)
         
-        # Split for validation
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+        # Split for validation (if enough data)
+        if len(unique_texts) >= 20:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+            validation = True
+        else:
+            X_train, y_train = X, y
+            validation = False
         
         # Train
         self.model.fit(X_train, y_train)
         self.is_trained = True
         
-        # Evaluate
-        y_pred = self.model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        
-        print(f"[ML] Training complete!")
-        print(f"[ML] Accuracy: {accuracy:.2%}")
-        print(f"[ML] Classification Report:")
-        print(classification_report(y_test, y_pred, target_names=['Not Skill', 'Skill']))
-        
-        # Save model
-        self._save_model()
+        # Evaluate if validation data available
+        if validation:
+            y_pred = self.model.predict(X_test)
+            accuracy = accuracy_score(y_test, y_pred)
+            self.training_stats['accuracy'] = float(accuracy)
+            
+            print(f"[ML]    Training complete!")
+            print(f"[ML]    Accuracy: {accuracy:.2%}")
+            print(f"[ML]    Classification Report:")
+            print(classification_report(y_test, y_pred, target_names=['Not Skill', 'Skill']))
+        else:
+            print(f"[ML]   Training complete! (No validation - limited data)")
         
         return True
     
+    def train_from_feedback(self, approved_skills, rejected_skills):
+        """
+        Train from user feedback (for backward compatibility with NLPProcessor)
+        """
+        texts = approved_skills + rejected_skills
+        labels = [1] * len(approved_skills) + [0] * len(rejected_skills)
+        return self.train(texts, labels)
+    
     def predict(self, text):
         """
-        Predict if a phrase is a skill.
-        
-        Args:
-            text: Single phrase or list of phrases
-        
-        Returns:
-            Prediction (0=Not Skill, 1=Skill) or list of predictions
+        Predict if a phrase is a skill using trained ML model.
         """
         if not self.is_trained:
-            print("[ML] Model not trained. Using fallback.")
-            return 1 if len(text.split()) >= 2 else 0
+            return self._fallback_predict(text)
         
         if isinstance(text, str):
             X = self.vectorizer.transform([text])
@@ -131,8 +276,10 @@ class SkillClassifier:
             prob = self.model.predict_proba(X)[0]
             return {
                 'prediction': int(pred),
+                'label': 'Skill' if pred == 1 else 'Not Skill',
                 'confidence': float(max(prob)),
-                'prob_skill': float(prob[1])
+                'prob_skill': float(prob[1]),
+                'prob_not_skill': float(prob[0])
             }
         else:
             X = self.vectorizer.transform(text)
@@ -141,38 +288,46 @@ class SkillClassifier:
             return [
                 {
                     'prediction': int(preds[i]),
+                    'label': 'Skill' if preds[i] == 1 else 'Not Skill',
                     'confidence': float(max(probs[i])),
-                    'prob_skill': float(probs[i][1])
+                    'prob_skill': float(probs[i][1]),
+                    'prob_not_skill': float(probs[i][0])
                 }
                 for i in range(len(text))
             ]
     
-    def predict_skill(self, text, threshold=0.70):
-        """
-        Predict if a phrase is a skill with threshold.
-        
-        Returns: (is_skill, confidence)
-        """
+    def _fallback_predict(self, text):
+        """Rule-based fallback when ML not trained"""
         if isinstance(text, str):
-            result = self.predict(text)
-            is_skill = result['prediction'] == 1 and result['confidence'] >= threshold
-            return is_skill, result['confidence']
-        
-        results = self.predict(text)
-        return [
-            (r['prediction'] == 1 and r['confidence'] >= threshold, r['confidence'])
-            for r in results
-        ]
+            # Check if it's a common skill term
+            common_skills = ['excel', 'word', 'powerpoint', 'outlook', 'autocad', 'python', 'java', 'sql']
+            if any(skill in text.lower() for skill in common_skills):
+                return {'prediction': 1, 'label': 'Skill', 'confidence': 0.65, 'prob_skill': 0.65}
+            return {
+                'prediction': 1 if len(text.split()) >= 2 else 0,
+                'label': 'Skill' if len(text.split()) >= 2 else 'Not Skill',
+                'confidence': 0.50,
+                'prob_skill': 0.50
+            }
+        else:
+            return [
+                {
+                    'prediction': 1 if len(t.split()) >= 2 else 0,
+                    'label': 'Skill' if len(t.split()) >= 2 else 'Not Skill',
+                    'confidence': 0.50,
+                    'prob_skill': 0.50
+                }
+                for t in text
+            ]
     
     def get_feature_importance(self, top_n=20):
         """Get top features for skill classification"""
         if not self.is_trained:
-            return []
+            return {'top_skill_indicators': [], 'top_not_skill_indicators': []}
         
         feature_names = self.vectorizer.get_feature_names_out()
         coefficients = self.model.coef_[0]
         
-        # Get top positive (skill indicators) and negative (non-skill indicators)
         top_skill = sorted(
             zip(feature_names, coefficients),
             key=lambda x: x[1],
@@ -189,75 +344,80 @@ class SkillClassifier:
             'top_not_skill_indicators': top_not_skill
         }
     
-    def generate_training_data_from_feedback(self, nlp_processor):
-        """
-        Generate training data from user feedback.
-        
-        This connects your feedback system to the ML classifier.
-        """
-        texts = []
-        labels = []
-        
-        # Get approved skills (1 = skill)
-        for skill in nlp_processor.feedback_log.get('approved', []):
-            texts.append(skill)
-            labels.append(1)
-        
-        # Get rejected skills (0 = not skill)
-        for skill in nlp_processor.feedback_log.get('rejected', []):
-            texts.append(skill)
-            labels.append(0)
-        
-        if len(texts) >= 10:
-            print(f"[ML] Generating training data from {len(texts)} feedback items")
-            return self.train(texts, labels)
-        
-        return False
+    def get_stats(self):
+        """Get training statistics"""
+        return self.training_stats
 
 
-# Example training script
+# ============ TRAINING SCRIPT ============
 if __name__ == "__main__":
-    # Sample training data
-    sample_texts = [
-        "AutoCAD", "Technical Drafting", "Microsoft Office", "Python", "Java",
-        "Project Management", "Leadership", "Communication", "Data Analysis",
-        "Machine Learning", "Deep Learning", "SQL", "Excel", "PowerPoint",
-        "Philippines", "Certificate", "March 2024", "TESDA", "Email", "Phone",
-        "Bachelor of Science", "University", "College", "Graduate", "Intern",
-        "Resume", "Address", "Contact", "Date of Birth", "Nationality",
-        "Registered Electrical Engineer", "PRC", "License", "WEA", "Employee"
-    ]
+    import sys
     
-    sample_labels = [
-        1, 1, 1, 1, 1,  # Skills
-        1, 1, 1, 1, 1,  # Skills
-        1, 1, 1, 1, 1,  # Skills
-        0, 0, 0, 0, 0,  # Not skills
-        0, 0, 0, 0, 0,  # Not skills
-        0, 0, 0, 0, 0,  # Not skills
-        0, 0, 0, 0, 0   # Not skills
-    ]
+    print("=" * 60)
+    print(" TRAINING SKILL CLASSIFIER")
+    print(" Using HUMAN-VERIFIED data from Supabase feedback_training")
+    print("=" * 60)
     
+    # Initialize classifier (uses same Supabase setup as your backend)
     classifier = SkillClassifier()
-    classifier.train(sample_texts, sample_labels)
     
-    # Test predictions
-    test_phrases = [
-        "AutoCAD",
-        "Philippines",
-        "Python",
-        "Certificate",
-        "Project Management",
-        "Email"
-    ]
+    # Train from Supabase ONLY
+    success = classifier.train_from_supabase()
     
-    print("\n[ML] Test Predictions:")
-    for phrase in test_phrases:
-        result = classifier.predict(phrase)
-        print(f"  {phrase}: {'Skill' if result['prediction'] == 1 else 'Not Skill'} (conf: {result['confidence']:.2f})")
+    if success:
+        print("\n" + "=" * 60)
+        print(" TRAINING COMPLETE!")
+        print(f" Model saved to: {classifier.model_path}")
+        print(f" Training Stats:")
+        print(f"   Total samples: {classifier.training_stats.get('total_samples', 0)}")
+        print(f"   Skills: {classifier.training_stats.get('skill_samples', 0)}")
+        print(f"   Not Skills: {classifier.training_stats.get('not_skill_samples', 0)}")
+        if classifier.training_stats.get('accuracy'):
+            print(f"   Accuracy: {classifier.training_stats['accuracy']:.2%}")
+        
+        # Test predictions
+        print("\n" + "=" * 60)
+        print(" TEST PREDICTIONS")
+        print("=" * 60)
+        
+        test_phrases = [
+            # Should be skills (from your approved list)
+            "AutoCAD", "Project Management", "Microsoft Excel", "Lighting Design",
+            "Proposal Engineering", "Cross-functional Collaboration", "Python",
+            "Bid Management Tools", "Electrical Engineering",
+            "client requirements", "electrical cost estimation", "technical documentation",
+            "ups service support and coordination", "sales engineering",
+            
+            # Should NOT be skills (from your rejected list)
+            "Philippines", "Certificate", "Mapúa University", "Patrick Cruz",
+            "10 years", "Company Logo", "Full Name", "License Number",
+            "Employee ID", "Date Hired", "Proposal Engineer", "EMP-006",
+            "june 15, 2016", "internal use"
+        ]
+        
+        print(f"{'Phrase':<40} {'Result':<15} {'Confidence'}")
+        print("-" * 75)
+        
+        for phrase in test_phrases:
+            result = classifier.predict(phrase)
+            status = f" {result['label']}" if result['prediction'] == 1 else f" {result['label']}"
+            conf = result['confidence']
+            print(f"{phrase:<40} {status:<15} {conf:.2%}")
+        
+        # Feature importance
+        print("\n" + "=" * 60)
+        print(" TOP SKILL INDICATORS (Learned from Human Feedback)")
+        print("=" * 60)
+        importance = classifier.get_feature_importance()
+        if importance:
+            print("\n Top 10 Skill Indicators:")
+            for feature, coef in importance['top_skill_indicators'][:10]:
+                print(f"   {feature}: {coef:.3f}")
+            
+            print("\n Top 10 Not-Skill Indicators:")
+            for feature, coef in importance['top_not_skill_indicators'][:10]:
+                print(f"   {feature}: {coef:.3f}")
+    else:
+        print("\n Training failed. Need at least 10 human-verified samples in feedback_training table.")
     
-    # Feature importance
-    print("\n[ML] Top Skill Indicators:")
-    importance = classifier.get_feature_importance()
-    for feature, coef in importance['top_skill_indicators'][:10]:
-        print(f"  {feature}: {coef:.3f}")
+    print("=" * 60)

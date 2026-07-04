@@ -9,7 +9,8 @@ export default function SkillFeedbackModal({
     onClose, 
     documentId, 
     employeeId, 
-    extractedSkills = [],
+    needsReview = [],      // ← Only pending skills
+    autoApproved = [],     // ← Already approved skills
     documentType = 'Resume',
     onFeedbackSubmitted,
     onSkip
@@ -26,9 +27,24 @@ export default function SkillFeedbackModal({
         return token ? { Authorization: `Bearer ${token}` } : {};
     };
 
-    // Initialize with all skills as pending
+    // ============ HELPER: Extract skill name from object or string ============
+    const getSkillName = (skill) => {
+        if (typeof skill === 'string') return skill;
+        if (typeof skill === 'object' && skill !== null) {
+            return skill.skill_name || skill.skill_tag || skill.skill || skill.name || String(skill);
+        }
+        return String(skill);
+    };
+
+    // ============ HELPER: Normalize skills array ============
+    const normalizeSkills = (skills) => {
+        if (!Array.isArray(skills)) return [];
+        return skills.map(s => getSkillName(s));
+    };
+
+    // Initialize with needsReview skills
     useEffect(() => {
-        if (isOpen && extractedSkills) {
+        if (isOpen && needsReview) {
             setApproved([]);
             setRejected([]);
             // Check for existing feedback
@@ -36,7 +52,7 @@ export default function SkillFeedbackModal({
                 fetchExistingFeedback();
             }
         }
-    }, [isOpen, extractedSkills, documentId, employeeId]);
+    }, [isOpen, needsReview, documentId, employeeId]);
 
     const fetchExistingFeedback = async () => {
         try {
@@ -57,25 +73,28 @@ export default function SkillFeedbackModal({
     };
 
     const handleApprove = (skill) => {
-        setApproved([...approved, skill]);
-        setRejected(rejected.filter(s => s !== skill));
+        const skillName = getSkillName(skill);
+        setApproved([...approved, skillName]);
+        setRejected(rejected.filter(s => getSkillName(s) !== skillName));
     };
 
     const handleReject = (skill) => {
-        setRejected([...rejected, skill]);
-        setApproved(approved.filter(s => s !== skill));
+        const skillName = getSkillName(skill);
+        setRejected([...rejected, skillName]);
+        setApproved(approved.filter(s => s !== skillName));
     };
 
     const handleUndo = (skill) => {
-        setApproved(approved.filter(s => s !== skill));
-        setRejected(rejected.filter(s => s !== skill));
+        const skillName = getSkillName(skill);
+        setApproved(approved.filter(s => s !== skillName));
+        setRejected(rejected.filter(s => s !== skillName));
     };
 
     const handleSubmit = async () => {
         setSubmitting(true);
         try {
             const authHeader = await getAuthHeader();
-                    const response = await axios.post(
+            const response = await axios.post(
                 `${API_URL}/employee/skill-feedback`,
                 {
                     documentId,
@@ -87,7 +106,6 @@ export default function SkillFeedbackModal({
             );
 
             if (response.data.success) {
-                // Callback with approved skills
                 if (onFeedbackSubmitted) {
                     onFeedbackSubmitted(approved);
                 }
@@ -110,8 +128,12 @@ export default function SkillFeedbackModal({
         onClose();
     };
 
+    // ============ Normalize all skill arrays ============
+    const normalizedNeedsReview = normalizeSkills(needsReview);
+    const normalizedAutoApproved = normalizeSkills(autoApproved);
+    
     // Get pending skills (not yet approved or rejected)
-    const pendingSkills = extractedSkills.filter(s => 
+    const pendingSkills = normalizedNeedsReview.filter(s => 
         !approved.includes(s) && !rejected.includes(s)
     );
     const canSave = !!documentId && !submitting;
@@ -136,6 +158,11 @@ export default function SkillFeedbackModal({
                 </div>
 
                 <div style={modalStyles.badgeContainer}>
+                    {normalizedAutoApproved.length > 0 && (
+                        <span style={{...modalStyles.badge, ...modalStyles.badgeAutoApproved}}>
+                            ✅ Auto-Approved: {normalizedAutoApproved.length}
+                        </span>
+                    )}
                     <span style={{...modalStyles.badge, ...modalStyles.badgeApproved}}>
                         ✅ Approved: {approved.length}
                     </span>
@@ -152,10 +179,29 @@ export default function SkillFeedbackModal({
                     )}
                 </div>
 
+                {normalizedAutoApproved.length > 0 && (
+                    <div style={modalStyles.autoApprovedContainer}>
+                        <div style={modalStyles.autoApprovedHeader}>
+                            <span>✅ Auto-Approved Skills (from knowledge base)</span>
+                        </div>
+                        <div style={modalStyles.autoApprovedList}>
+                            {normalizedAutoApproved.map((skill, index) => (
+                                <span key={index} style={modalStyles.autoApprovedTag}>
+                                    {skill}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 <div style={modalStyles.body}>
-                    {extractedSkills.length === 0 ? (
+                    {normalizedNeedsReview.length === 0 ? (
                         <div style={modalStyles.empty}>
-                            <p style={modalStyles.emptyText}>No skills extracted from this document.</p>
+                            <p style={modalStyles.emptyText}>
+                                {normalizedAutoApproved.length > 0 
+                                    ? '🎉 All skills have been auto-approved from the knowledge base!' 
+                                    : 'No skills extracted from this document.'}
+                            </p>
                             <button onClick={onClose} style={modalStyles.doneBtn}>
                                 Done
                             </button>
@@ -263,6 +309,7 @@ export default function SkillFeedbackModal({
     );
 }
 
+
 // ============ STYLES ============
 const modalStyles = {
     overlay: {
@@ -358,9 +405,38 @@ const modalStyles = {
         backgroundColor: '#fef3c7',
         color: '#92400e',
     },
+    badgeAutoApproved: {
+        backgroundColor: '#dbeafe',
+        color: '#1e40af',
+    },
     badgeExisting: {
         backgroundColor: '#e0e7ff',
         color: '#3730a3',
+    },
+    autoApprovedContainer: {
+        padding: '12px 24px',
+        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: '#eff6ff',
+        flexShrink: 0,
+    },
+    autoApprovedHeader: {
+        fontSize: '13px',
+        fontWeight: '600',
+        color: '#1e40af',
+        marginBottom: '8px',
+    },
+    autoApprovedList: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '6px',
+    },
+    autoApprovedTag: {
+        padding: '4px 12px',
+        backgroundColor: '#dbeafe',
+        color: '#1e40af',
+        borderRadius: '16px',
+        fontSize: '13px',
+        border: '1px solid #bfdbfe',
     },
     body: {
         padding: '20px 24px',

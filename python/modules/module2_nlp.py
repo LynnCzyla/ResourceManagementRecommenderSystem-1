@@ -6,6 +6,7 @@ import spacy
 import re
 import json
 import os
+import sys 
 from collections import Counter, defaultdict
 from datetime import datetime
 import hashlib
@@ -14,7 +15,8 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from modules.skill_classifier import SkillClassifier  # NEW
+from modules.skill_classifier import SkillClassifier
+
 
 class NLPProcessor:
     """100% Dynamic NLP - Learns everything from documents"""
@@ -50,7 +52,11 @@ class NLPProcessor:
         # All data structures start empty
         self.skill_dictionary = {}          # skill -> category (learned)
         self.skill_categories = {}          # category -> list of skills (learned)
-        self.learned_skills = set()         # All learned skills
+        self.learned_skills = set()         # All learned skills (includes aliases)
+        
+        # Alias structures (NEW)
+        self.skill_aliases = {}              # master -> [aliases]
+        self.alias_lookup = {}               # alias -> master
         
         # Learning statistics - grows with data
         self.word_frequency = Counter()      # All words in documents
@@ -74,11 +80,30 @@ class NLPProcessor:
         self.feedback_log = {}               # User feedback log
         
         self.classifier = SkillClassifier()
-        self.use_ml = False  # ← USE THIS!
-        if not self.use_ml:
-            print("[NLP] ⚠️ ML Classifier not trained. Using rule-based fallback.")
-        # Load existing learning or start empty
-        self._load_data()
+        # ============ SMART ML ACTIVATION ============
+        if self.classifier.is_trained:
+            self.use_ml = True
+        # Try to get accuracy from model file
+        try:
+            with open(self.classifier.model_path, 'rb') as f:
+                import pickle
+                data = pickle.load(f)
+                accuracy = data.get('training_stats', {}).get('accuracy', 0)
+                print(f"[NLP]  ML Classifier is ACTIVE!")
+                print(f"[NLP]    Trained on {self.classifier.training_stats.get('total_samples', 0)} samples")
+                print(f"[NLP]    Accuracy: {accuracy:.2%}")
+        except:
+            print(f"[NLP]  ML Classifier is ACTIVE!")
+            print(f"[NLP]    Trained on {self.classifier.training_stats.get('total_samples', 0)} samples")
+            # ==============================================
+        
+        # ============ DYNAMIC REJECTION LEARNING ============
+        self.rejected_phrases = defaultdict(int)      # phrase -> rejection count
+        self.rejected_single_words = defaultdict(int) # word -> rejection count
+        self.rejected_names = defaultdict(int)        # name -> rejection count
+        self.rejected_fragments = defaultdict(int)    # fragment -> rejection count
+        self.learned_skill_keywords = set()           # learned from approved skills
+        # ===================================================
         
         # Stats
         self.stats = {
@@ -90,9 +115,13 @@ class NLPProcessor:
             'documents_analyzed': 0
         }
         
+        # Load existing learning or start empty
+        self._load_data()
+        
         print(f"[NLP] 100% Dynamic NLP initialized")
         print(f"[NLP] Learned {len(self.skill_dictionary)} skills from {self.stats['documents_analyzed']} documents")
         print(f"[NLP] Discovered {len(self.skill_categories)} categories")
+        print(f"[NLP] Alias groups: {len(self.skill_aliases)}")
     
     def _get_default_db_path(self):
         """Get path for learning database"""
@@ -102,20 +131,34 @@ class NLPProcessor:
         return skill_dir / 'learned_skills.json'
     
     def _load_data(self):
-        """Load all learned data - MERGES with existing in-memory data"""
+        """Load all learned data - with alias structure support"""
+
+        # ============ FIX: Initialize stats if missing ============
+        if not hasattr(self, 'stats'):
+            self.stats = {
+                'total_processed': 0,
+                'total_skills_extracted': 0,
+                'total_licenses_found': 0,
+                'new_skills_learned': 0,
+                'new_categories_created': 0,
+                'documents_analyzed': 0
+            }
+        # =============================================================
+        
+        # Load rejection patterns
         if os.path.exists(self.skill_db_path):
             try:
                 with open(self.skill_db_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     
                     # ============ MERGE, DON'T REPLACE! ============
-                    # 1. Merge learned_skills
+                    # 1. Merge learned_skills (ALL skills, including aliases)
                     loaded_skills = set(data.get('learned_skills', []))
-                    self.learned_skills.update(loaded_skills)  # ← MERGE
+                    self.learned_skills.update(loaded_skills)
                     
                     # 2. Merge dictionary
                     loaded_dict = data.get('dictionary', {})
-                    self.skill_dictionary.update(loaded_dict)  # ← MERGE
+                    self.skill_dictionary.update(loaded_dict)
                     
                     # 3. Merge categories
                     loaded_categories = data.get('categories', {})
@@ -126,32 +169,43 @@ class NLPProcessor:
                             if skill not in self.skill_categories[category]:
                                 self.skill_categories[category].append(skill)
                     
-                    # 4. Merge word_frequency
+                    # 4. Load alias structures (NEW)
+                    self.skill_aliases = data.get('skill_aliases', {})
+                    self.alias_lookup = data.get('alias_lookup', {})
+                    
+                    # 5. Load rejection patterns (NEW)
+                    self.rejected_phrases = defaultdict(int, data.get('rejected_phrases', {}))
+                    self.rejected_single_words = defaultdict(int, data.get('rejected_single_words', {}))
+                    self.rejected_names = defaultdict(int, data.get('rejected_names', {}))
+                    self.rejected_fragments = defaultdict(int, data.get('rejected_fragments', {}))
+                    self.learned_skill_keywords = set(data.get('learned_skill_keywords', []))
+                    
+                    # 6. Merge word_frequency
                     loaded_wf = data.get('word_frequency', {})
                     for word, count in loaded_wf.items():
                         self.word_frequency[word] += count
                     
-                    # 5. Merge phrase_frequency
+                    # 7. Merge phrase_frequency
                     loaded_pf = data.get('phrase_frequency', {})
                     for phrase, count in loaded_pf.items():
                         self.phrase_frequency[phrase] += count
                     
-                    # 6. Merge skill_candidates
+                    # 8. Merge skill_candidates
                     loaded_sc = data.get('skill_candidates', {})
                     for word, count in loaded_sc.items():
                         self.skill_candidates[word] += count
                     
-                    # 7. Merge skill_patterns
+                    # 9. Merge skill_patterns
                     loaded_sp = data.get('skill_patterns', {})
                     for word, count in loaded_sp.items():
                         self.skill_patterns[word] += count
                     
-                    # 8. Merge non_skill_patterns
+                    # 10. Merge non_skill_patterns
                     loaded_nsp = data.get('non_skill_patterns', {})
                     for word, count in loaded_nsp.items():
                         self.non_skill_patterns[word] += count
                     
-                    # 9. 🔥 MERGE feedback_log
+                    # 11. MERGE feedback_log
                     loaded_feedback = data.get('feedback_log', {})
                     for key in ['approved', 'rejected']:
                         if key in loaded_feedback:
@@ -161,10 +215,9 @@ class NLPProcessor:
                                 if item not in self.feedback_log[key]:
                                     self.feedback_log[key].append(item)
                     
-                    # 10. 🔥 MERGE merge_history
+                    # 12. MERGE merge_history
                     loaded_history = data.get('merge_history', [])
                     if loaded_history:
-                        # Merge, avoiding duplicates
                         existing_entries = {(h.get('skill1'), h.get('skill2')): h for h in self.merge_history}
                         for entry in loaded_history:
                             key = (entry.get('skill1'), entry.get('skill2'))
@@ -172,17 +225,17 @@ class NLPProcessor:
                                 self.merge_history.append(entry)
                                 existing_entries[key] = entry
                     
-                    # 11. Merge skill_importance
+                    # 13. Merge skill_importance
                     loaded_importance = data.get('skill_importance', {})
                     for skill, importance in loaded_importance.items():
                         self.skill_importance[skill] = self.skill_importance.get(skill, 0) + importance
                     
-                    # 12. Merge learned_sections
+                    # 14. Merge learned_sections
                     loaded_sections = data.get('learned_sections', {})
                     for section, count in loaded_sections.items():
                         self.learned_sections[section] = self.learned_sections.get(section, 0) + count
                     
-                    # 13. Merge type_thresholds
+                    # 15. Merge type_thresholds
                     loaded_thresholds = data.get('type_thresholds', {})
                     for key, value in loaded_thresholds.items():
                         self.type_thresholds[key] = value
@@ -191,6 +244,8 @@ class NLPProcessor:
                     self.stats['documents_analyzed'] = data.get('documents_analyzed', 0)
                     
                     print(f"[NLP] Merged data from file: {len(self.learned_skills)} skills, {len(self.feedback_log.get('approved', []))} approved, {len(self.merge_history)} merge entries")
+                    print(f"[NLP] Alias groups: {len(self.skill_aliases)}, Aliases: {len(self.alias_lookup)}")
+                    print(f"[NLP] Learned {len(self.learned_skill_keywords)} skill keywords from feedback")
                     return
             except Exception as e:
                 print(f"[NLP] Error loading data: {e}")
@@ -200,12 +255,31 @@ class NLPProcessor:
         self._save_data()
     
     def _save_data(self):
-        """Save all learned data"""
+        """Save all learned data with alias structure and rejection patterns"""
+        return self._save_knowledge_base_with_aliases()
+    
+    def _save_knowledge_base_with_aliases(self):
+        """
+        Save learned_skills.json with alias structure and rejection patterns.
+        """
         try:
+            # Build alias structure from merge history if not already built
+            if not self.skill_aliases and self.merge_history:
+                self._build_alias_structure_from_history()
+            
             data = {
+                'learned_skills': list(self.learned_skills),  # ALL skills (masters + aliases)
                 'dictionary': self.skill_dictionary,
                 'categories': self.skill_categories,
-                'learned_skills': list(self.learned_skills),
+                'skill_aliases': self.skill_aliases,      # master -> [aliases]
+                'alias_lookup': self.alias_lookup,        # alias -> master
+                # ============ NEW: Rejection patterns ============
+                'rejected_phrases': dict(self.rejected_phrases),
+                'rejected_single_words': dict(self.rejected_single_words),
+                'rejected_names': dict(self.rejected_names),
+                'rejected_fragments': dict(self.rejected_fragments),
+                'learned_skill_keywords': list(self.learned_skill_keywords),
+                # ===================================================
                 'word_frequency': dict(self.word_frequency.most_common(1000)),
                 'phrase_frequency': dict(self.phrase_frequency.most_common(500)),
                 'skill_candidates': dict(self.skill_candidates.most_common(100)),
@@ -219,13 +293,78 @@ class NLPProcessor:
                 'feedback_log': self.feedback_log,
                 'merge_history': self.merge_history[-1000:] if hasattr(self, 'merge_history') else []
             }
+            
             with open(self.skill_db_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            print(f"[NLP] Saved: {len(self.learned_skills)} skills, {len(self.feedback_log.get('approved', []))} approved, {len(self.merge_history)} merge entries")
+            
+            print(f"[NLP] Saved knowledge base: {len(self.learned_skills)} skills, {len(self.skill_aliases)} alias groups")
+            print(f"[NLP] Saved {len(self.rejected_phrases)} rejected patterns")
             return True
+            
         except Exception as e:
-            print(f"[NLP] Error saving data: {e}")
+            print(f"[NLP] Error saving: {e}")
             return False
+    
+    def _build_alias_structure_from_history(self):
+        """Build alias structures from merge history"""
+        self.skill_aliases = {}
+        self.alias_lookup = {}
+        
+        for merge in self.merge_history:
+            if merge.get('decision'):
+                skill1 = merge['skill1']
+                skill2 = merge['skill2']
+                
+                # Determine which is the master
+                if skill1 in self.learned_skills and skill2 in self.learned_skills:
+                    # Both exist - check merge history for which was kept
+                    master = self._choose_master(skill1, skill2)
+                    alias = skill2 if master == skill1 else skill1
+                    
+                    if master not in self.skill_aliases:
+                        self.skill_aliases[master] = []
+                    if alias not in self.skill_aliases[master]:
+                        self.skill_aliases[master].append(alias)
+                    self.alias_lookup[alias] = master
+                    
+                elif skill1 in self.learned_skills:
+                    # skill1 is master
+                    if skill1 not in self.skill_aliases:
+                        self.skill_aliases[skill1] = []
+                    if skill2 not in self.skill_aliases[skill1]:
+                        self.skill_aliases[skill1].append(skill2)
+                    self.alias_lookup[skill2] = skill1
+                    
+                elif skill2 in self.learned_skills:
+                    # skill2 is master
+                    if skill2 not in self.skill_aliases:
+                        self.skill_aliases[skill2] = []
+                    if skill1 not in self.skill_aliases[skill2]:
+                        self.skill_aliases[skill2].append(skill1)
+                    self.alias_lookup[skill1] = skill2
+    
+    def get_master_skill(self, skill):
+        """
+        Get the master skill for a given skill.
+        Useful for recommendation phase.
+        
+        Args:
+            skill: The skill phrase to lookup
+        
+        Returns:
+            The master skill name, or the original if not an alias
+        """
+        if skill in self.alias_lookup:
+            return self.alias_lookup[skill]
+        return skill
+    
+    def get_aliases(self, master):
+        """Get all aliases for a master skill"""
+        return self.skill_aliases.get(master, [])
+    
+    def is_alias(self, skill):
+        """Check if a skill is an alias"""
+        return skill in self.alias_lookup
     
     # ============ DYNAMIC SECTION LEARNING ============
     
@@ -444,7 +583,7 @@ class NLPProcessor:
         if skill1 == skill2:
             return False
         
-        # ============ 🔥 LOAD EXISTING MERGE HISTORY ============
+        # ============ LOAD EXISTING MERGE HISTORY ============
         if not hasattr(self, 'merge_history') or len(self.merge_history) == 0:
             if os.path.exists(self.skill_db_path):
                 try:
@@ -458,9 +597,40 @@ class NLPProcessor:
                     print(f"[MERGE] Error loading: {e}")
         # =====================================================
         
+        # ============ CATEGORY PROTECTION ============
+        cat1 = self.skill_dictionary.get(skill1, 'Other')
+        cat2 = self.skill_dictionary.get(skill2, 'Other')
+        
+        # Don't merge if categories are different AND both are known
+        if cat1 != cat2 and cat1 != 'Other' and cat2 != 'Other':
+            print(f"[SMART] Different categories: '{skill1}' ({cat1}) vs '{skill2}' ({cat2})")
+            return False
+        # ===================================================
+        
+        # ============ WORD OVERLAP PROTECTION ============
+        words1 = set(skill1.lower().split())
+        words2 = set(skill2.lower().split())
+        overlap = len(words1 & words2)
+        
         # Calculate similarity
         similarity = self._calculate_similarity(skill1, skill2)
+        
+        # If they only share 1 word, require higher similarity
+        if overlap == 1 and similarity < 0.85:
+            print(f"[SMART] Only 1 word overlap: '{skill1}' <-> '{skill2}' (sim: {similarity:.2f})")
+            return False
+        # ===================================================
+        
+        # ============ DYNAMIC THRESHOLD ============
         threshold = self._get_merge_threshold(skill1, skill2)
+        
+        # Increase threshold for multi-word skills with low overlap
+        if len(words1) > 2 or len(words2) > 2:
+            overlap_ratio = overlap / max(len(words1), len(words2))
+            if overlap_ratio < 0.4:
+                threshold = max(threshold, 0.85)
+        # ===================================================
+        
         decision = similarity > threshold
         
         # Append new entry
@@ -476,6 +646,11 @@ class NLPProcessor:
         # Keep manageable
         if len(self.merge_history) > 1000:
             self.merge_history = self.merge_history[-500:]
+        
+        if decision:
+            print(f"[SMART]  Merging: '{skill1}'  '{skill2}' (sim: {similarity:.2f}, threshold: {threshold:.2f})")
+        else:
+            print(f"[SMART]  Keeping: '{skill1}'  '{skill2}' (sim: {similarity:.2f}, threshold: {threshold:.2f})")
         
         return decision
     
@@ -552,131 +727,397 @@ class NLPProcessor:
     # ============ EXTRACT CANDIDATES ============
     
     def _extract_candidates(self, text):
-        """Extract potential skill candidates - learns from data"""
+        """Extract potential skill candidates - learns from data dynamically"""
         candidates = set()
-        doc = self.nlp(text)
         
-        # Extract noun phrases
-        for chunk in doc.noun_chunks:
-            chunk_text = chunk.text.strip()
-            if 2 < len(chunk_text) < 50:
-                candidates.add(chunk_text.lower())
+        # ============ STEP 1: Learn section names from this document ============
+        # First, extract all section headers
+        header_pattern = re.compile(r'^([A-Z][A-Z\s&]+|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:.]?\s*$', re.MULTILINE)
         
-        # Extract from bullet points
-        bullet_matches = re.findall(r'[•▪➢►▸-]\s*([A-Za-z0-9\s,]+)', text)
+        sections = {}
+        lines = text.split('\n')
+        current_section = None
+        current_content = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if this is a section header
+            if header_pattern.match(line):
+                # Save previous section
+                if current_section and current_content:
+                    sections[current_section] = '\n'.join(current_content)
+                current_section = line.rstrip(':.').strip().lower()
+                current_content = []
+            elif current_section:
+                current_content.append(line)
+        
+        # Save last section
+        if current_section and current_content:
+            sections[current_section] = '\n'.join(current_content)
+        
+        # ============ STEP 2: Score sections for skill relevance ============
+        # Skill indicators (learned patterns, not hardcoded)
+        skill_indicators = [
+            'skill', 'competenc', 'proficien', 'specializ', 
+            'knowledge', 'expertise', 'qualif', 'ability',
+            'technical', 'software', 'tool', 'platform',
+            'experience', 'project', 'coordination', 'management',
+            'control', 'tracking', 'document', 'filing', 'version'
+        ]
+        
+        # Non-skill indicators (things that are NOT skills)
+        non_skill_indicators = [
+            'photo', 'picture', 'logo', 'confidential', 'internal',
+            'employee id', 'full name', 'position', 'department',
+            'date hired', 'employment status', 'supervisor', 'manager remarks',
+            'educational background', 'degree', 'course', 'institution', 
+            'year completed', 'professional license', 'license number'
+        ]
+        
+        # Score each section
+        scored_sections = {}
+        for section_name, content in sections.items():
+            section_lower = section_name.lower()
+            content_lower = content.lower()
+            
+            score = 0
+            
+            # Check section name for skill indicators
+            for indicator in skill_indicators:
+                if indicator in section_lower:
+                    score += 3
+                    break
+            
+            # Check content for skill indicators
+            for indicator in skill_indicators:
+                if indicator in content_lower:
+                    score += 1
+            
+            # Check for bullet points (often skills)
+            bullet_count = len(re.findall(r'[•\-\*]\s*[A-Za-z]', content))
+            if bullet_count > 2:
+                score += 2
+            elif bullet_count > 0:
+                score += 1
+            
+            # Check for common skill patterns
+            if re.search(r'\b(?:proficient|experienced|skilled|expert)\b', content_lower):
+                score += 2
+            
+            # Penalize non-skill sections
+            for indicator in non_skill_indicators:
+                if indicator in section_lower or indicator in content_lower:
+                    score -= 2
+                    break
+            
+            scored_sections[section_name] = {
+                'content': content,
+                'score': score,
+                'is_skill_section': score >= 3  # Threshold learned from data
+            }
+        
+        # ============ STEP 3: Extract from skill sections ============
+        for section_name, section_data in scored_sections.items():
+            if not section_data['is_skill_section']:
+                continue
+            
+            content = section_data['content']
+            
+            # Extract bullet points
+            bullet_items = re.findall(r'[•\-\*]\s*([^\n•\-\*]+)', content)
+            
+            if bullet_items:
+                for item in bullet_items:
+                    clean = item.strip()
+                    if 3 < len(clean) < 100 and clean:
+                        # Filter out non-skills
+                        if not self._is_non_skill(clean):
+                            candidates.add(clean)
+            else:
+                # If no bullet points, split by newlines or commas
+                items = re.split(r'\n|,', content)
+                for item in items:
+                    clean = item.strip()
+                    if 3 < len(clean) < 100 and clean:
+                        if not self._is_non_skill(clean):
+                            candidates.add(clean)
+        
+        # ============ STEP 4: Extract from bullet points anywhere ============
+        bullet_matches = re.findall(r'[•\-\*]\s*([A-Za-z0-9\s,&]+)', text)
         for match in bullet_matches:
             clean = match.strip()
-            if 2 < len(clean) < 50:
-                candidates.add(clean.lower())
+            if 3 < len(clean) < 100 and clean:
+                if not self._is_non_skill(clean):
+                    candidates.add(clean)
         
-        # Extract from competency sections
-        section_pattern = re.compile(r'([A-Z][A-Z\s&]+|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:.]?\s*', re.MULTILINE)
-        sections = section_pattern.findall(text)
-        for section in sections:
-            if 'competency' in section.lower() or 'skill' in section.lower() or 'technical' in section.lower():
-                section_idx = text.lower().find(section.lower())
-                if section_idx != -1:
-                    subsection = text[section_idx:section_idx + 500]
-                    items = re.split(r'[•▪➢►▸-]\s*|\d+\.\s*', subsection)
-                    for item in items:
-                        clean = item.strip()
-                        if 2 < len(clean) < 50:
-                            candidates.add(clean.lower())
+        # ============ STEP 5: Extract noun phrases (spaCy) ============
+        doc = self.nlp(text)
+        for chunk in doc.noun_chunks:
+            chunk_text = chunk.text.strip()
+            if 3 < len(chunk_text) < 50:
+                if not self._is_non_skill(chunk_text):
+                    candidates.add(chunk_text)
         
-        # Extract from "Skills:" sections
-        skill_pattern = re.search(r'skills?\s*[:.]?\s*([A-Za-z0-9,\s]+)', text, re.IGNORECASE)
-        if skill_pattern:
-            skills_text = skill_pattern.group(1)
-            for skill in skills_text.split(','):
-                clean = skill.strip()
-                if 2 < len(clean) < 50:
-                    candidates.add(clean.lower())
-        
-        # ============ 🔥 ADD THESE NEW PATTERNS ============
-        
-        # 1. Extract from section headers like "Technical Competencies"
-        section_pattern2 = re.compile(
-            r'(?:Technical Competencies|Software Proficiency|Areas of Specialization|Product and Technical Knowledge|Industry Experience)\s*([\s\S]*?)(?=\n\n|\Z)',
-            re.IGNORECASE
-        )
-        section_matches = section_pattern2.findall(text)
-        for match in section_matches:
-            # Split by bullet points or newlines
-            items = re.split(r'[•▪➢►▸-]\s*|\n', match)
-            for item in items:
-                clean = item.strip()
-                if 2 < len(clean) < 50 and not clean.isupper():
-                    candidates.add(clean.lower())
-        
-        # 2. Extract colon-separated lists like "License: Registered Electrical Engineer"
-        colon_pattern = re.compile(r'([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:]\s*([A-Za-z0-9\s,]+)')
+        # ============ STEP 6: Extract from colon-separated lists ============
+        colon_pattern = re.compile(r'([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:]\s*([A-Za-z0-9\s,&]+)')
         for match in colon_pattern.finditer(text):
             value = match.group(2).strip()
-            if 2 < len(value) < 50:
-                candidates.add(value.lower())
-        
-        # 3. Extract from parentheses: "Microsoft Excel (Bid Tracking & Cost Coordination)"
-        paren_pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*\([^)]+\)')
-        for match in paren_pattern.finditer(text):
-            skill = match.group(1).strip()
-            if 2 < len(skill) < 40:
-                candidates.add(skill.lower())
-        
-        # 4. Extract lines with "Engineer" or "Engineering" in them
-        engineer_pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+Engineer|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+Engineering)')
-        for match in engineer_pattern.finditer(text):
-            skill = match.group(0).strip()
-            if 2 < len(skill) < 40:
-                candidates.add(skill.lower())
-        
-        # 5. Extract from bulleted sections with specific headers
-        bullet_section_pattern = re.compile(
-            r'(?:Technical Competencies|Software Proficiency|Areas of Specialization|Product and Technical Knowledge)\s*([\s\S]*?)(?=\n[A-Z]|\Z)',
-            re.IGNORECASE
-        )
-        for match in bullet_section_pattern.finditer(text):
-            section_text = match.group(1)
-            bullet_items = re.findall(r'[•▪➢►▸-]\s*([A-Za-z0-9\s,]+)', section_text)
-            for item in bullet_items:
-                clean = item.strip()
-                if 2 < len(clean) < 50:
-                    candidates.add(clean.lower())
-        
-        # 6. Extract from "● " bullet points (specific to your resume format)
-        bullet_pattern = re.compile(r'●\s*([A-Za-z0-9\s,]+)')
-        for match in bullet_pattern.finditer(text):
-            clean = match.group(1).strip()
-            if 2 < len(clean) < 50:
-                candidates.add(clean.lower())
-        
-        return candidates
+            if 3 < len(value) < 100 and value:
+                if not self._is_non_skill(value):
+                    candidates.add(value)
+
+        # ============ Split long phrases ============
+        cleaned_candidates = set()
+        for candidate in candidates:
+            cleaned = self._clean_candidate_text(candidate)
+            if not cleaned or len(cleaned) < 3:
+                continue
+            
+            words = cleaned.split()
+            
+            # ============ FIX: Only keep short phrases ============
+            # Keep short phrases (2-4 words) ONLY
+            if 2 <= len(words) <= 4:
+                cleaned_candidates.add(cleaned)
+            else:
+                # Split long phrases at connectors
+                connectors = ['and', 'of', 'for', 'to', 'with', 'in', 'on', 'at']
+                current_phrase = []
+                
+                for word in words:
+                    current_phrase.append(word)
+                    
+                    # If we hit a connector, save the phrase
+                    if word.lower() in connectors and len(current_phrase) >= 2:
+                        phrase = ' '.join(current_phrase[:-1])
+                        # Only keep 2-4 word phrases
+                        if 2 <= len(phrase.split()) <= 4:
+                            cleaned_candidates.add(phrase)
+                        current_phrase = [word]
+                    
+                    # If we have 3 words, save it
+                    if len(current_phrase) == 3:
+                        phrase = ' '.join(current_phrase)
+                        # Only keep 2-4 word phrases
+                        if 2 <= len(phrase.split()) <= 4:
+                            cleaned_candidates.add(phrase)
+                        current_phrase = current_phrase[1:]
+
+        return cleaned_candidates  # ← ONLY cleaned candidates, NO long phrases
     
+    def _clean_candidate_text(self, text):
+        """Clean extracted candidate text"""
+        if not text:
+            return ""
+        
+        # Remove leading bullets and symbols
+        text = re.sub(r'^[•\-\*]\s*', '', text)
+        text = re.sub(r'\s*[•\-\*]$', '', text)
+        
+        # Remove parentheses that wrap the whole text
+        if text.startswith('(') and text.endswith(')'):
+            text = text[1:-1]
+        
+        # Remove brackets
+        if text.startswith('[') and text.endswith(']'):
+            text = text[1:-1]
+        
+        # Remove trailing punctuation
+        text = re.sub(r'[,;:]$', '', text)
+        
+        # Normalize whitespace
+        text = ' '.join(text.split())
+        
+        # Normalize case (title case for display)
+        if len(text.split()) > 1:
+            text = text.title()
+        
+        return text
+    
+    def _is_obvious_non_skill(self, text):
+        """
+        DYNAMICALLY determine if text is obviously NOT a skill.
+        Learns from user feedback - NO hardcoded lists!
+        """
+        if not text:
+            return True
+        
+        text_lower = text.lower()
+        words = text_lower.split()
+        
+        # ============ DYNAMIC FILTERS (Learned from feedback) ============
+        
+        # 1. Check if this exact phrase was rejected (learned)
+        if text_lower in self.rejected_phrases:
+            rejection_count = self.rejected_phrases[text_lower]
+            if rejection_count >= 2:  # Rejected at least twice
+                return True
+        
+        # 2. Check if it's a single word that was rejected (learned)
+        if len(words) == 1:
+            if text_lower in self.rejected_single_words:
+                if self.rejected_single_words[text_lower] >= 2:
+                    return True
+        
+        # 3. Check if it's a name pattern that was rejected (learned)
+        if 2 <= len(words) <= 3 and all(w[0].isupper() for w in words if w):
+            for pattern in self.rejected_names:
+                if text_lower in pattern:
+                    if self.rejected_names[pattern] >= 2:
+                        return True
+        
+        # 4. Check if it's a fragment pattern that was rejected (learned)
+        connectors = ['and', 'for', 'with', 'to', 'of']
+        if any(text_lower.startswith(c) for c in connectors):
+            for pattern in self.rejected_fragments:
+                if text_lower in pattern:
+                    if self.rejected_fragments[pattern] >= 2:
+                        return True
+        
+        # 5. Check if it contains learned skill keywords (from approved skills)
+        if self.learned_skill_keywords:
+            for keyword in self.learned_skill_keywords:
+                if keyword in text_lower:
+                    return False  # Contains skill keyword, likely a skill
+        
+        # ============ SAFE STATIC FILTERS ============
+        # These are safe because they're structural, not semantic
+        # Months, dates, numbers - these never change
+        months = {'january', 'february', 'march', 'april', 'may', 'june',
+                  'july', 'august', 'september', 'october', 'november', 'december',
+                  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'}
+        if text_lower in months or any(month in text_lower for month in months):
+            return True
+        
+        # Education words (structural)
+        education = {'bachelor', 'master', 'phd', 'doctorate', 'degree', 'diploma',
+                     'certificate', 'certification', 'course', 'college', 'university'}
+        if any(word in text_lower for word in education):
+            return True
+        
+        # Length checks (structural)
+        if len(text) < 3:
+            return True
+        
+        # Date patterns (structural)
+        date_patterns = [
+            r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b',
+            r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
+            r'\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b'
+        ]
+        for pattern in date_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        
+        return False
+
+    def _is_non_skill(self, text):
+        """Dynamically determine if text is likely NOT a skill"""
+        if not text:
+            return True
+        
+        text_lower = text.lower()
+        
+        # Learned non-skill patterns (from feedback_log)
+        non_skill_patterns = {
+            'n/a', 'none', 'page', 'date', 'employee', 'id', 'photo', 
+            'confidential', 'internal use', 'company logo', 'photo here',
+            'insert', 'position', 'department', 'supervisor', 'manager',
+            'remarks', 'classification', 'category', 'functional area',
+            'degree', 'course', 'institution', 'university', 'college',
+            'license', 'certificate', 'year', 'completed', 'obtained'
+        }
+        
+        # Check against learned patterns
+        if any(pattern in text_lower for pattern in non_skill_patterns):
+            return True
+        
+        # Check length (too short or too long)
+        if len(text) < 3 or len(text) > 100:
+            return True
+        
+        # Check if it's a date or number
+        if re.match(r'^\d', text) or re.search(r'\d{4}', text):
+            return True
+        
+        # Check if it's all uppercase (often headers)
+        if text.isupper() and len(text) > 5:
+            return True
+        
+        return False
+        
+    # In module2_nlp.py - Updated predict method
+
     def _is_likely_skill(self, candidate):
-        """Dynamically determine if candidate is a skill using ML + fallback"""
+        """
+        Determine if candidate is a skill using multi-layer decision.
+        
+        Layers:
+        1. Knowledge Base -> Auto-approve if already known
+        2. ML Classifier -> Predict confidence for NEW skills
+        3. Fallback Rules -> Only when ML is OFF or fails
+        """
         if not candidate or len(candidate) < 3:
             return False
         
         candidate_lower = candidate.lower()
         words = candidate_lower.split()
         
-        # Always accept already learned skills
+        # ============================================================
+        # LAYER 1: Knowledge Base - Auto-approve known skills
+        # ============================================================
         if candidate_lower in self.learned_skills:
-            return True
+            print(f"[KB] '{candidate}' -> Already in knowledge base (auto-approved)")
+            return candidate
         
-        # ============ ML CLASSIFIER (NEW) ============
+        # ============================================================
+        # LAYER 2: ML Classifier - Predict for NEW skills
+        # ============================================================
         if self.use_ml:
-            result = self.classifier.predict(candidate_lower)
-            is_skill = result['prediction'] == 1 and result['confidence'] >= 0.65
-            if is_skill:
-                print(f"[ML] ✅ {candidate} → Skill (conf: {result['confidence']:.2f})")
-            else:
-                print(f"[ML] ❌ {candidate} → Not Skill (conf: {result['confidence']:.2f})")
-            return is_skill
-        # ==============================================
+            try:
+                result = self.classifier.predict(candidate_lower)
+                is_skill = result['prediction'] == 1
+                confidence = result['confidence']
+                
+                if is_skill and confidence >= 0.85:
+                    print(f"[ML] '{candidate}' -> High confidence skill ({confidence:.2%})")
+                    master = self.get_master_skill(candidate_lower)
+                    if master != candidate_lower:
+                        print(f"[ML] Normalized: '{candidate}' -> '{master}'")
+                        return master
+                    return candidate
+                
+                elif is_skill and confidence >= 0.65:
+                    print(f"[ML] '{candidate}' -> Likely skill ({confidence:.2%}) - needs review")
+                    return candidate, 'needs_review'
+                
+                elif confidence < 0.40:
+                    print(f"[ML]  '{candidate}' -> Not skill ({confidence:.2%}) - rejected")
+                    return False
+                
+                else:
+                    print(f"[ML]  '{candidate}' -> Uncertain ({confidence:.2%}) - show for review")
+                    return candidate, 'needs_review'
+                    
+            except Exception as e:
+                print(f"[ML] Prediction failed: {e}. Using fallback.", file=sys.stderr)
         
-        # ============ FALLBACK: Your Existing Rule-Based Logic ============
-        if self.stats['documents_analyzed'] < 3:
-            return len(words) >= 2
+        # ============================================================
+        # LAYER 3: Fallback Rules (only when ML is OFF or fails)
+        # ============================================================
+        doc_count = self.stats.get('documents_analyzed', 0) if hasattr(self, 'stats') else 0
+        
+        if doc_count < 3:
+            if len(words) >= 2:
+                skip_words = ['n/a', 'none', 'page', 'date', 'employee', 'id', 'photo', 
+                            'confidential', 'internal use', 'company logo']
+                if not any(skip in candidate_lower for skip in skip_words):
+                    print(f"[FALLBACK]  '{candidate}' -> Accepted (early document)")
+                    return candidate
+            return False
         
         non_skill_score = sum(1 for w in words if self.non_skill_patterns.get(w, 0) > 3)
         skill_score = sum(1 for w in words if self.skill_candidates.get(w, 0) > 2)
@@ -685,13 +1126,15 @@ class NLPProcessor:
             return False
         
         if skill_score > 0:
-            return True
+            print(f"[FALLBACK]  '{candidate}' -> Skill pattern matched")
+            return candidate
         
         if len(words) >= 2 and len(candidate_lower) < 30:
-            return True
+            print(f"[FALLBACK]  '{candidate}' -> 2+ words accepted")
+            return candidate
         
         return False
-        
+    
     # ============ ANALYZE STATISTICS ============
     
     def _analyze_statistics(self, text, skills):
@@ -730,12 +1173,12 @@ class NLPProcessor:
             if word not in skill_words and word not in self.skill_candidates:
                 self.non_skill_patterns[word] += 1
     
-    # ============ DYNAMIC MERGING ============
+    # ============ DYNAMIC MERGING (UPDATED - KEEPS ALL SKILLS) ============
     
     def merge_synonyms_dynamically(self):
         """
-        100% dynamic merge - learns everything from data.
-        ZERO hardcoded lists or values.
+        100% dynamic merge - stores aliases, never deletes skills.
+        All skills remain in learned_skills for employee records.
         """
         if len(self.learned_skills) < 3:
             return 0
@@ -771,34 +1214,47 @@ class NLPProcessor:
                     if candidate != master:
                         master = candidate
                 
-                # Merge all into master
+                # ============ NEW: KEEP ALL SKILLS ============
+                # Build alias list for this master
+                aliases = []
                 for skill in group:
-                    if skill != master and skill in self.learned_skills:
-                        self.learned_skills.remove(skill)
+                    if skill != master:
+                        aliases.append(skill)
                         merged_count += 1
-                        merged_details.append(f"{skill} → {master}")
+                        merged_details.append(f"{skill} -> {master} (alias)")
                         
-                        if skill in self.skill_dictionary:
-                            if master not in self.skill_dictionary:
-                                self.skill_dictionary[master] = self.skill_dictionary[skill]
-                            del self.skill_dictionary[skill]
+                        # Update dictionary if master doesn't have category
+                        if master not in self.skill_dictionary and skill in self.skill_dictionary:
+                            self.skill_dictionary[master] = self.skill_dictionary[skill]
                         
-                        # Update skill_candidates
-                        for word in skill.split():
-                            if word in self.skill_candidates:
-                                for master_word in master.split():
-                                    if master_word not in self.skill_candidates:
-                                        self.skill_candidates[master_word] = self.skill_candidates[word]
+                        # Add to merge history with alias flag
+                        self.merge_history.append({
+                            'skill1': skill,
+                            'skill2': master,
+                            'similarity': self._calculate_similarity(skill, master),
+                            'threshold': self._get_merge_threshold(skill, master),
+                            'decision': True,
+                            'is_alias': True,
+                            'timestamp': datetime.now().isoformat()
+                        })
                 
-                if master not in self.learned_skills:
-                    self.learned_skills.add(master)
+                # Store aliases in knowledge base
+                if aliases and master in self.learned_skills:
+                    if master not in self.skill_aliases:
+                        self.skill_aliases[master] = []
+                    for alias in aliases:
+                        if alias not in self.skill_aliases[master]:
+                            self.skill_aliases[master].append(alias)
+                        self.alias_lookup[alias] = master
+                
+                # Ensure master is in dictionary
                 if master not in self.skill_dictionary:
                     self.skill_dictionary[master] = 'Other'
         
         if merged_count > 0:
             self._discover_categories()
-            self._save_data()
-            print(f"[NLP] Dynamically merged {merged_count} skills")
+            self._save_knowledge_base_with_aliases()
+            print(f"[NLP] Dynamically merged {merged_count} skills (kept all as aliases)")
             for detail in merged_details[:5]:
                 print(f"   {detail}")
             if len(merged_details) > 5:
@@ -886,9 +1342,9 @@ class NLPProcessor:
     # ============ FEEDBACK LEARNING ============
     
     def learn_from_feedback(self, approved_skills, rejected_skills):
-        """Learn from user feedback to improve future merging"""
+        """Learn from user feedback - DYNAMICALLY learns what's NOT a skill"""
         
-        # ============ 🔥 LOAD EXISTING FEEDBACK FROM FILE ============
+        # ============ LOAD EXISTING FEEDBACK FROM FILE ============
         if os.path.exists(self.skill_db_path):
             try:
                 with open(self.skill_db_path, 'r', encoding='utf-8') as f:
@@ -918,6 +1374,14 @@ class NLPProcessor:
                     self.feedback_log['approved'] = []
                 self.feedback_log['approved'].append(skill)
                 self.skill_importance[skill] = self.skill_importance.get(skill, 0) + 1
+                
+                # ============ LEARN SKILL KEYWORDS ============
+                words = skill.lower().split()
+                for word in words:
+                    if len(word) > 3 and word not in self.learned_skill_keywords:
+                        self.learned_skill_keywords.add(word)
+                        print(f"[LEARN] Learned skill keyword: '{word}' from '{skill}'")
+                
                 print(f"[FEEDBACK] Approved: {skill}")
         
         for skill in rejected_skills:
@@ -926,25 +1390,63 @@ class NLPProcessor:
                     self.feedback_log['rejected'] = []
                 self.feedback_log['rejected'].append(skill)
                 self.skill_importance[skill] = self.skill_importance.get(skill, 0) - 1
+                
+                # ============ LEARN FROM REJECTIONS ============
+                skill_lower = skill.lower()
+                words = skill_lower.split()
+                
+                # 1. Track rejected phrases
+                self.rejected_phrases[skill_lower] = self.rejected_phrases.get(skill_lower, 0) + 1
+                print(f"[LEARN] Learned rejected phrase: '{skill}'")
+                
+                # 2. Track rejected single words
+                if len(words) == 1 and len(skill_lower) > 2:
+                    self.rejected_single_words[skill_lower] = self.rejected_single_words.get(skill_lower, 0) + 1
+                    print(f"[LEARN] Learned rejected word: '{skill}'")
+                
+                # 3. Track rejected name patterns
+                if 2 <= len(words) <= 3 and all(w[0].isupper() for w in words if w):
+                    self.rejected_names[skill_lower] = self.rejected_names.get(skill_lower, 0) + 1
+                    print(f"[LEARN] Learned rejected name pattern: '{skill}'")
+                
+                # 4. Track rejected fragments
+                connectors = ['and', 'for', 'with', 'to', 'of']
+                if any(skill_lower.startswith(c) for c in connectors):
+                    self.rejected_fragments[skill_lower] = self.rejected_fragments.get(skill_lower, 0) + 1
+                    print(f"[LEARN] Learned rejected fragment: '{skill}'")
+                
                 print(f"[FEEDBACK] Rejected: {skill}")
         # ================================================
         
-        # Re-run merge
+        # Add approved skills to learned_skills
+        for skill in approved_skills:
+            if skill and skill not in self.learned_skills:
+                self.learned_skills.add(skill)
+                self.skill_dictionary[skill] = 'Other'
+                print(f"[NLP] Added new skill to knowledge base: {skill}")
+        
+        # Re-run merge (this will create aliases, not delete)
         if len(self.learned_skills) > 5:
-            self.merge_synonyms_dynamically()
+            merged = self.merge_synonyms_dynamically()
+            if merged > 0:
+                print(f"[NLP] Auto-merged {merged} duplicate skills (kept as aliases)")
         
         # Train ML
-        if len(approved_skills) + len(rejected_skills) >= 10:
-            print(f"[ML] 🔬 Training classifier...")
+        total_feedback = len(self.feedback_log.get('approved', [])) + len(self.feedback_log.get('rejected', []))
+        if total_feedback >= 10:
+            print(f"[ML] Training classifier with {total_feedback} feedback items...")
             try:
-                self.classifier.train_from_feedback(approved_skills, rejected_skills)
+                # Get all feedback for training
+                all_approved = self.feedback_log.get('approved', [])
+                all_rejected = self.feedback_log.get('rejected', [])
+                self.classifier.train_from_feedback(all_approved, all_rejected)
                 self.use_ml = self.classifier.is_trained
                 if self.use_ml:
-                    print("[ML] ✅ Classifier trained successfully!")
+                    print("[ML] Classifier trained successfully!")
             except Exception as e:
-                print(f"[ML] ❌ Error: {e}")
+                print(f"[ML] Error: {e}")
         
-        self._save_data()
+        self._save_knowledge_base_with_aliases()
         return len(approved_skills)
     
     # ============ SIMILARITY CALCULATION ============
@@ -1002,42 +1504,31 @@ class NLPProcessor:
         # Learn section names from this document
         self._learn_section_names()
         
-        # ============ 🔥 ADD SKILLS TO FEEDBACK_LOG ============
-        # Add approved skills (all extracted skills are considered approved initially)
-        #for skill in skills:
-        #   if skill and skill not in self.feedback_log.get('approved', []):
-        #       if 'approved' not in self.feedback_log:
-        #           self.feedback_log['approved'] = []
-        #       self.feedback_log['approved'].append(skill)
-         #       print(f"[NLP] 📝 Added to feedback_log (approved): {skill}")
-        # =============================================================
-        
-        # Learn new skills (if enabled)
+        # Learn new skills (if auto-learning enabled)
         new_skills = []
-        # ============ AUTO-LEARNING (ENABLE IF DESIRED) ============
+        # Auto-learning is disabled by default - enable if desired
         # for skill in skills:
         #     if skill not in self.learned_skills:
         #         self.learned_skills.add(skill)
         #         new_skills.append(skill)
         #         self.stats['new_skills_learned'] += 1
-        # ===========================================================
         
         # Re-discover categories periodically
         if len(new_skills) > 0 or len(self.learned_skills) % 10 == 0:
             self._discover_categories()
         
-        # Run dynamic merge
+        # Run dynamic merge (keeps all skills, creates aliases)
         if self.stats['documents_analyzed'] > 0 and len(self.learned_skills) > 5:
             print(f"[NLP] Running dynamic merge after {self.stats['documents_analyzed']} documents...")
             merged = self.merge_synonyms_dynamically()
             if merged > 0:
-                print(f"[NLP] Dynamically merged {merged} skills!")
+                print(f"[NLP] Dynamically merged {merged} skills (kept as aliases)!")
         
         self.stats['documents_analyzed'] += 1
         
         # Save periodically
         if self.stats['documents_analyzed'] % 5 == 0:
-            self._save_data()
+            self._save_knowledge_base_with_aliases()
         
         return new_skills
     
@@ -1050,12 +1541,22 @@ class NLPProcessor:
         
         # Extract candidates
         candidates = self._extract_candidates(text)
-        
-        # Filter candidates using learned patterns
+
         valid_skills = []
+        auto_approved = []
+        needs_review = []
+        
         for candidate in candidates:
-            if self._is_likely_skill(candidate):
-                valid_skills.append(candidate)
+            result = self._is_likely_skill(candidate)
+            
+            if isinstance(result, tuple):
+                skill_name, status = result
+                if status == 'needs_review':
+                    needs_review.append(skill_name)
+                    valid_skills.append(skill_name)
+            elif result:
+                auto_approved.append(result)
+                valid_skills.append(result)
         
         # Learn from this document
         self._learn_from_document(text, valid_skills)
@@ -1067,7 +1568,9 @@ class NLPProcessor:
             'licenses': [],
             'emails': [],
             'phones': [],
-            'skills': sorted(valid_skills)
+            'skills': sorted(valid_skills),
+            'auto_approved': auto_approved,      # ← New: skills auto-approved
+            'needs_review': needs_review  
         }
         
         # NER
@@ -1102,7 +1605,13 @@ class NLPProcessor:
         # Build categorized dictionary
         categorized = {}
         for skill in skills:
-            category = self.skill_dictionary.get(skill, 'Other')
+            # Get category (check if it's an alias first)
+            if skill in self.alias_lookup:
+                master = self.alias_lookup[skill]
+                category = self.skill_dictionary.get(master, 'Other')
+            else:
+                category = self.skill_dictionary.get(skill, 'Other')
+            
             if category not in categorized:
                 categorized[category] = []
             if skill not in categorized[category]:
@@ -1111,6 +1620,8 @@ class NLPProcessor:
         return {
             'skills': skills,
             'categorized': categorized,
+            'auto_approved': entities.get('auto_approved', []),    # ← KEY FIX
+            'needs_review': entities.get('needs_review', []),      # ← KEY FIX
             'total_skills': len(skills),
             'licenses': entities['licenses'],
             'persons': entities['persons'],
@@ -1157,7 +1668,7 @@ class NLPProcessor:
                 'extracted_at': datetime.now().isoformat()
             })
         
-        self._save_data()
+        self._save_knowledge_base_with_aliases()
         
         return {
             'employee_update': employee_update,
@@ -1188,10 +1699,12 @@ class NLPProcessor:
             'total_categories': len(self.skill_categories),
             'documents_analyzed': self.stats['documents_analyzed'],
             'learned_sections': len(self.learned_sections),
-            'type_thresholds': self.type_thresholds
+            'type_thresholds': self.type_thresholds,
+            'alias_groups': len(self.skill_aliases),
+            'total_aliases': len(self.alias_lookup),
+            'rejected_phrases_count': len(self.rejected_phrases),
+            'learned_keywords_count': len(self.learned_skill_keywords)
         }
-    
-        
 
 
 # Example usage

@@ -262,6 +262,57 @@ async function retrainMLPython(texts, labels) {
     });
 }
 
+// ============ GET ML STATUS ============
+async function getMLStatusPython() {
+    return new Promise((resolve, reject) => {
+        const rootPath = path.join(__dirname, '../..');
+        const pythonPath = process.platform === 'win32'
+            ? path.join(rootPath, 'python', 'venv', 'Scripts', 'python.exe')
+            : path.join(rootPath, 'python', 'venv', 'bin', 'python');
+        const scriptPath = path.join(rootPath, 'python', 'scripts');
+        
+        const args = [
+            '-u',
+            path.join(scriptPath, 'runner.py'),
+            'ml_status'
+        ];
+        
+        const pythonProcess = spawn(pythonPath, args, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        });
+        
+        let stdoutData = '';
+        let stderrData = '';
+        
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+        
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+            console.log(`🐍 ${data.toString().trim()}`);
+        });
+        
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(stderrData));
+            } else {
+                try {
+                    const result = JSON.parse(stdoutData);
+                    resolve(result);
+                } catch (e) {
+                    resolve({ success: true, ml_active: false, error: 'Parse error' });
+                }
+            }
+        });
+        
+        pythonProcess.on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
 // ============ EXPORTS ============
 
 exports.cleanupDuplicateSkills = async (req, res) => {
@@ -355,6 +406,7 @@ exports.cleanupDuplicateSkills = async (req, res) => {
     }
 };
 
+// ============ PROCESS DOCUMENT (UPDATED) ============
 exports.processDocument = async (req, res) => {
     try {
         const file = req.file;
@@ -399,6 +451,46 @@ exports.processDocument = async (req, res) => {
             return res.status(500).json({ success: false, error: result?.error || 'Python processing failed' });
         }
 
+        // ============ EXTRACT DATA ============
+        const nlpResult = result.nlp || {};
+        const allSkills = nlpResult.skills || [];
+        const categorizedSkills = nlpResult.categorized_skills || {};
+        const autoApproved = nlpResult.auto_approved || [];
+        const needsReview = nlpResult.needs_review || [];
+
+        // ============ DEBUG: Log raw data ============
+        console.log('🔍 RAW autoApproved:', JSON.stringify(autoApproved));
+        console.log('🔍 RAW needsReview (first 5):', JSON.stringify(needsReview.slice(0, 5)));
+        console.log('🔍 RAW allSkills count:', allSkills.length);
+
+        // ============ FIX: Normalize skills ============
+        const normalizeSkill = (skill) => {
+            if (typeof skill === 'string') return skill.trim();
+            if (typeof skill === 'object' && skill !== null) {
+                return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
+            }
+            return String(skill).trim();
+        };
+
+        // Convert to normalized strings
+        const autoApprovedNormalized = autoApproved.map(normalizeSkill);
+        const needsReviewNormalized = needsReview.map(normalizeSkill);
+
+        // Create a Set for O(1) lookup (case-insensitive)
+        const autoApprovedSet = new Set(autoApprovedNormalized.map(s => s.toLowerCase()));
+
+        // Filter out auto-approved skills (case-insensitive)
+        const finalAutoApproved = autoApprovedNormalized;
+        const finalNeedsReview = needsReviewNormalized.filter(skill => {
+            const skillLower = skill.toLowerCase();
+            return !autoApprovedSet.has(skillLower) && skill.length > 0;
+        });
+
+        console.log(`📊 Skill separation: ${finalAutoApproved.length} auto-approved, ${finalNeedsReview.length} needs review`);
+        console.log(`📊 Auto-approved:`, finalAutoApproved);
+        console.log(`📊 Needs review (first 5):`, finalNeedsReview.slice(0, 5));
+
+        // ============ SAVE TO DATABASE ============
         const { data: documentData, error: docError } = await supabase
             .from('documents')
             .insert({
@@ -416,7 +508,7 @@ exports.processDocument = async (req, res) => {
                 document_hash: result.ocr?.document_hash || '',
                 processed_at: new Date().toISOString(),
                 extraction_method: result.ocr?.method || 'unknown',
-                extracted_skills: result.nlp?.skills || [],
+                extracted_skills: allSkills,
                 skills_approved: false,
                 feedback_pending: true,
                 approved_skills: [],
@@ -427,6 +519,15 @@ exports.processDocument = async (req, res) => {
 
         if (docError) console.error('Error saving document:', docError);
 
+        // ============ FILTER ALL SKILLS TOO ============
+        const finalAllSkills = allSkills
+        .map(normalizeSkill)
+        .filter(skill => {
+            const skillLower = skill.toLowerCase();
+            return !autoApprovedSet.has(skillLower) && skill.length > 0;
+        });
+
+        // ============ RETURN RESPONSE ============
         return res.json({
             success: true,
             data: {
@@ -434,18 +535,21 @@ exports.processDocument = async (req, res) => {
                 fileUrl: uploadResult.publicUrl,
                 ocr: result.ocr,
                 nlp: {
-                    skills: result.nlp?.skills || [],
-                    categorized_skills: result.nlp?.categorized_skills || [],
-                    prc_license: result.nlp?.prc_license || null,
-                    prc_verified: result.nlp?.prc_verified || false
+                    skills: finalAllSkills,  // ← FIXED: Filtered
+                    categorized_skills: categorizedSkills,
+                    auto_approved: finalAutoApproved,
+                    needs_review: finalNeedsReview,
+                    prc_license: nlpResult.prc_license || null,
+                    prc_verified: nlpResult.prc_verified || false
                 },
                 summary: result.summary,
-                feedback_required: true,
-                pending_skills: result.nlp?.skills || []
+                feedback_required: finalNeedsReview.length > 0,
+                pending_skills: finalNeedsReview
             },
-            message: 'Document processed. Please review and approve skills.'
+            message: finalNeedsReview.length > 0 
+                ? `Document processed. Please review ${finalNeedsReview.length} skills.`
+                : `Document processed. ${finalAutoApproved.length} skills auto-approved!`
         });
-
     } catch (error) {
         console.error('Document processing error:', error);
         res.status(500).json({ success: false, error: error.message || 'Internal server error' });
@@ -655,6 +759,7 @@ exports.getPendingFeedback = async (req, res) => {
     }
 };
 
+// ============ SAVE SKILL FEEDBACK (UPDATED) ============
 exports.saveSkillFeedback = async (req, res) => {
     try {
         const { documentId, approved_skills = [], rejected_skills = [], document_type } = req.body;
@@ -845,7 +950,11 @@ exports.saveSkillFeedback = async (req, res) => {
 
         res.json({
             success: true,
-            data: { documentId: updatedDocument.id },
+            data: { 
+                documentId: updatedDocument.id,
+                approved_skills: approved_skills || [],
+                rejected_skills: rejected_skills || []
+            },
             message: `✅ ${approved_skills?.length || 0} skills saved!`
         });
 
@@ -1064,6 +1173,54 @@ exports.getFeedbackStats = async (req, res) => {
         
     } catch (error) {
         console.error('Feedback stats error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============ GET ML STATUS ============
+exports.getMLStatus = async (req, res) => {
+    try {
+        // Get status from Python
+        const pythonResult = await getMLStatusPython();
+        
+        // Also get feedback count from database
+        const { count: totalCount } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true });
+        
+        const { count: skillCount } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true })
+            .eq('label', 'Skill');
+        
+        const { count: notSkillCount } = await supabase
+            .from('feedback_training')
+            .select('*', { count: 'exact', head: true })
+            .eq('label', 'Not Skill');
+        
+        res.json({
+            success: true,
+            data: {
+                ml_active: pythonResult?.ml_active || false,
+                ml_trained: pythonResult?.ml_trained || false,
+                total_skills: pythonResult?.total_skills || 0,
+                total_categories: pythonResult?.total_categories || 0,
+                alias_groups: pythonResult?.alias_groups || 0,
+                feedback_approved: pythonResult?.feedback_approved || 0,
+                feedback_rejected: pythonResult?.feedback_rejected || 0,
+                feedback_total: totalCount || 0,
+                feedback_skills: skillCount || 0,
+                feedback_not_skills: notSkillCount || 0,
+                status: pythonResult?.ml_active ? 'active' : 
+                       pythonResult?.ml_trained ? 'trained_but_inactive' : 'untrained',
+                message: pythonResult?.ml_active ? 'ML is active and running!' :
+                         pythonResult?.ml_trained ? 'ML is trained but not active' :
+                         'ML is not trained yet'
+            }
+        });
+        
+    } catch (error) {
+        console.error('ML Status error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

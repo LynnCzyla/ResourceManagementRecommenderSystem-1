@@ -1,24 +1,35 @@
-# check_all_data.py
-import json
+# check_ml_status.py
+import sys
+import os
 from pathlib import Path
 
-json_path = Path("../shared-data/skills_db/learned_skills.json")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-with open(json_path, 'r', encoding='utf-8') as f:
-    data = json.load(f)
+from modules.module2_nlp import NLPProcessor
 
 print("=" * 60)
-print("📊 COMPLETE DATA ACCUMULATION CHECK")
+print("🔍 ML STATUS CHECK")
 print("=" * 60)
 
-print(f"\n📁 learned_skills: {len(data.get('learned_skills', []))} skills")
-print(f"📁 feedback_log approved: {len(data.get('feedback_log', {}).get('approved', []))}")
-print(f"📁 feedback_log rejected: {len(data.get('feedback_log', {}).get('rejected', []))}")
-print(f"📁 merge_history: {len(data.get('merge_history', []))} entries")
-print(f"📁 non_skill_patterns: {len(data.get('non_skill_patterns', {}))} patterns")
-print(f"📁 categories: {len(data.get('categories', {}))} categories")
+nlp = NLPProcessor()
+
+print(f"\n📊 Current Status:")
+print(f"   ML Active (use_ml): {nlp.use_ml}")
+print(f"   Model Trained: {nlp.classifier.is_trained}")
+
+if nlp.classifier.is_trained and not nlp.use_ml:
+    print("\n⚠️ PROBLEM: ML is trained but NOT active!")
+    print("   Solution: Set use_ml = True in module2_nlp.py")
+    
+    # Option to fix
+    response = input("\n   Would you like to activate ML now? (y/n): ")
+    if response.lower() == 'y':
+        nlp.use_ml = True
+        nlp._save_data()
+        print("   ✅ ML ACTIVATED!")
+elif nlp.classifier.is_trained and nlp.use_ml:
+    print("\n✅ ML IS ACTIVE! Should see ML logs on upload.")
+else:
+    print("\n❌ ML is not trained yet.")
 
 print("\n" + "=" * 60)
-print("✅ ALL DATA IS ACCUMULATING CORRECTLY!")
-print("📊 No resets detected!")
-print("=" * 60)

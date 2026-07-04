@@ -19,9 +19,8 @@ class PythonService {
         console.log('🐍 Starting Python process...');
         
         return new Promise((resolve, reject) => {
-            // Use spawn with -u flag for unbuffered output
             const args = [
-                '-u',  // Force unbuffered stdout
+                '-u',
                 path.join(this.scriptPath, 'runner.py'),
                 'process_document',
                 imagePath,
@@ -35,7 +34,7 @@ class PythonService {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 env: {
                     ...process.env,
-                    PYTHONUNBUFFERED: '1'  // Force Python to be unbuffered
+                    PYTHONUNBUFFERED: '1'
                 }
             });
             
@@ -48,63 +47,56 @@ class PythonService {
                 const chunk = data.toString();
                 stdoutData += chunk;
                 console.log(`📊 Received ${chunk.length} bytes`);
-                
-                // Try to parse JSON as soon as we have complete data
-                try {
-                    const jsonStart = stdoutData.indexOf('{');
-                    const jsonEnd = stdoutData.lastIndexOf('}');
-                    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-                        const jsonStr = stdoutData.substring(jsonStart, jsonEnd + 1);
-                        const parsed = JSON.parse(jsonStr);
-                        if (!resolved) {
-                            resolved = true;
-                            console.log('✅ JSON parsed successfully!');
-                            console.log(`📊 Skills found: ${parsed?.nlp?.skills?.length || 0}`);
-                            resolve(parsed);
-                        }
-                    }
-                } catch (e) {
-                    // Not complete JSON yet, keep collecting
-                }
+                console.log(`📄 Raw output: ${chunk.substring(0, 200)}${chunk.length > 200 ? '...' : ''}`);
             });
             
             // --- Handle stderr (debug logs) ---
             pythonProcess.stderr.on('data', (data) => {
-                const chunk = data.toString();
-                stderrData += chunk;
-                if (stderrData.split('\n').length < 20) {
-                    console.log(`🐍 Python: ${chunk.trim()}`);
-                }
+                const chunk = data.toString().trim();
+                stderrData += chunk + '\n';
+                console.log(`🐍 ${chunk}`);
             });
             
             // --- Process exit ---
             pythonProcess.on('close', (code) => {
                 console.log(`✅ Python process exited with code ${code}`);
                 
-                if (resolved) return;
+                // Log any stderr data
+                if (stderrData) {
+                    console.log(`📋 Python stderr:\n${stderrData}`);
+                }
+                
+                // Log full stdout for debugging
+                if (stdoutData) {
+                    console.log(`📋 Python stdout:\n${stdoutData.substring(0, 500)}${stdoutData.length > 500 ? '...' : ''}`);
+                }
                 
                 if (code !== 0) {
-                    console.error('❌ Python error output:', stderrData);
-                    reject(new Error(`Python exited with code ${code}: ${stderrData}`));
+                    reject(new Error(`Python exited with code ${code}: ${stderrData || 'No stderr output'}`));
                     return;
                 }
                 
-                // Final attempt to parse
+                // Try to parse JSON
                 try {
                     const clean = stdoutData.trim();
                     const jsonStart = clean.indexOf('{');
                     const jsonEnd = clean.lastIndexOf('}');
+                    
                     if (jsonStart !== -1 && jsonEnd !== -1) {
                         const jsonStr = clean.substring(jsonStart, jsonEnd + 1);
                         const parsed = JSON.parse(jsonStr);
-                        console.log('✅ JSON parsed from final output');
+                        console.log('✅ JSON parsed successfully!');
+                        console.log(`📊 Skills found: ${parsed?.nlp?.skills?.length || 0}`);
                         resolve(parsed);
                     } else {
-                        reject(new Error('No JSON found in output'));
+                        console.error('❌ No JSON found in output');
+                        console.error(`📄 Raw output: ${clean.substring(0, 300)}`);
+                        reject(new Error('No JSON found in Python output'));
                     }
                 } catch (e) {
-                    console.error('❌ Final parse error:', e);
-                    reject(e);
+                    console.error('❌ JSON parse error:', e.message);
+                    console.error(`📄 Raw output: ${stdoutData.substring(0, 300)}`);
+                    reject(new Error(`Failed to parse JSON: ${e.message}`));
                 }
             });
             
@@ -126,8 +118,8 @@ class PythonService {
             // Clear timeout on resolve/reject
             const originalResolve = resolve;
             const originalReject = reject;
-            resolve = (...args) => { clearTimeout(timeout); originalResolve(...args); };
-            reject = (...args) => { clearTimeout(timeout); originalReject(...args); };
+            resolve = (...args) => { clearTimeout(timeout); resolved = true; originalResolve(...args); };
+            reject = (...args) => { clearTimeout(timeout); resolved = true; originalReject(...args); };
         });
     }
 

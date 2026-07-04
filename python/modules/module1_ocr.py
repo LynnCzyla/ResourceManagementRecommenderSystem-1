@@ -124,7 +124,7 @@ class OCRProcessor:
     # METHOD 2: Fast OCR for Scanned PDFs (OPTIMIZED)
     # ============================================================
     def extract_with_ocr_fast(self, file_path):
-        """Fast OCR - Only for scanned PDFs/images"""
+        """Fast OCR - For scanned PDFs AND images"""
         
         if not OCR_SUPPORT or not PDF2IMAGE_SUPPORT:
             debug_print("[OCR] OCR not available")
@@ -133,19 +133,32 @@ class OCRProcessor:
         debug_print("[OCR] Starting OCR...")
         
         try:
-            # Convert PDF to images
-            debug_print("[OCR] Converting to images...")
-            images = convert_from_path(file_path, dpi=150, thread_count=4)
-            debug_print(f"[OCR] Converting {len(images)} pages...")
-            
+            is_pdf = file_path.lower().endswith('.pdf')
             all_text = []
-            page_num = 0
+            images = []
+            
+            if is_pdf:
+                # ========== Convert PDF to images ==========
+                debug_print("[OCR] Converting PDF to images...")
+                images = convert_from_path(file_path, dpi=150, thread_count=4)
+                debug_print(f"[OCR] Converted {len(images)} pages from PDF")
+            else:
+                # ========== Load image directly ==========
+                debug_print("[OCR] Loading image file...")
+                from PIL import Image
+                img = Image.open(file_path)
+                images = [img]  # Single image
+                debug_print(f"[OCR] Loaded image: {img.size}")
+            
+            debug_print(f"[OCR] Processing {len(images)} pages...")
             
             for i, image in enumerate(images):
                 page_num = i + 1
                 debug_print(f"[OCR] Processing page {page_num}/{len(images)}...")
                 
                 # Convert PIL to OpenCV
+                import cv2
+                import numpy as np
                 img = np.array(image)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 
@@ -154,6 +167,7 @@ class OCRProcessor:
                 _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 
                 # OCR
+                from PIL import Image
                 pil_img = Image.fromarray(binary)
                 text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
                 
@@ -170,31 +184,33 @@ class OCRProcessor:
             full_text = '\n\n'.join(all_text)
             
             if full_text.strip():
-                debug_print(f"[OCR] Total: {len(full_text)} chars from {page_num} pages")
+                debug_print(f"[OCR] Total: {len(full_text)} chars from {len(images)} pages")
                 return full_text
             
         except Exception as e:
             debug_print(f"[OCR] Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         return None
-    
-    # ============================================================
-    # SMART DETECTION: Check if PDF has text
-    # ============================================================
-    def pdf_has_text(self, pdf_path):
-        """Quick check if PDF has extractable text (NO OCR)"""
-        try:
-            import PyPDF2
-            with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                # Check first page only (fast)
-                if reader.pages:
-                    text = reader.pages[0].extract_text()
-                    if text and len(text.strip()) > 50:
-                        return True
-            return False
-        except:
-            return True  # Assume it has text
+        
+        # ============================================================
+        # SMART DETECTION: Check if PDF has text
+        # ============================================================
+        def pdf_has_text(self, pdf_path):
+            """Quick check if PDF has extractable text (NO OCR)"""
+            try:
+                import PyPDF2
+                with open(pdf_path, 'rb') as file:
+                    reader = PyPDF2.PdfReader(file)
+                    # Check first page only (fast)
+                    if reader.pages:
+                        text = reader.pages[0].extract_text()
+                        if text and len(text.strip()) > 50:
+                            return True
+                return False
+            except:
+                return True  # Assume it has text
     
     # ============================================================
     # MAIN EXTRACT METHOD
@@ -241,11 +257,11 @@ class OCRProcessor:
                 else:
                     raise Exception("OCR failed to extract text")
         
+        # ========== STEP 4: Image file - use OCR ==========
         else:
-            # ========== STEP 4: Image file - use OCR ==========
             debug_print("[STEP 2] Image file - using OCR...")
             ocr_start = time.time()
-            text = self.extract_with_ocr_fast(file_path)
+            text = self.extract_with_ocr_fast(file_path)  # ← This now handles images
             ocr_time = time.time() - ocr_start
             
             if text:
@@ -285,15 +301,67 @@ class OCRProcessor:
         }
     
     def _clean_text(self, text):
-        """Clean text"""
+        """Clean text - remove problematic characters"""
+        if not text:
+            return ""
+        
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         cleaned = ' '.join(lines)
         cleaned = re.sub(r'\s+', ' ', cleaned)
+        
+        # ============ FIX: Remove problematic Unicode characters ============
+        # Replace bullet points and other problematic characters
+        replacements = {
+            '●': '-',      # Black circle bullet
+            '•': '-',      # Bullet
+            '▪': '-',      # Black square
+            '■': '-',      # Black square
+            '➢': '>',      # Right arrow
+            '►': '>',      # Right arrow
+            '▸': '>',      # Right arrow
+            '→': '->',     # Right arrow
+            '↔': '<->',    # Left-right arrow
+            '✓': '[OK]',   # Check mark
+            '✗': '[NO]',   # X mark
+            '★': '*',      # Star
+            '☆': '*',      # Star
+            '◆': '-',      # Diamond
+            '◇': '-',      # Diamond
+            '☑': '[OK]',   # Check box
+            '☐': '[]',     # Empty box
+            '☒': '[NO]',   # X box
+            '\u25cf': '-', # Unicode for ●
+            '\u2022': '-', # Unicode for •
+            '\u25a0': '-', # Unicode for ■
+            '\u25b6': '>', # Unicode for ►
+        }
+        
+        for old, new in replacements.items():
+            cleaned = cleaned.replace(old, new)
+        
+        # Also remove any remaining non-ASCII characters that might cause issues
+        # This keeps only printable ASCII characters
+        # cleaned = ''.join(char if ord(char) < 128 else '?' for char in cleaned)
+        # =============================================================
+    
         return cleaned
     
     def process_document(self, file_path, document_id, employee_id, doc_type):
         """Process document"""
         ocr_result = self.extract_text(file_path)
+
+         # ============ FIX: Clean the text again ============
+        raw_text = ocr_result['raw_text']
+        cleaned_text = ocr_result['cleaned_text']
+        
+        # Remove bullet points
+        for char in ['●', '•', '▪', '■', '➢', '►', '▸', '→', '↔']:
+            raw_text = raw_text.replace(char, '-')
+            cleaned_text = cleaned_text.replace(char, '-')
+        
+        ocr_result['raw_text'] = raw_text
+        ocr_result['cleaned_text'] = cleaned_text
+        # ===================================================
         
         db_record = {
             'document_id': document_id,
