@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { getTasks, saveTasks, getProjects } from '../mockState';
+import axios from 'axios';
+import { supabase } from '../../lib/supabaseClient';
 
-export default function EmployeeAssignmentsTab() {
+export default function EmployeeAssignmentsTab({ user }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Weekly Log Progress Form States
   const [logWeek, setLogWeek] = useState('');
@@ -21,58 +23,78 @@ export default function EmployeeAssignmentsTab() {
     return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
   };
 
+  const getAuthHeader = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return { Authorization: `Bearer ${session.access_token}` };
+    const storedToken = localStorage.getItem('token') || localStorage.getItem('access_token');
+    if (storedToken) return { Authorization: `Bearer ${storedToken}` };
+    return {};
+  };
+
+  const fetchAssignmentsAndTasks = async () => {
+    setLoading(true);
+    try {
+      const authHeader = await getAuthHeader();
+      
+      const projRes = await axios.get('http://localhost:5000/api/employee/assignments', { headers: authHeader });
+      if (projRes.data.success) {
+        setProjects(projRes.data.data || []);
+      }
+
+      const tasksRes = await axios.get('http://localhost:5000/api/employee/tasks', { headers: authHeader });
+      if (tasksRes.data.success) {
+        setTasks(tasksRes.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching assignments or tasks:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    setProjects(getProjects());
-    loadEmployeeTasks();
-  }, []);
+    fetchAssignmentsAndTasks();
+  }, [user?.id]);
 
-  const loadEmployeeTasks = () => {
-    const allTasks = getTasks();
-    // Current Employee: Javier Santos (EMP-1014)
-    const myTasks = allTasks.filter(t => t.employeeId === 'EMP-1014');
-    setTasks(myTasks);
+  const handleUpdateStatus = async (taskId, newStatus) => {
+    try {
+      const authHeader = await getAuthHeader();
+      const response = await axios.put(`http://localhost:5000/api/employee/tasks/${taskId}`, { status: newStatus }, { headers: authHeader });
+      if (response.data.success) {
+        setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+      }
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      alert('Failed to update task status.');
+    }
   };
 
-  const handleUpdateStatus = (taskId, newStatus) => {
-    const allTasks = getTasks();
-    const updatedTasks = allTasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t);
-    saveTasks(updatedTasks);
-    loadEmployeeTasks();
-  };
-
-  const handleLogProgress = (e, taskId) => {
+  const handleLogProgress = async (e, taskId) => {
     e.preventDefault();
     if (!logWeek || !logPercentage || !logDesc) return;
 
-    const allTasks = getTasks();
-    const updatedTasks = allTasks.map(t => {
-      if (t.id === taskId) {
-        const logs = t.progressLogs || [];
-        const newLog = {
-          id: Date.now(),
-          week: logWeek,
-          percentage: parseInt(logPercentage, 10),
-          description: logDesc,
-          date: new Date().toISOString().split('T')[0]
-        };
-        return {
-          ...t,
-          progressLogs: [...logs, newLog]
-        };
-      }
-      return t;
-    });
+    try {
+      const authHeader = await getAuthHeader();
+      const response = await axios.post(`http://localhost:5000/api/employee/tasks/${taskId}/progress`, {
+        week: logWeek,
+        percentage: logPercentage,
+        description: logDesc
+      }, { headers: authHeader });
 
-    saveTasks(updatedTasks);
-    setLogWeek('');
-    setLogPercentage('');
-    setLogDesc('');
-    setActiveLogTaskId(null);
-    loadEmployeeTasks();
+      if (response.data.success) {
+        setLogWeek('');
+        setLogPercentage('');
+        setLogDesc('');
+        setActiveLogTaskId(null);
+        await fetchAssignmentsAndTasks();
+      }
+    } catch (error) {
+      console.error('Error logging task progress:', error);
+      alert('Failed to submit progress log.');
+    }
   };
 
-  // Javier Santos is assigned to "Inventory and Supply Chain Tracker"
-  const myAssignedProjects = projects.filter(p => p.id === 2);
+  if (loading) return <div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading assignments...</div>;
 
   return (
     <div style={styles.container}>
@@ -85,19 +107,23 @@ export default function EmployeeAssignmentsTab() {
       <div className="glass-card" style={styles.card}>
         <h2 style={styles.sectionTitle}>Assigned Projects</h2>
         <div style={styles.projList}>
-          {myAssignedProjects.map(proj => (
-            <div key={proj.id} style={styles.projItem}>
-              <div style={styles.projHeader}>
-                <h3 style={styles.projName}>{proj.name}</h3>
-                <span style={styles.timelineBadge}>Active Assignment</span>
+          {projects.length === 0 ? (
+            <p style={styles.emptyText}>No project assignments.</p>
+          ) : (
+            projects.map(proj => (
+              <div key={proj.id} style={styles.projItem}>
+                <div style={styles.projHeader}>
+                  <h3 style={styles.projName}>{proj.name}</h3>
+                  <span style={styles.timelineBadge}>Active Assignment</span>
+                </div>
+                <p style={styles.projDesc}>{proj.description}</p>
+                <div style={styles.projFooter}>
+                  <span>Timeline: <strong>{proj.startDate} to {proj.endDate}</strong></span>
+                  <span>Project Manager: <strong>{proj.projectManager}</strong></span>
+                </div>
               </div>
-              <p style={styles.projDesc}>{proj.description}</p>
-              <div style={styles.projFooter}>
-                <span>Timeline: <strong>{proj.startDate} to {proj.endDate}</strong></span>
-                <span>Project Manager: <strong>Lynn Czyla M. Alpuerto</strong></span>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 

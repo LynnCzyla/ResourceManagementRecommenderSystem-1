@@ -59,6 +59,25 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         return () => clearInterval(interval);
       }, [user?.id]);
 
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleOutsideClick = (e) => {
+      const btn = document.getElementById('notif-btn');
+      const dropdown = document.getElementById('notif-dropdown');
+      if (
+        (btn && btn.contains(e.target)) ||
+        (dropdown && dropdown.contains(e.target))
+      ) {
+        return;
+      }
+      setShowNotifications(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showNotifications]);
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const markAllRead = async () => {
@@ -420,6 +439,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
             {/* Notifications Center */}
             <div style={{ position: 'relative' }}>
               <button 
+                id="notif-btn"
                 onClick={() => setShowNotifications(!showNotifications)} 
                 style={styles.iconButton}
                 title="Notifications"
@@ -435,7 +455,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
               </button>
 
               {showNotifications && (
-                <div className="glass-card" style={styles.notificationDropdown}>
+                <div id="notif-dropdown" className="glass-card" style={styles.notificationDropdown}>
                   <div style={styles.notifHeader}>
                     <h4 style={{ margin: 0, fontSize: 14 }}>System Notifications</h4>
                     {unreadCount > 0 && (

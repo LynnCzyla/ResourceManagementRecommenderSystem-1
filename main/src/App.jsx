@@ -15,6 +15,24 @@ const BOOT_IS_RECOVERY =
   window.location.hash.includes('access_token') ||
   sessionStorage.getItem('wea_password_recovery') === 'true';
 
+const sanitizeUserForStorage = (userObj) => {
+  if (!userObj) return null;
+  const sanitized = { ...userObj };
+  
+  if (sanitized.avatar && sanitized.avatar.startsWith('data:image')) {
+    sanitized.avatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
+  }
+  
+  if (sanitized.profile) {
+    sanitized.profile = { ...sanitized.profile };
+    if (sanitized.profile.avatar_url && sanitized.profile.avatar_url.startsWith('data:image')) {
+      sanitized.profile.avatar_url = null;
+    }
+  }
+  
+  return sanitized;
+};
+
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -267,7 +285,7 @@ function App() {
           };
 
           localStorage.setItem('token', session.access_token);
-          localStorage.setItem('user', JSON.stringify(user));
+          localStorage.setItem('user', JSON.stringify(sanitizeUserForStorage(user)));
           localStorage.setItem('loginTime', Date.now().toString());
           userActivityRef.current = Date.now();
 
@@ -383,15 +401,41 @@ function App() {
 
   const toggleTheme = () => setIsDark(!isDark);
 
-  const handleLogin = (userProfile) => {
-    console.log('🔍 User logged in:', userProfile);
-    console.log('🔍 User role:', userProfile.role);
-    localStorage.setItem('user', JSON.stringify(userProfile));
-    localStorage.setItem('loginTime', Date.now().toString());
-    userActivityRef.current = Date.now();
-    setCurrentUser(userProfile);
-    setIsLoggedIn(true);
-  };
+      const handleLogin = async (userProfile) => {
+      console.log('🔍 User logged in:', userProfile);
+
+      try {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userProfile.id)
+          .single();
+
+        if (profileData) {
+          userProfile = {
+            ...userProfile,
+            name: `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}`,
+            avatar: profileData.avatar_url ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
+            employee_id: profileData.employee_id,
+            profile: profileData,
+            first_name: profileData.first_name,
+            last_name: profileData.last_name,
+            middle_name: profileData.middle_name,
+            role: profileData.role || userProfile.role,
+          };
+        }
+      } catch (err) {
+        console.error('Could not fetch fresh profile on login:', err);
+      }
+
+      console.log('🔍 User role:', userProfile.role);
+      localStorage.setItem('user', JSON.stringify(sanitizeUserForStorage(userProfile)));
+      localStorage.setItem('loginTime', Date.now().toString());
+      userActivityRef.current = Date.now();
+      setCurrentUser(userProfile);
+      setIsLoggedIn(true);
+    };
 
   const handleLogout = async () => {
     const result = await showConfirmationAlert(

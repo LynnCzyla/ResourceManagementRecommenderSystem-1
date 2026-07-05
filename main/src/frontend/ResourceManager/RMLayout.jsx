@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 
 import RMDashboardTab from './RMDashboardTab';
@@ -30,6 +30,25 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
     e.stopPropagation();
     setNotifications(notifications.filter(n => n.id !== id));
   };
+
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleOutsideClick = (e) => {
+      const btn = document.getElementById('notif-btn');
+      const dropdown = document.getElementById('notif-dropdown');
+      if (
+        (btn && btn.contains(e.target)) ||
+        (dropdown && dropdown.contains(e.target))
+      ) {
+        return;
+      }
+      setShowNotifications(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showNotifications]);
 
   const handleNavClick = (tabName) => {
     setActiveTab(tabName);
@@ -211,6 +230,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
             {/* Notifications */}
             <div style={{ position: 'relative' }}>
               <button 
+                id="notif-btn"
                 onClick={() => setShowNotifications(!showNotifications)} 
                 style={styles.iconButton}
                 className="hover-icon-button"
@@ -225,7 +245,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
               </button>
 
               {showNotifications && (
-                <div className="glass-card" style={styles.notificationDropdown}>
+                <div id="notif-dropdown" className="glass-card" style={styles.notificationDropdown}>
                   <div style={styles.notifHeader}>
                     <h4 style={{ margin: 0, fontSize: 14 }}>Notifications</h4>
                     {unreadCount > 0 && (

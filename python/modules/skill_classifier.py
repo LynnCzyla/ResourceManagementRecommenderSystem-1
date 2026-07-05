@@ -37,7 +37,7 @@ class SkillClassifier:
             max_features=5000,
             ngram_range=(1, 3),
             stop_words='english',
-            min_df=2,
+            min_df=1,
             max_df=0.95
         )
         self.model = LogisticRegression(

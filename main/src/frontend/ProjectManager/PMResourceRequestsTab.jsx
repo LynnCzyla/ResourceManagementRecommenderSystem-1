@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { getRequests, saveRequests, getProjects } from '../mockState';
+import { getResourceRequests, createResourceRequest, getProjects } from './pmApi';
 
-export default function PMResourceRequestsTab() {
+export default function PMResourceRequestsTab({ user }) {
   const [requests, setRequests] = useState([]);
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [submitError, setSubmitError] = useState('');
   const initialResources = [{
     role: '',
     quantity: 1,
@@ -21,10 +23,24 @@ export default function PMResourceRequestsTab() {
     resources: initialResources
   });
 
+  const loadData = async () => {
+    try {
+      const [requestsData, projectsData] = await Promise.all([
+        getResourceRequests(),
+        getProjects(user?.id),
+      ]);
+      setRequests(requestsData);
+      setProjects(projectsData);
+      setLoadError('');
+    } catch (err) {
+      console.error('Failed to load resource requests:', err);
+      setLoadError(err.message || 'Failed to load resource requests');
+    }
+  };
+
   useEffect(() => {
-    setRequests(getRequests());
-    setProjects(getProjects());
-  }, []);
+    loadData();
+  }, [user]);
 
   const handleResourceChange = (index, field, value) => {
     setFormData(prev => {
@@ -77,42 +93,24 @@ export default function PMResourceRequestsTab() {
     });
   };
 
-  const handleCreateSubmit = (e) => {
+  const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    const selectedProj = projects.find(p => p.id === parseInt(formData.projectId)) || { name: 'Unknown Project' };
+    if (!formData.projectId || !formData.resources.length) return;
 
-    const newRequests = formData.resources.map((res, idx) => {
-      const skillsArray = res.skills
-        ? res.skills.split(',').map(s => s.trim()).filter(s => s.length > 0)
-        : [];
+    setSubmitError('');
+    try {
+      await createResourceRequest({
+        projectId: formData.projectId,
+        resources: formData.resources,
+      });
 
-      // Compute duration description from dates if present
-      let durationDesc = '60 days';
-      if (res.startDate && res.endDate) {
-        const diffTime = Math.abs(new Date(res.endDate) - new Date(res.startDate));
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        durationDesc = `${diffDays} days`;
-      }
-
-      return {
-        id: Date.now() + idx,
-        projectName: selectedProj.name,
-        skills: skillsArray,
-        timeline: res.assignment,
-        duration: durationDesc,
-        startDate: res.startDate || new Date().toISOString().split('T')[0],
-        endDate: res.endDate || new Date().toISOString().split('T')[0],
-        status: 'Pending',
-        quantity: parseInt(res.quantity) || 1
-      };
-    });
-
-    const updated = [...newRequests, ...requests];
-    setRequests(updated);
-    saveRequests(updated);
-
-    setShowCreateModal(false);
-    resetFormData();
+      await loadData();
+      setShowCreateModal(false);
+      resetFormData();
+    } catch (err) {
+      console.error('Failed to create resource request:', err);
+      setSubmitError(err.message || 'Failed to create resource request');
+    }
   };
 
   return (
@@ -126,6 +124,10 @@ export default function PMResourceRequestsTab() {
           + New Request
         </button>
       </div>
+
+      {loadError && (
+        <div className="glass-card" style={styles.errorBanner}>{loadError}</div>
+      )}
 
       {/* Requests Table */}
       <div className="glass-card" style={styles.card}>
@@ -189,6 +191,10 @@ export default function PMResourceRequestsTab() {
             </div>
             
             <form onSubmit={handleCreateSubmit} style={{ marginTop: 16 }}>
+              {submitError && (
+                <div style={{ ...styles.errorBanner, marginBottom: 16 }}>{submitError}</div>
+              )}
+
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Project <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <select 
@@ -360,6 +366,12 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  errorBanner: {
+    padding: '12px 16px',
+    color: 'var(--color-danger)',
+    fontSize: '13px',
+    fontWeight: '600',
   },
   createBtn: {
     backgroundColor: 'var(--color-primary)',
