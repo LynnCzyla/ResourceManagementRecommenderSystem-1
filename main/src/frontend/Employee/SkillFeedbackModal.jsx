@@ -42,17 +42,25 @@ export default function SkillFeedbackModal({
         return skills.map(s => getSkillName(s));
     };
 
-    // Initialize with needsReview skills
+    // ============ FIX: Only reset/refetch when the modal opens for a NEW document ============
+    // The old version watched `needsReview` (an array prop). Arrays are recreated on every
+    // parent re-render even when their contents haven't changed, so React saw a "new" array
+    // on almost every render and re-ran this effect — wiping out `approved`/`rejected` state
+    // (setApproved([]); setRejected([]);) while the user was still mid-review. That's why
+    // things you'd already approved or rejected kept popping back into the pending list.
+    //
+    // We only need this effect to run when the modal is opened, or when it's opened for a
+    // different document/employee. `needsReview`/`autoApproved` are read directly in the
+    // render below and don't need to be dependencies here.
     useEffect(() => {
-        if (isOpen && needsReview) {
+        if (isOpen && documentId && employeeId) {
             setApproved([]);
             setRejected([]);
-            // Check for existing feedback
-            if (documentId && employeeId) {
-                fetchExistingFeedback();
-            }
+            setHasExistingFeedback(false);
+            fetchExistingFeedback();
         }
-    }, [isOpen, needsReview, documentId, employeeId]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, documentId, employeeId]);
 
     const fetchExistingFeedback = async () => {
         try {
@@ -74,20 +82,20 @@ export default function SkillFeedbackModal({
 
     const handleApprove = (skill) => {
         const skillName = getSkillName(skill);
-        setApproved([...approved, skillName]);
-        setRejected(rejected.filter(s => getSkillName(s) !== skillName));
+        setApproved(prev => [...prev, skillName]);
+        setRejected(prev => prev.filter(s => getSkillName(s) !== skillName));
     };
 
     const handleReject = (skill) => {
         const skillName = getSkillName(skill);
-        setRejected([...rejected, skillName]);
-        setApproved(approved.filter(s => s !== skillName));
+        setRejected(prev => [...prev, skillName]);
+        setApproved(prev => prev.filter(s => getSkillName(s) !== skillName));
     };
 
     const handleUndo = (skill) => {
         const skillName = getSkillName(skill);
-        setApproved(approved.filter(s => s !== skillName));
-        setRejected(rejected.filter(s => s !== skillName));
+        setApproved(prev => prev.filter(s => s !== skillName));
+        setRejected(prev => prev.filter(s => s !== skillName));
     };
 
     const handleSubmit = async () => {
