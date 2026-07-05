@@ -1,34 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { getProjects, getEmployees, getTasks } from '../mockState';
+import { getDashboardStats, getEmployees, getTasks } from './pmApi';
 
-export default function PMDashboardTab() {
-  const [projects, setProjects] = useState([]);
+export default function PMDashboardTab({ user }) {
+  const [stats, setStats] = useState({
+    activeProjectsCount: 0,
+    totalProjectsCount: 0,
+    totalTeamMembers: 0,
+    totalHoursThisWeek: 0,
+    totalTasksCount: 0,
+    tasksByStatus: { Pending: 0, 'In Progress': 0, Completed: 0 },
+  });
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [loadError, setLoadError] = useState('');
 
-  useEffect(() => {
-    setProjects(getProjects());
-    setEmployees(getEmployees());
-    setTasks(getTasks());
-  }, []);
-
-  const activeProjectsCount = projects.filter(p => p.status === 'Active').length;
-  const totalTeamMembers = employees.length; // Simplified
-  
-  // Calculate average utilization
-  const teamUtilization = "78%";
-
-  const dailyStatusMap = {
-    'EMP-1014': 'Present',
-    'EMP-1015': 'Absent',
-    'EMP-1016': 'On Leave',
-    'EMP-1017': 'Present',
-    'EMP-1018': 'Present',
-    'EMP-1019': 'Absent',
-    'EMP-1020': 'Present',
+  const loadDashboard = async () => {
+    try {
+      const [statsData, employeesData, tasksData] = await Promise.all([
+        getDashboardStats(user?.id),
+        getEmployees(),
+        getTasks(),
+      ]);
+      setStats(statsData);
+      setEmployees(employeesData);
+      setTasks(tasksData);
+      setLoadError('');
+    } catch (err) {
+      console.error('Failed to load dashboard:', err);
+      setLoadError(err.message || 'Failed to load dashboard');
+    }
   };
 
-  const getDailyStatus = (id) => dailyStatusMap[id] || 'Present';
+  useEffect(() => {
+    loadDashboard();
+  }, [user]);
 
   const getAssignedTasks = (id) => tasks.filter(task => task.employeeId === id);
   const getTaskCompletion = (id) => {
@@ -45,11 +50,9 @@ export default function PMDashboardTab() {
     return Math.round(percentages.reduce((sum, value) => sum + value, 0) / percentages.length);
   };
 
-  const attendanceCounts = employees.reduce((acc, emp) => {
-    const status = getDailyStatus(emp.id);
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, { Present: 0, Absent: 0, 'On Leave': 0 });
+  const teamUtilization = stats.totalTeamMembers > 0
+    ? `${Math.min(100, Math.round((stats.totalHoursThisWeek / (stats.totalTeamMembers * 40)) * 100))}%`
+    : '0%';
 
   return (
     <div style={styles.container}>
@@ -57,6 +60,10 @@ export default function PMDashboardTab() {
         <h1 style={styles.title}>Project Manager Dashboard</h1>
         <p style={styles.subtitle}>Overview of project metrics, team utilization, and resource readiness.</p>
       </div>
+
+      {loadError && (
+        <div className="glass-card" style={styles.errorBanner}>{loadError}</div>
+      )}
 
       {/* Stats Grid */}
       <div className="stats-grid" style={styles.statsGrid}>
@@ -67,7 +74,7 @@ export default function PMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{activeProjectsCount}</div>
+            <div style={styles.statValue}>{stats.activeProjectsCount}</div>
             <div style={styles.statLabel}>Active Projects</div>
           </div>
         </div>
@@ -80,7 +87,7 @@ export default function PMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{totalTeamMembers}</div>
+            <div style={styles.statValue}>{stats.totalTeamMembers}</div>
             <div style={styles.statLabel}>My Team Members</div>
           </div>
         </div>
@@ -93,7 +100,7 @@ export default function PMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>120h</div>
+            <div style={styles.statValue}>{stats.totalHoursThisWeek}h</div>
             <div style={styles.statLabel}>Total Hours This Week</div>
           </div>
         </div>
@@ -117,7 +124,7 @@ export default function PMDashboardTab() {
         {/* Task Assignment Overview */}
         <div className="glass-card" style={styles.mainPanel}>
           <h2 style={styles.panelTitle}>Task Assignment Overview</h2>
-          <p style={styles.panelSubtitle}>Review current employee task assignments, progress percentage, and daily availability.</p>
+          <p style={styles.panelSubtitle}>Review current employee task assignments and progress percentage.</p>
 
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
@@ -127,14 +134,12 @@ export default function PMDashboardTab() {
                   <th style={styles.th}>Assigned Task</th>
                   <th style={styles.th}>% Complete</th>
                   <th style={styles.th}>Task Status</th>
-                  <th style={styles.th}>Attendance</th>
                 </tr>
               </thead>
               <tbody>
                 {employees.map(emp => {
                   const assignedTasks = getAssignedTasks(emp.id);
                   const completion = getTaskCompletion(emp.id);
-                  const attendance = getDailyStatus(emp.id);
                   const taskLabel = assignedTasks.length ? assignedTasks[0].title : 'No task assigned';
                   const taskStatus = assignedTasks.length ? assignedTasks[0].status : 'Idle';
 
@@ -150,11 +155,6 @@ export default function PMDashboardTab() {
                       <td style={styles.tdVal}>{taskLabel}</td>
                       <td style={styles.tdVal}>{completion}%</td>
                       <td style={styles.tdVal}>{taskStatus}</td>
-                      <td style={styles.tdVal}>
-                        <span style={{ ...styles.attendanceBadge, backgroundColor: attendance === 'Present' ? 'rgba(16, 185, 129, 0.12)' : attendance === 'Absent' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)', color: attendance === 'Present' ? 'var(--color-success)' : attendance === 'Absent' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
-                          {attendance}
-                        </span>
-                      </td>
                     </tr>
                   );
                 })}
@@ -163,23 +163,23 @@ export default function PMDashboardTab() {
           </div>
         </div>
 
-        {/* Daily Attendance */}
+        {/* Task Status Breakdown */}
         <div className="glass-card" style={styles.sidePanel}>
-          <h2 style={styles.panelTitle}>Daily Attendance</h2>
-          <p style={styles.panelSubtitle}>Today's employee presence and leave status.</p>
+          <h2 style={styles.panelTitle}>Task Status Breakdown</h2>
+          <p style={styles.panelSubtitle}>How your team's tasks are distributed right now.</p>
 
           <div style={styles.attendanceStats}>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{attendanceCounts.Present}</span>
-              <span style={styles.attendanceLabel}>Present</span>
+              <span style={styles.attendanceValue}>{stats.tasksByStatus.Pending}</span>
+              <span style={styles.attendanceLabel}>Pending</span>
             </div>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{attendanceCounts.Absent}</span>
-              <span style={styles.attendanceLabel}>Absent</span>
+              <span style={styles.attendanceValue}>{stats.tasksByStatus['In Progress']}</span>
+              <span style={styles.attendanceLabel}>In Progress</span>
             </div>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{attendanceCounts['On Leave']}</span>
-              <span style={styles.attendanceLabel}>On Leave</span>
+              <span style={styles.attendanceValue}>{stats.tasksByStatus.Completed}</span>
+              <span style={styles.attendanceLabel}>Completed</span>
             </div>
           </div>
 
@@ -187,8 +187,8 @@ export default function PMDashboardTab() {
             {employees.map(emp => (
               <div key={emp.id} style={styles.attendanceRow}>
                 <div style={styles.attendanceName}>{emp.name}</div>
-                <span style={{ ...styles.attendanceBadge, backgroundColor: getDailyStatus(emp.id) === 'Present' ? 'rgba(16, 185, 129, 0.12)' : getDailyStatus(emp.id) === 'Absent' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)', color: getDailyStatus(emp.id) === 'Present' ? 'var(--color-success)' : getDailyStatus(emp.id) === 'Absent' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
-                  {getDailyStatus(emp.id)}
+                <span style={{ ...styles.attendanceBadge, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+                  {getTaskCompletion(emp.id)}%
                 </span>
               </div>
             ))}
@@ -217,6 +217,12 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  errorBanner: {
+    padding: '12px 16px',
+    color: 'var(--color-danger)',
+    fontSize: '13px',
+    fontWeight: '600',
   },
   statsGrid: {
     display: 'grid',
@@ -364,31 +370,4 @@ const styles = {
     fontSize: '11px',
     fontWeight: '700',
   },
-  poolList: {
-    display: 'none',
-  },
-  poolItem: {
-    display: 'none',
-  },
-  poolHeader: {
-    display: 'none',
-  },
-  poolAvatar: {
-    display: 'none',
-  },
-  poolName: {
-    display: 'none',
-  },
-  poolRole: {
-    display: 'none',
-  },
-  tagContainer: {
-    display: 'none',
-  },
-  skillTag: {
-    display: 'none',
-  },
-  certBadge: {
-    display: 'none',
-  }
 };
