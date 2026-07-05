@@ -74,6 +74,7 @@ export default function EmployeeProfileTab() {
     department: '',
     role: ''
   });
+  const [departments, setDepartments] = useState([]);
   const [profilePicture, setProfilePicture] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -198,6 +199,17 @@ export default function EmployeeProfileTab() {
     setError(null);
     try {
       const authHeader = await getAuthHeader();
+
+      // Fetch departments list
+      try {
+        const deptRes = await axios.get(`${API_URL}/admin/departments`);
+        if (deptRes.data.success) {
+          setDepartments(deptRes.data.data || []);
+        }
+      } catch (deptErr) {
+        console.error('Failed to load departments:', deptErr);
+      }
+
       let actualEmployeeId = employeeId;
   
       if (!actualEmployeeId || !/^EMP-\d+/i.test(actualEmployeeId)) {
@@ -337,27 +349,45 @@ export default function EmployeeProfileTab() {
                 processingTime: data.ocr?.processing_time || 0
             });
             
-            // ============ Store for modal ============
-            setAutoApprovedSkills(finalAutoApproved);
-            setNeedsReviewSkills(finalNeedsReview);
-            setPendingSkills(finalNeedsReview);
+            // ============ CHECK IF FEEDBACK ALREADY EXISTS ============
+            const authHeader = await getAuthHeader();
+            const feedbackCheck = await axios.get(
+                `${API_URL}/employee/pending-feedback/${data.documentId}?employeeId=${employeeId}`,
+                { headers: authHeader }
+            ).catch(() => null);
             
-            // ============ Show modal if there are skills ============
-            if (finalNeedsReview.length > 0 || finalAutoApproved.length > 0) {
-                setPendingDocumentId(data.documentId);
-                setPendingDocumentType('Resume');
-                setShowFeedbackModal(true);
-                console.log('🎯 Opening feedback modal with:', {
-                    needsReview: finalNeedsReview.length,
-                    autoApproved: finalAutoApproved.length
-                });
-            } else {
-                // No skills found
+            const hasFeedback = feedbackCheck?.data?.data?.has_feedback === true;
+            
+            if (hasFeedback) {
+                // Feedback already submitted for this document
+                console.log('✅ Feedback already submitted for this document');
                 await fetchEmployeeData();
-                setProcessingStatus('Done!');
+                setProcessingStatus('Done! Feedback already saved for this document.');
                 setProcessingStep('complete');
                 setTimeout(() => setShowProgressDetails(false), 3000);
-                alert('No skills were extracted from this document.');
+            } else {
+                // ============ Store for modal ============
+                setAutoApprovedSkills(finalAutoApproved);
+                setNeedsReviewSkills(finalNeedsReview);
+                setPendingSkills(finalNeedsReview);
+                
+                // ============ Show modal if there are skills ============
+                if (finalNeedsReview.length > 0 || finalAutoApproved.length > 0) {
+                    setPendingDocumentId(data.documentId);
+                    setPendingDocumentType('Resume');
+                    setShowFeedbackModal(true);
+                    console.log('🎯 Opening feedback modal with:', {
+                        needsReview: finalNeedsReview.length,
+                        autoApproved: finalAutoApproved.length
+                    });
+                } else {
+                    // No skills found
+                    await fetchEmployeeData();
+                    setProcessingStatus('Done!');
+                    setProcessingStep('complete');
+                    setTimeout(() => setShowProgressDetails(false), 3000);
+                    alert('No skills were extracted from this document.');
+                }
             }
         } else {
             throw new Error(response.data.error || 'Processing failed');
@@ -451,6 +481,12 @@ const handleCertUpload = async (e) => {
       setEmployeeSkills(merged);
       if (employeeInfo) setEmployeeInfo({ ...employeeInfo, skills: merged });
     }
+    // Clear the needs review list since feedback has been submitted
+    setNeedsReviewSkills([]);
+    setPendingSkills([]);
+    setAutoApprovedSkills([]);
+    setShowFeedbackModal(false);
+    setPendingDocumentId(null);
     await fetchEmployeeData();
     setProcessingStatus('Done!');
     setProcessingStep('complete');
@@ -458,6 +494,14 @@ const handleCertUpload = async (e) => {
   };
 
   const handleSkipFeedback = () => {
+    // Skipping just closes the modal but doesn't clear the needs review list
+    // This allows the user to review again later
+    setShowFeedbackModal(false);
+    setPendingDocumentId(null);
+    // CLEAR STATE SO IT DOESN'T REAPPEAR
+    setNeedsReviewSkills([]);
+    setPendingSkills([]);
+    setAutoApprovedSkills([]);
     fetchEmployeeData();
     setProcessingStatus('Done!');
     setProcessingStep('complete');
@@ -541,7 +585,14 @@ const handleCertUpload = async (e) => {
     <div style={styles.container}>
       <SkillFeedbackModal
         isOpen={showFeedbackModal}
-        onClose={() => { setShowFeedbackModal(false); handleSkipFeedback(); }}
+        onClose={() => { 
+          setShowFeedbackModal(false);
+          setPendingDocumentId(null);
+          setNeedsReviewSkills([]);
+          setPendingSkills([]);
+          setAutoApprovedSkills([]);
+          handleSkipFeedback(); 
+        }}
         documentId={pendingDocumentId}
         employeeId={employeeId}
         // ✅ FIX: Use the separated lists
@@ -781,11 +832,20 @@ const handleCertUpload = async (e) => {
                 </div>
                 <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
                   <label style={styles.formLabel}>Email Address</label>
-                  <input type="email" value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} style={styles.formInput} required />
+                  <input type="email" value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} style={styles.formInput} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Department</label>
-                  <input type="text" value={profileForm.department} onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })} style={styles.formInput} required />
+                  <select 
+                    value={profileForm.department} 
+                    onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })} 
+                    style={styles.formInput}
+                  >
+                    <option value="">-- Select Department --</option>
+                    {departments.map(d => (
+                      <option key={d.id} value={d.department_name}>{d.department_name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Role Title</label>
