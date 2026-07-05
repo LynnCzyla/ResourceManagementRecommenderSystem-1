@@ -490,34 +490,99 @@ exports.processDocument = async (req, res) => {
         console.log(`📊 Auto-approved:`, finalAutoApproved);
         console.log(`📊 Needs review (first 5):`, finalNeedsReview.slice(0, 5));
 
-        // ============ SAVE TO DATABASE ============
-        const { data: documentData, error: docError } = await supabase
-            .from('documents')
-            .insert({
-                employee_id: employeeId,
-                document_type: documentType,
-                file_name: uploadResult.fileName,
-                file_path: uploadResult.filePath,
-                file_size: uploadResult.fileSize,
-                mime_type: uploadResult.mimeType,
-                raw_ocr_text: result.ocr?.raw_text || '',
-                cleaned_ocr_text: result.ocr?.cleaned_text || '',
-                ocr_confidence: result.ocr?.confidence || 0,
-                word_count: result.ocr?.word_count || 0,
-                char_count: result.ocr?.char_count || 0,
-                document_hash: result.ocr?.document_hash || '',
-                processed_at: new Date().toISOString(),
-                extraction_method: result.ocr?.method || 'unknown',
-                extracted_skills: allSkills,
-                skills_approved: false,
-                feedback_pending: true,
-                approved_skills: [],
-                rejected_skills: []
-            })
-            .select()
-            .single();
+        // ============ CHECK FOR EXISTING DOCUMENT WITH FEEDBACK (using hash) ============
+        const documentHash = result.ocr?.document_hash || '';
+        console.log(`🔍 Document hash: ${documentHash || 'NOT AVAILABLE'}`);
+        
+        let existingDoc = null;
+        if (documentHash) {
+            const { data: foundDoc, error: existingError } = await supabase
+                .from('documents')
+                .select('id, approved_skills, rejected_skills, feedback_pending, file_name')
+                .eq('employee_id', employeeId)
+                .eq('document_type', documentType)
+                .eq('document_hash', documentHash)
+                .maybeSingle();
 
-        if (docError) console.error('Error saving document:', docError);
+            if (!existingError && foundDoc) {
+                existingDoc = foundDoc;
+                console.log(`✅ Found existing document (by hash): ${foundDoc.file_name}`);
+            }
+        }
+
+        let documentId = existingDoc?.id;
+        let previouslyApproved = [];
+        let previouslyRejected = [];
+
+        if (existingDoc) {
+            previouslyApproved = (existingDoc.approved_skills || []).map(normalizeSkill);
+            previouslyRejected = (existingDoc.rejected_skills || []).map(normalizeSkill);
+            
+            console.log(`📝 Found existing document with feedback:`);
+            console.log(`   ✅ Previously approved: ${previouslyApproved.length}`);
+            console.log(`   ❌ Previously rejected: ${previouslyRejected.length}`);
+
+            // Create sets for filtering (case-insensitive)
+            const approvedSet = new Set(previouslyApproved.map(s => s.toLowerCase()));
+            const rejectedSet = new Set(previouslyRejected.map(s => s.toLowerCase()));
+
+            // ============ FILTER OUT ALREADY-REVIEWED SKILLS ============
+            const filteredNeedsReview = finalNeedsReview.filter(skill => {
+                const skillLower = skill.toLowerCase();
+                const isApproved = approvedSet.has(skillLower);
+                const isRejected = rejectedSet.has(skillLower);
+                
+                if (isApproved) {
+                    console.log(`   ⏭️  Skipping "${skill}" (already approved)`);
+                }
+                if (isRejected) {
+                    console.log(`   ⏭️  Skipping "${skill}" (already rejected)`);
+                }
+                
+                return !isApproved && !isRejected;
+            });
+
+            console.log(`📊 After filtering: ${filteredNeedsReview.length} skills left to review`);
+            
+            // Use filtered list
+            while (finalNeedsReview.length > 0) {
+                finalNeedsReview.pop();
+            }
+            finalNeedsReview.push(...filteredNeedsReview);
+        }
+
+        // ============ SAVE TO DATABASE ============
+        if (!existingDoc) {
+            // New document
+            const { data: documentData, error: docError } = await supabase
+                .from('documents')
+                .insert({
+                    employee_id: employeeId,
+                    document_type: documentType,
+                    file_name: uploadResult.fileName,
+                    file_path: uploadResult.filePath,
+                    file_size: uploadResult.fileSize,
+                    mime_type: uploadResult.mimeType,
+                    raw_ocr_text: result.ocr?.raw_text || '',
+                    cleaned_ocr_text: result.ocr?.cleaned_text || '',
+                    ocr_confidence: result.ocr?.confidence || 0,
+                    word_count: result.ocr?.word_count || 0,
+                    char_count: result.ocr?.char_count || 0,
+                    document_hash: result.ocr?.document_hash || '',
+                    processed_at: new Date().toISOString(),
+                    extraction_method: result.ocr?.method || 'unknown',
+                    extracted_skills: allSkills,
+                    skills_approved: false,
+                    feedback_pending: true,
+                    approved_skills: [],
+                    rejected_skills: []
+                })
+                .select()
+                .single();
+
+            if (docError) console.error('Error saving document:', docError);
+            documentId = documentData?.id || result.document_id;
+        }
 
         // ============ FILTER ALL SKILLS TOO ============
         const finalAllSkills = allSkills
@@ -531,7 +596,7 @@ exports.processDocument = async (req, res) => {
         return res.json({
             success: true,
             data: {
-                documentId: documentData?.id || result.document_id,
+                documentId: documentId,
                 fileUrl: uploadResult.publicUrl,
                 ocr: result.ocr,
                 nlp: {
@@ -548,6 +613,8 @@ exports.processDocument = async (req, res) => {
             },
             message: finalNeedsReview.length > 0 
                 ? `Document processed. Please review ${finalNeedsReview.length} skills.`
+                : previouslyApproved.length > 0 || previouslyRejected.length > 0
+                ? `Document processed. All skills have been reviewed! (${previouslyApproved.length} approved, ${previouslyRejected.length} rejected)`
                 : `Document processed. ${finalAutoApproved.length} skills auto-approved!`
         });
     } catch (error) {
