@@ -195,63 +195,126 @@ exports.processDocument = async (req, res) => {
             }
         }
 
-        // ✅ ALL CHECKS PASSED — Upload to Supabase Storage
-        const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
+        // ============ NORMALIZE + SEPARATE AUTO-APPROVED VS NEEDS-REVIEW ============
+        const normalizeSkill = (skill) => {
+            if (typeof skill === 'string') return skill.trim();
+            if (typeof skill === 'object' && skill !== null) {
+                return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
+            }
+            return String(skill).trim();
+        };
 
-        // Save document record to database
-        const { data: documentData, error: docError } = await supabase
-            .from('documents')
-            .insert({
-                employee_id: employeeId,
-                document_type: documentType,
-                file_name: uploadResult.fileName,
-                file_path: uploadResult.filePath,
-                file_size: uploadResult.fileSize,
-                mime_type: uploadResult.mimeType,
-                raw_ocr_text: result.ocr?.raw_text || '',
-                cleaned_ocr_text: result.ocr?.cleaned_text || '',
-                ocr_confidence: result.ocr?.confidence || 0,
-                word_count: result.ocr?.word_count || 0,
-                char_count: result.ocr?.char_count || 0,
-                document_hash: result.ocr?.document_hash || '',
-                processed_at: new Date().toISOString(),
-                extraction_method: result.ocr?.method || 'unknown',
-                extracted_skills: result.nlp?.skills || [],
-                skills_approved: false,
-                feedback_pending: true,
-                approved_skills: [],
-                rejected_skills: []
-            })
-            .select()
-            .single();
+        const autoApprovedNormalized = (result.nlp?.auto_approved || []).map(normalizeSkill);
+        const needsReviewNormalized = (result.nlp?.needs_review || []).map(normalizeSkill);
+        const autoApprovedSet = new Set(autoApprovedNormalized.map(s => s.toLowerCase()));
 
-        if (docError || !documentData) {
-            console.error('Error saving document:', docError);
-            return res.status(docError?.status || 500).json({
-                success: false,
-                error: docError?.message || 'Failed to save document record'
+        let finalNeedsReview = needsReviewNormalized.filter(skill =>
+            !autoApprovedSet.has(skill.toLowerCase()) && skill.length > 0
+        );
+
+        // ============ CHECK FOR EXISTING DOCUMENT (SAME FILE RESCANNED) ============
+        const documentHash = result.ocr?.document_hash || '';
+        let existingDoc = null;
+
+        if (documentHash) {
+            const { data: foundDoc } = await supabase
+                .from('documents')
+                .select('id, approved_skills, rejected_skills, file_name')
+                .eq('employee_id', employeeId)
+                .eq('document_type', documentType)
+                .eq('document_hash', documentHash)
+                .maybeSingle();
+
+            if (foundDoc) {
+                existingDoc = foundDoc;
+                console.log(`✅ Found existing document (rescan): ${foundDoc.file_name}`);
+            }
+        }
+
+        let documentId;
+        let previouslyApproved = [];
+        let previouslyRejected = [];
+
+        if (existingDoc) {
+            documentId = existingDoc.id;
+            previouslyApproved = (existingDoc.approved_skills || []).map(normalizeSkill);
+            previouslyRejected = (existingDoc.rejected_skills || []).map(normalizeSkill);
+
+            const approvedSet = new Set(previouslyApproved.map(s => s.toLowerCase()));
+            const rejectedSet = new Set(previouslyRejected.map(s => s.toLowerCase()));
+
+            finalNeedsReview = finalNeedsReview.filter(skill => {
+                const skillLower = skill.toLowerCase();
+                if (approvedSet.has(skillLower) || rejectedSet.has(skillLower)) {
+                    console.log(`   ⏭️  Skipping "${skill}" (already reviewed)`);
+                    return false;
+                }
+                return true;
             });
+
+            console.log(`📊 Rescan: ${previouslyApproved.length} previously approved, ${previouslyRejected.length} previously rejected, ${finalNeedsReview.length} left to review`);
+        } else {
+            // ✅ Brand new document — upload to storage and insert a fresh row
+            const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
+
+            const { data: documentData, error: docError } = await supabase
+                .from('documents')
+                .insert({
+                    employee_id: employeeId,
+                    document_type: documentType,
+                    file_name: uploadResult.fileName,
+                    file_path: uploadResult.filePath,
+                    file_size: uploadResult.fileSize,
+                    mime_type: uploadResult.mimeType,
+                    raw_ocr_text: result.ocr?.raw_text || '',
+                    cleaned_ocr_text: result.ocr?.cleaned_text || '',
+                    ocr_confidence: result.ocr?.confidence || 0,
+                    word_count: result.ocr?.word_count || 0,
+                    char_count: result.ocr?.char_count || 0,
+                    document_hash: documentHash,
+                    processed_at: new Date().toISOString(),
+                    extraction_method: result.ocr?.method || 'unknown',
+                    extracted_skills: result.nlp?.skills || [],
+                    skills_approved: false,
+                    feedback_pending: true,
+                    approved_skills: [],
+                    rejected_skills: []
+                })
+                .select()
+                .single();
+
+            if (docError || !documentData) {
+                console.error('Error saving document:', docError);
+                return res.status(docError?.status || 500).json({
+                    success: false,
+                    error: docError?.message || 'Failed to save document record'
+                });
+            }
+            documentId = documentData.id;
         }
 
         return res.json({
             success: true,
             data: {
-                documentId: documentData.id,
-                fileUrl: uploadResult.publicUrl,
+                documentId,
                 ocr: result.ocr,
                 nlp: {
                     skills: result.nlp?.skills || [],
                     categorized_skills: result.nlp?.categorized_skills || [],
+                    auto_approved: autoApprovedNormalized,
+                    needs_review: finalNeedsReview,
                     prc_license: result.nlp?.prc_license || null,
                     prc_verified: result.nlp?.prc_verified || false
                 },
                 summary: result.summary,
-                feedback_required: true,
-                pending_skills: result.nlp?.skills || []
+                feedback_required: finalNeedsReview.length > 0,
+                pending_skills: finalNeedsReview
             },
-            message: 'Document processed. Please review and approve skills.'
+            message: finalNeedsReview.length > 0
+                ? `Document processed. Please review ${finalNeedsReview.length} skill(s).`
+                : `Document processed. All skills already reviewed or auto-approved!`
         });
-
+        
     } catch (error) {
         console.error('Document processing error:', error);
         res.status(500).json({ success: false, error: error.message });
