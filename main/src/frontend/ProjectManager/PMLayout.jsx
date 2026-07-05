@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 
 import PMDashboardTab from './PMDashboardTab';
@@ -6,6 +6,18 @@ import PMProjectsTab from './PMProjectsTab';
 import PMResourceRequestsTab from './PMResourceRequestsTab';
 import PMProjectTrackingTab from './PMProjectTrackingTab';
 import ProfileSettings from '../ProfileSettings';
+import { getNotifications, markAllNotificationsRead, deleteNotification as deleteNotificationApi } from './pmApi';
+
+function timeAgo(dateStr) {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin} min${diffMin === 1 ? '' : 's'} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
+}
 
 export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -13,22 +25,62 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
-  
-  // Mock notifications for PM
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'alert', text: 'New resource assignment approved: Javier Santos', time: '10 mins ago', read: false },
-    { id: 2, type: 'system', text: 'Project proposal for supply tracker has been marked active.', time: '2 hours ago', read: true }
-  ]);
+
+  const [notifications, setNotifications] = useState([]);
+
+  const loadNotifications = async () => {
+    if (!user?.id) return;
+    try {
+      const data = await getNotifications(user.id);
+      setNotifications(data || []);
+    } catch (err) {
+      console.error('Failed to load notifications:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+  }, [user]);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleOutsideClick = (e) => {
+      const btn = document.getElementById('notif-btn');
+      const dropdown = document.getElementById('notif-dropdown');
+      if (
+        (btn && btn.contains(e.target)) ||
+        (dropdown && dropdown.contains(e.target))
+      ) {
+        return;
+      }
+      setShowNotifications(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showNotifications]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
+  const markAllRead = async () => {
+    if (!user?.id) return;
+    try {
+      await markAllNotificationsRead(user.id);
+      setNotifications(notifications.map(n => ({ ...n, read: true })));
+    } catch (err) {
+      console.error('Failed to mark notifications as read:', err);
+    }
   };
 
-  const deleteNotification = (id, e) => {
+  const deleteNotification = async (id, e) => {
     e.stopPropagation();
-    setNotifications(notifications.filter(n => n.id !== id));
+    try {
+      await deleteNotificationApi(id);
+      setNotifications(notifications.filter(n => n.id !== id));
+    } catch (err) {
+      console.error('Failed to delete notification:', err);
+    }
   };
 
   const handleNavClick = (tabName) => {
@@ -41,15 +93,15 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <PMDashboardTab />;
+        return <PMDashboardTab user={user} />;
       case 'projects':
-        return <PMProjectsTab />;
+        return <PMProjectsTab user={user} />;
       case 'requests':
-        return <PMResourceRequestsTab />;
+        return <PMResourceRequestsTab user={user} />;
       case 'tracking':
-        return <PMProjectTrackingTab />;
+        return <PMProjectTrackingTab user={user} />;
       default:
-        return <PMDashboardTab />;
+        return <PMDashboardTab user={user} />;
     }
   };
 
@@ -64,15 +116,15 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
           ...styles.sidebarHeader,
           justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
         }}>
-          <img 
-            src={weaLogo} 
-            alt="WEA Logo" 
+          <img
+            src={weaLogo}
+            alt="WEA Logo"
             style={{
               ...styles.sidebarLogo,
               height: sidebarCollapsed ? '32px' : '56px',
               width: 'auto',
               maxWidth: sidebarCollapsed ? '48px' : '180px',
-            }} 
+            }}
           />
         </div>
 
@@ -82,8 +134,8 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
 
         <nav style={styles.nav}>
           {/* Dashboard */}
-          <div 
-            onClick={() => handleNavClick('dashboard')} 
+          <div
+            onClick={() => handleNavClick('dashboard')}
             style={{
               ...styles.navItem,
               backgroundColor: activeTab === 'dashboard' ? 'var(--color-primary-light)' : 'transparent',
@@ -102,8 +154,8 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
           </div>
 
           {/* My Projects */}
-          <div 
-            onClick={() => handleNavClick('projects')} 
+          <div
+            onClick={() => handleNavClick('projects')}
             style={{
               ...styles.navItem,
               backgroundColor: activeTab === 'projects' ? 'var(--color-primary-light)' : 'transparent',
@@ -119,8 +171,8 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
           </div>
 
           {/* Resource Requests */}
-          <div 
-            onClick={() => handleNavClick('requests')} 
+          <div
+            onClick={() => handleNavClick('requests')}
             style={{
               ...styles.navItem,
               backgroundColor: activeTab === 'requests' ? 'var(--color-primary-light)' : 'transparent',
@@ -139,8 +191,8 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
           </div>
 
           {/* Project Tracking */}
-          <div 
-            onClick={() => handleNavClick('tracking')} 
+          <div
+            onClick={() => handleNavClick('tracking')}
             style={{
               ...styles.navItem,
               backgroundColor: activeTab === 'tracking' ? 'var(--color-primary-light)' : 'transparent',
@@ -171,7 +223,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Project Manager Portal</span>
           </div>
-          
+
           <div style={styles.topbarRight}>
             {/* Theme Toggle */}
             <div style={styles.topbarSwitchContainer}>
@@ -207,8 +259,9 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
 
             {/* Notifications */}
             <div style={{ position: 'relative' }}>
-              <button 
-                onClick={() => setShowNotifications(!showNotifications)} 
+              <button
+                id="notif-btn"
+                onClick={() => setShowNotifications(!showNotifications)}
                 style={styles.iconButton}
                 className="hover-icon-button"
               >
@@ -222,7 +275,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
               </button>
 
               {showNotifications && (
-                <div className="glass-card" style={styles.notificationDropdown}>
+                <div id="notif-dropdown" className="glass-card" style={styles.notificationDropdown}>
                   <div style={styles.notifHeader}>
                     <h4 style={{ margin: 0, fontSize: 14 }}>Notifications</h4>
                     {unreadCount > 0 && (
@@ -234,8 +287,8 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
                       <div style={styles.emptyNotif}>No notifications.</div>
                     ) : (
                       notifications.map(n => (
-                        <div 
-                          key={n.id} 
+                        <div
+                          key={n.id}
                           style={{
                             ...styles.notifItem,
                             borderLeftColor: n.type === 'ocr' ? 'var(--color-primary)' : n.type === 'alert' ? 'var(--color-danger)' : 'var(--color-accent)',
@@ -244,7 +297,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
                         >
                           <div style={styles.notifContent}>
                             <p style={{ ...styles.notifText, fontWeight: n.read ? '400' : '600' }}>{n.text}</p>
-                            <span style={styles.notifTime}>{n.time}</span>
+                            <span style={styles.notifTime}>{timeAgo(n.created_at)}</span>
                           </div>
                           <button onClick={(e) => deleteNotification(n.id, e)} style={styles.deleteNotifBtn}>
                             &times;
