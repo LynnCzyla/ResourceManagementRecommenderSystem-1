@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { getProjects, saveProjects } from '../mockState';
+import { getProjects, createProject } from './pmApi';
 
-export default function PMProjectsTab() {
+export default function PMProjectsTab({ user }) {
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [submitError, setSubmitError] = useState('');
   const initialResources = [{
     role: '',
     quantity: 1,
@@ -24,9 +26,19 @@ export default function PMProjectsTab() {
     resources: initialResources
   });
 
+  const loadProjects = async () => {
+    try {
+      const data = await getProjects(user?.id);
+      setProjects(data);
+    } catch (err) {
+      console.error('Failed to load projects:', err);
+      setLoadError(err.message || 'Failed to load projects');
+    }
+  };
+
   useEffect(() => {
-    setProjects(getProjects());
-  }, []);
+    loadProjects();
+  }, [user]);
 
   const handleResourceChange = (index, field, value) => {
     setFormData(prev => {
@@ -81,36 +93,31 @@ export default function PMProjectsTab() {
     });
   };
 
-  const handleCreateSubmit = (e) => {
+  const handleCreateSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.description) return;
 
-    // Sum manpower needed from all resource requirements
-    const totalManpower = formData.resources.reduce((sum, r) => sum + (parseInt(r.quantity) || 0), 0);
+    setSubmitError('');
+    try {
+      await createProject({
+        name: formData.name,
+        description: formData.description,
+        teamSize: formData.teamSize,
+        duration: formData.duration,
+        startDate: formData.startDate || new Date().toISOString().split('T')[0],
+        endDate: formData.endDate || new Date().toISOString().split('T')[0],
+        priority: formData.priority,
+        resources: formData.resources,
+        createdBy: user?.id,
+      });
 
-    // Merge skills
-    const allSkills = formData.resources.flatMap(r => 
-      r.skills ? r.skills.split(',').map(s => s.trim()).filter(s => s.length > 0) : []
-    );
-    const uniqueSkills = [...new Set(allSkills)];
-
-    const newProject = {
-      id: Date.now(),
-      name: formData.name,
-      description: formData.description,
-      startDate: formData.startDate || new Date().toISOString().split('T')[0],
-      endDate: formData.endDate || new Date().toISOString().split('T')[0],
-      status: 'Pending Approval',
-      requiredSkills: uniqueSkills,
-      manpowerNeeded: totalManpower
-    };
-
-    const updated = [newProject, ...projects];
-    setProjects(updated);
-    saveProjects(updated);
-
-    setShowCreateModal(false);
-    resetFormData();
+      await loadProjects();
+      setShowCreateModal(false);
+      resetFormData();
+    } catch (err) {
+      console.error('Failed to create project:', err);
+      setSubmitError(err.message || 'Failed to create project');
+    }
   };
 
   return (
@@ -124,6 +131,10 @@ export default function PMProjectsTab() {
           + New Project
         </button>
       </div>
+
+      {loadError && (
+        <div className="glass-card" style={{ padding: '12px 16px', color: 'var(--color-danger)', fontSize: '13px', fontWeight: '600' }}>{loadError}</div>
+      )}
 
       {/* Projects Grid */}
       <div style={styles.projectsGrid}>
@@ -187,7 +198,10 @@ export default function PMProjectsTab() {
             </div>
             
             <form onSubmit={handleCreateSubmit} style={{ marginTop: 16 }}>
-              
+              {submitError && (
+                <div style={{ padding: '12px 16px', marginBottom: 16, color: 'var(--color-danger)', fontSize: '13px', fontWeight: '600' }}>{submitError}</div>
+              )}
+
               {/* Project Details Section */}
               <div style={styles.sectionContainer}>
                 <div style={styles.sectionHeader}>
