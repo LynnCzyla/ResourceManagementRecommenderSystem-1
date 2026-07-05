@@ -142,57 +142,26 @@ class Runner:
                 rejected = rejected_skills or []
             
             print(f"[LEARN] Processing {len(approved)} approved, {len(rejected)} rejected", file=sys.stderr)
-            
-            # Update the skill dictionary
-            skills_learned = 0
-            for skill in approved:
-                if skill and skill not in self.nlp.learned_skills:
-                    self.nlp.learned_skills.add(skill)
-                    self.nlp.skill_dictionary[skill] = 'Other'
-                    skills_learned += 1
-                    print(f"[LEARN] Learned: {skill}", file=sys.stderr)
-            
-            # Mark rejected skills as non-skills
-            for skill in rejected:
-                if skill:
-                    self.nlp.non_skill_patterns[skill] += 1
-                    print(f"[LEARN] Marked as non-skill: {skill}", file=sys.stderr)
-            
-            # Log approved skills (APPEND to existing, don't replace!)
-            if 'approved' not in self.nlp.feedback_log:
-                self.nlp.feedback_log['approved'] = []
-            
-            for skill in approved:
-                if skill and skill not in self.nlp.feedback_log['approved']:
-                    self.nlp.feedback_log['approved'].append(skill)
-                    print(f"[FEEDBACK] Added approved: {skill}", file=sys.stderr)
-            
-            # Log rejected skills (APPEND to existing, don't replace!)
-            if 'rejected' not in self.nlp.feedback_log:
-                self.nlp.feedback_log['rejected'] = []
-            
-            for skill in rejected:
-                if skill and skill not in self.nlp.feedback_log['rejected']:
-                    self.nlp.feedback_log['rejected'].append(skill)
-                    print(f"[FEEDBACK] Added rejected: {skill}", file=sys.stderr)
-            
-            print(f"[LEARN] Feedback log totals: {len(self.nlp.feedback_log.get('approved', []))} approved, {len(self.nlp.feedback_log.get('rejected', []))} rejected", file=sys.stderr)
-            
-            # Increment documents_analyzed
-            self.nlp.stats['documents_analyzed'] = self.nlp.stats.get('documents_analyzed', 0) + 1
-            
-            # Auto-merge duplicates
+
+            # ============ FIX: delegate to the real implementation ============
+            # Previously this method had its own hand-rolled logic that only
+            # touched non_skill_patterns/feedback_log, and never touched
+            # rejected_phrases/rejected_single_words/etc. That's why rejections
+            # never actually "stuck" - the counting logic in
+            # NLPProcessor.learn_from_feedback() was correct but never called.
+            self.nlp.learn_from_feedback(approved, rejected)
+            # ====================================================================
+
+            # Auto-merge duplicates (learn_from_feedback already does this
+            # internally too, but keep this for the return value / logging)
             merged = 0
             if len(self.nlp.learned_skills) > 5:
                 print(f"[LEARN] Auto-merging duplicates...", file=sys.stderr)
                 merged = self.nlp.merge_synonyms_dynamically()
                 if merged > 0:
                     print(f"[LEARN] Auto-merged {merged} duplicate skills!", file=sys.stderr)
-            
-            # Save the updated data
-            self.nlp._save_data()
-            
-            return {"success": True, "skills_learned": skills_learned, "merged": merged}
+
+            return {"success": True, "skills_learned": len(approved), "merged": merged}
             
         except Exception as e:
             print(f"[LEARN] Error: {str(e)}", file=sys.stderr)

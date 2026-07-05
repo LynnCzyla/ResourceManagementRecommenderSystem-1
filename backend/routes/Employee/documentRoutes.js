@@ -31,14 +31,17 @@ try {
     feedbackController = null;
 }
 
+const supabase = require('../../supabase');
+
 // ============ DOCUMENT ROUTES (ALL PROTECTED) ============
 router.post('/process-document', verifyToken, upload.single('document'), documentController.processDocument);
 router.get('/documents', verifyToken, documentController.getDocuments);
-router.get('/profile', verifyToken, documentController.getCurrentProfile);
-router.get('/profile/:employeeId', verifyToken, documentController.getProfile);
-router.put('/profile', verifyToken, documentController.updateProfile);
 router.get('/skills', verifyToken, documentController.getSkills);
 router.get('/stats', verifyToken, documentController.getStats);
+
+// ============ EMPLOYEE SUB-ROUTES ============
+router.use('/', require('./employeeApi'));
+
 
 // ============ ML STATUS ROUTE ============
 if (feedbackController && typeof feedbackController.getMLStatus === 'function') {

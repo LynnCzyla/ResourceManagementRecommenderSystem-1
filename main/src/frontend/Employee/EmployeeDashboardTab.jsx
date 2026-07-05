@@ -1,20 +1,61 @@
 import React, { useState, useEffect } from 'react';
-import { getTasks, getEmployees } from '../mockState';
+import axios from 'axios';
+import { supabase } from '../../lib/supabaseClient';
 
-export default function EmployeeDashboardTab() {
+export default function EmployeeDashboardTab({ user }) {
   const [tasks, setTasks] = useState([]);
   const [employeeInfo, setEmployeeInfo] = useState(null);
+  const [stats, setStats] = useState({
+    assignedProjectsCount: 0,
+    activeTasksCount: 0,
+    completedTasksCount: 0,
+    certificationsCount: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  const getAuthHeader = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return { Authorization: `Bearer ${session.access_token}` };
+    const storedToken = localStorage.getItem('token') || localStorage.getItem('access_token');
+    if (storedToken) return { Authorization: `Bearer ${storedToken}` };
+    return {};
+  };
 
   useEffect(() => {
-    const allTasks = getTasks();
-    const emps = getEmployees();
-    // In demo, current employee is Javier Santos (EMP-1014)
-    const currentEmp = emps.find(e => e.id === 'EMP-1014') || emps[0];
-    setEmployeeInfo(currentEmp);
-    setTasks(allTasks.filter(t => t.employeeId === currentEmp.id));
-  }, []);
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      try {
+        const authHeader = await getAuthHeader();
+        
+        // 1. Fetch dashboard stats
+        const dashboardRes = await axios.get('http://localhost:5000/api/employee/dashboard', { headers: authHeader });
+        if (dashboardRes.data.success) {
+          const d = dashboardRes.data.data;
+          setEmployeeInfo(d.employeeInfo);
+          setStats({
+            assignedProjectsCount: d.assignedProjectsCount,
+            activeTasksCount: d.activeTasksCount,
+            completedTasksCount: d.completedTasksCount,
+            certificationsCount: d.certificationsCount
+          });
+        }
 
-  if (!employeeInfo) return <div>Loading dashboard...</div>;
+        // 2. Fetch tasks
+        const tasksRes = await axios.get('http://localhost:5000/api/employee/tasks', { headers: authHeader });
+        if (tasksRes.data.success) {
+          setTasks(tasksRes.data.data || []);
+        }
+      } catch (error) {
+        console.error('Error loading employee dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [user?.id]);
+
+  if (loading || !employeeInfo) return <div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading dashboard...</div>;
 
   const activeTasks = tasks.filter(t => t.status === 'In Progress').length;
   const pendingTasks = tasks.filter(t => t.status === 'Pending').length;
@@ -50,7 +91,7 @@ export default function EmployeeDashboardTab() {
                 <line x1="9" y1="16" x2="15" y2="16"></line>
                 <path d="M8 6h2v2H8zm4 0h2v2h-2zm-4 4h2v2H8zm4 0h2v2h-2zm-4 4h2v2H8zm4 0h2v2h-2z"></path>
               </svg>
-              {employeeInfo.department}
+              {employeeInfo.department || 'Unassigned'}
             </span>
             <span>|</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -73,7 +114,7 @@ export default function EmployeeDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>1</div>
+            <div style={styles.statValue}>{stats.assignedProjectsCount}</div>
             <div style={styles.statLabel}>Assigned Project</div>
           </div>
         </div>
@@ -110,7 +151,7 @@ export default function EmployeeDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{employeeInfo.certifications.length}</div>
+            <div style={styles.statValue}>{stats.certificationsCount}</div>
             <div style={styles.statLabel}>Certifications</div>
           </div>
         </div>

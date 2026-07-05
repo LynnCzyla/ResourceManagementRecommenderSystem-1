@@ -334,6 +334,21 @@ class OCRProcessor:
             '\u2022': '-', # Unicode for •
             '\u25a0': '-', # Unicode for ■
             '\u25b6': '>', # Unicode for ►
+            # ============ FIX: Word/typography dash variants -> plain ASCII hyphen ============
+            # These commonly come from Word documents / PDFs and were previously left
+            # untouched, so a bullet like "– Engineering Drawings" (en-dash) survived
+            # all the way through the pipeline even after the plain "-" was being
+            # stripped everywhere else. Normalizing here means EVERY downstream
+            # cleaning step (module2_nlp.py's leading-junk stripping, etc.) only has
+            # to handle one dash character instead of several look-alikes.
+            '\u2010': '-',  # hyphen
+            '\u2011': '-',  # non-breaking hyphen
+            '\u2012': '-',  # figure dash
+            '\u2013': '-',  # en dash (–)
+            '\u2014': '-',  # em dash (—)
+            '\u2015': '-',  # horizontal bar
+            '\u2043': '-',  # hyphen bullet
+            # =====================================================================================
         }
         
         for old, new in replacements.items():
@@ -354,8 +369,9 @@ class OCRProcessor:
         raw_text = ocr_result['raw_text']
         cleaned_text = ocr_result['cleaned_text']
         
-        # Remove bullet points
-        for char in ['●', '•', '▪', '■', '➢', '►', '▸', '→', '↔']:
+        # Remove bullet points (including dash variants normalized above)
+        for char in ['●', '•', '▪', '■', '➢', '►', '▸', '→', '↔',
+                     '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2043']:
             raw_text = raw_text.replace(char, '-')
             cleaned_text = cleaned_text.replace(char, '-')
         
@@ -375,7 +391,7 @@ class OCRProcessor:
             'document_hash': ocr_result['document_hash'],
             'uploaded_at': datetime.now().isoformat(),
             'file_path': file_path,
-            'processing_time_seconds': ocr_result['processing_time'],
+            'processing_time_seconds': ocr_result['processing_time_seconds'] if 'processing_time_seconds' in ocr_result else ocr_result['processing_time'],
             'extraction_method': ocr_result.get('method', 'unknown')
         }
         
