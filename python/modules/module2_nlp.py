@@ -17,6 +17,9 @@ from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from modules.skill_classifier import SkillClassifier
 
+# ============ FIX: connectors that should never lead a skill phrase ============
+LEADING_CONNECTORS = ('and', 'of', 'for', 'with', 'to', 'in', 'on', 'at')
+
 
 class NLPProcessor:
     """100% Dynamic NLP - Learns everything from documents"""
@@ -875,7 +878,15 @@ class NLPProcessor:
             cleaned = self._clean_candidate_text(candidate)
             if not cleaned or len(cleaned) < 3:
                 continue
-            
+
+            # ============ FIX: extra safety net ============
+            # If cleaning still leaves a leading connector word, skip it -
+            # this is exactly what produced "And Archiving Systems", etc.
+            first_word = cleaned.split()[0].lower() if cleaned.split() else ''
+            if first_word in LEADING_CONNECTORS:
+                continue
+            # =================================================
+
             words = cleaned.split()
             
             # ============ FIX: Only keep short phrases ============
@@ -890,13 +901,15 @@ class NLPProcessor:
                 for word in words:
                     current_phrase.append(word)
                     
-                    # If we hit a connector, save the phrase
+                    # If we hit a connector, save the phrase BEFORE the connector
+                    # and start the NEXT phrase fresh (don't carry the connector over -
+                    # that was the bug that produced "And ..." fragments).
                     if word.lower() in connectors and len(current_phrase) >= 2:
                         phrase = ' '.join(current_phrase[:-1])
                         # Only keep 2-4 word phrases
                         if 2 <= len(phrase.split()) <= 4:
                             cleaned_candidates.add(phrase)
-                        current_phrase = [word]
+                        current_phrase = []  # ============ FIX: was [word] ============
                     
                     # If we have 3 words, save it
                     if len(current_phrase) == 3:
@@ -906,24 +919,50 @@ class NLPProcessor:
                             cleaned_candidates.add(phrase)
                         current_phrase = current_phrase[1:]
 
-        return cleaned_candidates  # ← ONLY cleaned candidates, NO long phrases
+        # ============ FIX: final pass - drop anything still starting with a connector ============
+        final_candidates = set()
+        for c in cleaned_candidates:
+            words = c.split()
+            if not words:
+                continue
+            if words[0].lower() in LEADING_CONNECTORS:
+                continue
+            final_candidates.add(c)
+
+        return final_candidates  # ← ONLY cleaned candidates, NO long phrases, NO leading connectors
     
     def _clean_candidate_text(self, text):
         """Clean extracted candidate text"""
         if not text:
             return ""
-        
-        # Remove leading bullets and symbols
-        text = re.sub(r'^[•\-\*]\s*', '', text)
-        text = re.sub(r'\s*[•\-\*]$', '', text)
-        
-        # Remove parentheses that wrap the whole text
+
+        # ============ FIX: strip ANY leading/trailing junk characters ============
+        # Old version only stripped '•', '-', '*' from the start, which is why
+        # things like "(Tracking Logs" and "- Engineering Drawings" got through.
+        text = re.sub(r'^[\s•\-\*\(\)\[\]]+', '', text) 
+        text = re.sub(r'[\s•\-\*\(\)\[\]]+$', '', text)
+        # ===========================================================================
+
+        # Remove parentheses that wrap the whole text (in case any remain)
         if text.startswith('(') and text.endswith(')'):
             text = text[1:-1]
         
         # Remove brackets
         if text.startswith('[') and text.endswith(']'):
             text = text[1:-1]
+
+        # ============ FIX: strip a leading connector word ============
+        # This is what turns "And Archiving Systems" into "Archiving Systems".
+        text = re.sub(
+            r'^(?:' + '|'.join(LEADING_CONNECTORS) + r')\s+',
+            '',
+            text,
+            flags=re.IGNORECASE
+        )
+        # ================================================================
+
+        # Strip again in case removing the connector exposed more junk
+        text = re.sub(r'^[\s•\-\*\(\)\[\]]+', '', text)
         
         # Remove trailing punctuation
         text = re.sub(r'[,;:]$', '', text)
@@ -948,25 +987,25 @@ class NLPProcessor:
         text_lower = text.lower()
         words = text_lower.split()
         
-        # ============ DYNAMIC FILTERS (Learned from feedback) ============
+      # ============ DYNAMIC FILTERS (Learned from feedback) ============
         
         # 1. Check if this exact phrase was rejected (learned)
         if text_lower in self.rejected_phrases:
             rejection_count = self.rejected_phrases[text_lower]
-            if rejection_count >= 2:  # Rejected at least twice
+            if rejection_count >= 1:  # Rejected at least once
                 return True
         
         # 2. Check if it's a single word that was rejected (learned)
         if len(words) == 1:
             if text_lower in self.rejected_single_words:
-                if self.rejected_single_words[text_lower] >= 2:
+                if self.rejected_single_words[text_lower] >= 1:
                     return True
         
         # 3. Check if it's a name pattern that was rejected (learned)
         if 2 <= len(words) <= 3 and all(w[0].isupper() for w in words if w):
             for pattern in self.rejected_names:
                 if text_lower in pattern:
-                    if self.rejected_names[pattern] >= 2:
+                    if self.rejected_names[pattern] >= 1:
                         return True
         
         # 4. Check if it's a fragment pattern that was rejected (learned)
@@ -974,7 +1013,7 @@ class NLPProcessor:
         if any(text_lower.startswith(c) for c in connectors):
             for pattern in self.rejected_fragments:
                 if text_lower in pattern:
-                    if self.rejected_fragments[pattern] >= 2:
+                    if self.rejected_fragments[pattern] >= 1:
                         return True
         
         # 5. Check if it contains learned skill keywords (from approved skills)
@@ -982,7 +1021,8 @@ class NLPProcessor:
             for keyword in self.learned_skill_keywords:
                 if keyword in text_lower:
                     return False  # Contains skill keyword, likely a skill
-        
+                
+                
         # ============ SAFE STATIC FILTERS ============
         # These are safe because they're structural, not semantic
         # Months, dates, numbers - these never change
@@ -1064,12 +1104,20 @@ class NLPProcessor:
             return False
         
         candidate_lower = candidate.lower()
+        if self._is_obvious_non_skill(candidate):
+            print(f"[REJECT-LEARNED] '{candidate}' -> previously rejected")
+            return False
         words = candidate_lower.split()
+
+        # ============ FIX: reject leading-connector fragments outright ============
+        if words and words[0] in LEADING_CONNECTORS:
+            return False
+        # =============================================================================
         
         # ============================================================
         # LAYER 1: Knowledge Base - Auto-approve known skills
         # ============================================================
-        if candidate_lower in self.learned_skills:
+        if candidate_lower in {s.lower() for s in self.learned_skills}:
             print(f"[KB] '{candidate}' -> Already in knowledge base (auto-approved)")
             return candidate
         
@@ -1385,46 +1433,48 @@ class NLPProcessor:
                 print(f"[FEEDBACK] Approved: {skill}")
         
         for skill in rejected_skills:
+            if not skill:
+                continue
+
             if skill not in self.feedback_log.get('rejected', []):
                 if 'rejected' not in self.feedback_log:
                     self.feedback_log['rejected'] = []
                 self.feedback_log['rejected'].append(skill)
                 self.skill_importance[skill] = self.skill_importance.get(skill, 0) - 1
-                
-                # ============ LEARN FROM REJECTIONS ============
-                skill_lower = skill.lower()
-                words = skill_lower.split()
-                
-                # 1. Track rejected phrases
-                self.rejected_phrases[skill_lower] = self.rejected_phrases.get(skill_lower, 0) + 1
-                print(f"[LEARN] Learned rejected phrase: '{skill}'")
-                
-                # 2. Track rejected single words
-                if len(words) == 1 and len(skill_lower) > 2:
-                    self.rejected_single_words[skill_lower] = self.rejected_single_words.get(skill_lower, 0) + 1
-                    print(f"[LEARN] Learned rejected word: '{skill}'")
-                
-                # 3. Track rejected name patterns
-                if 2 <= len(words) <= 3 and all(w[0].isupper() for w in words if w):
-                    self.rejected_names[skill_lower] = self.rejected_names.get(skill_lower, 0) + 1
-                    print(f"[LEARN] Learned rejected name pattern: '{skill}'")
-                
-                # 4. Track rejected fragments
-                connectors = ['and', 'for', 'with', 'to', 'of']
-                if any(skill_lower.startswith(c) for c in connectors):
-                    self.rejected_fragments[skill_lower] = self.rejected_fragments.get(skill_lower, 0) + 1
-                    print(f"[LEARN] Learned rejected fragment: '{skill}'")
-                
-                print(f"[FEEDBACK] Rejected: {skill}")
+
+            # ============ LEARN FROM REJECTIONS - runs every time, not just once ============
+            skill_lower = skill.lower()
+            words = skill_lower.split()
+
+            # 1. Track rejected phrases
+            self.rejected_phrases[skill_lower] = self.rejected_phrases.get(skill_lower, 0) + 1
+            print(f"[LEARN] Learned rejected phrase: '{skill}' (count={self.rejected_phrases[skill_lower]})")
+
+            # 2. Track rejected single words
+            if len(words) == 1 and len(skill_lower) > 2:
+                self.rejected_single_words[skill_lower] = self.rejected_single_words.get(skill_lower, 0) + 1
+
+            # 3. Track rejected name patterns
+            if 2 <= len(words) <= 3 and all(w[0].isupper() for w in words if w):
+                self.rejected_names[skill_lower] = self.rejected_names.get(skill_lower, 0) + 1
+
+            # 4. Track rejected fragments
+            connectors = ['and', 'for', 'with', 'to', 'of']
+            if any(skill_lower.startswith(c) for c in connectors):
+                self.rejected_fragments[skill_lower] = self.rejected_fragments.get(skill_lower, 0) + 1
+
+            print(f"[FEEDBACK] Rejected: {skill}")
         # ================================================
         
-        # Add approved skills to learned_skills
+        # Add approved skills to learned_skills - store LOWERCASE so future
+        # candidate_lower lookups in _is_likely_skill() actually match.
         for skill in approved_skills:
-            if skill and skill not in self.learned_skills:
-                self.learned_skills.add(skill)
-                self.skill_dictionary[skill] = 'Other'
-                print(f"[NLP] Added new skill to knowledge base: {skill}")
-        
+            skill_key = skill.strip().lower() if skill else ''
+            if skill_key and skill_key not in self.learned_skills:
+                self.learned_skills.add(skill_key)
+                self.skill_dictionary[skill_key] = 'Other'
+                print(f"[NLP] Added new skill to knowledge base: {skill_key}")
+                
         # Re-run merge (this will create aliases, not delete)
         if len(self.learned_skills) > 5:
             merged = self.merge_synonyms_dynamically()
