@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 
 import EmployeeDashboardTab from './EmployeeDashboardTab';
@@ -6,29 +7,99 @@ import EmployeeProfileTab from './EmployeeProfileTab';
 import EmployeeAssignmentsTab from './EmployeeAssignmentsTab';
 
 export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('employeeActiveTab') || 'dashboard';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  
-  // Mock notifications for Employee
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'ocr', text: 'You have been assigned to Inventory and Supply Chain Tracker project.', time: '1 day ago', read: true },
-    { id: 2, type: 'alert', text: 'New daily task assigned: Setup FastAPI router endpoints.', time: '1 hour ago', read: false }
-  ]);
+  const [notifications, setNotifications] = useState([]);
+
+  const fetchNotifications = async () => {
+    if (!user?.id) return;
+    try {
+      const response = await axios.get(`http://localhost:5000/api/notifications?userId=${user.id}`);
+      if (response.data.success) {
+        setNotifications(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 15000);
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleOutsideClick = (e) => {
+      const btn = document.getElementById('notif-btn');
+      const dropdown = document.getElementById('notif-dropdown');
+      if (
+        (btn && btn.contains(e.target)) ||
+        (dropdown && dropdown.contains(e.target))
+      ) {
+        return;
+      }
+      setShowNotifications(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showNotifications]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
+  const markAllRead = async () => {
+    if (!user?.id) return;
+    try {
+      const response = await axios.patch('http://localhost:5000/api/notifications/mark-all-read', { userId: user.id });
+      if (response.data.success) {
+        setNotifications(notifications.map(n => ({ ...n, read: true })));
+      }
+    } catch (error) {
+      console.error('Error marking notifications as read:', error);
+    }
   };
 
-  const deleteNotification = (id, e) => {
+  const deleteNotification = async (id, e) => {
     e.stopPropagation();
-    setNotifications(notifications.filter(n => n.id !== id));
+    try {
+      const response = await axios.delete(`http://localhost:5000/api/notifications/${id}`);
+      if (response.data.success) {
+        setNotifications(notifications.filter(n => n.id !== id));
+      }
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+    }
+  };
+
+  const formatTime = (dateStr) => {
+    try {
+      const date = new Date(dateStr);
+      const seconds = Math.floor((new Date() - date) / 1000);
+      let interval = Math.floor(seconds / 31536000);
+      if (interval >= 1) return interval + " years ago";
+      interval = Math.floor(seconds / 2592000);
+      if (interval >= 1) return interval + " months ago";
+      interval = Math.floor(seconds / 86400);
+      if (interval >= 1) return interval + " days ago";
+      interval = Math.floor(seconds / 3600);
+      if (interval >= 1) return interval + " hours ago";
+      interval = Math.floor(seconds / 60);
+      if (interval >= 1) return interval + " minutes ago";
+      return "Just now";
+    } catch (e) {
+      return dateStr;
+    }
   };
 
   const handleNavClick = (tabName) => {
     setActiveTab(tabName);
+    localStorage.setItem('employeeActiveTab', tabName);
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
     }
@@ -37,13 +108,13 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <EmployeeDashboardTab />;
+        return <EmployeeDashboardTab user={user} />;
       case 'profile':
-        return <EmployeeProfileTab />;
+        return <EmployeeProfileTab user={user} />;
       case 'assignments':
-        return <EmployeeAssignmentsTab />;
+        return <EmployeeAssignmentsTab user={user} />;
       default:
-        return <EmployeeDashboardTab />;
+        return <EmployeeDashboardTab user={user} />;
     }
   };
 
@@ -183,6 +254,7 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
             {/* Notifications */}
             <div style={{ position: 'relative' }}>
               <button 
+                id="notif-btn"
                 onClick={() => setShowNotifications(!showNotifications)} 
                 style={styles.iconButton}
                 className="hover-icon-button"
@@ -197,7 +269,7 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
               </button>
 
               {showNotifications && (
-                <div className="glass-card" style={styles.notificationDropdown}>
+                <div id="notif-dropdown" className="glass-card" style={styles.notificationDropdown}>
                   <div style={styles.notifHeader}>
                     <h4 style={{ margin: 0, fontSize: 14 }}>Notifications</h4>
                     {unreadCount > 0 && (
@@ -219,7 +291,7 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
                         >
                           <div style={styles.notifContent}>
                             <p style={{ ...styles.notifText, fontWeight: n.read ? '400' : '600' }}>{n.text}</p>
-                            <span style={styles.notifTime}>{n.time}</span>
+                            <span style={styles.notifTime}>{formatTime(n.created_at || n.time)}</span>
                           </div>
                           <button onClick={(e) => deleteNotification(n.id, e)} style={styles.deleteNotifBtn}>
                             &times;
