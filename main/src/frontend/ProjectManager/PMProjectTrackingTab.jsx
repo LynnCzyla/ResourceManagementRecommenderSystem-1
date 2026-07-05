@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { getEmployees, getTasks, saveTasks, getProjects } from '../mockState';
+import { getEmployees, getTasks, createTask, updateTask, getProjects, updateProject } from './pmApi';
 
-export default function PMProjectTrackingTab() {
+export default function PMProjectTrackingTab({ user }) {
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
-  
-  const [selectedProjectId, setSelectedProjectId] = useState(2); // Default to active project (Inventory Tracker)
+  const [loadError, setLoadError] = useState('');
+  const [formError, setFormError] = useState('');
+
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
   const [showEditTaskModal, setShowEditTaskModal] = useState(false);
@@ -30,45 +32,74 @@ export default function PMProjectTrackingTab() {
     'EMP-1020': 'Present',
   });
 
+  const loadEmployees = async () => {
+    try {
+      setEmployees(await getEmployees());
+    } catch (err) {
+      console.error('Failed to load employees:', err);
+      setLoadError(err.message || 'Failed to load employees');
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const data = await getProjects();
+      setProjects(data);
+      setSelectedProjectId(prev => prev ?? (data.length ? data[0].id : null));
+    } catch (err) {
+      console.error('Failed to load projects:', err);
+      setLoadError(err.message || 'Failed to load projects');
+    }
+  };
+
+  const loadTasks = async (projectId) => {
+    if (!projectId) return;
+    try {
+      setTasks(await getTasks({ projectId }));
+    } catch (err) {
+      console.error('Failed to load tasks:', err);
+      setLoadError(err.message || 'Failed to load tasks');
+    }
+  };
+
   useEffect(() => {
-    setEmployees(getEmployees());
-    setTasks(getTasks());
-    setProjects(getProjects());
+    loadEmployees();
+    loadProjects();
   }, []);
 
-  const handleCreateTask = (e) => {
+  useEffect(() => {
+    loadTasks(selectedProjectId);
+  }, [selectedProjectId]);
+
+  const handleCreateTask = async (e) => {
     e.preventDefault();
     if (!newTaskData.title || !newTaskData.employeeId) return;
 
-    const assignedEmp = employees.find(emp => emp.id === newTaskData.employeeId);
-    const selectedProj = projects.find(p => p.id === selectedProjectId) || { name: 'Current Project' };
+    setFormError('');
+    try {
+      await createTask({
+        projectId: selectedProjectId,
+        employeeId: newTaskData.employeeId,
+        title: newTaskData.title,
+        description: newTaskData.description,
+        priority: newTaskData.priority,
+        dueDate: newTaskData.dueDate || new Date().toISOString().split('T')[0],
+        createdBy: user?.id,
+      });
 
-    const newTask = {
-      id: Date.now(),
-      projectId: selectedProjectId,
-      projectName: selectedProj.name,
-      employeeId: newTaskData.employeeId,
-      employeeName: assignedEmp ? assignedEmp.name : 'Unassigned',
-      title: newTaskData.title,
-      description: newTaskData.description,
-      priority: newTaskData.priority,
-      status: 'Pending',
-      dueDate: newTaskData.dueDate || new Date().toISOString().split('T')[0],
-      progressLogs: []
-    };
-
-    const updatedTasks = [...tasks, newTask];
-    setTasks(updatedTasks);
-    saveTasks(updatedTasks);
-
-    setShowCreateTaskModal(false);
-    setNewTaskData({
-      title: '',
-      description: '',
-      employeeId: '',
-      priority: 'Medium',
-      dueDate: ''
-    });
+      await loadTasks(selectedProjectId);
+      setShowCreateTaskModal(false);
+      setNewTaskData({
+        title: '',
+        description: '',
+        employeeId: '',
+        priority: 'Medium',
+        dueDate: ''
+      });
+    } catch (err) {
+      console.error('Failed to create task:', err);
+      setFormError(err.message || 'Failed to create task');
+    }
   };
 
   const handleProjectClick = (project) => {
@@ -83,12 +114,22 @@ export default function PMProjectTrackingTab() {
     setShowEditProjectModal(true);
   };
 
-  const handleEditProject = (e) => {
+  const handleEditProject = async (e) => {
     e.preventDefault();
-    const updatedProjects = projects.map(p => p.id === editProjectData.id ? { ...p, ...editProjectData } : p);
-    setProjects(updatedProjects);
-    saveProjects(updatedProjects);
-    setShowEditProjectModal(false);
+    setFormError('');
+    try {
+      await updateProject(editProjectData.id, {
+        name: editProjectData.name,
+        description: editProjectData.description,
+        startDate: editProjectData.startDate,
+        endDate: editProjectData.endDate,
+      });
+      await loadProjects();
+      setShowEditProjectModal(false);
+    } catch (err) {
+      console.error('Failed to update project:', err);
+      setFormError(err.message || 'Failed to update project');
+    }
   };
 
   const handleOpenEditTask = (task) => {
@@ -101,27 +142,26 @@ export default function PMProjectTrackingTab() {
     setShowEditTaskModal(true);
   };
 
-  const handleSaveTaskEdit = (e) => {
+  const handleSaveTaskEdit = async (e) => {
     e.preventDefault();
-    const updatedTasks = tasks.map(t => {
-      if (t.id === taskToEdit.id) {
-        const assignedEmp = employees.find(emp => emp.id === editTaskData.employeeId);
-        return {
-          ...t,
-          employeeId: editTaskData.employeeId,
-          employeeName: assignedEmp ? assignedEmp.name : 'Unassigned',
-          status: editTaskData.status,
-          dueDate: editTaskData.dueDate
-        };
-      }
-      return t;
-    });
-    setTasks(updatedTasks);
-    saveTasks(updatedTasks);
-    setShowEditTaskModal(false);
-    setTaskToEdit(null);
+    setFormError('');
+    try {
+      await updateTask(taskToEdit.id, {
+        employeeId: editTaskData.employeeId,
+        status: editTaskData.status,
+        dueDate: editTaskData.dueDate,
+      });
+      await loadTasks(selectedProjectId);
+      setShowEditTaskModal(false);
+      setTaskToEdit(null);
+    } catch (err) {
+      console.error('Failed to update task:', err);
+      setFormError(err.message || 'Failed to update task');
+    }
   };
 
+  // Placeholder — there's no attendance table in the schema yet, so this
+  // always falls back to 'Present'. Swap in a real lookup once that exists.
   const getDailyStatus = (id) => dailyStatusMap[id] || 'Present';
 
   const getTaskCount = (id) => tasks.filter(t => t.employeeId === id).length;
