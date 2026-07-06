@@ -9,20 +9,27 @@ const PM_BASE = 'http://localhost:5000/api/pm';
 const NOTIF_BASE = 'http://localhost:5000/api/notifications';
 
 async function request(base, path, options = {}) {
-  const res = await fetch(`${base}${path}`, {
+  const url = `${base}${path}`;
+  console.log(`🌐 API Request: ${options.method || 'GET'} ${url}`);
+  
+  const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
 
+  console.log(`  → Status: ${res.status}`);
+
   let body = null;
   try {
     body = await res.json();
+    console.log(`  → Response:`, body);
   } catch {
-    // no JSON body (e.g. network-level failure) — fall through
+    console.log(`  → No JSON body`);
   }
 
   if (!res.ok || (body && body.success === false)) {
     const message = (body && (body.message || body.error)) || `Request failed (${res.status})`;
+    console.error(`  ✗ Error: ${message}`);
     throw new Error(message);
   }
 
@@ -39,9 +46,17 @@ export function getDashboardStats(createdBy) {
 }
 
 // ── Employees ───────────────────────────────────────────────────────────
-export function getEmployees(departmentId) {
-  const qs = departmentId ? `?departmentId=${encodeURIComponent(departmentId)}` : '';
-  return pm(`/employees${qs}`);
+// pmId scopes results to only the employees assigned to that PM's own
+// projects; projectId narrows further to just ONE project's assigned team
+// (e.g. for an "Assign Task" dropdown); departmentId additionally narrows
+// by department.
+export function getEmployees(pmId, departmentId, projectId) {
+  const params = new URLSearchParams();
+  if (pmId) params.set('pmId', pmId);
+  if (departmentId) params.set('departmentId', departmentId);
+  if (projectId) params.set('projectId', projectId);
+  const qs = params.toString();
+  return pm(`/employees${qs ? `?${qs}` : ''}`);
 }
 
 // ── Projects ────────────────────────────────────────────────────────────
