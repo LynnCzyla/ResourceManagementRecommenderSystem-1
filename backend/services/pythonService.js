@@ -79,11 +79,21 @@ class PythonService {
                 // Try to parse JSON
                 try {
                     const clean = stdoutData.trim();
-                    const jsonStart = clean.indexOf('{');
-                    const jsonEnd = clean.lastIndexOf('}');
+                    
+                    // Filter out debug lines (lines starting with [ or containing [XXX])
+                    const lines = clean.split('\n');
+                    const jsonLines = lines.filter(line => {
+                        const trimmed = line.trim();
+                        // Skip debug lines that start with [ like [NLP], [ML], [RUNNER], etc.
+                        return !trimmed.match(/^\[.*\]/);
+                    });
+                    const filtered = jsonLines.join('').trim();
+                    
+                    const jsonStart = filtered.indexOf('{');
+                    const jsonEnd = filtered.lastIndexOf('}');
                     
                     if (jsonStart !== -1 && jsonEnd !== -1) {
-                        const jsonStr = clean.substring(jsonStart, jsonEnd + 1);
+                        const jsonStr = filtered.substring(jsonStart, jsonEnd + 1);
                         const parsed = JSON.parse(jsonStr);
                         console.log('✅ JSON parsed successfully!');
                         console.log(`📊 Skills found: ${parsed?.nlp?.skills?.length || 0}`);
