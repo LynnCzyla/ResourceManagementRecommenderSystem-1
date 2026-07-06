@@ -41,13 +41,18 @@ async function findPositionIdByName(roleName) {
   return data && data.length > 0 ? data[0].id : null;
 }
 
+// requirement_skills stores the skill as plain text (column `skills`) —
+// there is no skill_id foreign key on this table. We still upsert into the
+// master `skills` table so the skill exists for autocomplete/reporting
+// elsewhere, but the link to the requirement is just the text value.
 async function attachSkillsToRequirement(requirementId, skillNames = []) {
   for (const rawName of skillNames) {
-    const skillId = await findOrCreateSkill(rawName);
-    if (!skillId) continue;
+    const name = rawName.trim();
+    if (!name) continue;
+    await findOrCreateSkill(name);
     await supabase.from('requirement_skills').insert({
       requirement_id: requirementId,
-      skill_id: skillId,
+      skills: name,
     });
   }
 }
@@ -57,7 +62,7 @@ function transformProject(row) {
   const requirements = row.project_resource_requirements || [];
   const manpowerNeeded = requirements.reduce((sum, r) => sum + (r.quantity_needed || 0), 0);
   const allSkills = requirements.flatMap(r =>
-    (r.requirement_skills || []).map(rs => rs.skills?.skill_name).filter(Boolean)
+    (r.requirement_skills || []).map(rs => rs.skills).filter(Boolean)
   );
 
   return {
@@ -77,10 +82,12 @@ function transformProject(row) {
       id: r.id,
       role: r.positions?.position_name || r.role_title || '',
       quantity: r.quantity_needed,
-      experience: r.experience_level,
       assignment: r.assignment_type,
       justification: r.justification,
-      skills: (r.requirement_skills || []).map(rs => rs.skills?.skill_name).filter(Boolean),
+      startDate: r.start_date,
+      endDate: r.end_date,
+      status: r.status,
+      skills: (r.requirement_skills || []).map(rs => rs.skills).filter(Boolean),
     })),
   };
 }
@@ -90,13 +97,16 @@ const PROJECT_SELECT = `
   project_resource_requirements (
     id,
     quantity_needed,
-    experience_level,
     assignment_type,
     justification,
     role_title,
+    start_date,
+    end_date,
+    status,
     positions ( id, position_name ),
     requirement_skills (
-      skills ( id, skill_name )
+      id,
+      skills
     )
   )
 `;
@@ -195,9 +205,10 @@ router.post('/projects', async (req, res) => {
           position_id: positionId,
           role_title: positionId ? null : (resource.role || null),
           quantity_needed: parseInt(resource.quantity, 10) || 1,
-          experience_level: resource.experience || 'Intermediate',
           assignment_type: resource.assignment || 'Full-time',
           justification: resource.justification || null,
+          start_date: resource.startDate || null,
+          end_date: resource.endDate || null,
         })
         .select()
         .single();
