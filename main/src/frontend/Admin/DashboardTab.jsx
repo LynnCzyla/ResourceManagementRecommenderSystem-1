@@ -1,16 +1,85 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpen }) {
+export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   const navigateTo = (tabName, expandMenu) => {
     setActiveTab(tabName);
     if (expandMenu === 'user') {
       setUserMgmtOpen(true);
-    } else if (expandMenu === 'logs') {
-      setLogsOpen(true);
     }
   };
 
-  const systemPerformanceData = [20, 35, 30, 45, 60, 55, 70, 65, 80, 75, 85, 90];
+  const [statusInfo, setStatusInfo] = useState({
+    status: 'Online',
+    totalUsers: 'Loading...',
+    totalDepartments: 'Loading...'
+  });
+
+  const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  const [sessionDuration, setSessionDuration] = useState('00:00');
+
+  useEffect(() => {
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString());
+      const diff = Date.now() - startTime;
+      const secs = Math.floor((diff / 1000) % 60);
+      const mins = Math.floor((diff / (1000 * 60)) % 60);
+      setSessionDuration(`${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const fetchSystemInfo = async () => {
+      let isOnline = 'Offline';
+      try {
+        const res = await fetch('http://localhost:5000/api/health');
+        if (res.ok) {
+          isOnline = 'Online';
+        }
+      } catch (err) {
+        console.error('Error checking API health:', err);
+      }
+
+      let userCount = 0;
+      try {
+        const token = localStorage.getItem('token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res = await fetch('http://localhost:5000/api/users', { headers });
+        const users = await res.json();
+        if (Array.isArray(users)) {
+          userCount = users.length;
+        } else if (users && Array.isArray(users.data)) {
+          userCount = users.data.length;
+        }
+      } catch (err) {
+        console.error('Error fetching users count:', err);
+      }
+
+      let deptCount = 0;
+      try {
+        const res = await fetch('http://localhost:5000/api/admin/departments');
+        if (res.ok) {
+          const depts = await res.json();
+          if (Array.isArray(depts)) {
+            deptCount = depts.length;
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching departments count:', err);
+      }
+
+      setStatusInfo({
+        status: isOnline,
+        totalUsers: userCount,
+        totalDepartments: deptCount
+      });
+    };
+
+    fetchSystemInfo();
+  }, []);
+
   const userRolesData = [
     { label: 'Resource Managers', count: 3, percentage: 6, color: '#10b981' },
     { label: 'Project Managers', count: 5, percentage: 10, color: '#0ea5e9' },
@@ -19,18 +88,10 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
 
   const activities = [
     { id: 1, text: 'User Romell Ebuen assigned role Resource Manager', time: '2 hours ago', user: 'Admin' },
-    { id: 2, text: 'OCR processing successful for romell_cv.pdf (98.2% Accuracy)', time: '3 hours ago', user: 'System' },
-    { id: 3, text: 'System configuration "OCR Sensitivity" updated to 85%', time: '6 hours ago', user: 'Admin' },
-    { id: 4, text: 'New project "Substation Safety Installation" created', time: '1 day ago', user: 'ProjManager' },
-    { id: 5, text: 'Deactivated employee account "John Tester"', time: '2 days ago', user: 'Admin' },
-    { id: 6, text: 'NLP synonym dictionary rebuilt (Added 4 new oil & gas terms)', time: '3 days ago', user: 'System' },
-  ];
-
-  const databaseStats = [
-    { label: 'Resumes', count: 42, color: 'var(--color-primary)' },
-    { label: 'Certificates', count: 96, color: 'var(--color-accent)' },
-    { label: 'Projects', count: 12, color: '#8b5cf6' },
-    { label: 'Audit Logs', count: 340, color: '#f59e0b' }
+    { id: 2, text: 'New project "Substation Safety Installation" created', time: '3 hours ago', user: 'ProjManager' },
+    { id: 3, text: 'System configuration updated', time: '6 hours ago', user: 'Admin' },
+    { id: 4, text: 'Deactivated employee account "John Tester"', time: '1 day ago', user: 'Admin' },
+    { id: 5, text: 'New user account created for Maria Santos', time: '2 days ago', user: 'Admin' },
   ];
 
   return (
@@ -67,83 +128,69 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
           </div>
         </div>
 
-        <div onClick={() => navigateTo('reports')} className="glass-card" style={styles.actionCard}>
-          <div style={{ ...styles.iconBg, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
-            </svg>
-          </div>
-          <div style={styles.actionTextContainer}>
-            <h3 style={styles.actionTitle}>Generate System Report</h3>
-          </div>
-        </div>
-
-        <div onClick={() => navigateTo('ocr-logs', 'logs')} className="glass-card" style={styles.actionCard}>
-          <div style={{ ...styles.iconBg, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
-              <path d="M3 10h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8z"></path>
-            </svg>
-          </div>
-          <div style={styles.actionTextContainer}>
-            <h3 style={styles.actionTitle}>Monitor OCR/NLP Logs</h3>
-          </div>
-        </div>
       </div>
 
       <div className="dashboard-grid">
         <div className="glass-card">
-          <h2 style={styles.chartTitle}>Overall System Performance</h2>
-          <p style={styles.chartSubtitle}>Processing efficiency and OCR accuracy index over time</p>
+          <h2 style={styles.chartTitle}>System Status</h2>
+          <p style={styles.chartSubtitle}>Current system health and performance metrics</p>
           
-          <div style={styles.svgContainer}>
-            <svg viewBox="0 0 500 200" width="100%" height="200" style={{ overflow: 'visible' }}>
-              <defs>
-                <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--color-primary)" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="var(--color-primary)" stopOpacity="0.0" />
-                </linearGradient>
-              </defs>
-              
-              <line x1="0" y1="50" x2="500" y2="50" stroke="var(--color-border)" strokeWidth="0.5" strokeDasharray="4" />
-              <line x1="0" y1="100" x2="500" y2="100" stroke="var(--color-border)" strokeWidth="0.5" strokeDasharray="4" />
-              <line x1="0" y1="150" x2="500" y2="150" stroke="var(--color-border)" strokeWidth="0.5" strokeDasharray="4" />
-              
-              <path 
-                d={`M 0 180 
-                    L 0 ${180 - systemPerformanceData[0] * 1.5} 
-                    C 45 ${180 - systemPerformanceData[1] * 1.5}, 90 ${180 - systemPerformanceData[2] * 1.5}, 135 ${180 - systemPerformanceData[3] * 1.5}
-                    C 180 ${180 - systemPerformanceData[4] * 1.5}, 225 ${180 - systemPerformanceData[5] * 1.5}, 270 ${180 - systemPerformanceData[6] * 1.5}
-                    C 315 ${180 - systemPerformanceData[7] * 1.5}, 360 ${180 - systemPerformanceData[8] * 1.5}, 405 ${180 - systemPerformanceData[9] * 1.5}
-                    C 450 ${180 - systemPerformanceData[10] * 1.5}, 480 ${180 - systemPerformanceData[11] * 1.5}, 500 ${180 - systemPerformanceData[11] * 1.5}
-                    L 500 180 Z`}
-                fill="url(#chartGrad)"
-              />
-              
-              <path 
-                d={`M 0 ${180 - systemPerformanceData[0] * 1.5} 
-                    C 45 ${180 - systemPerformanceData[1] * 1.5}, 90 ${180 - systemPerformanceData[2] * 1.5}, 135 ${180 - systemPerformanceData[3] * 1.5}
-                    C 180 ${180 - systemPerformanceData[4] * 1.5}, 225 ${180 - systemPerformanceData[5] * 1.5}, 270 ${180 - systemPerformanceData[6] * 1.5}
-                    C 315 ${180 - systemPerformanceData[7] * 1.5}, 360 ${180 - systemPerformanceData[8] * 1.5}, 405 ${180 - systemPerformanceData[9] * 1.5}
-                    C 450 ${180 - systemPerformanceData[10] * 1.5}, 480 ${180 - systemPerformanceData[11] * 1.5}, 500 ${180 - systemPerformanceData[11] * 1.5}`}
-                fill="none" 
-                stroke="var(--color-primary)" 
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
-
-              <circle cx="270" cy={180 - systemPerformanceData[6] * 1.5} r="5" fill="var(--color-primary)" stroke="var(--color-bg-card)" strokeWidth="2" />
-              <circle cx="500" cy={180 - systemPerformanceData[11] * 1.5} r="5" fill="var(--color-primary)" stroke="var(--color-bg-card)" strokeWidth="2" />
-              
-              <text x="5" y="40" fill="var(--color-text-muted)" fontSize="9">90% Max Efficiency</text>
-              <text x="5" y="195" fill="var(--color-text-muted)" fontSize="9">Week 1</text>
-              <text x="250" y="195" fill="var(--color-text-muted)" fontSize="9">Week 6</text>
-              <text x="460" y="195" fill="var(--color-text-muted)" fontSize="9">Current</text>
-            </svg>
+          <div style={styles.statusGrid}>
+            <div style={styles.statusItem}>
+              <div style={{ ...styles.statusIcon, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-primary)' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+              </div>
+              <div>
+                <div style={styles.statusLabel}>Status</div>
+                <div style={{ ...styles.statusValue, color: 'var(--color-primary)' }}>{statusInfo.status}</div>
+              </div>
+            </div>
+            
+            <div style={styles.statusItem}>
+              <div style={{ ...styles.statusIcon, background: 'rgba(2, 132, 199, 0.15)', color: 'var(--color-accent)' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="16" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+              </div>
+              <div>
+                <div style={styles.statusLabel}>System Version</div>
+                <div style={styles.statusValue}>v1.0.0</div>
+              </div>
+            </div>
+            
+            <div style={styles.statusItem}>
+              <div style={{ ...styles.statusIcon, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </div>
+              <div>
+                <div style={styles.statusLabel}>Total Departments</div>
+                <div style={styles.statusValue}>{statusInfo.totalDepartments}</div>
+              </div>
+            </div>
+            
+            <div style={styles.statusItem}>
+              <div style={{ ...styles.statusIcon, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="9" cy="7" r="4"></circle>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+              </div>
+              <div>
+                <div style={styles.statusLabel}>Registered Accounts</div>
+                <div style={styles.statusValue}>{statusInfo.totalUsers}</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -205,28 +252,26 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen, setLogsOpe
         </div>
 
         <div className="glass-card">
-          <h2 style={styles.chartTitle}>Database Health Status</h2>
-          <p style={styles.chartSubtitle}>Record distribution across entities (Sync Status: OK)</p>
+          <h2 style={styles.chartTitle}>Admin Session Monitor</h2>
+          <p style={styles.chartSubtitle}>Real-time frontend session diagnostics</p>
           
-          <div style={styles.dbStatsWrapper}>
-            {databaseStats.map((stat, idx) => {
-              const maxVal = 340;
-              const barHeight = (stat.count / maxVal) * 100;
-              return (
-                <div key={idx} style={styles.dbStatColumn}>
-                  <div style={styles.dbBarTrack}>
-                    <div style={{ 
-                      ...styles.dbBarFill, 
-                      height: `${barHeight}%`, 
-                      backgroundColor: stat.color,
-                      boxShadow: `0 0 10px ${stat.color}40`
-                    }}></div>
-                  </div>
-                  <span style={styles.dbStatCount}>{stat.count}</span>
-                  <span style={styles.dbStatLabel}>{stat.label}</span>
-                </div>
-              );
-            })}
+          <div style={styles.sessionMonitorWrapper}>
+            <div style={styles.sessionRow}>
+              <span style={styles.sessionLabel}>Environment</span>
+              <span style={styles.sessionValueBadge}>Development</span>
+            </div>
+            <div style={styles.sessionRow}>
+              <span style={styles.sessionLabel}>Database Link</span>
+              <span style={{ ...styles.sessionValueBadge, color: 'var(--color-primary)', backgroundColor: 'rgba(16, 185, 129, 0.15)' }}>Active</span>
+            </div>
+            <div style={styles.sessionRow}>
+              <span style={styles.sessionLabel}>Session Duration</span>
+              <span style={styles.sessionValueText}>{sessionDuration}</span>
+            </div>
+            <div style={styles.sessionRow}>
+              <span style={styles.sessionLabel}>Current Time</span>
+              <span style={styles.sessionValueText}>{currentTime}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -382,43 +427,70 @@ const styles = {
     margin: 0,
     lineHeight: '1.4',
   },
-  dbStatsWrapper: {
-    display: 'flex',
-    justifyContent: 'space-around',
-    alignItems: 'flex-end',
-    height: '180px',
-    paddingBottom: '10px',
-  },
-  dbStatColumn: {
+  sessionMonitorWrapper: {
     display: 'flex',
     flexDirection: 'column',
+    gap: '14px',
+    padding: '10px 0',
+  },
+  sessionRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    width: '60px',
+    paddingBottom: '10px',
+    borderBottom: '1px solid var(--color-border)',
   },
-  dbBarTrack: {
-    width: '18px',
-    height: '120px',
-    backgroundColor: 'var(--color-border)',
-    borderRadius: '10px',
-    position: 'relative',
-    overflow: 'hidden',
-    marginBottom: '8px',
-  },
-  dbBarFill: {
-    width: '100%',
-    position: 'absolute',
-    bottom: 0,
-    borderRadius: '10px',
-    transition: 'height 1s cubic-bezier(0.4, 0, 0.2, 1)',
-  },
-  dbStatCount: {
+  sessionLabel: {
     fontSize: '13px',
+    fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+  },
+  sessionValueBadge: {
+    fontSize: '12px',
+    fontWeight: '700',
+    padding: '3px 8px',
+    borderRadius: '4px',
+    backgroundColor: 'rgba(2, 132, 199, 0.15)',
+    color: 'var(--color-accent)',
+  },
+  sessionValueText: {
+    fontSize: '14px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+    fontFamily: 'monospace',
   },
-  dbStatLabel: {
-    fontSize: '11px',
+  statusGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '16px',
+    padding: '8px 0',
+  },
+  statusItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '16px',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+  },
+  statusIcon: {
+    width: '40px',
+    height: '40px',
+    borderRadius: 'var(--radius-sm)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  statusLabel: {
+    fontSize: '12px',
     color: 'var(--color-text-muted)',
-    marginTop: '2px',
+    marginBottom: '4px',
+  },
+  statusValue: {
+    fontSize: '16px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
   }
 };

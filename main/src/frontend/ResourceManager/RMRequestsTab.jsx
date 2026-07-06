@@ -9,6 +9,8 @@ export default function RMRequestsTab() {
   const [activeRequestDetails, setActiveRequestDetails] = useState(null);
   const [recommendationTab, setRecommendationTab] = useState('Recommended');
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
 
   useEffect(() => {
     setRequests(getRequests());
@@ -275,6 +277,14 @@ export default function RMRequestsTab() {
     ? recommendationResults.all
     : recommendationResults.recommended;
 
+  const filteredRequests = requests.filter(req => {
+    const matchesSearch = 
+      req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      req.skills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -285,14 +295,41 @@ export default function RMRequestsTab() {
       <div style={styles.mainLayout}>
         {/* Requests List */}
         <div className="glass-card" style={styles.panel}>
-          <h2 style={styles.panelTitle}>Pending Requests</h2>
+          <div style={styles.panelHeader}>
+            <h2 style={styles.panelTitle}>Pending Requests</h2>
+            <div style={styles.controls}>
+              <div style={styles.searchWrapper}>
+                <svg style={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search requests..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={styles.searchInput}
+                />
+              </div>
+              <select 
+                value={statusFilter} 
+                onChange={(e) => setStatusFilter(e.target.value)} 
+                style={styles.filterSelect}
+              >
+                <option value="All">All Status</option>
+                <option value="Pending">Pending</option>
+                <option value="Approved">Approved</option>
+                <option value="Rejected">Rejected</option>
+              </select>
+            </div>
+          </div>
           <div style={styles.reqList}>
-            {requests.length === 0 ? (
+            {filteredRequests.length === 0 ? (
               <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center', padding: '24px 0' }}>
                 No active allocation requests found.
               </div>
             ) : (
-              requests.map(req => (
+              filteredRequests.map(req => (
                 <div
                   key={req.id}
                   style={{
@@ -497,6 +534,49 @@ const styles = {
     borderBottom: '1px solid var(--color-border)',
     paddingBottom: '10px',
     margin: 0,
+  },
+  panelHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px',
+    borderBottom: '1px solid var(--color-border)',
+    paddingBottom: '10px',
+  },
+  controls: {
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'center',
+  },
+  searchWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '10px',
+    color: 'var(--color-text-muted)',
+  },
+  searchInput: {
+    paddingLeft: '32px',
+    padding: '6px 10px 6px 32px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '12px',
+    outline: 'none',
+    minWidth: '160px',
+  },
+  filterSelect: {
+    padding: '6px 10px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '12px',
+    outline: 'none',
   },
   reqList: {
     display: 'flex',

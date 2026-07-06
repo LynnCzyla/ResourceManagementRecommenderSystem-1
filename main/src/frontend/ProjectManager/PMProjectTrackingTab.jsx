@@ -7,13 +7,13 @@ export default function PMProjectTrackingTab({ user }) {
   const [projects, setProjects] = useState([]);
   const [loadError, setLoadError] = useState('');
   const [formError, setFormError] = useState('');
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
 
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
-  const [showEditProjectModal, setShowEditProjectModal] = useState(false);
   const [showEditTaskModal, setShowEditTaskModal] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState(null);
-  const [editProjectData, setEditProjectData] = useState({ id: null, name: '', description: '', startDate: '', endDate: '' });
   const [newTaskData, setNewTaskData] = useState({
     title: '',
     description: '',
@@ -116,35 +116,7 @@ export default function PMProjectTrackingTab({ user }) {
     }
   };
 
-  const handleProjectClick = (project) => {
-    setSelectedProjectId(project.id);
-    setEditProjectData({
-      id: project.id,
-      name: project.name,
-      description: project.description,
-      startDate: project.startDate,
-      endDate: project.endDate
-    });
-    setShowEditProjectModal(true);
-  };
 
-  const handleEditProject = async (e) => {
-    e.preventDefault();
-    setFormError('');
-    try {
-      await updateProject(editProjectData.id, {
-        name: editProjectData.name,
-        description: editProjectData.description,
-        startDate: editProjectData.startDate,
-        endDate: editProjectData.endDate,
-      });
-      await loadProjects();
-      setShowEditProjectModal(false);
-    } catch (err) {
-      console.error('Failed to update project:', err);
-      setFormError(err.message || 'Failed to update project');
-    }
-  };
 
   const handleOpenEditTask = (task) => {
     setTaskToEdit(task);
@@ -192,6 +164,10 @@ export default function PMProjectTrackingTab({ user }) {
   const currentProjectEmployees = employees; // employees is already scoped to selectedProjectId (see loadEmployees)
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
+  const filteredProjects = projects.filter(p => 
+    p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
+  );
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -200,35 +176,66 @@ export default function PMProjectTrackingTab({ user }) {
           <p style={styles.subtitle}>Review assigned employees and manage daily task distribution.</p>
         </div>
         <div style={styles.actions}>
-          <select 
-            value={selectedProjectId ?? ''} 
-            onChange={(e) => setSelectedProjectId(parseInt(e.target.value))} 
-            style={styles.projectSelect}
-          >
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <div style={styles.controls}>
+            <div style={styles.projectDropdownWrapper}>
+              <div 
+                style={styles.projectDropdownTrigger}
+                onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
+              >
+                <span style={styles.projectDropdownValue}>
+                  {selectedProject ? selectedProject.name : 'Select a project'}
+                </span>
+                <svg style={styles.dropdownArrow} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+              {projectDropdownOpen && (
+                <div style={styles.projectDropdownMenu}>
+                  <div style={styles.projectDropdownSearch}>
+                    <svg style={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input
+                      type="text"
+                      placeholder="Search projects..."
+                      value={projectSearchQuery}
+                      onChange={(e) => setProjectSearchQuery(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={styles.projectDropdownInput}
+                    />
+                  </div>
+                  <div style={styles.projectDropdownList}>
+                    {filteredProjects.length === 0 ? (
+                      <div style={styles.noProjectsText}>No projects found</div>
+                    ) : (
+                      filteredProjects.map(p => (
+                        <div
+                          key={p.id}
+                          style={{
+                            ...styles.projectDropdownItem,
+                            backgroundColor: selectedProjectId === p.id ? 'var(--color-primary-light)' : 'transparent',
+                            color: selectedProjectId === p.id ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                          }}
+                          onClick={() => {
+                            setSelectedProjectId(p.id);
+                            setProjectDropdownOpen(false);
+                            setProjectSearchQuery('');
+                          }}
+                        >
+                          {p.name}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
           <button onClick={() => setShowCreateTaskModal(true)} style={styles.createBtn}>
             + Assign Task
           </button>
         </div>
-      </div>
-      <div style={styles.projectCardStrip}>
-        {projects.map(project => (
-          <button
-            key={project.id}
-            onClick={() => handleProjectClick(project)}
-            style={{
-              ...styles.projectCard,
-              borderColor: selectedProjectId === project.id ? 'var(--color-primary)' : 'transparent',
-              background: selectedProjectId === project.id ? 'rgba(59, 130, 246, 0.08)' : 'var(--color-bg-card)'
-            }}
-          >
-            <div style={styles.projectCardName}>{project.name}</div>
-            <div style={styles.projectCardMeta}>{project.status} • {project.startDate} - {project.endDate}</div>
-          </button>
-        ))}
       </div>
 
       <div style={styles.mainGrid}>
@@ -391,64 +398,6 @@ export default function PMProjectTrackingTab({ user }) {
         </div>
       )}
 
-      {/* Edit Project Modal */}
-      {showEditProjectModal && (
-        <div style={styles.modalOverlay}>
-          <div className="glass-card" style={styles.modalCard}>
-            <div style={styles.modalHeader}>
-              <h2 style={{ margin: 0, fontSize: 20 }}>Edit Project</h2>
-              <button onClick={() => setShowEditProjectModal(false)} style={styles.closeModalBtn}>&times;</button>
-            </div>
-            <form onSubmit={handleEditProject} style={{ marginTop: 16 }}>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Project Name</label>
-                <input
-                  type="text"
-                  value={editProjectData.name}
-                  onChange={(e) => setEditProjectData(prev => ({ ...prev, name: e.target.value }))}
-                  style={styles.modalInput}
-                  required
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Description</label>
-                <textarea
-                  value={editProjectData.description}
-                  onChange={(e) => setEditProjectData(prev => ({ ...prev, description: e.target.value }))}
-                  style={styles.modalTextarea}
-                  required
-                />
-              </div>
-              <div style={styles.formRow}>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>Start Date</label>
-                  <input
-                    type="date"
-                    value={editProjectData.startDate}
-                    onChange={(e) => setEditProjectData(prev => ({ ...prev, startDate: e.target.value }))}
-                    style={styles.modalInput}
-                    required
-                  />
-                </div>
-                <div style={{ ...styles.formGroup, flex: 1 }}>
-                  <label style={styles.formLabel}>End Date</label>
-                  <input
-                    type="date"
-                    value={editProjectData.endDate}
-                    onChange={(e) => setEditProjectData(prev => ({ ...prev, endDate: e.target.value }))}
-                    style={styles.modalInput}
-                    required
-                  />
-                </div>
-              </div>
-              <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowEditProjectModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Save Project</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Edit Task Modal */}
       {showEditTaskModal && taskToEdit && (
@@ -561,15 +510,85 @@ const styles = {
     display: 'flex',
     gap: '12px',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
-  projectSelect: {
+  projectDropdownWrapper: {
+    position: 'relative',
+  },
+  projectDropdownTrigger: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: '10px 14px',
     borderRadius: 'var(--radius-md)',
     border: '1px solid var(--color-border)',
     background: 'var(--color-bg-card)',
     color: 'var(--color-text-primary)',
     fontWeight: '600',
+    cursor: 'pointer',
+    minWidth: '250px',
+  },
+  projectDropdownValue: {
+    fontSize: '14px',
+  },
+  dropdownArrow: {
+    transition: 'transform 0.2s',
+  },
+  projectDropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: '4px',
+    backgroundColor: 'var(--color-bg-card)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-md)',
+    boxShadow: 'var(--shadow-md)',
+    zIndex: 100,
+    maxHeight: '300px',
+    overflow: 'hidden',
+  },
+  projectDropdownSearch: {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '12px',
+    borderBottom: '1px solid var(--color-border)',
+    position: 'relative',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '16px',
+    color: 'var(--color-text-muted)',
+  },
+  projectDropdownInput: {
+    paddingLeft: '36px',
+    padding: '6px 8px 6px 36px',
+    borderRadius: '4px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
     outline: 'none',
+    width: '100%',
+  },
+  projectDropdownList: {
+    maxHeight: '200px',
+    overflowY: 'auto',
+  },
+  projectDropdownItem: {
+    padding: '10px 14px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    transition: 'background-color 0.2s',
+    '&:hover': {
+      backgroundColor: 'var(--color-bg-card-hover)',
+    }
+  },
+  noProjectsText: {
+    padding: '12px 14px',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
+    fontStyle: 'italic',
   },
   createBtn: {
     backgroundColor: 'var(--color-primary)',
@@ -736,32 +755,6 @@ const styles = {
     cursor: 'pointer',
     marginTop: '8px',
     transition: 'background-color 0.2s',
-  },
-  projectCardStrip: {
-    display: 'flex',
-    gap: '12px',
-    flexWrap: 'wrap',
-    marginBottom: '24px',
-  },
-  projectCard: {
-    flex: '1 1 260px',
-    padding: '18px',
-    borderRadius: '18px',
-    border: '1px solid transparent',
-    textAlign: 'left',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    background: 'var(--color-bg-card)',
-  },
-  projectCardName: {
-    fontSize: '14px',
-    fontWeight: '700',
-    marginBottom: '6px',
-    color: 'var(--color-text-primary)',
-  },
-  projectCardMeta: {
-    fontSize: '11px',
-    color: 'var(--color-text-muted)',
   },
   suggestionPanel: {
     borderTop: '1px solid var(--color-border)',

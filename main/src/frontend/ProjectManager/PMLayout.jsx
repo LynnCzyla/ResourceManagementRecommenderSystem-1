@@ -27,6 +27,28 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
   const [isProfileHovered, setIsProfileHovered] = useState(false);
 
   const [notifications, setNotifications] = useState([]);
+  const [phTime, setPhTime] = useState('');
+
+  useEffect(() => {
+    const updateTime = () => {
+      const options = {
+        timeZone: 'Asia/Manila',
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      };
+      const formatter = new Intl.DateTimeFormat('en-US', options);
+      setPhTime(formatter.format(new Date()));
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadNotifications = async () => {
     if (!user?.id) return;
@@ -222,6 +244,10 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
         <header style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Project Manager Portal</span>
+            <div style={styles.phClockContainer}>
+              <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
+              <span style={styles.phClockTime}>{phTime}</span>
+            </div>
           </div>
 
           <div style={styles.topbarRight}>
@@ -389,6 +415,30 @@ const styles = {
   topbarLeft: {
     display: 'flex',
     alignItems: 'center',
+  },
+  phClockContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginLeft: '20px',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    backgroundColor: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+  },
+  phClockLabel: {
+    fontWeight: '700',
+    color: 'var(--color-primary)',
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  phClockTime: {
+    fontFamily: 'monospace',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
   },
   topbarTitle: {
     fontFamily: 'var(--font-heading)',

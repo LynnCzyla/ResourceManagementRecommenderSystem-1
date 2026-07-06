@@ -8,6 +8,8 @@ export default function RMProjectsTab() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
   const [assignForm, setAssignForm] = useState({ employeeId: '', role: '' });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
 
   useEffect(() => {
     setProjects(getProjects());
@@ -122,15 +124,50 @@ export default function RMProjectsTab() {
     saveProjects(updatedProjects);
   };
 
+  const filteredProjects = projects.filter(proj => {
+    const matchesSearch = 
+      proj.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      proj.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      proj.requiredSkills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesStatus = statusFilter === 'All' || proj.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Projects Management</h1>
-        <p style={styles.subtitle}>Track resource allocations, monitor utilization rates, and assign new candidates to active contracts.</p>
+        <div>
+          <h1 style={styles.title}>Projects Management</h1>
+          <p style={styles.subtitle}>Track resource allocations, monitor utilization rates, and assign new candidates to active contracts.</p>
+        </div>
+        <div style={styles.controls}>
+          <div style={styles.searchWrapper}>
+            <svg style={styles.searchIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={styles.searchInput}
+            />
+          </div>
+          <select 
+            value={statusFilter} 
+            onChange={(e) => setStatusFilter(e.target.value)} 
+            style={styles.filterSelect}
+          >
+            <option value="All">All Status</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+        </div>
       </div>
 
       <div style={styles.grid}>
-        {projects.map(proj => {
+        {filteredProjects.map(proj => {
           // Initialize assigned list to defaults if not present
           const assignedList = proj.assignedEmployees || [
             // Mock default assignments if empty to look filled and cohesive
@@ -278,6 +315,9 @@ const styles = {
     textAlign: 'left',
   },
   header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: '8px',
   },
   title: {
@@ -289,6 +329,41 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  controls: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  searchWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '12px',
+    color: 'var(--color-text-muted)',
+  },
+  searchInput: {
+    paddingLeft: '40px',
+    padding: '8px 12px 8px 40px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
+    minWidth: '200px',
+  },
+  filterSelect: {
+    padding: '8px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
   },
   grid: {
     display: 'grid',
