@@ -6,6 +6,8 @@ export default function PMProjectsTab({ user }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [submitError, setSubmitError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('name');
   const initialResources = [{
     role: '',
     quantity: 1,
@@ -120,6 +122,16 @@ export default function PMProjectsTab({ user }) {
     }
   };
 
+  const filteredProjects = projects.filter(proj => 
+    proj.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    proj.description.toLowerCase().includes(searchQuery.toLowerCase())
+  ).sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    if (sortBy === 'status') return a.status.localeCompare(b.status);
+    if (sortBy === 'startDate') return new Date(a.startDate) - new Date(b.startDate);
+    return 0;
+  });
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -127,9 +139,35 @@ export default function PMProjectsTab({ user }) {
           <h1 style={styles.title}>My Projects</h1>
           <p style={styles.subtitle}>Create and manage projects, define skills requirements, and track approvals.</p>
         </div>
-        <button onClick={() => { resetFormData(); setShowCreateModal(true); }} style={styles.createBtn}>
-          + New Project
-        </button>
+        <div style={styles.headerActions}>
+          <div style={styles.controls}>
+            <div style={styles.searchWrapper}>
+              <svg style={styles.searchIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                placeholder="Search projects..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={styles.searchInput}
+              />
+            </div>
+            <select 
+              value={sortBy} 
+              onChange={(e) => setSortBy(e.target.value)} 
+              style={styles.sortSelect}
+            >
+              <option value="name">Sort by Name</option>
+              <option value="status">Sort by Status</option>
+              <option value="startDate">Sort by Date</option>
+            </select>
+          </div>
+          <button onClick={() => { resetFormData(); setShowCreateModal(true); }} style={styles.createBtn}>
+            + New Project
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -143,7 +181,7 @@ export default function PMProjectsTab({ user }) {
             No projects found. Create one to get started!
           </div>
         ) : (
-          projects.map(proj => (
+          filteredProjects.map(proj => (
             <div key={proj.id} className="glass-card" style={styles.projCard}>
               <div style={styles.cardHeader}>
                 <h3 style={styles.projName}>{proj.name}</h3>
@@ -435,6 +473,46 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '8px',
+  },
+  headerActions: {
+    display: 'flex',
+    gap: '16px',
+    alignItems: 'center',
+  },
+  controls: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  searchWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '12px',
+    color: 'var(--color-text-muted)',
+  },
+  searchInput: {
+    paddingLeft: '40px',
+    padding: '8px 12px 8px 40px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
+    minWidth: '200px',
+  },
+  sortSelect: {
+    padding: '8px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
   },
   title: {
     fontSize: '28px',

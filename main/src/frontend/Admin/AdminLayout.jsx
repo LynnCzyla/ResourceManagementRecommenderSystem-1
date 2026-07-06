@@ -6,8 +6,6 @@ import DashboardTab from './DashboardTab';
 import UserManagementTab from './UserManagementTab';
 import SystemSettingsTab from './SystemSettingsTab';
 import LogsTab from './LogsTab';
-import ReportsTab from './ReportsTab';
-import DbRecordsTab from './DbRecordsTab';
 import ProfileSettings from '../ProfileSettings';
 import DepartmentsTab from './DepartmentsTab';
 
@@ -21,9 +19,30 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
 
   // Submenu states
   const [userMgmtOpen, setUserMgmtOpen] = useState(true);
-  const [logsOpen, setLogsOpen] = useState(true);
 
   const [notifications, setNotifications] = useState([]);
+  const [phTime, setPhTime] = useState('');
+
+  useEffect(() => {
+    const updateTime = () => {
+      const options = {
+        timeZone: 'Asia/Manila',
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      };
+      const formatter = new Intl.DateTimeFormat('en-US', options);
+      setPhTime(formatter.format(new Date()));
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
     // Add this helper after useState declarations
     const formatTime = (isoString) => {
@@ -117,8 +136,6 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
     }
     if (category === 'user') {
       setUserMgmtOpen(!userMgmtOpen);
-    } else if (category === 'logs') {
-      setLogsOpen(!logsOpen);
     }
   };
 
@@ -126,7 +143,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <DashboardTab setActiveTab={setActiveTab} setUserMgmtOpen={setUserMgmtOpen} setLogsOpen={setLogsOpen} />;
+        return <DashboardTab setActiveTab={setActiveTab} setUserMgmtOpen={setUserMgmtOpen} />;
       case 'user-accounts':
         return <UserManagementTab activeSubTab="accounts" />;
       case 'contact-requests':
@@ -135,14 +152,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         return <UserManagementTab activeSubTab="locked" />;
       case 'system-settings':
         return <SystemSettingsTab />;
-      case 'ocr-logs':
-        return <LogsTab activeSubTab="ocr" />;
       case 'audit-logs':
-        return <LogsTab activeSubTab="audit" />;
-      case 'reports':
-        return <ReportsTab />;
-      case 'database-records':
-        return <DbRecordsTab />;
+        return <LogsTab />;
       case 'departments':
         return <DepartmentsTab />;
       default:
@@ -279,55 +290,22 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
             {!sidebarCollapsed && <span style={styles.navText}>System Settings</span>}
           </div>
 
-          {/* Monitoring Logs Category */}
-          <div>
-            <div 
-              onClick={() => toggleCategory('logs')} 
-              style={styles.categoryHeader}
-              title="Monitoring Logs"
-              className="hover-sidebar-item"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-              {!sidebarCollapsed && (
-                <>
-                  <span style={styles.categoryTitle}>Monitoring Logs</span>
-                  <span style={styles.arrowIcon}>{logsOpen ? '▼' : '▲'}</span>
-                </>
-              )}
-            </div>
-
-            {logsOpen && (
-              <div style={sidebarCollapsed ? styles.collapsedSubmenu : styles.submenu}>
-                <div 
-                  onClick={() => handleNavClick('ocr-logs')} 
-                  style={{
-                    ...styles.submenuItem,
-                    color: activeTab === 'ocr-logs' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    fontWeight: activeTab === 'ocr-logs' ? '700' : '400'
-                  }}
-                  className="hover-submenu-item"
-                >
-                  {!sidebarCollapsed ? '• OCR/NLP Logs' : 'OCR'}
-                </div>
-                <div 
-                  onClick={() => handleNavClick('audit-logs')} 
-                  style={{
-                    ...styles.submenuItem,
-                    color: activeTab === 'audit-logs' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    fontWeight: activeTab === 'audit-logs' ? '700' : '400'
-                  }}
-                  className="hover-submenu-item"
-                >
-                  {!sidebarCollapsed ? '• Activity & Audit' : 'Audit'}
-                </div>
-              </div>
-            )}
+          {/* Audit Logs */}
+          <div 
+            onClick={() => handleNavClick('audit-logs')} 
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'audit-logs' ? 'var(--color-primary-light)' : 'transparent',
+              borderLeftColor: activeTab === 'audit-logs' ? 'var(--color-primary)' : 'transparent',
+            }}
+            title="Audit Logs"
+            className="hover-sidebar-item"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            {!sidebarCollapsed && <span style={styles.navText}>Audit Logs</span>}
           </div>
 
           {/* Departments & Positions */}
@@ -348,43 +326,6 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
             {!sidebarCollapsed && <span style={styles.navText}>Departments & Positions</span>}
           </div>
 
-          {/* Reports */}
-          <div 
-            onClick={() => handleNavClick('reports')} 
-            style={{
-              ...styles.navItem,
-              backgroundColor: activeTab === 'reports' ? 'var(--color-primary-light)' : 'transparent',
-              borderLeftColor: activeTab === 'reports' ? 'var(--color-primary)' : 'transparent',
-            }}
-            title="Reports"
-            className="hover-sidebar-item"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
-              <line x1="18" y1="20" x2="18" y2="10"></line>
-              <line x1="12" y1="20" x2="12" y2="4"></line>
-              <line x1="6" y1="20" x2="6" y2="14"></line>
-            </svg>
-            {!sidebarCollapsed && <span style={styles.navText}>Reports</span>}
-          </div>
-
-          {/* Database Records */}
-          <div 
-            onClick={() => handleNavClick('database-records')} 
-            style={{
-              ...styles.navItem,
-              backgroundColor: activeTab === 'database-records' ? 'var(--color-primary-light)' : 'transparent',
-              borderLeftColor: activeTab === 'database-records' ? 'var(--color-primary)' : 'transparent',
-            }}
-            title="Database Records"
-            className="hover-sidebar-item"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
-              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
-              <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
-            </svg>
-            {!sidebarCollapsed && <span style={styles.navText}>Database Records</span>}
-          </div>
         </nav>
 
         {!sidebarCollapsed && (
@@ -401,6 +342,10 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         <header style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Admin Portal</span>
+            <div style={styles.phClockContainer}>
+              <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
+              <span style={styles.phClockTime}>{phTime}</span>
+            </div>
           </div>
           
           <div style={styles.topbarRight}>
@@ -572,6 +517,30 @@ const styles = {
   topbarLeft: {
     display: 'flex',
     alignItems: 'center',
+  },
+  phClockContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginLeft: '20px',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    backgroundColor: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+  },
+  phClockLabel: {
+    fontWeight: '700',
+    color: 'var(--color-primary)',
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  phClockTime: {
+    fontFamily: 'monospace',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
   },
   topbarTitle: {
     fontFamily: 'var(--font-heading)',

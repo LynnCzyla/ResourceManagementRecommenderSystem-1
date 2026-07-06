@@ -7,6 +7,8 @@ export default function PMResourceRequestsTab({ user }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [submitError, setSubmitError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('status');
   const initialResources = [{
     role: '',
     quantity: 1,
@@ -113,6 +115,16 @@ export default function PMResourceRequestsTab({ user }) {
     }
   };
 
+  const filteredRequests = requests.filter(req => 
+    req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.skills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()))
+  ).sort((a, b) => {
+    if (sortBy === 'status') return a.status.localeCompare(b.status);
+    if (sortBy === 'project') return a.projectName.localeCompare(b.projectName);
+    if (sortBy === 'quantity') return a.quantity - b.quantity;
+    return 0;
+  });
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -120,9 +132,35 @@ export default function PMResourceRequestsTab({ user }) {
           <h1 style={styles.title}>Resource Requests</h1>
           <p style={styles.subtitle}>Track and manage your manpower requests for project allocation.</p>
         </div>
-        <button onClick={() => setShowCreateModal(true)} style={styles.createBtn}>
-          + New Request
-        </button>
+        <div style={styles.headerActions}>
+          <div style={styles.controls}>
+            <div style={styles.searchWrapper}>
+              <svg style={styles.searchIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                placeholder="Search requests..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={styles.searchInput}
+              />
+            </div>
+            <select 
+              value={sortBy} 
+              onChange={(e) => setSortBy(e.target.value)} 
+              style={styles.sortSelect}
+            >
+              <option value="status">Sort by Status</option>
+              <option value="project">Sort by Project</option>
+              <option value="quantity">Sort by Quantity</option>
+            </select>
+          </div>
+          <button onClick={() => setShowCreateModal(true)} style={styles.createBtn}>
+            + New Request
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -150,7 +188,7 @@ export default function PMResourceRequestsTab({ user }) {
                   <td colSpan="7" style={styles.emptyRow}>No resource requests found.</td>
                 </tr>
               ) : (
-                requests.map(req => (
+                filteredRequests.map(req => (
                   <tr key={req.id} style={styles.trRow}>
                     <td style={{ ...styles.td, fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</td>
                     <td style={styles.td}>
@@ -356,6 +394,46 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '8px',
+  },
+  headerActions: {
+    display: 'flex',
+    gap: '16px',
+    alignItems: 'center',
+  },
+  controls: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  searchWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '12px',
+    color: 'var(--color-text-muted)',
+  },
+  searchInput: {
+    paddingLeft: '40px',
+    padding: '8px 12px 8px 40px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
+    minWidth: '200px',
+  },
+  sortSelect: {
+    padding: '8px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
   },
   title: {
     fontSize: '28px',

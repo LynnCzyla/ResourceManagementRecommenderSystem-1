@@ -6,13 +6,14 @@ export default function PMDashboardTab({ user }) {
     activeProjectsCount: 0,
     totalProjectsCount: 0,
     totalTeamMembers: 0,
-    totalHoursThisWeek: 0,
     totalTasksCount: 0,
     tasksByStatus: { Pending: 0, 'In Progress': 0, Completed: 0 },
   });
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loadError, setLoadError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('name');
 
   const loadDashboard = async () => {
     try {
@@ -50,9 +51,20 @@ export default function PMDashboardTab({ user }) {
     return Math.round(percentages.reduce((sum, value) => sum + value, 0) / percentages.length);
   };
 
-  const teamUtilization = stats.totalTeamMembers > 0
-    ? `${Math.min(100, Math.round((stats.totalHoursThisWeek / (stats.totalTeamMembers * 40)) * 100))}%`
-    : '0%';
+  const filteredEmployees = employees.filter(emp => 
+    emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    emp.role.toLowerCase().includes(searchQuery.toLowerCase())
+  ).sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    if (sortBy === 'role') return a.role.localeCompare(b.role);
+    if (sortBy === 'completion') {
+      const completionA = getTaskCompletion(a.id);
+      const completionB = getTaskCompletion(b.id);
+      return completionB - completionA; // Highest completion first
+    }
+    return 0;
+  });
+
 
   return (
     <div style={styles.container}>
@@ -92,39 +104,42 @@ export default function PMDashboardTab({ user }) {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
-          <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--color-warning)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
-          </div>
-          <div>
-            <div style={styles.statValue}>{stats.totalHoursThisWeek}h</div>
-            <div style={styles.statLabel}>Total Hours This Week</div>
-          </div>
-        </div>
 
-        <div className="glass-card" style={styles.statCard}>
-          <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="20" x2="18" y2="10"></line>
-              <line x1="12" y1="20" x2="12" y2="4"></line>
-              <line x1="6" y1="20" x2="6" y2="14"></line>
-            </svg>
-          </div>
-          <div>
-            <div style={styles.statValue}>{teamUtilization}</div>
-            <div style={styles.statLabel}>Team Utilization</div>
-          </div>
-        </div>
       </div>
 
       <div style={styles.gridContainer}>
         {/* Task Assignment Overview */}
         <div className="glass-card" style={styles.mainPanel}>
-          <h2 style={styles.panelTitle}>Task Assignment Overview</h2>
-          <p style={styles.panelSubtitle}>Review current employee task assignments and progress percentage.</p>
+          <div style={styles.panelHeader}>
+            <div>
+              <h2 style={styles.panelTitle}>Task Assignment Overview</h2>
+              <p style={styles.panelSubtitle}>Review current employee task assignments and progress percentage.</p>
+            </div>
+            <div style={styles.controls}>
+              <div style={styles.searchWrapper}>
+                <svg style={styles.searchIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search by name or role..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={styles.searchInput}
+                />
+              </div>
+              <select 
+                value={sortBy} 
+                onChange={(e) => setSortBy(e.target.value)} 
+                style={styles.sortSelect}
+              >
+                <option value="name">Sort by Name</option>
+                <option value="role">Sort by Role</option>
+                <option value="completion">Sort by Completion</option>
+              </select>
+            </div>
+          </div>
 
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
@@ -137,7 +152,7 @@ export default function PMDashboardTab({ user }) {
                 </tr>
               </thead>
               <tbody>
-                {employees.map(emp => {
+                {filteredEmployees.map(emp => {
                   const assignedTasks = getAssignedTasks(emp.id);
                   const completion = getTaskCompletion(emp.id);
                   const taskLabel = assignedTasks.length ? assignedTasks[0].title : 'No task assigned';
@@ -260,6 +275,49 @@ const styles = {
   },
   mainPanel: {
     padding: '24px',
+  },
+  panelHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '20px',
+    flexWrap: 'wrap',
+    gap: '16px',
+  },
+  controls: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  searchWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '12px',
+    color: 'var(--color-text-muted)',
+  },
+  searchInput: {
+    paddingLeft: '40px',
+    padding: '8px 12px 8px 40px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
+    minWidth: '200px',
+  },
+  sortSelect: {
+    padding: '8px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
   },
   sidePanel: {
     padding: '24px',
