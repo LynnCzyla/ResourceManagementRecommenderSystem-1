@@ -371,8 +371,9 @@ export default function EmployeeProfileTab() {
                 setNeedsReviewSkills(finalNeedsReview);
                 setPendingSkills(finalNeedsReview);
                 
-                // ============ Show modal if there are skills ============
-                if (finalNeedsReview.length > 0 || finalAutoApproved.length > 0) {
+                // ============ LOGIC: Show modal ONLY if there are skills to review ============
+                if (finalNeedsReview.length > 0) {
+                    // Skills need review — show modal
                     setPendingDocumentId(data.documentId);
                     setPendingDocumentType('Resume');
                     setShowFeedbackModal(true);
@@ -380,13 +381,21 @@ export default function EmployeeProfileTab() {
                         needsReview: finalNeedsReview.length,
                         autoApproved: finalAutoApproved.length
                     });
-                } else {
-                    // No skills found
+                } else if (finalAutoApproved.length > 0) {
+                    // ✅ NO skills to review BUT have auto-approved skills → auto-add without modal
+                    console.log('✅ Auto-submitting auto-approved skills (no review needed)');
+                    await autoSubmitFeedback(data.documentId, finalAutoApproved, 'Resume');
                     await fetchEmployeeData();
-                    setProcessingStatus('Done!');
+                    setProcessingStatus('Done! Skills added automatically.');
                     setProcessingStep('complete');
                     setTimeout(() => setShowProgressDetails(false), 3000);
-                    alert('No skills were extracted from this document.');
+                } else {
+                    // No skills at all (all filtered out or none found) → just finish silently
+                    console.log('ℹ️  No skills to process (all filtered or none found)');
+                    await fetchEmployeeData();
+                    setProcessingStatus('Done! No new skills to add.');
+                    setProcessingStep('complete');
+                    setTimeout(() => setShowProgressDetails(false), 2000);
                 }
             }
         } else {
@@ -432,7 +441,8 @@ const handleCertUpload = async (e) => {
           const finalNeedsReview = needsReview.length > 0 ? needsReview : allSkills;
           const finalAutoApproved = autoApproved.length > 0 ? autoApproved : [];
           
-          if (allSkills.length > 0) {
+          if (finalNeedsReview.length > 0) {
+              // ✅ Skills need review — show modal
               setCertOcrResult({
                   fileName: file.name,
                   confidence: data.ocr?.confidence ? `${(data.ocr.confidence * 100).toFixed(1)}%` : 'N/A',
@@ -447,7 +457,21 @@ const handleCertUpload = async (e) => {
               setPendingSkills(finalNeedsReview);
               setPendingDocumentType('Certificate');
               setShowFeedbackModal(true);
+          } else if (finalAutoApproved.length > 0) {
+              // ✅ NO review needed BUT have auto-approved skills → auto-add
+              console.log('✅ Auto-submitting certificate auto-approved skills');
+              await autoSubmitFeedback(data.documentId, finalAutoApproved, 'Certificate');
+              setCertifications([...certifications, {
+                  id: Date.now(),
+                  name: file.name,
+                  issuer: nlp.organizations?.[0] || 'Verified (via OCR)',
+                  date: new Date().toISOString().split('T')[0],
+                  expiry: 'N/A',
+                  skills: finalAutoApproved
+              }]);
+              await fetchEmployeeData();
           } else {
+              // No skills at all
               setCertOcrResult(null);
               setCertifications([...certifications, {
                   id: Date.now(),
@@ -458,7 +482,6 @@ const handleCertUpload = async (e) => {
                   skills: []
               }]);
               await fetchEmployeeData();
-              alert('Certificate uploaded successfully!');
           }
       } else {
           throw new Error(response.data.error || 'Processing failed');
@@ -491,6 +514,32 @@ const handleCertUpload = async (e) => {
     setProcessingStatus('Done!');
     setProcessingStep('complete');
     setTimeout(() => setShowProgressDetails(false), 3000);
+  };
+
+  // ============ AUTO-SUBMIT FEEDBACK HELPER ============
+  const autoSubmitFeedback = async (documentId, approvedSkills, documentType) => {
+    try {
+      const authHeader = await getAuthHeader();
+      const response = await axios.post(
+        `${API_URL}/employee/skill-feedback`,
+        {
+          documentId,
+          approved_skills: approvedSkills,
+          rejected_skills: [],
+          document_type: documentType
+        },
+        { headers: authHeader }
+      );
+
+      if (response.data.success) {
+        console.log('✅ Auto-submitted feedback for auto-approved skills');
+        const merged = Array.from(new Set([...employeeSkills, ...approvedSkills]));
+        setEmployeeSkills(merged);
+        if (employeeInfo) setEmployeeInfo({ ...employeeInfo, skills: merged });
+      }
+    } catch (error) {
+      console.error('Error auto-submitting feedback:', error);
+    }
   };
 
   const handleSkipFeedback = () => {
