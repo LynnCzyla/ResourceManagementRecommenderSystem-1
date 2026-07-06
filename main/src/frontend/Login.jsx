@@ -360,6 +360,58 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
               Contact Administrator
             </a>
           </div>
+
+          <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px dashed var(--color-border)', textAlign: 'center' }}>
+            <a
+              href="https://wea-asia.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '8px 16px',
+                borderRadius: '20px',
+                background: 'var(--color-primary-light)',
+                color: 'var(--color-primary)',
+                textDecoration: 'none',
+                fontSize: '12px',
+                fontWeight: '600',
+                letterSpacing: '0.3px',
+                transition: 'all 0.3s ease',
+                border: '1px solid rgba(16, 185, 129, 0.2)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(16, 185, 129, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                const arrow = e.currentTarget.querySelector('.wea-arrow');
+                if (arrow) arrow.style.transform = 'translateX(3px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--color-primary-light)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                const arrow = e.currentTarget.querySelector('.wea-arrow');
+                if (arrow) arrow.style.transform = 'translateX(0)';
+              }}
+            >
+              Visit Wholesale Electric Asia (WEA) Website
+              <svg
+                className="wea-arrow"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ marginLeft: '6px', transition: 'transform 0.2s ease' }}
+              >
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </a>
+          </div>
         </form>
       </div>
 
