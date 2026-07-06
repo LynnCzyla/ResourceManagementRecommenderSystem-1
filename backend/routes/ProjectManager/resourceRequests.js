@@ -37,19 +37,24 @@ async function findPositionIdByName(roleName) {
   return data && data.length > 0 ? data[0].id : null;
 }
 
+// requirement_skills stores the skill as plain text (column `skills`) —
+// there is no skill_id foreign key on this table. We still upsert into the
+// master `skills` table so the skill exists for autocomplete/reporting
+// elsewhere, but the link to the requirement is just the text value.
 async function attachSkillsToRequirement(requirementId, skillNames = []) {
   for (const rawName of skillNames) {
-    const skillId = await findOrCreateSkill(rawName);
-    if (!skillId) continue;
+    const name = rawName.trim();
+    if (!name) continue;
+    await findOrCreateSkill(name);
     await supabase.from('requirement_skills').insert({
       requirement_id: requirementId,
-      skill_id: skillId,
+      skills: name,
     });
   }
 }
 
 function transformRequest(row) {
-  const skills = (row.requirement_skills || []).map(rs => rs.skills?.skill_name).filter(Boolean);
+  const skills = (row.requirement_skills || []).map(rs => rs.skills).filter(Boolean);
 
   let duration = null;
   if (row.start_date && row.end_date) {
@@ -71,7 +76,6 @@ function transformRequest(row) {
     endDate: row.end_date,
     status: row.status,
     quantity: row.quantity_needed,
-    experience: row.experience_level,
     justification: row.justification,
   };
 }
@@ -81,7 +85,8 @@ const REQUEST_SELECT = `
   projects ( id, project_name ),
   positions ( id, position_name ),
   requirement_skills (
-    skills ( id, skill_name )
+    id,
+    skills
   )
 `;
 
@@ -133,7 +138,6 @@ router.post('/resource-requests', async (req, res) => {
           position_id: positionId,
           role_title: positionId ? null : (resource.role || null),
           quantity_needed: parseInt(resource.quantity, 10) || 1,
-          experience_level: resource.experience || 'Intermediate',
           assignment_type: resource.assignment || 'Full-Time (40 hours/week)',
           justification: resource.justification || null,
           start_date: resource.startDate || null,
