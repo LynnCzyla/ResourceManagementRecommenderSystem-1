@@ -52,25 +52,33 @@ router.get('/tasks', verifyToken, async (req, res) => {
       .from('project_tasks')
       .select(`
         *,
-        projects ( id, project_name )
+        projects ( id, project_name ),
+        profiles!project_tasks_profile_id_fkey ( id, first_name, last_name )
       `)
       .eq('profile_id', userId)
-      .order('created_at', { ascending: false });
+      .order('id', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('SUPABASE TASKS ERROR:', JSON.stringify(error, null, 2));
+      throw error;
+    }
 
-    const formattedTasks = (data || []).map(row => ({
-      id: row.id,
-      projectId: row.project_id,
-      projectName: row.projects?.project_name || 'Unknown Project',
-      employeeId: row.profile_id,
-      title: row.title,
-      description: row.description,
-      priority: row.priority,
-      status: row.status,
-      dueDate: row.due_date,
-      progressLogs: row.progress_logs || []
-    }));
+    const formattedTasks = (data || []).map(row => {
+      const profile = row.profiles || {};
+      return {
+        id: row.id,
+        projectId: row.project_id,
+        projectName: row.projects?.project_name || 'Unknown Project',
+        employeeId: row.profile_id,
+        employeeName: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'You',
+        title: row.title,
+        description: row.description,
+        priority: row.priority,
+        status: row.status,
+        dueDate: row.due_date,
+        progressLogs: row.progress_logs || []
+      };
+    });
 
     res.json({ success: true, data: formattedTasks });
   } catch (error) {
