@@ -33,21 +33,33 @@ const TASK_SELECT = `
 router.get('/tasks', async (req, res) => {
   try {
     const { projectId, employeeId } = req.query;
+    console.log('📋 PM Tasks endpoint called:', { projectId, employeeId });
 
     let query = supabase
       .from('project_tasks')
       .select(TASK_SELECT)
       .order('created_at', { ascending: false });
 
-    if (projectId) query = query.eq('project_id', projectId);
-    if (employeeId) query = query.eq('profile_id', employeeId);
+    if (projectId) {
+      console.log('  → Filtering by projectId:', projectId);
+      query = query.eq('project_id', projectId);
+    }
+    if (employeeId) {
+      console.log('  → Filtering by employeeId:', employeeId);
+      query = query.eq('profile_id', employeeId);
+    }
 
     const { data, error } = await query;
-    if (error) throw error;
+    console.log('  → Query result:', { count: data?.length, hasError: !!error });
+    if (error) {
+      console.error('  ✗ Supabase error:', JSON.stringify(error, null, 2));
+      throw error;
+    }
 
+    console.log('  ✓ Returning', data.length, 'tasks');
     res.status(200).json({ success: true, data: (data || []).map(transformTask) });
   } catch (error) {
-    console.error('Error fetching tasks:', error);
+    console.error('❌ Error fetching tasks:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch tasks', error: error.message });
   }
 });
@@ -79,13 +91,19 @@ router.post('/tasks', async (req, res) => {
 
     if (error) throw error;
 
-    // Notify the assigned employee
-    await supabase.from('notifications').insert({
+    // Notify the assigned employee. This is best-effort — a failure here
+    // (e.g. an RLS policy blocking inserts on `notifications`) must not
+    // block the response, since the task row itself was already committed
+    // successfully above.
+    const { error: notifyError } = await supabase.from('notifications').insert({
       recipient_id: employeeId,
       type: 'alert',
       text: `📋 You've been assigned a new task: "${title}"`,
       read: false,
     });
+    if (notifyError) {
+      console.error('Task created, but failed to send notification:', notifyError);
+    }
 
     res.status(201).json({ success: true, message: 'Task created successfully', data: transformTask(data) });
   } catch (error) {
