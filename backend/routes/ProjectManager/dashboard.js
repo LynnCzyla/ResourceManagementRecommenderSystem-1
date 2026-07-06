@@ -23,14 +23,29 @@ router.get('/dashboard', async (req, res) => {
     if (projectIds.length > 0) {
       const { data, error } = await supabase
         .from('project_assignments')
-        .select('profile_id, allocated_hours, status')
+        .select('profile_id, status')
         .in('project_id', projectIds);
       if (error) throw error;
       assignments = data || [];
     }
 
     const uniqueTeamMemberIds = [...new Set(assignments.map(a => a.profile_id))];
-    const totalHoursThisWeek = assignments.reduce((sum, a) => sum + (a.allocated_hours || 0), 0);
+
+    // project_assignments has no per-assignment hours column, so weekly
+    // hours are approximated from each assigned employee's
+    // total_available_hours on their profile.
+    let totalHoursThisWeek = 0;
+    if (uniqueTeamMemberIds.length > 0) {
+      const { data: memberProfiles, error: memberError } = await supabase
+        .from('profiles')
+        .select('id, total_available_hours')
+        .in('id', uniqueTeamMemberIds);
+      if (memberError) throw memberError;
+      totalHoursThisWeek = (memberProfiles || []).reduce(
+        (sum, p) => sum + (p.total_available_hours || 0),
+        0
+      );
+    }
 
     let tasks = [];
     if (projectIds.length > 0) {
