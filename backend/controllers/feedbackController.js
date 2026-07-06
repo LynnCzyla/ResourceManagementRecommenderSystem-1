@@ -514,29 +514,85 @@ exports.processDocument = async (req, res) => {
         let previouslyApproved = [];
         let previouslyRejected = [];
 
-        if (existingDoc) {
-            previouslyApproved = (existingDoc.approved_skills || []).map(normalizeSkill);
-            previouslyRejected = (existingDoc.rejected_skills || []).map(normalizeSkill);
-            
-            console.log(`📝 Found existing document with feedback:`);
-            console.log(`   ✅ Previously approved: ${previouslyApproved.length}`);
-            console.log(`   ❌ Previously rejected: ${previouslyRejected.length}`);
+        // ============ METHOD 1: Check documents table ============
+        console.log(`🔍 [METHOD 1] Loading rejection history from previous documents...`);
+        const { data: allPreviousDocs, error: allDocsError } = await supabase
+            .from('documents')
+            .select('id, approved_skills, rejected_skills, file_name')
+            .eq('employee_id', employeeId)
+            .eq('document_type', documentType)
+            .order('created_at', { ascending: false });
 
+        if (!allDocsError && allPreviousDocs && allPreviousDocs.length > 0) {
+            // Aggregate ALL rejections across ALL documents
+            allPreviousDocs.forEach(doc => {
+                if (doc.approved_skills && Array.isArray(doc.approved_skills)) {
+                    previouslyApproved.push(...doc.approved_skills.map(normalizeSkill));
+                }
+                if (doc.rejected_skills && Array.isArray(doc.rejected_skills)) {
+                    previouslyRejected.push(...doc.rejected_skills.map(normalizeSkill));
+                }
+            });
+            
+            console.log(`   📝 Found ${allPreviousDocs.length} documents`);
+            console.log(`   ✅ From documents table: ${previouslyApproved.length} approved, ${previouslyRejected.length} rejected`);
+        } else {
+            console.log(`   ℹ️  No previous documents found`);
+        }
+
+        // ============ METHOD 2: FALLBACK - Check feedback_training table directly ============
+        // This is the ACTUAL source of truth for what user rejected
+        console.log(`🔍 [METHOD 2] FALLBACK - Loading from feedback_training table...`);
+        console.log(`   Looking for employee_id: ${employeeId}, label: 'Not Skill'`);
+        
+        const { data: feedbackRecords, error: feedbackError } = await supabase
+            .from('feedback_training')
+            .select('phrase, label')
+            .eq('employee_id', employeeId)
+            .eq('label', 'Not Skill');  // Get only the rejected skills
+
+        if (feedbackError) {
+            console.error(`   ❌ ERROR querying feedback_training:`, feedbackError);
+        } else if (feedbackRecords && feedbackRecords.length > 0) {
+            const feedbackRejected = feedbackRecords.map(r => normalizeSkill(r.phrase));
+            previouslyRejected.push(...feedbackRejected);
+            console.log(`   ✅ From feedback_training: ${feedbackRecords.length} rejected skills`);
+            console.log(`   Samples: ${feedbackRejected.slice(0, 3).join(', ')}`);
+        } else {
+            console.log(`   ℹ️  No rejected skills found in feedback_training`);
+        }
+
+        // ============ Deduplicate and summarize ============
+        if (previouslyApproved.length > 0 || previouslyRejected.length > 0) {
+            // Remove duplicates (case-insensitive)
+            previouslyApproved = [...new Set(previouslyApproved.map(s => s.toLowerCase()))];
+            previouslyRejected = [...new Set(previouslyRejected.map(s => s.toLowerCase()))];
+            
+            console.log(`📊 FINAL REJECTION HISTORY:`);
+            console.log(`   ✅ Approved (total unique): ${previouslyApproved.length}`);
+            console.log(`   ❌ Rejected (total unique): ${previouslyRejected.length}`);
+        }
+
+        if (existingDoc && !documentId) {
+            documentId = existingDoc.id;
+        }
+
+        if (previouslyApproved.length > 0 || previouslyRejected.length > 0) {
             // Create sets for filtering (case-insensitive)
             const approvedSet = new Set(previouslyApproved.map(s => s.toLowerCase()));
             const rejectedSet = new Set(previouslyRejected.map(s => s.toLowerCase()));
 
-            // ============ FILTER OUT ALREADY-REVIEWED SKILLS ============
+            // ============ FILTER OUT ALREADY-REVIEWED SKILLS (from ALL previous documents) ============
             const filteredNeedsReview = finalNeedsReview.filter(skill => {
                 const skillLower = skill.toLowerCase();
                 const isApproved = approvedSet.has(skillLower);
                 const isRejected = rejectedSet.has(skillLower);
                 
                 if (isApproved) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already approved)`);
+                    console.log(`   ⏭️  Skipping "${skill}" (already approved in previous scan)`);
                 }
                 if (isRejected) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already rejected)`);
+                    console.log(`   ⏭️  Skipping "${skill}" (already REJECTED in previous scan) ❌`);
                 }
                 
                 return !isApproved && !isRejected;
