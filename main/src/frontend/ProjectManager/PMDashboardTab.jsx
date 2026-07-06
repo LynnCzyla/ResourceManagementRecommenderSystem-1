@@ -18,7 +18,7 @@ export default function PMDashboardTab({ user }) {
     try {
       const [statsData, employeesData, tasksData] = await Promise.all([
         getDashboardStats(user?.id),
-        getEmployees(),
+        getEmployees(user?.id),
         getTasks(),
       ]);
       setStats(statsData);
