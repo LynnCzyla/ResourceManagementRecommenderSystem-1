@@ -6,6 +6,7 @@ export default function EmployeeAssignmentsTab({ user }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sessionReady, setSessionReady] = useState(false);
 
   // Weekly Log Progress Form States
   const [logWeek, setLogWeek] = useState('');
@@ -52,9 +53,49 @@ export default function EmployeeAssignmentsTab({ user }) {
     }
   };
 
+  // ============ FIX: Wait for session to be restored before fetching ============
   useEffect(() => {
-    fetchAssignmentsAndTasks();
-  }, [user?.id]);
+    let cancelled = false;
+
+    const setupAuth = async () => {
+      // Listen for auth state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (cancelled) return;
+        
+        console.log(`🔐 Auth state changed: ${event}`, session ? 'Session exists' : 'No session');
+        
+        // Only fetch when we have a valid session or are already authenticated
+        if (session || localStorage.getItem('token')) {
+          setSessionReady(true);
+        }
+      });
+
+      // Always attempt to restore session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled) return;
+      
+      if (session || localStorage.getItem('token')) {
+        setSessionReady(true);
+      }
+
+      return () => {
+        subscription?.unsubscribe();
+      };
+    };
+
+    setupAuth();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ============ Fetch when session is ready ============
+  useEffect(() => {
+    if (sessionReady && user?.id) {
+      fetchAssignmentsAndTasks();
+    }
+  }, [sessionReady, user?.id]);
 
   const handleUpdateStatus = async (taskId, newStatus) => {
     try {
