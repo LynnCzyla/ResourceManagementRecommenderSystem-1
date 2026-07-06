@@ -32,9 +32,17 @@ export default function PMProjectTrackingTab({ user }) {
     'EMP-1020': 'Present',
   });
 
-  const loadEmployees = async () => {
+  const loadEmployees = async (projectId) => {
+    if (!projectId) {
+      setEmployees([]);
+      return;
+    }
     try {
-      setEmployees(await getEmployees());
+      // Scoped to this ONE project's assigned team, not every employee the
+      // PM has anywhere — this feeds the "Assigned Team" panel and the
+      // "Assign To" / reassignment dropdowns below, so it must never show
+      // employees who aren't actually staffed on this project.
+      setEmployees(await getEmployees(user?.id, undefined, projectId));
     } catch (err) {
       console.error('Failed to load employees:', err);
       setLoadError(err.message || 'Failed to load employees');
@@ -43,7 +51,7 @@ export default function PMProjectTrackingTab({ user }) {
 
   const loadProjects = async () => {
     try {
-      const data = await getProjects();
+      const data = await getProjects(user?.id);
       setProjects(data);
       setSelectedProjectId(prev => prev ?? (data.length ? data[0].id : null));
     } catch (err) {
@@ -53,21 +61,27 @@ export default function PMProjectTrackingTab({ user }) {
   };
 
   const loadTasks = async (projectId) => {
-    if (!projectId) return;
+    if (!projectId) {
+      console.log('⏭️  loadTasks: projectId is empty, skipping');
+      return;
+    }
     try {
-      setTasks(await getTasks({ projectId }));
+      console.log('📋 loadTasks: Fetching tasks for projectId:', projectId);
+      const result = await getTasks({ projectId });
+      console.log('✓ loadTasks: Got', result?.length || 0, 'tasks');
+      setTasks(result || []);
     } catch (err) {
-      console.error('Failed to load tasks:', err);
+      console.error('❌ loadTasks: Failed to fetch tasks:', err);
       setLoadError(err.message || 'Failed to load tasks');
     }
   };
 
   useEffect(() => {
-    loadEmployees();
     loadProjects();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
+    loadEmployees(selectedProjectId);
     loadTasks(selectedProjectId);
   }, [selectedProjectId]);
 
@@ -175,7 +189,7 @@ export default function PMProjectTrackingTab({ user }) {
 
   // Filter tasks for current selected project
   const currentProjectTasks = tasks.filter(t => t.projectId === selectedProjectId);
-  const currentProjectEmployees = employees; // Simplified: show all engineering pool as mock team members
+  const currentProjectEmployees = employees; // employees is already scoped to selectedProjectId (see loadEmployees)
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
   return (
@@ -187,7 +201,7 @@ export default function PMProjectTrackingTab({ user }) {
         </div>
         <div style={styles.actions}>
           <select 
-            value={selectedProjectId} 
+            value={selectedProjectId ?? ''} 
             onChange={(e) => setSelectedProjectId(parseInt(e.target.value))} 
             style={styles.projectSelect}
           >
