@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // GET current system settings
 router.get('/system-settings', async (req, res) => {
@@ -162,6 +163,13 @@ router.put('/system-settings', async (req, res) => {
     }
 
     if (result.error) throw result.error;
+
+    await logAuditEvent({
+      req,
+      action: existing && existing.length > 0 ? 'Updated' : 'Created',
+      systemCategory: 'System Settings',
+      logDescription: `Session timeout changed to ${sessionTimeout} minutes`,
+    });
 
     res.status(200).json({ 
       success: true, 
