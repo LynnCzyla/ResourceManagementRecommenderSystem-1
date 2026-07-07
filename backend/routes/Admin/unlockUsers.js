@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 const {
   unlockUserAccount,
   lockUserAccount,
@@ -86,6 +87,14 @@ router.post('/unlock/unlock-user', async (req, res) => {
         read: false 
       });
 
+      await logAuditEvent({
+        req,
+        userId,
+        action: 'Account Unlocked',
+        systemCategory: 'Auth',
+        logDescription: `Unlocked account for ${userId}`,
+      });
+
       res.status(200).json({
         success: true,
         message: 'User account unlocked successfully'
@@ -127,6 +136,14 @@ router.post('/unlock/unlock-user', async (req, res) => {
           recipient_id: userId,
           type: 'alert',
           text: '⚠️ Your account has been locked by an administrator. Please contact support.'
+        });
+
+        await logAuditEvent({
+          req,
+          userId,
+          action: 'Account Locked',
+          systemCategory: 'Auth',
+          logDescription: `Locked account for ${userId}`,
         });
 
         res.status(200).json({
@@ -173,6 +190,14 @@ router.post('/reset-attempts', async (req, res) => {
       .single();
     
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      userId,
+      action: 'Updated',
+      systemCategory: 'Auth',
+      logDescription: `Reset failed login attempts for ${userId}`,
+    });
     
     res.status(200).json({
       success: true,
