@@ -21,11 +21,21 @@ const contactAdminRoutes = require('./routes/Admin/contactAdmin');
 const departmentsPositionsRoutes = require('./routes/Admin/departmentsPositions');
 const notificationsRouter = require('./routes/notifications');
 const documentRoutes = require('./routes/Employee/documentRoutes');
+const dashboardRoutes = require('./routes/Admin/dashboard');
+const auditLogsRoutes = require('./routes/Admin/auditLogs');
+app.use('/api/rm', require('./routes/ResourceManager/Dashboard'));
+app.use('/api/rm', require('./routes/ResourceManager/Index'));
+app.use('/api/rm', require('./routes/ResourceManager/Projects'));
+app.use('/api/rm', require('./routes/ResourceManager/Employees'));
+
+
 app.use('/api/pm', require('./routes/ProjectManager'));
 
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/admin', departmentsPositionsRoutes);
 app.use('/api/admin', contactAdminRoutes);
+app.use('/api/admin', dashboardRoutes);
+app.use('/api/admin', auditLogsRoutes);
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", loginRoutes);
 app.use("/api/users", userRoutes);
