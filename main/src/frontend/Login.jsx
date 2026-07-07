@@ -14,36 +14,12 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [view, setView] = useState('login');
   const [showContactModal, setShowContactModal] = useState(false);
-  const [sessionTimeout, setSessionTimeout] = useState(null); // Start as null
-  const [timeoutLoaded, setTimeoutLoaded] = useState(false);
+  const [sessionTimeout, setSessionTimeout] = useState(30);
+  const [timeoutLoaded, setTimeoutLoaded] = useState(true);
   
   // Login attempts states
   const [isLocked, setIsLocked] = useState(false);
   const [lockMessage, setLockMessage] = useState('');
-
-  // Fetch session timeout directly
-  useEffect(() => {
-    const fetchSessionTimeout = async () => {
-      try {
-        const response = await fetch('http://localhost:5000/api/settings/system-settings');
-        const result = await response.json();
-        
-        if (result.success && result.data.sessionTimeout) {
-          setSessionTimeout(result.data.sessionTimeout);
-          console.log(`⏰ Session timeout: ${result.data.sessionTimeout} minutes`);
-        } else {
-          setSessionTimeout(30); // Default fallback
-        }
-      } catch (error) {
-        console.error('Failed to fetch session timeout:', error);
-        setSessionTimeout(30); // Default fallback
-      } finally {
-        setTimeoutLoaded(true);
-      }
-    };
-
-    fetchSessionTimeout();
-  }, []);
 
   // Check existing session on load
   useEffect(() => {
@@ -103,10 +79,7 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
       }
     };
 
-    // Only check session if timeout is loaded
-    if (timeoutLoaded) {
-      checkExistingSession();
-    }
+    checkExistingSession();
   }, [onLogin, sessionTimeout, timeoutLoaded]);
 
   // Prevent back button on login page
@@ -162,6 +135,10 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         body: JSON.stringify({ email, password }),
       });
 
+      if (!response.ok) {
+        throw new Error('backend-unavailable');
+      }
+
       const data = await response.json();
 
       if (data.success) {
@@ -196,8 +173,11 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
         }
       }
     } catch (error) {
-      console.error('Login error:', error);
-      setError('Invalid credentials');
+      if (error.message === 'backend-unavailable') {
+        setError('Cannot reach the admin server right now. Please start the backend and try again.');
+      } else {
+        setError('Invalid credentials');
+      }
     } finally {
       setIsLoading(false);
     }
