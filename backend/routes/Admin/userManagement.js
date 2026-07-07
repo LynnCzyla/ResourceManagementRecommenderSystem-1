@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Get all users with email from auth.users
 router.get("/", async (req, res) => {
@@ -110,6 +111,14 @@ router.put("/:id", async (req, res) => {
       });
 
       if (authError) throw authError;
+
+      await logAuditEvent({
+        req,
+        userId: id,
+        action: 'Updated',
+        systemCategory: 'User Management',
+        logDescription: `Updated user ${profileData.first_name} ${profileData.last_name}${email ? ` and email to ${email}` : ''}`,
+      });
     }
 
     // Get updated user with email
@@ -158,6 +167,14 @@ router.patch("/:id/status", async (req, res) => {
 
     if (error) throw error;
 
+    await logAuditEvent({
+      req,
+      userId: id,
+      action: 'Updated',
+      systemCategory: 'User Management',
+      logDescription: `Updated account status for user ${id} to ${status}`,
+    });
+
     res.json({
       success: true,
       user: data
@@ -200,6 +217,14 @@ router.delete("/:id", async (req, res) => {
 
       if (error) throw error;
       
+      await logAuditEvent({
+        req,
+        userId: id,
+        action: 'Deleted',
+        systemCategory: 'User Management',
+        logDescription: `Deleted user account for ${id}${hard_delete === 'true' ? ' (permanent)' : ' (deactivated)'}`,
+      });
+
       res.json({
         success: true,
         message: "User deactivated",
