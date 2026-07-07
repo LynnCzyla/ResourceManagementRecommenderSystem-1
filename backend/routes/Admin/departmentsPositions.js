@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DEPARTMENTS
@@ -64,6 +65,13 @@ router.post('/departments', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Created',
+      systemCategory: 'Departments',
+      logDescription: `Created new department: ${department_name.trim()}`,
+    });
 
     res.status(201).json({
       success: true,
@@ -131,6 +139,13 @@ router.put('/departments/:id', async (req, res) => {
       message: 'Department updated successfully.',
       data,
     });
+
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'Departments',
+      logDescription: `Updated department ${department_name.trim()}`,
+    });
   } catch (error) {
     console.error('Error updating department:', error);
     res.status(500).json({
@@ -165,6 +180,13 @@ router.delete('/departments/:id', async (req, res) => {
       .eq('id', id);
 
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Deleted',
+      systemCategory: 'Departments',
+      logDescription: `Removed department ${id}`,
+    });
 
     res.status(200).json({
       success: true,
@@ -278,6 +300,13 @@ router.post('/positions', async (req, res) => {
 
     if (error) throw error;
 
+    await logAuditEvent({
+      req,
+      action: 'Created',
+      systemCategory: 'Departments',
+      logDescription: `Created new position: ${position_name.trim()}`,
+    });
+
     res.status(201).json({
       success: true,
       message: 'Position created successfully.',
@@ -353,6 +382,13 @@ router.put('/positions/:id', async (req, res) => {
       message: 'Position updated successfully.',
       data,
     });
+
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'Departments',
+      logDescription: `Updated position ${position_name.trim()}`,
+    });
   } catch (error) {
     console.error('Error updating position:', error);
     res.status(500).json({
@@ -387,6 +423,13 @@ router.delete('/positions/:id', async (req, res) => {
       .eq('id', id);
 
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Deleted',
+      systemCategory: 'Departments',
+      logDescription: `Removed position ${id}`,
+    });
 
     res.status(200).json({
       success: true,
