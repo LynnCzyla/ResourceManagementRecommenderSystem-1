@@ -7,3 +7,4 @@ npm install nodemailer
 npm install multer
 npm install python-shell
 npm install uuid
+npm install pdfkit
