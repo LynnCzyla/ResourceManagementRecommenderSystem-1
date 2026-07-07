@@ -1,35 +1,60 @@
 import React, { useState, useEffect } from 'react';
-import { getEmployees, getProjects } from '../mockState';
+import { fetchDashboard } from './rmApi';
+import RMAvatar from './RMAvatar';
 
 export default function RMDashboardTab() {
   const [employees, setEmployees] = useState([]);
-  const [projects, setProjects] = useState([]);
+  const [totalEmployees, setTotalEmployees] = useState(0);
+  const [activeProjectsCount, setActiveProjectsCount] = useState(0);
+  const [workloadCounts, setWorkloadCounts] = useState({ available: 0, limited: 0, fullyLoaded: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [workloadFilter, setWorkloadFilter] = useState('All');
 
   useEffect(() => {
-    setEmployees(getEmployees());
-    setProjects(getProjects());
+    loadDashboard();
   }, []);
 
-  // Compute workload allocations
-  const totalEmployees = employees.length;
-  const activeProjectsCount = projects.filter(p => p.status === 'Active').length;
+  const loadDashboard = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchDashboard();
+      setEmployees(data.employees || []);
+      setTotalEmployees(data.totalEmployees || 0);
+      setActiveProjectsCount(data.activeProjectsCount || 0);
+      setWorkloadCounts(data.workloadCounts || { available: 0, limited: 0, fullyLoaded: 0 });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // Mock workload categorizations
-  const availableCount = employees.filter((_, idx) => idx % 3 === 0).length;
-  const limitedCount = employees.filter((_, idx) => idx % 3 === 1).length;
-  const fullyLoadedCount = employees.filter((_, idx) => idx % 3 === 2).length;
-
-  const filteredEmployees = employees.filter((emp, idx) => {
+  const filteredEmployees = employees.filter((emp) => {
     if (workloadFilter === 'All') return true;
-    const status = idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Limited availability' : 'Fully loaded';
-    return status === workloadFilter;
+    return emp.workloadStatus === workloadFilter;
   });
+
+  // Role distribution for the report modal, computed from live data instead of
+  // hardcoded placeholder rows.
+  const roleDistribution = employees.reduce((acc, emp) => {
+    acc[emp.role] = (acc[emp.role] || 0) + 1;
+    return acc;
+  }, {});
+
+  const avgUtilization = employees.length
+    ? Math.round(employees.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / employees.length)
+    : 0;
 
   const handleGenerateReport = () => {
     setShowReport(true);
   };
+
+  if (loading) {
+    return <div style={styles.container}><p>Loading dashboard…</p></div>;
+  }
 
   return (
     <div style={styles.container}>
@@ -37,6 +62,12 @@ export default function RMDashboardTab() {
         <h1 style={styles.title}>Capacity & Productivity Overview</h1>
         <p style={styles.subtitle}>Monitor workforce allocation, utilization metrics, and address resource bottlenecks.</p>
       </div>
+
+      {error && (
+        <div className="glass-card" style={{ padding: '12px 16px', color: 'var(--color-danger)' }}>
+          Couldn't load dashboard data: {error}
+        </div>
+      )}
 
       {/* Overview Cards */}
       <div style={styles.cardGrid}>
@@ -72,7 +103,7 @@ export default function RMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.cardVal}>{availableCount}</div>
+            <div style={styles.cardVal}>{workloadCounts.available}</div>
             <div style={styles.cardLabel}>Available</div>
           </div>
         </div>
@@ -84,7 +115,7 @@ export default function RMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.cardVal}>{limitedCount}</div>
+            <div style={styles.cardVal}>{workloadCounts.limited}</div>
             <div style={styles.cardLabel}>Limited availability</div>
           </div>
         </div>
@@ -96,7 +127,7 @@ export default function RMDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.cardVal}>{fullyLoadedCount}</div>
+            <div style={styles.cardVal}>{workloadCounts.fullyLoaded}</div>
             <div style={styles.cardLabel}>Fully loaded</div>
           </div>
         </div>
@@ -104,7 +135,6 @@ export default function RMDashboardTab() {
 
       {/* Main Grid */}
       <div style={styles.mainGrid}>
-        {/* Left Side: Workload Status List */}
         <div className="glass-card" style={styles.panel}>
           <div style={styles.panelHeader}>
             <h2 style={styles.panelTitle}>Employee Utilization & Workload</h2>
@@ -136,37 +166,47 @@ export default function RMDashboardTab() {
                 </tr>
               </thead>
               <tbody>
-                {filteredEmployees.map((emp, idx) => {
-                  const rate = idx % 3 === 0 ? '25%' : idx % 3 === 1 ? '60%' : '100%';
-                  const statusLabel = idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Limited availability' : 'Fully loaded';
-                  const statusColor = idx % 3 === 0 ? 'var(--color-success)' : idx % 3 === 1 ? 'var(--color-warning)' : 'var(--color-danger)';
-                  const statusBg = idx % 3 === 0 ? 'var(--color-primary-light)' : idx % 3 === 1 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)';
-                  return (
-                    <tr key={emp.id} style={styles.tr}>
-                      <td style={styles.td}>
-                        <div style={styles.empInfo}>
-                          <img src={emp.avatar} alt={emp.name} style={styles.empAvatar} />
-                          <div>
-                            <div style={styles.empName}>{emp.name}</div>
-                            <div style={styles.empEmail}>{emp.email}</div>
+                {filteredEmployees.length === 0 ? (
+                  <tr>
+                    <td style={styles.td} colSpan={4}>No employees match this filter.</td>
+                  </tr>
+                ) : (
+                  filteredEmployees.map((emp) => {
+                    const statusColor =
+                      emp.workloadStatus === 'Available' ? 'var(--color-success)' :
+                      emp.workloadStatus === 'Limited availability' ? 'var(--color-warning)' :
+                      'var(--color-danger)';
+                    const statusBg =
+                      emp.workloadStatus === 'Available' ? 'var(--color-primary-light)' :
+                      emp.workloadStatus === 'Limited availability' ? 'rgba(245, 158, 11, 0.1)' :
+                      'rgba(239, 68, 68, 0.1)';
+                    return (
+                      <tr key={emp.id} style={styles.tr}>
+                        <td style={styles.td}>
+                          <div style={styles.empInfo}>
+                            <RMAvatar name={emp.name} src={emp.avatar} size={36} />
+                            <div>
+                              <div style={styles.empName}>{emp.name}</div>
+                              <div style={styles.empEmail}>{emp.department}</div>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td style={styles.td}>{emp.role}</td>
-                      <td style={styles.td}>
-                        <span style={{ ...styles.statusBadge, color: statusColor, backgroundColor: statusBg }}>
-                          {statusLabel}
-                        </span>
-                      </td>
-                      <td style={styles.td}>
-                        <div style={styles.progressContainer}>
-                          <div style={{ ...styles.progressBar, width: rate, backgroundColor: statusColor }}></div>
-                          <span style={styles.progressText}>{rate}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td style={styles.td}>{emp.role}</td>
+                        <td style={styles.td}>
+                          <span style={{ ...styles.statusBadge, color: statusColor, backgroundColor: statusBg }}>
+                            {emp.workloadStatus}
+                          </span>
+                        </td>
+                        <td style={styles.td}>
+                          <div style={styles.progressContainer}>
+                            <div style={{ ...styles.progressBar, width: `${emp.utilizationRate}%`, backgroundColor: statusColor }}></div>
+                            <span style={styles.progressText}>{emp.utilizationRate}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -185,28 +225,23 @@ export default function RMDashboardTab() {
               <div style={styles.reportSection}>
                 <h3>Summary Metrics</h3>
                 <div style={styles.reportMetaGrid}>
-                  <div>
-                    <strong>Total Pool Size:</strong> {totalEmployees} Engineering Specialists
-                  </div>
-                  <div>
-                    <strong>Average Utilization Rate:</strong> 61.5%
-                  </div>
-                  <div>
-                    <strong>Available Count:</strong> {availableCount} employees
-                  </div>
-                  <div>
-                    <strong>LOTO/Safety Compliance:</strong> 100% Certified
-                  </div>
+                  <div><strong>Total Pool Size:</strong> {totalEmployees} employees</div>
+                  <div><strong>Average Utilization Rate:</strong> {avgUtilization}%</div>
+                  <div><strong>Available Count:</strong> {workloadCounts.available} employees</div>
+                  <div><strong>Fully Loaded:</strong> {workloadCounts.fullyLoaded} employees</div>
                 </div>
               </div>
 
               <div style={styles.reportSection}>
                 <h3>Resource Distribution by Role</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                  <div style={styles.reportRow}><span>Senior Design Engineers</span><span>2 Allocated</span></div>
-                  <div style={styles.reportRow}><span>Senior Cad Drafters & Lighting Designers</span><span>2 Allocated</span></div>
-                  <div style={styles.reportRow}><span>Proposal & Sales Engineers</span><span>3 Allocated</span></div>
-                  <div style={styles.reportRow}><span>Document Controllers</span><span>1 Allocated</span></div>
+                  {Object.entries(roleDistribution).length === 0 ? (
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No role data available.</div>
+                  ) : (
+                    Object.entries(roleDistribution).map(([role, count]) => (
+                      <div key={role} style={styles.reportRow}><span>{role}</span><span>{count} Allocated</span></div>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -368,58 +403,6 @@ const styles = {
     fontSize: '11px',
     fontWeight: '700',
     color: 'var(--color-text-secondary)',
-  },
-  poolList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  poolItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px',
-    borderRadius: '8px',
-    border: '1px solid var(--color-border)',
-    background: 'var(--color-bg-card-hover)',
-  },
-  poolAvatar: {
-    width: '36px',
-    height: '36px',
-    borderRadius: '50%',
-    objectFit: 'cover',
-  },
-  poolName: {
-    fontSize: '13px',
-    fontWeight: '700',
-    margin: 0,
-  },
-  poolRole: {
-    fontSize: '11px',
-    color: 'var(--color-text-muted)',
-  },
-  poolStatus: {
-    fontSize: '10px',
-    fontWeight: '700',
-    color: 'var(--color-warning)',
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    textTransform: 'uppercase',
-  },
-  skillsSummary: {
-    display: 'flex',
-    gap: '4px',
-    marginTop: '4px',
-  },
-  miniPill: {
-    fontSize: '9px',
-    fontWeight: '600',
-    background: 'var(--color-bg-root)',
-    border: '1px solid var(--color-border)',
-    color: 'var(--color-text-secondary)',
-    padding: '1px 4px',
-    borderRadius: '3px',
   },
   modalOverlay: {
     position: 'fixed',
