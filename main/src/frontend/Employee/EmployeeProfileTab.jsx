@@ -66,6 +66,30 @@ export default function EmployeeProfileTab() {
     return result.isConfirmed;
   };
 
+  const showSuccessAlert = (message, title = 'Success!') => {
+    return Swal.fire({
+      title,
+      text: message,
+      icon: 'success',
+      zIndex: 10050,
+      confirmButtonText: 'OK',
+      confirmButtonColor: 'var(--color-primary)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-success)',
+      customClass: {
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm',
+      },
+      didOpen: () => {
+        const container = Swal.getContainer();
+        if (container) {
+          container.style.zIndex = '10050';
+        }
+      }
+    });
+  };
+
   // Form states
   const [profileForm, setProfileForm] = useState({
     firstName: '',
@@ -573,7 +597,7 @@ const handleCertUpload = async (e) => {
         role: profileForm.role,
         avatar_url: profilePicture
       }, { headers: authHeader });
-      if (response.data.success) { alert('Profile updated successfully!'); await fetchEmployeeData(); }
+      if (response.data.success) { await showSuccessAlert('Profile updated successfully.'); await fetchEmployeeData(); }
       else alert('Failed to update profile');
     } catch (error) {
       console.error('Update error:', error);
@@ -596,7 +620,7 @@ const handleCertUpload = async (e) => {
     if (!currentPassword) { setPasswordError('Please enter your current password.'); return; }
     if (newPassword !== confirmPassword) { setPasswordError('New password and confirm password do not match.'); return; }
     if (newPassword.length < 8) { setPasswordError('Password must be at least 8 characters long.'); return; }
-    alert('Password changed successfully');
+    showSuccessAlert('Password changed successfully.');
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
