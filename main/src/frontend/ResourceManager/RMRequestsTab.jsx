@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { getRequests, getEmployees, getProjects } from '../mockState';
+import RMAvatar from './RMAvatar';
 
 export default function RMRequestsTab() {
   const [requests, setRequests] = useState([]);
@@ -9,6 +10,7 @@ export default function RMRequestsTab() {
   const [activeRequestDetails, setActiveRequestDetails] = useState(null);
   const [recommendationTab, setRecommendationTab] = useState('Recommended');
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
@@ -450,7 +452,7 @@ export default function RMRequestsTab() {
                         <div style={styles.recCardBody}>
                           <div style={styles.recHeaderRow}>
                             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                              <img src={rec.employee.avatar} alt={rec.employee.name} style={styles.recAvatar} />
+                              <RMAvatar name={rec.employee.name} src={rec.employee.avatar} size={36} />
                               <div>
                                 <div style={styles.recName}>{rec.employee.name}</div>
                                 <div style={styles.recRole}>{rec.employee.role}</div>
