@@ -456,55 +456,56 @@ const handleCertUpload = async (e) => {
               throw new Error('Document processed but did not return a valid document ID. Please try again.');
           }
           
-          // ============ FIX: Properly extract data ============
           const nlp = data.nlp || {};
           const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
           const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
-          const needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+          let needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
           
-          const finalNeedsReview = needsReview.length > 0 ? needsReview : allSkills;
-          const finalAutoApproved = autoApproved.length > 0 ? autoApproved : [];
+          // 🔥 FIX: If needsReview is empty but we have skills, use allSkills
+          if (needsReview.length === 0 && allSkills.length > 0) {
+              console.log('🔧 FIX (cert): needsReview was empty, using allSkills instead');
+              needsReview = allSkills;
+          }
           
-          if (finalNeedsReview.length > 0) {
+          console.log('📊 Certificate skills:', {
+              allSkills: allSkills.length,
+              autoApproved: autoApproved.length,
+              needsReview: needsReview.length,
+              sample: needsReview.slice(0, 3)
+          });
+          
+          if (needsReview.length > 0) {
               // ✅ Skills need review — show modal
               setCertOcrResult({
                   fileName: file.name,
                   confidence: data.ocr?.confidence ? `${(data.ocr.confidence * 100).toFixed(1)}%` : 'N/A',
                   extractedSkills: allSkills,
-                  needsReview: finalNeedsReview,
-                  autoApproved: finalAutoApproved,
+                  needsReview: needsReview,
+                  autoApproved: autoApproved,
                   method: data.ocr?.method || 'unknown',
                   processingTime: data.ocr?.processing_time || 0,
               });
               
+              // 🔥 CRITICAL FIX: Set BOTH state variables
               setPendingDocumentId(data.documentId);
-              setPendingSkills(finalNeedsReview);
+              setNeedsReviewSkills(needsReview);  // ← THIS WAS MISSING!
+              setPendingSkills(needsReview);       // ← Set this too
+              setAutoApprovedSkills(autoApproved); // ← And this
               setPendingDocumentType('Certificate');
               setShowFeedbackModal(true);
-          } else if (finalAutoApproved.length > 0) {
+              
+              console.log('🎯 Opening certificate feedback modal with:', {
+                  needsReview: needsReview.length,
+                  autoApproved: autoApproved.length
+              });
+          } else if (autoApproved.length > 0) {
               // ✅ NO review needed BUT have auto-approved skills → auto-add
               console.log('✅ Auto-submitting certificate auto-approved skills');
-              await autoSubmitFeedback(data.documentId, finalAutoApproved, 'Certificate');
-              setCertifications([...certifications, {
-                  id: Date.now(),
-                  name: file.name,
-                  issuer: nlp.organizations?.[0] || 'Verified (via OCR)',
-                  date: new Date().toISOString().split('T')[0],
-                  expiry: 'N/A',
-                  skills: finalAutoApproved
-              }]);
+              await autoSubmitFeedback(data.documentId, autoApproved, 'Certificate');
               await fetchEmployeeData();
           } else {
               // No skills at all
               setCertOcrResult(null);
-              setCertifications([...certifications, {
-                  id: Date.now(),
-                  name: file.name,
-                  issuer: nlp.organizations?.[0] || 'Verified (via OCR)',
-                  date: new Date().toISOString().split('T')[0],
-                  expiry: 'N/A',
-                  skills: []
-              }]);
               await fetchEmployeeData();
           }
       } else {
