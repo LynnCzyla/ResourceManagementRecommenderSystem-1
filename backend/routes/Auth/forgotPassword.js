@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Self-contained transporter (mirrors createUsers.js's setup)
 const transporter = nodemailer.createTransport({
@@ -158,6 +159,16 @@ router.post("/forgot-password", async (req, res) => {
     const resetLink = data.properties.action_link;
 
     await sendResetEmail(email, resetLink);
+
+    const { data: users } = await supabase.auth.admin.listUsers();
+    const matchedUser = users?.users?.find((user) => user.email?.toLowerCase() === email.toLowerCase());
+
+    await logAuditEvent({
+      userId: matchedUser?.id || null,
+      action: 'Password Reset',
+      systemCategory: 'Auth',
+      logDescription: `Password reset link requested for ${email}`,
+    });
 
     res.json({
       success: true,
