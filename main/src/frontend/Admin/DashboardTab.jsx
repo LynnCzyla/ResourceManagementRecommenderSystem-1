@@ -9,10 +9,13 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   };
 
   const [statusInfo, setStatusInfo] = useState({
-    status: 'Online',
+    status: 'Loading...',
     totalUsers: 'Loading...',
-    totalDepartments: 'Loading...'
+    totalDepartments: 'Loading...',
   });
+
+  const [userRolesData, setUserRolesData] = useState([]);
+  const [activities, setActivities] = useState([]);
 
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionDuration, setSessionDuration] = useState('00:00');
@@ -31,68 +34,59 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   }, []);
 
   useEffect(() => {
-    const fetchSystemInfo = async () => {
-      let isOnline = 'Offline';
-      try {
-        const res = await fetch('http://localhost:5000/api/health');
-        if (res.ok) {
-          isOnline = 'Online';
-        }
-      } catch (err) {
-        console.error('Error checking API health:', err);
-      }
-
-      let userCount = 0;
+    const fetchDashboardStats = async () => {
       try {
         const token = localStorage.getItem('token');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const res = await fetch('http://localhost:5000/api/users', { headers });
-        const users = await res.json();
-        if (Array.isArray(users)) {
-          userCount = users.length;
-        } else if (users && Array.isArray(users.data)) {
-          userCount = users.data.length;
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const res = await fetch('http://localhost:5000/api/admin/dashboard/stats', { headers });
+        const json = await res.json();
+
+        if (json.success) {
+          setStatusInfo({
+            status: json.data.status,
+            totalUsers: json.data.totalUsers,
+            totalDepartments: json.data.totalDepartments,
+          });
+          setUserRolesData(json.data.userRolesData || []);
+        } else {
+          setStatusInfo((prev) => ({ ...prev, status: 'Offline' }));
         }
       } catch (err) {
-        console.error('Error fetching users count:', err);
+        console.error('Error fetching dashboard stats:', err);
+        setStatusInfo((prev) => ({ ...prev, status: 'Offline' }));
       }
-
-      let deptCount = 0;
-      try {
-        const res = await fetch('http://localhost:5000/api/admin/departments');
-        if (res.ok) {
-          const depts = await res.json();
-          if (Array.isArray(depts)) {
-            deptCount = depts.length;
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching departments count:', err);
-      }
-
-      setStatusInfo({
-        status: isOnline,
-        totalUsers: userCount,
-        totalDepartments: deptCount
-      });
     };
 
-    fetchSystemInfo();
+    const fetchActivity = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const res = await fetch('http://localhost:5000/api/admin/dashboard/activity?limit=5', { headers });
+        const json = await res.json();
+
+        if (json.success) {
+          setActivities(json.data || []);
+        }
+      } catch (err) {
+        console.error('Error fetching recent activity:', err);
+      }
+    };
+
+    fetchDashboardStats();
+    fetchActivity();
   }, []);
 
-  const userRolesData = [
-    { label: 'Resource Managers', count: 3, percentage: 6, color: '#10b981' },
-    { label: 'Project Managers', count: 5, percentage: 10, color: '#0ea5e9' },
-    { label: 'Skilled Employees', count: 42, percentage: 84, color: '#6366f1' }
-  ];
-
-  const activities = [
-    { id: 1, text: 'User Romell Ebuen assigned role Resource Manager', time: '2 hours ago', user: 'Admin' },
-    { id: 2, text: 'New project "Substation Safety Installation" created', time: '3 hours ago', user: 'ProjManager' },
-    { id: 3, text: 'System configuration updated', time: '6 hours ago', user: 'Admin' },
-    { id: 4, text: 'Deactivated employee account "John Tester"', time: '1 day ago', user: 'Admin' },
-    { id: 5, text: 'New user account created for Maria Santos', time: '2 days ago', user: 'Admin' },
-  ];
+  // Build cumulative stroke-dasharray/dashoffset for each donut segment.
+  // Circle uses r=15.915 so its circumference is ~100 units — this lets us
+  // work directly in percentage units.
+  let cumulative = 0;
+  const donutSegments = userRolesData.map((role) => {
+    const dashoffset = 100 - cumulative;
+    cumulative += role.percentage;
+    return { ...role, dashoffset };
+  });
 
   return (
     <div>
@@ -127,14 +121,13 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
             <h3 style={styles.actionTitle}>Edit System Settings</h3>
           </div>
         </div>
-
       </div>
 
       <div className="dashboard-grid">
         <div className="glass-card">
           <h2 style={styles.chartTitle}>System Status</h2>
           <p style={styles.chartSubtitle}>Current system health and performance metrics</p>
-          
+
           <div style={styles.statusGrid}>
             <div style={styles.statusItem}>
               <div style={{ ...styles.statusIcon, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-primary)' }}>
@@ -148,7 +141,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                 <div style={{ ...styles.statusValue, color: 'var(--color-primary)' }}>{statusInfo.status}</div>
               </div>
             </div>
-            
+
             <div style={styles.statusItem}>
               <div style={{ ...styles.statusIcon, background: 'rgba(2, 132, 199, 0.15)', color: 'var(--color-accent)' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -162,7 +155,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                 <div style={styles.statusValue}>v1.0.0</div>
               </div>
             </div>
-            
+
             <div style={styles.statusItem}>
               <div style={{ ...styles.statusIcon, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -176,7 +169,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                 <div style={styles.statusValue}>{statusInfo.totalDepartments}</div>
               </div>
             </div>
-            
+
             <div style={styles.statusItem}>
               <div style={{ ...styles.statusIcon, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -197,19 +190,29 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         <div className="glass-card">
           <h2 style={styles.chartTitle}>Active Users by Role</h2>
           <p style={styles.chartSubtitle}>Breakdown of system accounts assigned</p>
-          
+
           <div style={styles.donutContainer}>
             <svg width="150" height="150" viewBox="0 0 42 42" style={styles.donutSvg}>
               <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="var(--color-border)" strokeWidth="4" />
-              <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#6366f1" strokeWidth="4" 
-                strokeDasharray="84 16" strokeDashoffset="100" />
-              <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#0ea5e9" strokeWidth="4" 
-                strokeDasharray="10 90" strokeDashoffset="16" />
-              <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#10b981" strokeWidth="4" 
-                strokeDasharray="6 94" strokeDashoffset="6" />
+              {donutSegments.map((seg, idx) => (
+                <circle
+                  key={idx}
+                  cx="21"
+                  cy="21"
+                  r="15.915"
+                  fill="transparent"
+                  stroke={seg.color}
+                  strokeWidth="4"
+                  strokeDasharray={`${seg.percentage} ${100 - seg.percentage}`}
+                  strokeDashoffset={seg.dashoffset}
+                />
+              ))}
             </svg>
-            
+
             <div style={styles.legendContainer}>
+              {userRolesData.length === 0 && (
+                <span style={styles.legendCount}>No role data yet.</span>
+              )}
               {userRolesData.map((role, idx) => (
                 <div key={idx} style={styles.legendItem}>
                   <div style={{ ...styles.legendDot, backgroundColor: role.color }}></div>
@@ -229,18 +232,26 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
           <h2 style={styles.chartTitle}>Recent Portal Activity</h2>
           <p style={styles.chartSubtitle}>Live trail of audit changes on WEA recommender database</p>
           <div style={styles.activityList}>
+            {activities.length === 0 && (
+              <p style={styles.actText}>No recent activity yet.</p>
+            )}
             {activities.map((act, index) => (
-              <div key={act.id} style={{
-                ...styles.activityItem,
-                borderBottom: index === activities.length - 1 ? 'none' : '1px solid var(--color-border)',
-                paddingBottom: index === activities.length - 1 ? 0 : '12px'
-              }}>
+              <div
+                key={act.id}
+                style={{
+                  ...styles.activityItem,
+                  borderBottom: index === activities.length - 1 ? 'none' : '1px solid var(--color-border)',
+                  paddingBottom: index === activities.length - 1 ? 0 : '12px',
+                }}
+              >
                 <div style={styles.actMeta}>
-                  <span style={{ 
-                    ...styles.actBadge, 
-                    backgroundColor: act.user === 'System' ? 'var(--color-primary-light)' : 'var(--color-accent-light)',
-                    color: act.user === 'System' ? 'var(--color-primary)' : 'var(--color-accent)',
-                  }}>
+                  <span
+                    style={{
+                      ...styles.actBadge,
+                      backgroundColor: act.user === 'System' ? 'var(--color-primary-light)' : 'var(--color-accent-light)',
+                      color: act.user === 'System' ? 'var(--color-primary)' : 'var(--color-accent)',
+                    }}
+                  >
                     {act.user}
                   </span>
                   <span style={styles.actTime}>{act.time}</span>
@@ -254,7 +265,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         <div className="glass-card">
           <h2 style={styles.chartTitle}>Admin Session Monitor</h2>
           <p style={styles.chartSubtitle}>Real-time frontend session diagnostics</p>
-          
+
           <div style={styles.sessionMonitorWrapper}>
             <div style={styles.sessionRow}>
               <span style={styles.sessionLabel}>Environment</span>
@@ -262,7 +273,15 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
             </div>
             <div style={styles.sessionRow}>
               <span style={styles.sessionLabel}>Database Link</span>
-              <span style={{ ...styles.sessionValueBadge, color: 'var(--color-primary)', backgroundColor: 'rgba(16, 185, 129, 0.15)' }}>Active</span>
+              <span
+                style={{
+                  ...styles.sessionValueBadge,
+                  color: 'var(--color-primary)',
+                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                }}
+              >
+                Active
+              </span>
             </div>
             <div style={styles.sessionRow}>
               <span style={styles.sessionLabel}>Session Duration</span>
@@ -307,11 +326,6 @@ const styles = {
     padding: '20px',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
-    '&:hover': {
-      transform: 'translateY(-2px)',
-      borderColor: 'var(--color-primary)',
-      backgroundColor: 'var(--color-bg-card-hover)',
-    }
   },
   iconBg: {
     width: '48px',
@@ -492,5 +506,5 @@ const styles = {
     fontSize: '16px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
-  }
+  },
 };
