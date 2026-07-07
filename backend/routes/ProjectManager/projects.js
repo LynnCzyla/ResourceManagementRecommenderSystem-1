@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -229,6 +230,14 @@ router.post('/projects', async (req, res) => {
 
     if (fetchError) throw fetchError;
 
+    await logAuditEvent({
+      req,
+      userId: createdBy || null,
+      action: 'Created',
+      systemCategory: 'Resource Management',
+      logDescription: `Created project ${name}`,
+    });
+
     res.status(201).json({
       success: true,
       message: 'Project created successfully',
@@ -266,6 +275,13 @@ router.put('/projects/:id', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Project not found' });
 
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'Resource Management',
+      logDescription: `Updated project ${id}`,
+    });
+
     res.status(200).json({ success: true, message: 'Project updated successfully', data });
   } catch (error) {
     console.error('Error updating project:', error);
@@ -292,6 +308,13 @@ router.patch('/projects/:id/status', async (req, res) => {
 
     if (error) throw error;
 
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'Resource Management',
+      logDescription: `Updated project ${id} status to ${status}`,
+    });
+
     res.status(200).json({ success: true, message: 'Project status updated', data });
   } catch (error) {
     console.error('Error updating project status:', error);
@@ -305,6 +328,13 @@ router.delete('/projects/:id', async (req, res) => {
     const { id } = req.params;
     const { error } = await supabase.from('projects').delete().eq('id', id);
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Deleted',
+      systemCategory: 'Resource Management',
+      logDescription: `Deleted project ${id}`,
+    });
     res.status(200).json({ success: true, message: 'Project deleted successfully' });
   } catch (error) {
     console.error('Error deleting project:', error);
