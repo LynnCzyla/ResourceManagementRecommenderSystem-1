@@ -9,8 +9,12 @@ import LogsTab from './LogsTab';
 import ProfileSettings from '../ProfileSettings';
 import DepartmentsTab from './DepartmentsTab';
 
+const BACKEND_RETRY_DELAY_MS = 5 * 60 * 1000;
+
 export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('adminActiveTab') || 'dashboard';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
@@ -22,6 +26,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
 
   const [notifications, setNotifications] = useState([]);
   const [phTime, setPhTime] = useState('');
+  const backendUnavailableUntilRef = React.useRef(0);
 
   useEffect(() => {
     const updateTime = () => {
@@ -60,6 +65,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
       useEffect(() => {
         if (!user?.id) return;
 
+        if (Date.now() < backendUnavailableUntilRef.current) return;
+
         const fetchNotifications = async () => {
           try {
             const res = await fetch(`http://localhost:5000/api/notifications?userId=${user.id}`);
@@ -69,6 +76,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
             }
           } catch (err) {
             console.error('Failed to fetch notifications:', err);
+            backendUnavailableUntilRef.current = Date.now() + BACKEND_RETRY_DELAY_MS;
           }
         };
 
@@ -100,6 +108,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const markAllRead = async () => {
+    if (Date.now() < backendUnavailableUntilRef.current) return;
     try {
       await fetch('http://localhost:5000/api/notifications/mark-all-read', {
         method: 'PATCH',
@@ -114,6 +123,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
 
   const deleteNotification = async (id, e) => {
   e.stopPropagation();
+  if (Date.now() < backendUnavailableUntilRef.current) return;
   try {
     await fetch(`http://localhost:5000/api/notifications/${id}`, { method: 'DELETE' });
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -125,6 +135,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   // Nav click helper to expand sidebar automatically
   const handleNavClick = (tabName) => {
     setActiveTab(tabName);
+    localStorage.setItem('adminActiveTab', tabName);
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
     }
