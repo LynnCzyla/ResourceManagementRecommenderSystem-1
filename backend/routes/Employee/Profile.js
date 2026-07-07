@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 router.get('/profile', verifyToken, async (req, res) => {
   try {
@@ -110,6 +111,14 @@ router.put('/profile', verifyToken, async (req, res) => {
         });
       }
     }
+
+    await logAuditEvent({
+      req,
+      userId,
+      action: 'Updated',
+      systemCategory: 'User Management',
+      logDescription: `Updated profile for ${profileData.first_name} ${profileData.last_name}`,
+    });
     
     res.json({
       success: true,
