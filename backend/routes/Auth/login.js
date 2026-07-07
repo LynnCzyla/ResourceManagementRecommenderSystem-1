@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Get max login attempts from system settings
 const getMaxLoginAttempts = async () => {
@@ -139,6 +140,13 @@ const lockUserAccount = async (userId) => {
       console.log(`✅ Notified ${admins.length} admin(s) about account lock`);
     }
 
+      await logAuditEvent({
+        userId,
+        action: 'Account Locked',
+        systemCategory: 'Auth',
+        logDescription: `Account auto-locked after repeated failed login attempts for user ${userId}`,
+      });
+
     return { success: true, data };
   } catch (error) {
     console.error('Error locking account:', error);
@@ -222,6 +230,13 @@ const resetLoginAttempts = async (userId) => {
     if (error && error.code !== 'PGRST116') {
       console.error('Error resetting login attempts:', error);
     }
+
+    await logAuditEvent({
+      userId,
+      action: 'Updated',
+      systemCategory: 'Auth',
+      logDescription: `Reset failed login attempts for ${userId}`,
+    });
   } catch (error) {
     console.error('Error resetting login attempts:', error);
   }
@@ -305,6 +320,13 @@ router.post('/login', async (req, res) => {
       } else {
         console.log(`👑 Admin failed login - not tracking: ${email}`);
       }
+
+      await logAuditEvent({
+        userId: userId || null,
+        action: 'Failed Login',
+        systemCategory: 'Auth',
+        logDescription: `Failed login attempt for ${email}`,
+      });
       
       return res.status(401).json({
         success: false,
@@ -357,6 +379,13 @@ router.post('/login', async (req, res) => {
     };
 
     console.log(`🎉 Login successful for: ${email}`);
+
+    await logAuditEvent({
+      userId: authUserId,
+      action: 'Login',
+      systemCategory: 'Auth',
+      logDescription: `User signed in successfully: ${email}`,
+    });
 
     res.status(200).json({
       success: true,
