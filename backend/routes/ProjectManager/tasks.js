@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 function transformTask(row) {
   const profile = row.profiles || {};
@@ -105,6 +106,14 @@ router.post('/tasks', async (req, res) => {
       console.error('Task created, but failed to send notification:', notifyError);
     }
 
+    await logAuditEvent({
+      req,
+      userId: createdBy || null,
+      action: 'Assigned',
+      systemCategory: 'Resource Management',
+      logDescription: `Assigned task "${title}" to employee ${employeeId}`,
+    });
+
     res.status(201).json({ success: true, message: 'Task created successfully', data: transformTask(data) });
   } catch (error) {
     console.error('Error creating task:', error);
@@ -135,6 +144,13 @@ router.put('/tasks/:id', async (req, res) => {
 
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Task not found' });
+
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'Resource Management',
+      logDescription: `Updated task ${id}`,
+    });
 
     res.status(200).json({ success: true, message: 'Task updated successfully', data: transformTask(data) });
   } catch (error) {
@@ -185,6 +201,14 @@ router.post('/tasks/:id/progress', async (req, res) => {
 
     if (error) throw error;
 
+    await logAuditEvent({
+      req,
+      userId: loggedBy || null,
+      action: 'Updated',
+      systemCategory: 'Resource Management',
+      logDescription: `Logged ${newLog.percentage}% progress for task ${id}`,
+    });
+
     res.status(200).json({ success: true, message: 'Progress logged successfully', data: transformTask(data) });
   } catch (error) {
     console.error('Error logging task progress:', error);
@@ -198,6 +222,13 @@ router.delete('/tasks/:id', async (req, res) => {
     const { id } = req.params;
     const { error } = await supabase.from('project_tasks').delete().eq('id', id);
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Deleted',
+      systemCategory: 'Resource Management',
+      logDescription: `Deleted task ${id}`,
+    });
     res.status(200).json({ success: true, message: 'Task deleted successfully' });
   } catch (error) {
     console.error('Error deleting task:', error);
