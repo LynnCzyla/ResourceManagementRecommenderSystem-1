@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -104,6 +105,12 @@ router.post("/contact-admin", async (req, res) => {
 
     console.log("✅ Contact request saved");
 
+    await logAuditEvent({
+      action: 'Created',
+      systemCategory: 'Contact Requests',
+      logDescription: `Created contact request from ${fullName} (${email})`,
+    });
+
     // 2. 🔔 Notify all admins about the new contact request
     try {
       const { data: admins, error: adminError } = await supabase
@@ -199,6 +206,14 @@ router.patch("/contact-requests/:id/status", async (req, res) => {
 
     if (error) throw error;
 
+    await logAuditEvent({
+      req,
+      userId: processed_by || null,
+      action: 'Updated',
+      systemCategory: 'Contact Requests',
+      logDescription: `Updated contact request ${id} to ${status}`,
+    });
+
     res.json({ success: true, request: data });
   } catch (error) {
     console.error("Error updating contact request status:", error);
@@ -219,6 +234,13 @@ router.delete("/contact-requests/:id", async (req, res) => {
       .eq("id", id);
 
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Deleted',
+      systemCategory: 'Contact Requests',
+      logDescription: `Deleted contact request ${id}`,
+    });
 
     res.json({ success: true });
   } catch (error) {
