@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import Swal from 'sweetalert2';
 
 const API = 'http://localhost:5000/api/admin';
 
@@ -238,6 +239,31 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
     return data.publicUrl;
   };
 
+  const showSuccessAlert = (message, title = 'Success!') => {
+    Swal.fire({
+      title,
+      text: message,
+      icon: 'success',
+      zIndex: 10050,
+      confirmButtonColor: 'var(--color-primary)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-success)',
+      customClass: {
+        container: 'swal-custom-container',
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm'
+      },
+      didOpen: () => {
+        const container = Swal.getContainer();
+        if (container) {
+          container.style.zIndex = '10050';
+        }
+      }
+    });
+  };
+
   const handleSaveProfile = async () => {
     if (!profileForm.first_name.trim() || !profileForm.last_name.trim()) {
       setProfileAlert({ type: 'error', message: 'First name and last name are required.' });
@@ -279,7 +305,8 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
       }
       setAvatarFile(null);
       setAvatarPreview(null);
-      setProfileAlert({ type: 'success', message: 'Profile updated successfully.' });
+      setProfileAlert({ type: '', message: '' });
+      showSuccessAlert('Profile updated successfully.');
 
     } catch (err) {
       console.error('Save profile error:', err);
