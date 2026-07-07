@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { getEmployees, saveEmployees } from '../mockState';
+import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects } from './rmApi';
+import RMAvatar from './RMAvatar';
 
 export default function RMEmployeeDirectoryTab() {
   const [employees, setEmployees] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState('All');
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -12,20 +16,36 @@ export default function RMEmployeeDirectoryTab() {
     startDate: new Date().toISOString().split('T')[0],
     notes: ''
   });
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setEmployees(getEmployees());
+    loadEmployees();
   }, []);
 
-  const handleToggleVerify = (empId) => {
-    const updated = employees.map(emp => {
-      if (emp.id === empId) {
-        return { ...emp, isVerified: !emp.isVerified };
-      }
-      return emp;
-    });
-    setEmployees(updated);
-    saveEmployees(updated);
+  const loadEmployees = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [empData, projData] = await Promise.all([fetchEmployees(), fetchProjects()]);
+      setEmployees(empData.employees || []);
+      setProjects(projData.projects || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleVerify = async (empId) => {
+    // optimistic update
+    setEmployees((prev) => prev.map((emp) => (emp.id === empId ? { ...emp, isVerified: !emp.isVerified } : emp)));
+    try {
+      await toggleEmployeeVerified(empId);
+    } catch (err) {
+      // revert on failure
+      setEmployees((prev) => prev.map((emp) => (emp.id === empId ? { ...emp, isVerified: !emp.isVerified } : emp)));
+      alert(`Couldn't update verification status: ${err.message}`);
+    }
   };
 
   const handleOpenAssignModal = (emp) => {
@@ -43,23 +63,41 @@ export default function RMEmployeeDirectoryTab() {
     setSelectedEmployee(null);
   };
 
-  const handleAssignSubmit = (e) => {
+  const handleAssignSubmit = async (e) => {
     e.preventDefault();
-    alert(`Assigned ${selectedEmployee.name} to project`);
-    handleCloseAssignModal();
+    if (!selectedEmployee || !assignForm.projectId) return;
+
+    setSubmitting(true);
+    try {
+      await assignEmployeeFromDirectory(selectedEmployee.id, {
+        projectId: assignForm.projectId,
+        startDate: assignForm.startDate,
+        notes: assignForm.notes
+      });
+      alert(`Assigned ${selectedEmployee.name} to project`);
+      handleCloseAssignModal();
+    } catch (err) {
+      alert(`Couldn't assign employee: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const filteredEmployees = employees.filter(emp => {
-    const matchesSearch = 
+    const matchesSearch =
       emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.skills.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
-      
+
     const matchesRole = selectedRole === 'All' || emp.role === selectedRole;
     return matchesSearch && matchesRole;
   });
 
   const uniqueRoles = ['All', ...new Set(employees.map(emp => emp.role))];
+
+  if (loading) {
+    return <div style={styles.container}><p>Loading employee directory…</p></div>;
+  }
 
   return (
     <div style={styles.container}>
@@ -67,6 +105,12 @@ export default function RMEmployeeDirectoryTab() {
         <h1 style={styles.title}>Employee Directory</h1>
         <p style={styles.subtitle}>View employee profiles, skills, and assign resources to projects.</p>
       </div>
+
+      {error && (
+        <div className="glass-card" style={{ padding: '12px 16px', color: 'var(--color-danger)' }}>
+          Couldn't load employee data: {error}
+        </div>
+      )}
 
       {/* Filter Row */}
       <div style={styles.filterRow}>
@@ -104,28 +148,43 @@ export default function RMEmployeeDirectoryTab() {
           filteredEmployees.map(emp => (
             <div key={emp.id} className="glass-card" style={styles.card}>
               <div style={styles.cardHeader}>
-                <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
-                  <img src={emp.avatar} alt={emp.name} style={styles.avatar} />
+                <div style={styles.profileMetaWrap}>
+                  <RMAvatar name={emp.name} src={emp.avatar} size={40} />
                   <div>
                     <h3 style={styles.empName}>
                       {emp.name}
                       {emp.isVerified && (
-                        <span style={styles.verifyBadge} title="Verified Profile">✓ Verified</span>
+                        <span
+                          style={{ ...styles.verifyBadge, cursor: 'pointer' }}
+                          title="Verified Profile — click to unverify"
+                          onClick={() => handleToggleVerify(emp.id)}
+                        >
+                          ✓ Verified
+                        </span>
                       )}
                     </h3>
-                    <div style={styles.empRole}>{emp.role}</div>
-                    <div style={styles.empDept}>{emp.department}</div>
+                      <div style={styles.empRole}>{emp.role}</div>
+                      <div style={styles.empDept}>{emp.department}</div>
                   </div>
                 </div>
+                {!emp.isVerified && (
+                  <button onClick={() => handleToggleVerify(emp.id)} style={styles.verifyToggleBtn}>
+                    Mark Verified
+                  </button>
+                )}
               </div>
 
               {/* Skills Section */}
               <div style={styles.section}>
                 <h4 style={styles.sectionHeader}>Core Skills</h4>
                 <div style={styles.skillsList}>
-                  {emp.skills.map((skill, idx) => (
-                    <span key={idx} style={styles.skillPill}>{skill}</span>
-                  ))}
+                  {emp.skills.length === 0 ? (
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No skills on file.</span>
+                  ) : (
+                    emp.skills.map((skill, idx) => (
+                      <span key={idx} style={styles.skillPill}>{skill}</span>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -189,8 +248,6 @@ export default function RMEmployeeDirectoryTab() {
               </button>
             </div>
 
-            <p style={styles.modalSubtitle}>(These info and credentials is only example from our old prototype)</p>
-
             {/* Employee Profile Card */}
             <div style={styles.modalProfileCard}>
               <div style={styles.modalProfileBadge}>[{selectedEmployee.department}]</div>
@@ -209,9 +266,9 @@ export default function RMEmployeeDirectoryTab() {
                   required
                 >
                   <option value="">-- Select a project --</option>
-                  <option value="1">Project Alpha</option>
-                  <option value="2">Project Beta</option>
-                  <option value="3">Project Gamma</option>
+                  {projects.map(proj => (
+                    <option key={proj.id} value={proj.id}>{proj.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -248,9 +305,10 @@ export default function RMEmployeeDirectoryTab() {
                 </button>
                 <button
                   type="submit"
-                  style={styles.modalSubmitBtn}
+                  disabled={submitting}
+                  style={{ ...styles.modalSubmitBtn, opacity: submitting ? 0.6 : 1 }}
                 >
-                  ✓ Assign to Project
+                  {submitting ? 'Assigning…' : '✓ Assign to Project'}
                 </button>
               </div>
             </form>
@@ -339,15 +397,14 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  avatar: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '50%',
-    objectFit: 'cover',
+  profileMetaWrap: {
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'center',
   },
   empName: {
-    fontSize: '16px',
-    fontWeight: '800',
+    fontSize: '13px',
+    fontWeight: '700',
     margin: 0,
     display: 'flex',
     alignItems: 'center',
@@ -361,14 +418,25 @@ const styles = {
     borderRadius: '4px',
     fontWeight: '700',
   },
+  verifyToggleBtn: {
+    fontSize: '10px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    background: 'transparent',
+    border: '1px solid var(--color-border)',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
   empRole: {
-    fontSize: '12px',
+    fontSize: '11px',
     color: 'var(--color-text-secondary)',
     fontWeight: '600',
     marginTop: '2px',
   },
   empDept: {
-    fontSize: '11px',
+    fontSize: '10px',
     color: 'var(--color-text-muted)',
   },
   section: {
@@ -479,13 +547,6 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     transition: 'color 0.2s',
-  },
-  modalSubtitle: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted)',
-    fontStyle: 'italic',
-    padding: '0 24px 16px',
-    margin: 0,
   },
   modalProfileCard: {
     margin: '0 24px 20px',
