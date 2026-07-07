@@ -15,6 +15,13 @@ const BOOT_IS_RECOVERY =
   window.location.hash.includes('access_token') ||
   sessionStorage.getItem('wea_password_recovery') === 'true';
 
+const ACTIVE_TAB_STORAGE_KEYS = [
+  'adminActiveTab',
+  'pmActiveTab',
+  'rmActiveTab',
+  'employeeActiveTab'
+];
+
 const sanitizeUserForStorage = (userObj) => {
   if (!userObj) return null;
   const sanitized = { ...userObj };
@@ -48,23 +55,6 @@ function App() {
   const forceLogoutTimerRef = useRef(null);
   const refreshTimeoutRef = useRef(null);
 
-  const fetchSessionTimeout = async () => {
-    try {
-      const response = await fetch('http://localhost:5000/api/settings/system-settings');
-      const result = await response.json();
-      if (result.success && result.data.sessionTimeout) {
-        const newTimeout = result.data.sessionTimeout;
-        if (newTimeout !== sessionTimeout) {
-          console.log(`🔄 Session timeout updated from ${sessionTimeout} to ${newTimeout} minutes`);
-          setSessionTimeout(newTimeout);
-          showTimeoutUpdateNotification(newTimeout);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch session timeout:', error);
-    }
-  };
-
   const showTimeoutUpdateNotification = (newTimeout) => {
     if (isLoggedIn) {
       Swal.fire({
@@ -83,11 +73,8 @@ function App() {
   };
 
   useEffect(() => {
-    fetchSessionTimeout();
-    refreshTimeoutRef.current = setInterval(fetchSessionTimeout, 30000);
-    return () => {
-      if (refreshTimeoutRef.current) clearInterval(refreshTimeoutRef.current);
-    };
+    setSessionTimeout(30);
+    return () => {};
   }, []);
 
   useEffect(() => {
@@ -403,6 +390,8 @@ function App() {
 
       const handleLogin = async (userProfile) => {
       console.log('🔍 User logged in:', userProfile);
+
+      ACTIVE_TAB_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
 
       try {
         const { data: profileData } = await supabase
