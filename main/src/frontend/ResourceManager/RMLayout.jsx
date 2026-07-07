@@ -8,11 +8,14 @@ import RMRequestsTab from './RMRequestsTab';
 import ProfileSettings from '../ProfileSettings';
 
 export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('rmActiveTab') || 'dashboard';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
+  const [currentAvatar, setCurrentAvatar] = useState(user.avatar);
 
   // Mock notifications for Resource Manager
   const [notifications, setNotifications] = useState([
@@ -41,6 +44,10 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    setCurrentAvatar(user.avatar);
+  }, [user.avatar]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -74,6 +81,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
 
   const handleNavClick = (tabName) => {
     setActiveTab(tabName);
+    localStorage.setItem('rmActiveTab', tabName);
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
     }
@@ -323,7 +331,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
                   transition: 'background-color 0.2s ease'
                 }}
               >
-                <img src={user.avatar} alt="Avatar" style={styles.avatar} />
+                <img src={currentAvatar} alt="Avatar" style={styles.avatar} />
                 <div style={styles.profileInfo}>
                   <span style={styles.profileName}>{user.name}</span>
                   <span style={styles.profileRole}>{user.role}</span>
@@ -350,6 +358,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
         isOpen={showProfileSettings}
         onClose={() => setShowProfileSettings(false)}
         user={user}
+        onAvatarUpdate={(newUrl) => setCurrentAvatar(newUrl)}
       />
     </div>
   );
