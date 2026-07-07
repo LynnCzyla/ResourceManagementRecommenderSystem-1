@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -164,6 +165,13 @@ router.post('/resource-requests', async (req, res) => {
 
     if (fetchError) throw fetchError;
 
+    await logAuditEvent({
+      req,
+      action: 'Assigned',
+      systemCategory: 'Resource Management',
+      logDescription: `Submitted resource request(s) for project ${projectId}`,
+    });
+
     res.status(201).json({
       success: true,
       message: 'Resource request(s) submitted successfully',
@@ -195,6 +203,13 @@ router.patch('/resource-requests/:id/status', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Resource request not found' });
 
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'Resource Management',
+      logDescription: `Updated resource request ${id} status to ${status}`,
+    });
+
     res.status(200).json({ success: true, message: 'Resource request status updated', data });
   } catch (error) {
     console.error('Error updating resource request status:', error);
@@ -208,6 +223,13 @@ router.delete('/resource-requests/:id', async (req, res) => {
     const { id } = req.params;
     const { error } = await supabase.from('project_resource_requirements').delete().eq('id', id);
     if (error) throw error;
+
+    await logAuditEvent({
+      req,
+      action: 'Deleted',
+      systemCategory: 'Resource Management',
+      logDescription: `Deleted resource request ${id}`,
+    });
     res.status(200).json({ success: true, message: 'Resource request deleted successfully' });
   } catch (error) {
     console.error('Error deleting resource request:', error);
