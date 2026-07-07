@@ -1,20 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
-import { getProjects, saveProjects, getEmployees } from '../mockState';
+import { fetchProjects, fetchEmployees, assignEmployeeToProject, removeEmployeeFromProject } from './rmApi';
+import RMAvatar from './RMAvatar';
 
 export default function RMProjectsTab() {
   const [projects, setProjects] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
   const [assignForm, setAssignForm] = useState({ employeeId: '', role: '' });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setProjects(getProjects());
-    setEmployees(getEmployees());
+    loadData();
   }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [projData, empData] = await Promise.all([fetchProjects(), fetchEmployees()]);
+      setProjects(projData.projects || []);
+      setEmployees(empData.employees || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const showSuccessAlert = (message, title = 'Success!') => {
     Swal.fire({
@@ -71,67 +88,59 @@ export default function RMProjectsTab() {
     setAssignForm({ employeeId: '', role: '' });
   };
 
-  const handleAssignSubmit = (e) => {
+  const handleAssignSubmit = async (e) => {
     e.preventDefault();
     if (!assignForm.employeeId) return;
 
     const chosenEmp = employees.find(emp => emp.id === assignForm.employeeId);
     if (!chosenEmp) return;
 
-    const updatedProjects = projects.map(proj => {
-      if (proj.id === selectedProject.id) {
-        const currentAssigned = proj.assignedEmployees || [];
-        // Check if already assigned
-        if (currentAssigned.some(a => a.employeeId === chosenEmp.id)) {
-          showErrorAlert(`${chosenEmp.name} is already assigned to this project!`);
-          return proj;
-        }
-
-        const newAssignedItem = {
-          employeeId: chosenEmp.id,
-          employeeName: chosenEmp.name,
-          role: assignForm.role || chosenEmp.role,
-          hoursAllocated: parseInt(assignForm.hours) || 8,
-          avatar: chosenEmp.avatar
-        };
-
-        return {
-          ...proj,
-          assignedEmployees: [...currentAssigned, newAssignedItem]
-        };
-      }
-      return proj;
-    });
-
-    setProjects(updatedProjects);
-    saveProjects(updatedProjects);
-    setShowAssignModal(false);
-    showSuccessAlert(`Successfully assigned ${chosenEmp.name} to project!`);
+    setSubmitting(true);
+    try {
+      await assignEmployeeToProject(selectedProject.id, {
+        employeeId: chosenEmp.id,
+        role: assignForm.role || chosenEmp.role
+      });
+      setShowAssignModal(false);
+      showSuccessAlert(`Successfully assigned ${chosenEmp.name} to project!`);
+      await loadData();
+    } catch (err) {
+      showErrorAlert(err.message.includes('already assigned')
+        ? `${chosenEmp.name} is already assigned to this project!`
+        : err.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleRemoveMember = (projId, empId) => {
-    const updatedProjects = projects.map(proj => {
-      if (proj.id === projId) {
-        const currentAssigned = proj.assignedEmployees || [];
-        return {
-          ...proj,
-          assignedEmployees: currentAssigned.filter(a => a.employeeId !== empId)
-        };
-      }
-      return proj;
-    });
-    setProjects(updatedProjects);
-    saveProjects(updatedProjects);
+  const handleRemoveMember = async (projId, empId, empName, projName) => {
+    const result = await showConfirmationAlert(
+      'Remove member?',
+      `Remove ${empName} from ${projName}?`,
+      'Yes, remove'
+    );
+    if (!result.isConfirmed) return;
+
+    try {
+      await removeEmployeeFromProject(projId, empId);
+      await loadData();
+    } catch (err) {
+      showErrorAlert(err.message);
+    }
   };
 
   const filteredProjects = projects.filter(proj => {
-    const matchesSearch = 
+    const matchesSearch =
       proj.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      proj.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (proj.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       proj.requiredSkills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesStatus = statusFilter === 'All' || proj.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  if (loading) {
+    return <div style={styles.container}><p>Loading projects…</p></div>;
+  }
 
   return (
     <div style={styles.container}>
@@ -154,29 +163,28 @@ export default function RMProjectsTab() {
               style={styles.searchInput}
             />
           </div>
-          <select 
-            value={statusFilter} 
-            onChange={(e) => setStatusFilter(e.target.value)} 
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
             style={styles.filterSelect}
           >
             <option value="All">All Status</option>
             <option value="Active">Active</option>
+            <option value="Pending">Pending</option>
             <option value="Inactive">Inactive</option>
           </select>
         </div>
       </div>
 
+      {error && (
+        <div className="glass-card" style={{ padding: '12px 16px', color: 'var(--color-danger)' }}>
+          Couldn't load project data: {error}
+        </div>
+      )}
+
       <div style={styles.grid}>
         {filteredProjects.map(proj => {
-          // Initialize assigned list to defaults if not present
-          const assignedList = proj.assignedEmployees || [
-            // Mock default assignments if empty to look filled and cohesive
-            proj.id === 1 ? { employeeId: 'EMP-1014', employeeName: 'Javier Santos', role: 'Senior Cad Drafter & Lighting Designer', hoursAllocated: 8, avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100' } :
-            proj.id === 2 ? { employeeId: 'EMP-1015', employeeName: 'Vincent Miguel P. Soriano', role: 'Inside Sales / UPS Technical Engineer', hoursAllocated: 6, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100' } : null
-          ].filter(Boolean);
-
-          const totalAllocatedHours = assignedList.reduce((sum, item) => sum + item.hoursAllocated, 0);
-          const utilizationPercentage = Math.min(Math.round((totalAllocatedHours / 16) * 100), 100);
+          const assignedList = proj.assignedEmployees || [];
 
           return (
             <div key={proj.id} className="glass-card" style={styles.card}>
@@ -198,9 +206,13 @@ export default function RMProjectsTab() {
 
               {/* Skills */}
               <div style={styles.skillsRow}>
-                {proj.requiredSkills.map((sk, i) => (
-                  <span key={i} style={styles.skillPill}>{sk}</span>
-                ))}
+                {proj.requiredSkills.length === 0 ? (
+                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>No required skills listed.</span>
+                ) : (
+                  proj.requiredSkills.map((sk, i) => (
+                    <span key={i} style={styles.skillPill}>{sk}</span>
+                  ))
+                )}
               </div>
 
               {/* Allocation Stats */}
@@ -208,9 +220,6 @@ export default function RMProjectsTab() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: '700' }}>
                   <span>Team Members</span>
                   <span>{assignedList.length} member{assignedList.length === 1 ? '' : 's'}</span>
-                </div>
-                <div style={styles.utilizationBarContainer}>
-                  <div style={{ ...styles.utilizationBar, width: `${utilizationPercentage}%`, backgroundColor: utilizationPercentage > 75 ? 'var(--color-success)' : 'var(--color-primary)' }}></div>
                 </div>
               </div>
 
@@ -224,24 +233,15 @@ export default function RMProjectsTab() {
                     assignedList.map(member => (
                       <div key={member.employeeId} style={styles.memberRow}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <img src={member.avatar} alt={member.employeeName} style={styles.memberAvatar} />
+                          <RMAvatar name={member.employeeName} src={member.avatar} size={34} />
                           <div>
                             <div style={styles.memberName}>{member.employeeName}</div>
                             <div style={styles.memberRole}>{member.role}</div>
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <button 
-                            onClick={async () => {
-                              const result = await showConfirmationAlert(
-                                'Remove member?',
-                                `Remove ${member.employeeName} from ${proj.name}?`,
-                                'Yes, remove'
-                              );
-                              if (result.isConfirmed) {
-                                handleRemoveMember(proj.id, member.employeeId);
-                              }
-                            }}
+                          <button
+                            onClick={() => handleRemoveMember(proj.id, member.employeeId, member.employeeName, proj.name)}
                             style={styles.removeBtn}
                             title="Remove Member"
                           >
@@ -254,7 +254,9 @@ export default function RMProjectsTab() {
                 </div>
               </div>
 
-
+              <button onClick={() => handleOpenAssignModal(proj)} style={styles.assignBtn}>
+                Assign Resource
+              </button>
             </div>
           );
         })}
@@ -284,7 +286,7 @@ export default function RMProjectsTab() {
                 </select>
               </div>
 
-                    <div style={styles.formGroup}>
+              <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Project Role Overwrite</label>
                 <input
                   type="text"
@@ -297,7 +299,9 @@ export default function RMProjectsTab() {
 
               <div style={styles.modalActions}>
                 <button type="button" onClick={() => setShowAssignModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Assign Member</button>
+                <button type="submit" disabled={submitting} style={{ ...styles.saveBtn, opacity: submitting ? 0.6 : 1 }}>
+                  {submitting ? 'Assigning…' : 'Assign Member'}
+                </button>
               </div>
             </form>
           </div>
@@ -424,16 +428,6 @@ const styles = {
     gap: '6px',
     marginTop: '4px',
   },
-  utilizationBarContainer: {
-    height: '6px',
-    backgroundColor: 'var(--color-border)',
-    borderRadius: '4px',
-    overflow: 'hidden',
-  },
-  utilizationBar: {
-    height: '100%',
-    borderRadius: '4px',
-  },
   assignedSection: {
     display: 'flex',
     flexDirection: 'column',
@@ -474,11 +468,6 @@ const styles = {
   memberRole: {
     fontSize: '10px',
     color: 'var(--color-text-muted)',
-  },
-  memberHours: {
-    fontSize: '11px',
-    fontWeight: '600',
-    color: 'var(--color-text-secondary)',
   },
   removeBtn: {
     background: 'transparent',
@@ -534,10 +523,6 @@ const styles = {
   formGroup: {
     marginBottom: '16px',
     textAlign: 'left',
-  },
-  formRow: {
-    display: 'flex',
-    gap: '16px',
   },
   formLabel: {
     display: 'block',
