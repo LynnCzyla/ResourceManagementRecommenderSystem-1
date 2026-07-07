@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
+const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Generate a random password
 const generatePassword = () => {
@@ -222,6 +223,14 @@ router.post("/create", async (req, res) => {
       role
     );
 
+    await logAuditEvent({
+      req,
+      userId: authData.user.id,
+      action: 'Created',
+      systemCategory: 'User Management',
+      logDescription: `Created new user account for ${email}`,
+    });
+
     res.status(201).json({
       success: true,
       message: "User created successfully. Temporary password sent to email.",
@@ -263,6 +272,14 @@ router.post("/resend-password/:userId", async (req, res) => {
         error: "User not found"
       });
     }
+
+    await logAuditEvent({
+      req,
+      userId: userId,
+      action: 'Created',
+      systemCategory: 'User Management',
+      logDescription: `Resent temporary password for ${profile.first_name} ${profile.last_name}`,
+    });
 
     // Get email from auth users
     const { data: authData, error: authError } = await supabase.auth.admin.getUserById(userId);
