@@ -20,7 +20,9 @@ function timeAgo(dateStr) {
 }
 
 export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('pmActiveTab') || 'dashboard';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
@@ -107,6 +109,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
 
   const handleNavClick = (tabName) => {
     setActiveTab(tabName);
+    localStorage.setItem('pmActiveTab', tabName);
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
     }
