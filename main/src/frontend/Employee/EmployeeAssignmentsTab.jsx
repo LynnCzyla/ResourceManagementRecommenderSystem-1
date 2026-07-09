@@ -114,6 +114,16 @@ export default function EmployeeAssignmentsTab({ user }) {
     e.preventDefault();
     if (!logWeek || !logPercentage || !logDesc) return;
 
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      const currentTotal = (task.progressLogs || []).reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
+      const newPercentageVal = parseInt(logPercentage, 10) || 0;
+      if (currentTotal + newPercentageVal > 100) {
+        alert(`Cannot log progress. The total cumulative progress would be ${currentTotal + newPercentageVal}%, which exceeds the 100% limit. Maximum progress you can log is ${100 - currentTotal}%.`);
+        return;
+      }
+    }
+
     try {
       const authHeader = await getAuthHeader();
       const response = await axios.post(`http://localhost:5000/api/employee/tasks/${taskId}/progress`, {
@@ -197,17 +207,22 @@ export default function EmployeeAssignmentsTab({ user }) {
                   <div style={styles.logsSection}>
                     <h5 style={styles.logsSectionTitle}>Reported Progress Logs</h5>
                     <div style={styles.logsList}>
-                      {task.progressLogs.map(log => (
-                        <div key={log.id} style={styles.logItem}>
-                          <div style={styles.logMetaRow}>
-                            <span style={styles.logWeekBadge}>{log.week || 'N/A'}</span>
-                            <span style={styles.logPercentBadge}>{log.percentage}% complete</span>
-                            <span style={styles.logDate}>{log.date}</span>
+                      {task.progressLogs.map((log, idx) => {
+                        let cumulativePercentage = 0;
+                        for (let i = 0; i <= idx; i++) {
+                          cumulativePercentage += (parseInt(task.progressLogs[i].percentage, 10) || 0);
+                        }
+                        return (
+                          <div key={log.id} style={styles.logItem}>
+                            <div style={styles.logMetaRow}>
+                              <span style={styles.logWeekBadge}>{log.week || 'N/A'}</span>
+                              <span style={styles.logPercentBadge}>{log.percentage}% this week (Total: {cumulativePercentage}%)</span>
+                              <span style={styles.logDate}>{log.date}</span>
+                            </div>
+                            <span style={styles.logDescription}>{log.description}</span>
                           </div>
-                          <span style={styles.logPercentBadge}>{log.percentage}% complete</span>
-                          <span style={styles.logDescription}>{log.description}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -260,48 +275,76 @@ export default function EmployeeAssignmentsTab({ user }) {
                 </div>
 
                 {/* Collapsible weekly log form */}
-                {activeLogTaskId === task.id && (
-                  <form onSubmit={(e) => handleLogProgress(e, task.id)} style={styles.logForm}>
-                    <div style={styles.logFormRow}>
-                      <div style={{ width: '180px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={styles.logLabel}>Week</label>
-                        <input
-                          type="week"
-                          value={logWeek}
-                          onChange={(e) => setLogWeek(e.target.value)}
-                          style={styles.logInput}
-                          required
-                        />
+                {activeLogTaskId === task.id && (() => {
+                  const currentTotal = (task.progressLogs || []).reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
+                  const remaining = 100 - currentTotal;
+                  return (
+                    <form onSubmit={(e) => handleLogProgress(e, task.id)} style={styles.logForm}>
+                      <div style={styles.logFormRow}>
+                        <div style={{ width: '180px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <label style={styles.logLabel}>Week</label>
+                          <input
+                            type="week"
+                            value={logWeek}
+                            onChange={(e) => setLogWeek(e.target.value)}
+                            style={styles.logInput}
+                            required
+                          />
+                        </div>
+                        <div style={{ width: '130px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <label style={styles.logLabel}>% Complete (Max {remaining}%)</label>
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            max={remaining}
+                            value={logPercentage}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10) || 0;
+                              if (val > remaining) {
+                                alert(`Cannot exceed remaining task progress limit of ${remaining}%.`);
+                                setLogPercentage(remaining);
+                              } else {
+                                setLogPercentage(e.target.value);
+                              }
+                            }}
+                            placeholder={`e.g. ${Math.min(remaining, 30)}`}
+                            style={styles.logInput}
+                            disabled={remaining <= 0}
+                            required
+                          />
+                        </div>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <label style={styles.logLabel}>Weekly Summary</label>
+                          <input
+                            type="text"
+                            value={logDesc}
+                            onChange={(e) => setLogDesc(e.target.value)}
+                            placeholder="Summarize this week's work..."
+                            style={styles.logInput}
+                            required
+                          />
+                        </div>
+                        <button 
+                          type="submit" 
+                          style={{
+                            ...styles.logSubmitBtn,
+                            opacity: remaining <= 0 ? 0.5 : 1,
+                            cursor: remaining <= 0 ? 'not-allowed' : 'pointer'
+                          }}
+                          disabled={remaining <= 0}
+                        >
+                          Submit Weekly Log
+                        </button>
                       </div>
-                      <div style={{ width: '130px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={styles.logLabel}>% Complete</label>
-                        <input
-                          type="number"
-                          step="1"
-                          min="0"
-                          max="100"
-                          value={logPercentage}
-                          onChange={(e) => setLogPercentage(e.target.value)}
-                          placeholder="e.g. 65"
-                          style={styles.logInput}
-                          required
-                        />
-                      </div>
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={styles.logLabel}>Weekly Summary</label>
-                        <input
-                          type="text"
-                          value={logDesc}
-                          onChange={(e) => setLogDesc(e.target.value)}
-                          placeholder="Summarize this week's work..."
-                          style={styles.logInput}
-                          required
-                        />
-                      </div>
-                      <button type="submit" style={styles.logSubmitBtn}>Submit Weekly Log</button>
-                    </div>
-                  </form>
-                )}
+                      {remaining <= 0 && (
+                        <p style={{ color: 'var(--color-success)', fontSize: '11px', marginTop: '6px', fontWeight: 'bold' }}>
+                          ✓ Task progress is already at 100%. No further logging is needed.
+                        </p>
+                      )}
+                    </form>
+                  );
+                })()}
               </div>
             ))
           )}
