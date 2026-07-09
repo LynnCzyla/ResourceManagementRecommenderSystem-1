@@ -130,16 +130,28 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
     if (fetchError) throw fetchError;
     if (!existing) return res.status(404).json({ success: false, error: 'Task not found' });
 
+    const newPercentageVal = Math.min(100, Math.max(0, parseInt(percentage, 10) || 0));
+    const logs = existing.progress_logs || [];
+    const currentTotal = logs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
+
+    if (currentTotal + newPercentageVal > 100) {
+      return res.status(400).json({
+        success: false,
+        error: `Logged progress exceeds 100% total limit. Current progress logged: ${currentTotal}%. You can log up to ${100 - currentTotal}%.`
+      });
+    }
+
     const newLog = {
       id: Date.now(),
       week: week || null,
-      percentage: Math.min(100, Math.max(0, parseInt(percentage, 10) || 0)),
+      percentage: newPercentageVal,
       description: description || '',
       date: new Date().toISOString().split('T')[0]
     };
 
-    const updatedLogs = [...(existing.progress_logs || []), newLog];
-    const autoStatus = newLog.percentage >= 100 ? 'Completed' : newLog.percentage > 0 ? 'In Progress' : undefined;
+    const updatedLogs = [...logs, newLog];
+    const finalTotalPercentage = currentTotal + newPercentageVal;
+    const autoStatus = finalTotalPercentage >= 100 ? 'Completed' : finalTotalPercentage > 0 ? 'In Progress' : undefined;
 
     const updatePayload = {
       progress_logs: updatedLogs,
