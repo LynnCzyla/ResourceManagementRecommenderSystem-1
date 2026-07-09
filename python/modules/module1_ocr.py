@@ -275,7 +275,7 @@ class OCRProcessor:
         if not text or not text.strip():
             raise Exception("No text could be extracted")
         
-        cleaned = self._clean_text(text)
+        cleaned, structured = self._clean_text(text)
         total_time = time.time() - start_time
         
         self.stats['total_processed'] += 1
@@ -291,6 +291,7 @@ class OCRProcessor:
         return {
             'raw_text': text,
             'cleaned_text': cleaned,
+            'structured_text': structured,
             'confidence_score': 0.99 if method != 'ocr' else 0.85,
             'word_count': len(cleaned.split()),
             'char_count': len(cleaned),
@@ -303,12 +304,17 @@ class OCRProcessor:
     def _clean_text(self, text):
         """Clean text - remove problematic characters"""
         if not text:
-            return ""
+            return "", ""
         
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         cleaned = ' '.join(lines)
         cleaned = re.sub(r'\s+', ' ', cleaned)
         
+        # ============ NEW: structured version, keeps line breaks ============
+        structured = '\n'.join(re.sub(r'[ \t]+', ' ', line) for line in lines)
+        # ======================================================================
+
+
         # ============ FIX: Remove problematic Unicode characters ============
         # Replace bullet points and other problematic characters
         replacements = {
@@ -343,7 +349,6 @@ class OCRProcessor:
             # to handle one dash character instead of several look-alikes.
             '\u2010': '-',  # hyphen
             '\u2011': '-',  # non-breaking hyphen
-            '\u2012': '-',  # figure dash
             '\u2013': '-',  # en dash (–)
             '\u2014': '-',  # em dash (—)
             '\u2015': '-',  # horizontal bar
@@ -353,13 +358,21 @@ class OCRProcessor:
         
         for old, new in replacements.items():
             cleaned = cleaned.replace(old, new)
-        
+            structured = structured.replace(old, new)
+
+        # ============ FIX: split words glued together by pdfplumber column extraction ============
+        # e.g. "FlowRelevant" -> "Flow Relevant". A lowercase->uppercase boundary
+        # almost never occurs mid-word in real English, so this is safe.
+        cleaned = re.sub(r'([a-z])([A-Z])', r'\1 \2', cleaned)
+        structured = re.sub(r'([a-z])([A-Z])', r'\1 \2', structured)
+        # ============================================================================================
+
         # Also remove any remaining non-ASCII characters that might cause issues
         # This keeps only printable ASCII characters
         # cleaned = ''.join(char if ord(char) < 128 else '?' for char in cleaned)
         # =============================================================
     
-        return cleaned
+        return cleaned, structured
     
     def process_document(self, file_path, document_id, employee_id, doc_type):
         """Process document"""
@@ -368,15 +381,18 @@ class OCRProcessor:
          # ============ FIX: Clean the text again ============
         raw_text = ocr_result['raw_text']
         cleaned_text = ocr_result['cleaned_text']
+        structured_text = ocr_result.get('structured_text', cleaned_text)  # ← NEW
         
         # Remove bullet points (including dash variants normalized above)
         for char in ['●', '•', '▪', '■', '➢', '►', '▸', '→', '↔',
                      '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2043']:
             raw_text = raw_text.replace(char, '-')
             cleaned_text = cleaned_text.replace(char, '-')
+            structured_text = structured_text.replace(char, '-')  # ← NEW
         
         ocr_result['raw_text'] = raw_text
         ocr_result['cleaned_text'] = cleaned_text
+        ocr_result['structured_text'] = structured_text  # ← NEW
         # ===================================================
         
         db_record = {
@@ -385,6 +401,7 @@ class OCRProcessor:
             'document_type': doc_type,
             'raw_ocr_text': ocr_result['raw_text'],
             'cleaned_ocr_text': ocr_result['cleaned_text'],
+            'structured_ocr_text': ocr_result.get('structured_text', ocr_result['cleaned_text']),  # ← NEW
             'ocr_confidence': ocr_result['confidence_score'],
             'word_count': ocr_result['word_count'],
             'char_count': ocr_result['char_count'],
