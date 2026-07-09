@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getDashboardStats, getEmployees, getTasks } from './pmApi';
+import { getDashboardStats, getEmployees, getTasks, getProjects } from './pmApi';
 
 export default function PMDashboardTab({ user }) {
   const [stats, setStats] = useState({
@@ -10,21 +10,26 @@ export default function PMDashboardTab({ user }) {
     tasksByStatus: { Pending: 0, 'In Progress': 0, Completed: 0 },
   });
   const [employees, setEmployees] = useState([]);
+  const [projectEmployees, setProjectEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('all');
   const [loadError, setLoadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('name');
 
   const loadDashboard = async () => {
     try {
-      const [statsData, employeesData, tasksData] = await Promise.all([
+      const [statsData, employeesData, tasksData, projectsData] = await Promise.all([
         getDashboardStats(user?.id),
         getEmployees(user?.id),
         getTasks(),
+        getProjects(user?.id),
       ]);
       setStats(statsData);
       setEmployees(employeesData);
-      setTasks(tasksData);
+      setTasks(tasksData || []);
+      setProjects(projectsData || []);
       setLoadError('');
     } catch (err) {
       console.error('Failed to load dashboard:', err);
@@ -36,19 +41,82 @@ export default function PMDashboardTab({ user }) {
     loadDashboard();
   }, [user]);
 
-  const getAssignedTasks = (id) => tasks.filter(task => task.employeeId === id);
+  const loadProjectEmployees = async () => {
+    try {
+      const pmId = user?.id;
+      const projId = selectedProjectId === 'all' ? undefined : selectedProjectId;
+      const employeesData = await getEmployees(pmId, undefined, projId);
+      setProjectEmployees(employeesData || []);
+    } catch (err) {
+      console.error('Failed to load project employees:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.id) {
+      loadProjectEmployees();
+    }
+  }, [selectedProjectId, user]);
+
+  const getAssignedTasks = (id) => tasks.filter(task => task.employeeId === id && task.status !== 'Completed-Hidden');
+  
+  const calculateSingleTaskCompletion = (task) => {
+    if (task.progressLogs && task.progressLogs.length) {
+      return Math.min(100, task.progressLogs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0));
+    }
+    if (task.status === 'Completed' || task.status === 'Completed-Hidden') return 100;
+    if (task.status === 'In Progress') return 50;
+    return 0;
+  };
+
   const getTaskCompletion = (id) => {
     const assigned = getAssignedTasks(id);
     if (!assigned.length) return 0;
-    const percentages = assigned.map(task => {
-      if (task.progressLogs && task.progressLogs.length) {
-        return task.progressLogs[task.progressLogs.length - 1].percentage || 0;
-      }
-      if (task.status === 'Completed') return 100;
-      if (task.status === 'In Progress') return 55;
-      return 20;
-    });
+    const percentages = assigned.map(task => calculateSingleTaskCompletion(task));
     return Math.round(percentages.reduce((sum, value) => sum + value, 0) / percentages.length);
+  };
+
+  const getEmployeeProjectBreakdown = (empId) => {
+    const empTasks = getAssignedTasks(empId);
+    if (!empTasks.length) {
+      return {
+        projects: [],
+        overall: 0
+      };
+    }
+    
+    const projectGroups = {};
+    empTasks.forEach(task => {
+      const projName = task.projectName || 'Unassigned Project';
+      const projId = task.projectId || 'unassigned';
+      if (!projectGroups[projId]) {
+        projectGroups[projId] = {
+          id: projId,
+          name: projName,
+          taskCompletions: []
+        };
+      }
+      
+      const taskCompletion = calculateSingleTaskCompletion(task);
+      projectGroups[projId].taskCompletions.push(taskCompletion);
+    });
+    
+    const projectList = Object.values(projectGroups).map(group => {
+      const avg = Math.round(group.taskCompletions.reduce((s, c) => s + c, 0) / group.taskCompletions.length);
+      return {
+        id: group.id,
+        name: group.name,
+        completion: avg,
+        remaining: 100 - avg
+      };
+    });
+    
+    const overall = Math.round(projectList.reduce((s, p) => s + p.completion, 0) / projectList.length);
+    
+    return {
+      projects: projectList,
+      overall
+    };
   };
 
   const filteredEmployees = employees.filter(emp => 
@@ -64,6 +132,26 @@ export default function PMDashboardTab({ user }) {
     }
     return 0;
   });
+
+  const displayEmployees = selectedProjectId === 'all'
+    ? filteredEmployees
+    : filteredEmployees.filter(emp => 
+        projectEmployees.some(pe => pe.id === emp.id) ||
+        getAssignedTasks(emp.id).some(t => String(t.projectId) === String(selectedProjectId))
+      );
+
+  const displayEmployeesBreakdown = selectedProjectId === 'all'
+    ? filteredEmployees
+    : filteredEmployees.filter(emp => 
+        projectEmployees.some(pe => pe.id === emp.id) ||
+        getAssignedTasks(emp.id).some(t => String(t.projectId) === String(selectedProjectId))
+      );
+
+  const projectTasks = selectedProjectId === 'all' 
+    ? tasks 
+    : tasks.filter(t => String(t.projectId) === String(selectedProjectId));
+
+  const unassignedTasks = projectTasks.filter(task => !task.employeeId || !employees.some(emp => emp.id === task.employeeId));
 
 
   return (
@@ -116,6 +204,16 @@ export default function PMDashboardTab({ user }) {
               <p style={styles.panelSubtitle}>Review current employee task assignments and progress percentage.</p>
             </div>
             <div style={styles.controls}>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                style={styles.sortSelect}
+              >
+                <option value="all">All Projects</option>
+                {projects.map(proj => (
+                  <option key={proj.id} value={proj.id}>{proj.name}</option>
+                ))}
+              </select>
               <div style={styles.searchWrapper}>
                 <svg style={styles.searchIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="11" cy="11" r="8"></circle>
@@ -147,16 +245,27 @@ export default function PMDashboardTab({ user }) {
                 <tr style={styles.trHeader}>
                   <th style={styles.th}>Employee</th>
                   <th style={styles.th}>Assigned Task</th>
+                  <th style={styles.th}>No. of Tasks</th>
                   <th style={styles.th}>% Complete</th>
                   <th style={styles.th}>Task Status</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredEmployees.map(emp => {
-                  const assignedTasks = getAssignedTasks(emp.id);
-                  const completion = getTaskCompletion(emp.id);
-                  const taskLabel = assignedTasks.length ? assignedTasks[0].title : 'No task assigned';
+                {displayEmployees.map(emp => {
+                  const assignedTasks = selectedProjectId === 'all'
+                    ? getAssignedTasks(emp.id)
+                    : getAssignedTasks(emp.id).filter(t => String(t.projectId) === String(selectedProjectId));
+                  
+                  const completion = assignedTasks.length 
+                    ? Math.round(assignedTasks.map(task => calculateSingleTaskCompletion(task)).reduce((sum, val) => sum + val, 0) / assignedTasks.length)
+                    : 0;
+
+                  const taskLabel = assignedTasks.length ? assignedTasks.map(t => t.title).join(', ') : 'No task assigned';
                   const taskStatus = assignedTasks.length ? assignedTasks[0].status : 'Idle';
+
+                  const assignedTasksForSub = getAssignedTasks(emp.id);
+                  const assignedProjects = [...new Set(assignedTasksForSub.map(t => t.projectName).filter(Boolean))];
+                  const projectSubtitle = assignedProjects.length ? assignedProjects.join(', ') : 'Unassigned';
 
                   return (
                     <tr key={emp.id} style={styles.trRow}>
@@ -164,12 +273,34 @@ export default function PMDashboardTab({ user }) {
                         <img src={emp.avatar} alt={emp.name} style={styles.empAvatar} />
                         <div>
                           <div style={styles.empName}>{emp.name}</div>
-                          <div style={styles.empRole}>{emp.role}</div>
+                          <div style={styles.empRole}>{projectSubtitle}</div>
                         </div>
                       </td>
                       <td style={styles.tdVal}>{taskLabel}</td>
+                      <td style={styles.tdVal}>{assignedTasks.length}</td>
                       <td style={styles.tdVal}>{completion}%</td>
                       <td style={styles.tdVal}>{taskStatus}</td>
+                    </tr>
+                  );
+                })}
+
+                {/* Unassigned Tasks */}
+                {unassignedTasks.map(task => {
+                  const completion = calculateSingleTaskCompletion(task);
+                  
+                  return (
+                    <tr key={`unassigned-${task.id}`} style={styles.trRow}>
+                      <td style={styles.tdEmployee}>
+                        <div style={styles.unassignedAvatar}>?</div>
+                        <div>
+                          <div style={styles.empName}>Unassigned</div>
+                          <div style={styles.empRole}>No Assignee</div>
+                        </div>
+                      </td>
+                      <td style={styles.tdVal}>{task.title}</td>
+                      <td style={styles.tdVal}>1</td>
+                      <td style={styles.tdVal}>{completion}%</td>
+                      <td style={styles.tdVal}>{task.status}</td>
                     </tr>
                   );
                 })}
@@ -185,28 +316,62 @@ export default function PMDashboardTab({ user }) {
 
           <div style={styles.attendanceStats}>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{stats.tasksByStatus.Pending}</span>
+              <span style={styles.attendanceValue}>{projectTasks.filter(t => t.status === 'Pending').length}</span>
               <span style={styles.attendanceLabel}>Pending</span>
             </div>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{stats.tasksByStatus['In Progress']}</span>
+              <span style={styles.attendanceValue}>{projectTasks.filter(t => t.status === 'In Progress').length}</span>
               <span style={styles.attendanceLabel}>In Progress</span>
             </div>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{stats.tasksByStatus.Completed}</span>
+              <span style={styles.attendanceValue}>{projectTasks.filter(t => t.status === 'Completed').length}</span>
               <span style={styles.attendanceLabel}>Completed</span>
             </div>
           </div>
 
           <div style={styles.attendanceList}>
-            {employees.map(emp => (
-              <div key={emp.id} style={styles.attendanceRow}>
-                <div style={styles.attendanceName}>{emp.name}</div>
-                <span style={{ ...styles.attendanceBadge, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                  {getTaskCompletion(emp.id)}%
-                </span>
-              </div>
-            ))}
+            {displayEmployeesBreakdown.map(emp => {
+              const breakdown = getEmployeeProjectBreakdown(emp.id);
+              return (
+                <div key={emp.id} style={styles.breakdownCard}>
+                  <div style={styles.breakdownHeader}>
+                    <span style={styles.breakdownName}>{emp.name}</span>
+                    <span style={{
+                      ...styles.attendanceBadge,
+                      backgroundColor: breakdown.overall === 100 
+                        ? 'rgba(16, 185, 129, 0.12)' 
+                        : breakdown.overall > 0 
+                          ? 'rgba(2, 132, 199, 0.12)' 
+                          : 'var(--color-bg-root)',
+                      color: breakdown.overall === 100 
+                        ? 'var(--color-success)' 
+                        : breakdown.overall > 0 
+                          ? 'var(--color-accent)' 
+                          : 'var(--color-text-muted)'
+                    }}>
+                      {breakdown.overall}% Complete
+                    </span>
+                  </div>
+                  
+                  {breakdown.projects.length === 0 ? (
+                    <div style={styles.breakdownEmpty}>No active projects or tasks.</div>
+                  ) : (
+                    <div style={styles.breakdownDetails}>
+                      <div style={styles.breakdownSummaryTitle}>Status Summary:</div>
+                      {breakdown.projects.map(proj => (
+                        <div key={proj.id} style={styles.breakdownProjLine}>
+                          <span style={styles.breakdownProjName}>• {proj.name}:</span>
+                          <span style={styles.breakdownProjVal}>{proj.completion}% complete ({proj.remaining}% remaining)</span>
+                        </div>
+                      ))}
+                      <div style={styles.breakdownOverallSummary}>
+                        <strong>Overall progress:</strong> {breakdown.overall}% complete ({100 - breakdown.overall}% remaining)
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -427,5 +592,79 @@ const styles = {
     borderRadius: '999px',
     fontSize: '11px',
     fontWeight: '700',
+  },
+  unassignedAvatar: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
+    backgroundColor: '#64748b',
+    color: '#ffffff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '700',
+    fontSize: '15px',
+    marginRight: '12px',
+  },
+  breakdownCard: {
+    padding: '12px 14px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card-hover)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  breakdownHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  breakdownName: {
+    fontSize: '13px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  breakdownEmpty: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+    padding: '4px 0',
+  },
+  breakdownDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    fontSize: '11px',
+    color: 'var(--color-text-secondary)',
+    borderTop: '1px dashed var(--color-border)',
+    paddingTop: '6px',
+  },
+  breakdownSummaryTitle: {
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    marginBottom: '2px',
+    textTransform: 'uppercase',
+    fontSize: '9px',
+    letterSpacing: '0.5px',
+  },
+  breakdownProjLine: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    lineHeight: '1.4',
+  },
+  breakdownProjName: {
+    fontWeight: '500',
+  },
+  breakdownProjVal: {
+    fontFamily: 'monospace',
+    color: 'var(--color-text-muted)',
+  },
+  breakdownOverallSummary: {
+    borderTop: '1px solid var(--color-border)',
+    paddingTop: '4px',
+    marginTop: '2px',
+    fontSize: '11px',
+    color: 'var(--color-text-primary)',
   },
 };
