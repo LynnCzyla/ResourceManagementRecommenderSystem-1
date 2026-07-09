@@ -24,7 +24,7 @@ def test_full_pipeline():
     
     ocr = OCRProcessor()
     
-    file_path = r'D:\ResourceManagementRecommenderSystem\shared-data\uploads\scanned_WEA_Employee_Competency_Profile.pdf'
+    file_path = r'c:\xampp\htdocs\ResourceManagementRecommenderSystem\shared-data\uploads\RMRS Capstone_Reformatted_WEA (11).pdf'
     
     ocr_start = time.time()
     try:
