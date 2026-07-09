@@ -159,6 +159,44 @@ export default function PMProjectTrackingTab({ user }) {
       .slice(0, 3);
   };
 
+  // Format an ISO / date-like value into a short, readable label (e.g. "Aug 15, 2026")
+  const formatDeadline = (value) => {
+    if (!value) return null;
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return value; // fall back to raw string if unparsable
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const getDeadlineUrgency = (value) => {
+    if (!value) return 'neutral';
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return 'neutral';
+    const daysLeft = Math.ceil((d - new Date()) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0) return 'overdue';
+    if (daysLeft <= 7) return 'urgent';
+    if (daysLeft <= 30) return 'soon';
+    return 'neutral';
+  };
+
+  const getTaskProgress = (task) => {
+    if (task.progressLogs && task.progressLogs.length) {
+      return Math.min(100, task.progressLogs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0));
+    }
+    if (task.status === 'Completed' || task.status === 'Completed-Hidden') return 100;
+    if (task.status === 'In Progress') return 50;
+    return 0;
+  };
+
+  const handleMarkTaskDone = async (task) => {
+    try {
+      await updateTask(task.id, { status: 'Completed-Hidden' });
+      loadTasks(selectedProjectId);
+    } catch (err) {
+      console.error('Failed to mark task as done:', err);
+      alert(err.message || 'Failed to mark task as done');
+    }
+  };
+
   // Filter tasks for current selected project
   const currentProjectTasks = tasks.filter(t => t.projectId === selectedProjectId);
   const currentProjectEmployees = employees; // employees is already scoped to selectedProjectId (see loadEmployees)
@@ -167,6 +205,15 @@ export default function PMProjectTrackingTab({ user }) {
   const filteredProjects = projects.filter(p => 
     p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
   );
+
+  const deadlineUrgency = getDeadlineUrgency(selectedProject?.endDate);
+  const deadlineBadgeStyle = {
+    ...styles.deadlineBadge,
+    ...(deadlineUrgency === 'overdue' ? styles.deadlineBadgeOverdue :
+        deadlineUrgency === 'urgent' ? styles.deadlineBadgeUrgent :
+        deadlineUrgency === 'soon' ? styles.deadlineBadgeSoon :
+        styles.deadlineBadgeNeutral),
+  };
 
   return (
     <div style={styles.container}>
@@ -306,6 +353,14 @@ export default function PMProjectTrackingTab({ user }) {
                           </span>
                         </div>
                         <button style={styles.editTaskBtn} onClick={() => handleOpenEditTask(task)}>Edit Assignment</button>
+                        {getTaskProgress(task) >= 100 && (
+                          <button 
+                            style={styles.doneTaskBtn} 
+                            onClick={() => handleMarkTaskDone(task)}
+                          >
+                            Done
+                          </button>
+                        )}
                       </div>
                     ))
                   )}
@@ -321,7 +376,22 @@ export default function PMProjectTrackingTab({ user }) {
         <div style={styles.modalOverlay}>
           <div className="glass-card" style={styles.modalCard}>
             <div style={styles.modalHeader}>
-              <h2 style={{ margin: 0, fontSize: 20 }}>Assign Daily Task</h2>
+              <div style={styles.modalHeaderLeft}>
+                <h2 style={{ margin: 0, fontSize: 20 }}>Assign Daily Task</h2>
+                {selectedProject && (
+                  <span style={deadlineBadgeStyle}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                      <line x1="16" y1="2" x2="16" y2="6"></line>
+                      <line x1="8" y1="2" x2="8" y2="6"></line>
+                      <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                    {selectedProject.endDate
+                      ? `Project Deadline: ${formatDeadline(selectedProject.endDate)}`
+                      : 'No deadline set'}
+                  </span>
+                )}
+              </div>
               <button onClick={() => setShowCreateTaskModal(false)} style={styles.closeModalBtn}>&times;</button>
             </div>
             <form onSubmit={handleCreateTask} style={{ marginTop: 16 }}>
@@ -384,6 +454,7 @@ export default function PMProjectTrackingTab({ user }) {
                     value={newTaskData.dueDate} 
                     onChange={(e) => setNewTaskData({ ...newTaskData, dueDate: e.target.value })} 
                     style={styles.modalInput} 
+                    max={selectedProject?.endDate ? String(selectedProject.endDate).slice(0, 10) : undefined}
                     required
                   />
                 </div>
@@ -404,7 +475,22 @@ export default function PMProjectTrackingTab({ user }) {
         <div style={styles.modalOverlay}>
           <div className="glass-card" style={styles.modalCard}>
             <div style={styles.modalHeader}>
-              <h2 style={{ margin: 0, fontSize: 20 }}>Edit Assignment</h2>
+              <div style={styles.modalHeaderLeft}>
+                <h2 style={{ margin: 0, fontSize: 20 }}>Edit Assignment</h2>
+                {selectedProject && (
+                  <span style={deadlineBadgeStyle}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                      <line x1="16" y1="2" x2="16" y2="6"></line>
+                      <line x1="8" y1="2" x2="8" y2="6"></line>
+                      <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                    {selectedProject.endDate
+                      ? `Project Deadline: ${formatDeadline(selectedProject.endDate)}`
+                      : 'No deadline set'}
+                  </span>
+                )}
+              </div>
               <button onClick={() => setShowEditTaskModal(false)} style={styles.closeModalBtn}>&times;</button>
             </div>
             <form onSubmit={handleSaveTaskEdit} style={{ marginTop: 16 }}>
@@ -447,6 +533,7 @@ export default function PMProjectTrackingTab({ user }) {
                   value={editTaskData.dueDate}
                   onChange={(e) => setEditTaskData(prev => ({ ...prev, dueDate: e.target.value }))}
                   style={styles.modalInput}
+                  max={selectedProject?.endDate ? String(selectedProject.endDate).slice(0, 10) : undefined}
                   required
                 />
               </div>
@@ -756,6 +843,19 @@ const styles = {
     marginTop: '8px',
     transition: 'background-color 0.2s',
   },
+  doneTaskBtn: {
+    width: '100%',
+    border: 'none',
+    background: 'var(--color-success)',
+    color: '#ffffff',
+    padding: '10px 12px',
+    borderRadius: '10px',
+    fontSize: '12px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    marginTop: '6px',
+    transition: 'background-color 0.2s',
+  },
   suggestionPanel: {
     borderTop: '1px solid var(--color-border)',
     marginTop: '20px',
@@ -818,9 +918,42 @@ const styles = {
   modalHeader: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     borderBottom: '1px solid var(--color-border)',
     paddingBottom: '12px',
+    gap: '12px',
+  },
+  modalHeaderLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  deadlineBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '4px 10px',
+    borderRadius: '999px',
+    width: 'fit-content',
+    letterSpacing: '0.2px',
+  },
+  deadlineBadgeNeutral: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+  },
+  deadlineBadgeSoon: {
+    background: 'var(--color-warning-light)',
+    color: 'var(--color-warning)',
+  },
+  deadlineBadgeUrgent: {
+    background: 'var(--color-danger-light)',
+    color: 'var(--color-danger)',
+  },
+  deadlineBadgeOverdue: {
+    background: 'var(--color-danger)',
+    color: '#ffffff',
   },
   closeModalBtn: {
     background: 'transparent',
