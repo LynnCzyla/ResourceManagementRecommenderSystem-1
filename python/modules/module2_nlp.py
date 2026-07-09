@@ -379,7 +379,7 @@ class NLPProcessor:
         if not hasattr(self, 'learned_sections'):
             self.learned_sections = {}
         
-        # Common patterns that indicate section headers (learned, not hardcoded)
+        # Common patterns that indicate section headers (learned, not hardcoded)section_name
         header_patterns = re.compile(
             r'^([A-Z][A-Z\s&]+|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:.]?\s*$',
             re.MULTILINE
@@ -391,9 +391,14 @@ class NLPProcessor:
                 line = line.strip()
                 if not line:
                     continue
-                
-                # Check if this looks like a section header
-                if header_patterns.match(line):
+            
+            # ============ FIX: real headers in this doc are short (<=3 words). ============
+            # A 4+ word all-title-case line (e.g. "Basic Project Coordination Support")
+            # was being misread as a new header, silently dropping it as content.
+            is_short_enough_for_header = len(line.split()) <= 3
+            
+            # Check if this is a section header
+            if is_short_enough_for_header and header_pattern.match(line):
                     # Clean the section name
                     section = line.rstrip(':.').strip()
                     if len(section) > 2 and len(section) < 50:
@@ -732,6 +737,52 @@ class NLPProcessor:
     def _extract_candidates(self, text):
         """Extract potential skill candidates - learns from data dynamically"""
         candidates = set()
+        whole_phrase_candidates = set()
+
+        # ============ FIX: detect flat skill-list / CSV-style documents ============
+        # If most non-empty lines look like "Skill Name<sep>Category Label" (short,
+        # no terminal period, no prose), treat every line's first column as a
+        # whole skill candidate and skip resume-style section/bullet/NLP parsing
+        # entirely. This preserves every row instead of shredding it.
+        raw_lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
+        if raw_lines:
+            def _split_row(ln):
+                # Prefer tab or comma as the column separator; fall back to
+                # splitting on 2+ spaces (common in copy-pasted table text).
+                if '\t' in ln:
+                    return [p.strip() for p in ln.split('\t') if p.strip()]
+                if ',' in ln:
+                    return [p.strip() for p in ln.split(',') if p.strip()]
+                parts = re.split(r'\s{2,}', ln)
+                return [p.strip() for p in parts if p.strip()]
+
+            sample = raw_lines[:30]
+            row_like = sum(1 for ln in sample if len(_split_row(ln)) >= 2)
+            prose_like = sum(1 for ln in sample if ln.endswith('.') and len(ln.split()) > 8)
+            is_flat_skill_list = (
+                len(raw_lines) >= 10
+                and row_like / len(sample) >= 0.6
+                and prose_like == 0
+            )
+
+            if is_flat_skill_list:
+                for ln in raw_lines:
+                    cols = _split_row(ln)
+                    if not cols:
+                        continue
+                    skill_name = cols[0]
+                    cleaned = self._clean_candidate_text(skill_name)
+                    if cleaned and 2 < len(cleaned) < 100:
+                        whole_phrase_candidates.add(cleaned)
+                # Return immediately — every row captured whole, nothing shredded.
+                final_candidates = set()
+                for c in whole_phrase_candidates:
+                    words = c.split()
+                    if words and words[0].lower() in LEADING_CONNECTORS:
+                        continue
+                    final_candidates.add(c)
+                return final_candidates
+        # ==================================================================================
         
         # ============ STEP 1: Learn section names from this document ============
         # First, extract all section headers
@@ -816,6 +867,20 @@ class NLPProcessor:
                     score -= 2
                     break
             
+            # ============ FIX: hard-exclude known metadata/table sections ============
+            # These sections describe classification metadata or project tables,
+            # not skills — but generic substrings like 'competenc', 'document',
+            # 'management', 'control', 'experience', 'project' cause them to
+            # incorrectly score as skill sections.
+            METADATA_SECTION_MARKERS = (
+                'classification', 'primary role', 'functional area',
+                'specialization category', 'experience category',
+                'relevant project experience', 'project name'
+            )
+            if any(marker in section_lower for marker in METADATA_SECTION_MARKERS):
+                score -= 10
+            # ============================================================================
+
             scored_sections[section_name] = {
                 'content': content,
                 'score': score,
@@ -831,6 +896,28 @@ class NLPProcessor:
             
             # Extract bullet points
             bullet_items = re.findall(r'[•\-\*]\s*([^\n•\-\*]+)', content)
+
+            # ============ FIX: only fall back to plain lines for list-style sections ============
+            # A section is "list-style" if it's short, punchy lines (skills/tools),
+            # not flowing prose (Professional Summary). Guard on: no sentence-ending
+            # periods mid-content, and average line length typical of a skill label
+            # rather than a full sentence.
+            content_lines = [ln.strip() for ln in content.split('\n') if ln.strip()]
+            is_list_style = (
+                bool(content_lines)
+                and sum(1 for ln in content_lines if ln.endswith('.')) == 0
+                and sum(len(ln.split()) for ln in content_lines) / len(content_lines) <= 8
+            )
+
+            if is_list_style:
+                plain_lines = [
+                    ln for ln in content_lines
+                    if ln not in bullet_items and ln.lower() != section_name.lower()
+                ]
+                for clean in plain_lines:
+                    if 3 < len(clean) < 100 and not self._is_non_skill(clean):
+                        whole_phrase_candidates.add(clean)
+            # ==============================================================================================
             
             if bullet_items:
                 for item in bullet_items:
@@ -838,7 +925,7 @@ class NLPProcessor:
                     if 3 < len(clean) < 100 and clean:
                         # Filter out non-skills
                         if not self._is_non_skill(clean):
-                            candidates.add(clean)
+                            whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
             else:
                 # If no bullet points, split by newlines or commas
                 items = re.split(r'\n|,', content)
@@ -846,107 +933,118 @@ class NLPProcessor:
                     clean = item.strip()
                     if 3 < len(clean) < 100 and clean:
                         if not self._is_non_skill(clean):
-                            candidates.add(clean)
+                            whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
         
         # ============ STEP 4: Extract from bullet points anywhere ============
-        bullet_matches = re.findall(r'[•\-\*]\s*([A-Za-z0-9\s,&]+)', text)
+        bullet_matches = re.findall(r'[•\-\*][ \t]*([A-Za-z0-9 \t,&]+)', text)
         for match in bullet_matches:
             clean = match.strip()
             if 3 < len(clean) < 100 and clean:
                 if not self._is_non_skill(clean):
-                    candidates.add(clean)
+                    whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
         
         # ============ STEP 5: Extract noun phrases (spaCy) ============
-        doc = self.nlp(text)
+        # Exclude EVERY detected section (skill or not) from the remainder —
+        # not just skill sections. Table sections like "Relevant Project
+        # Experience" were leaking through because they were only excluded via
+        # a substring .replace() that silently fails when the row text doesn't
+        # match byte-for-byte. Rebuilding remainder_text from only the truly
+        # unclassified lines is more reliable than subtracting known content.
+        classified_content = set()
+        for section_data in scored_sections.values():
+            for line in section_data['content'].split('\n'):
+                classified_content.add(line.strip())
+
+        remainder_lines = [
+            ln for ln in text.split('\n')
+            if ln.strip() and ln.strip() not in classified_content
+        ]
+        remainder_text = '\n'.join(remainder_lines)
+        # ================================================================================
+
+        doc = self.nlp(remainder_text)
         for chunk in doc.noun_chunks:
             chunk_text = chunk.text.strip()
             if 3 < len(chunk_text) < 50:
-                if not self._is_non_skill(chunk_text):
+                if not self._is_non_skill(chunk_text): 
                     candidates.add(chunk_text)
         
         # ============ STEP 6: Extract from colon-separated lists ============
-        colon_pattern = re.compile(r'([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:]\s*([A-Za-z0-9\s,&]+)')
+        colon_pattern = re.compile(r'([A-Z][a-z]+[ \t]+[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+)*)[ \t]*[:][ \t]*([A-Za-z0-9 \t,&]+)')
+
+        # ============ FIX: structural PII guard ============
+        # These are field labels, not skills — reject regardless of learned
+        # feedback, since PII shouldn't require the model to be corrected first.
+        PII_LABELS = {
+            'full name', 'first name', 'last name', 'employee id',
+            'employee number', 'date hired', 'contact number',
+            'phone number', 'email address', 'immediate supervisor',
+            'position', 'department', 'employment status',
+            'primary role', 'functional area', 'experience category',
+            'specialization category', 'employment date'
+        }
         for match in colon_pattern.finditer(text):
+            label = match.group(1).strip().lower()
+            if label in PII_LABELS:
+                continue
             value = match.group(2).strip()
             if 3 < len(value) < 100 and value:
                 if not self._is_non_skill(value):
                     candidates.add(value)
 
-        # ============ Split long phrases ============
-        cleaned_candidates = set()
-        for candidate in candidates:
+        # ============ NEW: whole_phrase_candidates get light cleaning only, NO splitting ============
+        # These came from actual bullet/line items in the document, so the full
+        # phrase — however many words — is the real skill. Do not shred it.
+        for candidate in whole_phrase_candidates:
             cleaned = self._clean_candidate_text(candidate)
             if not cleaned or len(cleaned) < 3:
                 continue
 
-            # ============ FIX: extra safety net ============
-            # If cleaning still leaves a leading connector word, skip it -
-            # this is exactly what produced "And Archiving Systems", etc.
-            first_word = cleaned.split()[0].lower() if cleaned.split() else ''
-            if first_word in LEADING_CONNECTORS:
-                continue
-            # =================================================
-
             words = cleaned.split()
-            
-            # ============ FIX: Only keep short phrases ============
-            # Keep short phrases (2-4 words) ONLY
-            if 2 <= len(words) <= 4:
-                cleaned_candidates.add(cleaned)
-            else:
-                # Split long phrases at connectors
-                connectors = ['and', 'of', 'for', 'to', 'with', 'in', 'on', 'at']
-                current_phrase = []
-                
-                for word in words:
-                    current_phrase.append(word)
-                    
-                    # If we hit a connector, save the phrase BEFORE the connector
-                    # and start the NEXT phrase fresh (don't carry the connector over -
-                    # that was the bug that produced "And ..." fragments).
-                    if word.lower() in connectors and len(current_phrase) >= 2:
-                        phrase = ' '.join(current_phrase[:-1])
-                        # Only keep 2-4 word phrases
-                        if 2 <= len(phrase.split()) <= 4:
-                            cleaned_candidates.add(phrase)
-                        current_phrase = []  # ============ FIX: was [word] ============
-                    
-                    # If we have 3 words, save it
-                    if len(current_phrase) == 3:
-                        phrase = ' '.join(current_phrase)
-                        # Only keep 2-4 word phrases
-                        if 2 <= len(phrase.split()) <= 4:
-                            cleaned_candidates.add(phrase)
-                        current_phrase = current_phrase[1:]
+            if words and words[0].lower() in LEADING_CONNECTORS:
+                continue
+            if '/' in cleaned:
+                continue
+
+            candidates.add(cleaned)  # kept whole, regardless of word count
+        # ================================================================================================
 
         # ============ FIX: final pass - drop anything still starting with a connector ============
         final_candidates = set()
-        for c in cleaned_candidates:
+        for c in candidates:
             words = c.split()
             if not words:
                 continue
             if words[0].lower() in LEADING_CONNECTORS:
                 continue
+            if '/' in c:  # ← NEW: table/list separator artifact, never a real skill
+                continue
             final_candidates.add(c)
 
-        return final_candidates  # ← ONLY cleaned candidates, NO long phrases, NO leading connectors
+        return final_candidates  # ← ONLY cleaned candidates, NO long phrases, NO leading connectors, NO stray "/"
     
     def _clean_candidate_text(self, text):
         """Clean extracted candidate text"""
         if not text:
             return ""
 
+        # ============ NEW: remove parenthetical asides entirely, FIRST ============
+        # "(DMS)", "(Tracking Logs and Registers)" etc. are clarifying asides, not
+        # part of the skill name. Doing this before other cleanup prevents the
+        # old bug where a trailing ")" got stripped separately from its leading
+        # "(", leaving orphaned junk like "(Dms" after title-casing.
+        text = re.sub(r'\([^)]*\)', '', text)
+        text = re.sub(r'[()]', '', text)
+        # ============================================================================
+
         # ============ FIX: strip ANY leading/trailing junk characters ============
         # Old version only stripped '•', '-', '*' from the start, which is why
         # things like "(Tracking Logs" and "- Engineering Drawings" got through.
-        text = re.sub(r'^[\s•\-\*\(\)\[\]]+', '', text) 
-        text = re.sub(r'[\s•\-\*\(\)\[\]]+$', '', text)
+        # Also strips '/' now — table-separator artifacts like "/ Type Role".
+        text = re.sub(r'^[\s•\-\*\(\)\[\]/]+', '', text) 
+        text = re.sub(r'[\s•\-\*\(\)\[\]/]+$', '', text)
         # ===========================================================================
 
-        # Remove parentheses that wrap the whole text (in case any remain)
-        if text.startswith('(') and text.endswith(')'):
-            text = text[1:-1]
-        
         # Remove brackets
         if text.startswith('[') and text.endswith(']'):
             text = text[1:-1]
@@ -1068,7 +1166,11 @@ class NLPProcessor:
             'insert', 'position', 'department', 'supervisor', 'manager',
             'remarks', 'classification', 'category', 'functional area',
             'degree', 'course', 'institution', 'university', 'college',
-            'license', 'certificate', 'year', 'completed', 'obtained'
+            'license', 'certificate', 'year', 'completed', 'obtained',
+            # ============ NEW: structural/employment-status/geo fragments ============
+            'regular', 'part-time', 'full-time', 'contractual', 'probationary',
+            'form', 'the philippines', 'republic of', 'internal_cv',
+            # =============================================================================
         }
         
         # Check against learned patterns
@@ -1584,13 +1686,14 @@ class NLPProcessor:
     
     # ============ MAIN EXTRACTION METHODS ============
     
-    def extract_entities(self, text):
+    def extract_entities(self, text, structured_text=None):
         """Extract entities using learned patterns"""
         cleaned_text = self.clean_text(text)
         doc = self.nlp(cleaned_text)
         
-        # Extract candidates
-        candidates = self._extract_candidates(text)
+        # Extract candidates — prefer structured (line-preserved) text so section
+        # detection and noun-chunking don't span across unrelated fields.
+        candidates = self._extract_candidates(structured_text or text)
 
         valid_skills = []
         auto_approved = []
@@ -1647,9 +1750,9 @@ class NLPProcessor:
         
         return entities
     
-    def extract_skills_with_categories(self, text):
+    def extract_skills_with_categories(self, text, structured_text=None):
         """Extract skills with categories"""
-        entities = self.extract_entities(text)
+        entities = self.extract_entities(text, structured_text)
         skills = entities['skills']
         
         # Build categorized dictionary
@@ -1684,9 +1787,9 @@ class NLPProcessor:
             'documents_analyzed': self.stats['documents_analyzed']
         }
     
-    def prepare_db_records(self, employee_id, text):
+    def prepare_db_records(self, employee_id, text, structured_text=None):
         """Prepare database records"""
-        extracted = self.extract_skills_with_categories(text)
+        extracted = self.extract_skills_with_categories(text, structured_text)
         
         employee_update = {
             'employee_id': employee_id,
