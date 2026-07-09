@@ -126,73 +126,22 @@ class Runner:
             return {'success': False, 'error': str(e), 'traceback': error_trace}
     
     def learn_feedback(self, approved_skills, rejected_skills):
-        """Update learning from user feedback"""
+        """Update learning from user feedback — delegates to NLPProcessor's
+        own learn_from_feedback(), which is the method that actually populates
+        rejected_phrases / rejected_fragments / learned_skill_keywords and
+        retrains the ML classifier. Do not reimplement that logic here."""
         try:
             if self.nlp is None:
                 self.nlp = NLPProcessor()
             
-            if isinstance(approved_skills, str):
-                approved = json.loads(approved_skills)
-            else:
-                approved = approved_skills or []
-            
-            if isinstance(rejected_skills, str):
-                rejected = json.loads(rejected_skills)
-            else:
-                rejected = rejected_skills or []
+            approved = json.loads(approved_skills) if isinstance(approved_skills, str) else (approved_skills or [])
+            rejected = json.loads(rejected_skills) if isinstance(rejected_skills, str) else (rejected_skills or [])
             
             print(f"[LEARN] Processing {len(approved)} approved, {len(rejected)} rejected", file=sys.stderr)
             
-            # Update the skill dictionary
-            skills_learned = 0
-            for skill in approved:
-                if skill and skill not in self.nlp.learned_skills:
-                    self.nlp.learned_skills.add(skill)
-                    self.nlp.skill_dictionary[skill] = 'Other'
-                    skills_learned += 1
-                    print(f"[LEARN] Learned: {skill}", file=sys.stderr)
+            skills_learned = self.nlp.learn_from_feedback(approved, rejected)
             
-            # Mark rejected skills as non-skills
-            for skill in rejected:
-                if skill:
-                    self.nlp.non_skill_patterns[skill] += 1
-                    print(f"[LEARN] Marked as non-skill: {skill}", file=sys.stderr)
-            
-            # Log approved skills (APPEND to existing, don't replace!)
-            if 'approved' not in self.nlp.feedback_log:
-                self.nlp.feedback_log['approved'] = []
-            
-            for skill in approved:
-                if skill and skill not in self.nlp.feedback_log['approved']:
-                    self.nlp.feedback_log['approved'].append(skill)
-                    print(f"[FEEDBACK] Added approved: {skill}", file=sys.stderr)
-            
-            # Log rejected skills (APPEND to existing, don't replace!)
-            if 'rejected' not in self.nlp.feedback_log:
-                self.nlp.feedback_log['rejected'] = []
-            
-            for skill in rejected:
-                if skill and skill not in self.nlp.feedback_log['rejected']:
-                    self.nlp.feedback_log['rejected'].append(skill)
-                    print(f"[FEEDBACK] Added rejected: {skill}", file=sys.stderr)
-            
-            print(f"[LEARN] Feedback log totals: {len(self.nlp.feedback_log.get('approved', []))} approved, {len(self.nlp.feedback_log.get('rejected', []))} rejected", file=sys.stderr)
-            
-            # Increment documents_analyzed
-            self.nlp.stats['documents_analyzed'] = self.nlp.stats.get('documents_analyzed', 0) + 1
-            
-            # Auto-merge duplicates
-            merged = 0
-            if len(self.nlp.learned_skills) > 5:
-                print(f"[LEARN] Auto-merging duplicates...", file=sys.stderr)
-                merged = self.nlp.merge_synonyms_dynamically()
-                if merged > 0:
-                    print(f"[LEARN] Auto-merged {merged} duplicate skills!", file=sys.stderr)
-            
-            # Save the updated data
-            self.nlp._save_data()
-            
-            return {"success": True, "skills_learned": skills_learned, "merged": merged}
+            return {"success": True, "skills_learned": skills_learned}
             
         except Exception as e:
             print(f"[LEARN] Error: {str(e)}", file=sys.stderr)
