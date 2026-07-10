@@ -177,15 +177,16 @@ class SkillClassifier:
             # Train the model
             success = self.train(texts, labels)
             
-            # Update stats
+            # Update stats — merge into what train() already set (accuracy included),
+            # don't replace the dict or the accuracy computed during training is lost.
             if success:
-                self.training_stats = {
+                self.training_stats.update({
                     'total_samples': len(texts),
                     'skill_samples': sum(labels),
                     'not_skill_samples': len(labels) - sum(labels),
                     'source': 'supabase_feedback_training',
                     'trained_at': datetime.now().isoformat()
-                }
+                })
                 self._save_model()
             
             return success
