@@ -1,19 +1,21 @@
 // routes/Middleware/auth.js
 const path = require('path');
 const jwt = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
 const supabase = require(path.join(__dirname, '../../supabase'));
 
-console.log('✅ Auth middleware loaded, supabase:', !!supabase);
+const client = jwksClient({
+  jwksUri: `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`
+});
 
-// Check JWT secret
-const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-if (!jwtSecret) {
-  console.error('❌❌❌ SUPABASE_JWT_SECRET is NOT SET in .env file!');
-  console.error('❌❌❌ Please add it to backend/.env');
-} else {
-  console.log('✅ SUPABASE_JWT_SECRET is set (length:', jwtSecret.length, 'chars)');
-  console.log('✅ First 10 chars:', jwtSecret.substring(0, 10) + '...');
+function getKey(header, callback) {
+  client.getSigningKey(header.kid, (err, key) => {
+    if (err) return callback(err);
+    callback(null, key.getPublicKey());
+  });
 }
+
+console.log('✅ Auth middleware loaded, supabase:', !!supabase); // debug
 
 if (!process.env.SUPABASE_JWT_SECRET) {
   console.warn('⚠️ SUPABASE_JWT_SECRET is not set — add it to backend/.env (Supabase Dashboard → Settings → API → JWT Secret)');
@@ -58,14 +60,21 @@ const verifyToken = async (req, res, next) => {
 
     const token = authHeader.split(' ')[1];
 
-    // Verify token locally (no network call to Supabase = no egress per request)
+    // Verify token using Supabase's public JWKS (supports ES256/RS256 signing keys)
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
+      decoded = await new Promise((resolve, reject) => {
+        jwt.verify(token, getKey, { algorithms: ['ES256', 'RS256'] }, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
     } catch (err) {
+      console.error('❌ JWT Verify failed:', err.message);
       return res.status(401).json({
         success: false,
-        message: 'Invalid or expired token'
+        message: 'Invalid or expired token',
+        error: err.message
       });
     }
 
