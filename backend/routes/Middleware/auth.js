@@ -1,4 +1,4 @@
-// middleware/auth.js
+// routes/Middleware/auth.js
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
