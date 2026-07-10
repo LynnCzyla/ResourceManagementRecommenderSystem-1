@@ -81,9 +81,22 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         };
 
         fetchNotifications();
-        // Poll every 30 seconds for new notifications
-        const interval = setInterval(fetchNotifications, 30000);
-        return () => clearInterval(interval);
+        // Poll every 60 seconds, and only while the tab is actually visible
+        const interval = setInterval(() => {
+          if (document.visibilityState === 'visible') {
+            fetchNotifications();
+          }
+        }, 60000);
+
+        const handleVisibility = () => {
+          if (document.visibilityState === 'visible') fetchNotifications();
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+          clearInterval(interval);
+          document.removeEventListener('visibilitychange', handleVisibility);
+        };
       }, [user?.id]);
 
   useEffect(() => {
