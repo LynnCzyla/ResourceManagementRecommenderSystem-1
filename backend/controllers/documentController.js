@@ -5,18 +5,81 @@ const supabase = require('../supabase');
 const path = require('path');
 const fs = require('fs');
 
-// Helper: get full profile from token (includes name)
+// ============================================================
+// OPTIMIZATION 1: Cached Profile Helper
+// ============================================================
+const profileCache = new Map();
+
+// Helper: get full profile from token (includes name) with caching
 const getProfileFromToken = async (userId) => {
+    // Check cache
+    if (profileCache.has(userId)) {
+        console.log(`✅ Using cached profile for user ${userId}`);
+        return profileCache.get(userId);
+    }
+    
     const { data, error } = await supabase
         .from('profiles')
         .select('id, employee_id, first_name, middle_name, last_name')
         .eq('id', userId)
         .single();
-    return { data, error };
+    
+    const result = { data, error };
+    
+    // Cache if successful
+    if (!error && data) {
+        profileCache.set(userId, result);
+        // Clear cache after 5 minutes
+        setTimeout(() => profileCache.delete(userId), 5 * 60 * 1000);
+    }
+    
+    return result;
+};
+
+// ============================================================
+// OPTIMIZATION 2: Single Feedback History Query (Rank 1)
+// ============================================================
+const getFeedbackHistory = async (employeeId) => {
+    console.log(`🔍 Loading feedback history for employee: ${employeeId}`);
+    
+    const { data: feedbackRecords, error: feedbackError } = await supabase
+        .from('feedback_training')
+        .select('phrase, label')
+        .eq('employee_id', employeeId);
+    
+    if (feedbackError || !feedbackRecords) {
+        console.log(`   ℹ️  No feedback records found or error occurred`);
+        return { approved: [], rejected: [] };
+    }
+    
+    const normalizeSkill = (skill) => {
+        if (typeof skill === 'string') return skill.trim().toLowerCase();
+        if (typeof skill === 'object' && skill !== null) {
+            return String(skill.skill_name || skill.skill_tag || skill.skill || skill).trim().toLowerCase();
+        }
+        return String(skill).trim().toLowerCase();
+    };
+    
+    const approved = feedbackRecords
+        .filter(r => r.label === 'Skill')
+        .map(r => normalizeSkill(r.phrase))
+        .filter(Boolean);
+    
+    const rejected = feedbackRecords
+        .filter(r => r.label === 'Not Skill')
+        .map(r => normalizeSkill(r.phrase))
+        .filter(Boolean);
+    
+    console.log(`   ✅ Loaded: ${approved.length} approved, ${rejected.length} rejected skills from feedback_training`);
+    
+    // Deduplicate
+    return {
+        approved: [...new Set(approved)],
+        rejected: [...new Set(rejected)]
+    };
 };
 
 // Helper: best-effort guess at a person's name in the document, for DISPLAY only
-// (e.g. "Found: 'Carlo Reyes'" in a confirmation prompt). Never used for security decisions.
 const extractPossibleName = (rawText) => {
     const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 15);
 
@@ -28,7 +91,7 @@ const extractPossibleName = (rawText) => {
         }
     }
 
-    // Otherwise guess: a short line of 2-4 Title Case words (common resume/cert header pattern)
+    // Otherwise guess: a short line of 2-4 Title Case words
     const namePattern = /^([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,3})$/;
     for (const line of lines) {
         if (namePattern.test(line) && line.length < 50) {
@@ -46,18 +109,23 @@ const checkNameInContent = (rawText, firstName, middleName, lastName) => {
     const middle = (middleName || '').toUpperCase().trim();
     const last = (lastName || '').toUpperCase().trim();
 
-    // Check combinations — at minimum first + last must appear
     const hasFirst = first && text.includes(first);
     const hasLast = last && text.includes(last);
     const hasMiddle = middle && text.includes(middle);
 
-    // Must have at least first name AND last name in the document
     if (hasFirst && hasLast) return true;
-
-    // Also accept: last name + middle name (some certificates use middle initial)
     if (hasLast && hasMiddle) return true;
 
     return false;
+};
+
+// Helper: normalize skill names consistently
+const normalizeSkill = (skill) => {
+    if (typeof skill === 'string') return skill.trim();
+    if (typeof skill === 'object' && skill !== null) {
+        return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
+    }
+    return String(skill).trim();
 };
 
 exports.processDocument = async (req, res) => {
@@ -67,7 +135,7 @@ exports.processDocument = async (req, res) => {
 
         const { documentType } = req.body;
 
-        // ✅ STEP 1: Get logged-in employee from token (with full name)
+        // ✅ STEP 1: Get logged-in employee (with caching)
         const { data: profileData, error: profileError } = await getProfileFromToken(req.user.id);
         if (profileError || !profileData) {
             return res.status(403).json({ success: false, error: 'Profile not found for logged-in user' });
@@ -79,8 +147,16 @@ exports.processDocument = async (req, res) => {
         const middleName = profileData.middle_name || '';
         const lastName = profileData.last_name || '';
 
-        // FormData sends booleans as strings, so check for both
         const confirmMismatch = req.body.confirmMismatch === 'true' || req.body.confirmMismatch === true;
+
+        // ============================================================
+        // OPTIMIZATION 3: Load feedback history ONCE (Rank 1)
+        // ============================================================
+        const feedbackHistory = await getFeedbackHistory(employeeId);
+        const globalApproved = new Set(feedbackHistory.approved);
+        const globalRejected = new Set(feedbackHistory.rejected);
+
+        console.log(`📊 Global feedback: ${globalApproved.size} approved, ${globalRejected.size} rejected`);
 
         // ✅ LAYER 1 SECURITY: Check filename for EMP-XXX pattern
         const filename = file.originalname;
@@ -162,7 +238,6 @@ exports.processDocument = async (req, res) => {
         }
 
         // ✅ LAYER 3 SECURITY: Check employee name in document content
-        // Only applies when no EMP-XXX found (e.g. certificates)
         if (uniqueIds.length === 0 && rawText.length > 50) {
             console.log(`🔍 No EMP-ID found — checking name: ${firstName} ${lastName}`);
 
@@ -196,14 +271,6 @@ exports.processDocument = async (req, res) => {
         }
 
         // ============ NORMALIZE + SEPARATE AUTO-APPROVED VS NEEDS-REVIEW ============
-        const normalizeSkill = (skill) => {
-            if (typeof skill === 'string') return skill.trim();
-            if (typeof skill === 'object' && skill !== null) {
-                return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
-            }
-            return String(skill).trim();
-        };
-
         const autoApprovedNormalized = (result.nlp?.auto_approved || []).map(normalizeSkill);
         const needsReviewNormalized = (result.nlp?.needs_review || []).map(normalizeSkill);
         const autoApprovedSet = new Set(autoApprovedNormalized.map(s => s.toLowerCase()));
@@ -232,59 +299,22 @@ exports.processDocument = async (req, res) => {
         }
 
         let documentId;
-        let previouslyApproved = [];
-        let previouslyRejected = [];
 
         if (existingDoc) {
             documentId = existingDoc.id;
-            previouslyApproved = (existingDoc.approved_skills || []).map(normalizeSkill);
-            previouslyRejected = (existingDoc.rejected_skills || []).map(normalizeSkill);
-
-            // ============ METHOD 2: FALLBACK - Check feedback_training table directly ============
-            // This is the ACTUAL source of truth for what user approved/rejected
-            console.log(`🔍 [METHOD 2] FALLBACK - Loading from feedback_training table...`);
-            console.log(`   Looking for employee_id: ${employeeId}`);
             
-            // Get ALL feedback records (both approved and rejected)
-            const { data: feedbackRecords, error: feedbackError } = await supabase
-                .from('feedback_training')
-                .select('phrase, label')
-                .eq('employee_id', employeeId);
+            // ============================================================
+            // OPTIMIZATION 4: Use global feedback history (Rank 1)
+            // ============================================================
+            // Get document-specific previously approved/rejected
+            const docApproved = (existingDoc.approved_skills || []).map(normalizeSkill).map(s => s.toLowerCase());
+            const docRejected = (existingDoc.rejected_skills || []).map(normalizeSkill).map(s => s.toLowerCase());
+            
+            // Combine with global feedback history
+            const approvedSet = new Set([...globalApproved, ...docApproved]);
+            const rejectedSet = new Set([...globalRejected, ...docRejected]);
 
-            if (feedbackError) {
-                console.error(`   ❌ ERROR querying feedback_training:`, feedbackError);
-            } else if (feedbackRecords && feedbackRecords.length > 0) {
-                // Separate into approved and rejected
-                const feedbackApproved = feedbackRecords
-                    .filter(r => r.label === 'Skill')
-                    .map(r => normalizeSkill(r.phrase));
-                
-                const feedbackRejected = feedbackRecords
-                    .filter(r => r.label === 'Not Skill')
-                    .map(r => normalizeSkill(r.phrase));
-
-                previouslyApproved.push(...feedbackApproved);
-                previouslyRejected.push(...feedbackRejected);
-                
-                console.log(`   ✅ From feedback_training: ${feedbackApproved.length} approved, ${feedbackRejected.length} rejected`);
-                if (feedbackApproved.length > 0) console.log(`   Approved samples: ${feedbackApproved.slice(0, 3).join(', ')}`);
-                if (feedbackRejected.length > 0) console.log(`   Rejected samples: ${feedbackRejected.slice(0, 3).join(', ')}`);
-            } else {
-                console.log(`   ℹ️  No feedback records found in feedback_training`);
-            }
-
-            // Deduplicate
-            if (previouslyApproved.length > 0 || previouslyRejected.length > 0) {
-                previouslyApproved = [...new Set(previouslyApproved.map(s => s.toLowerCase()))];
-                previouslyRejected = [...new Set(previouslyRejected.map(s => s.toLowerCase()))];
-                
-                console.log(`📊 FINAL REJECTION HISTORY:`);
-                console.log(`   ✅ Approved (total unique): ${previouslyApproved.length}`);
-                console.log(`   ❌ Rejected (total unique): ${previouslyRejected.length}`);
-            }
-
-            const approvedSet = new Set(previouslyApproved.map(s => s.toLowerCase()));
-            const rejectedSet = new Set(previouslyRejected.map(s => s.toLowerCase()));
+            console.log(`📊 Rescan filtering: ${approvedSet.size} total approved, ${rejectedSet.size} total rejected`);
 
             finalNeedsReview = finalNeedsReview.filter(skill => {
                 const skillLower = skill.toLowerCase();
@@ -295,79 +325,42 @@ exports.processDocument = async (req, res) => {
                 return true;
             });
 
-            console.log(`📊 Rescan: ${previouslyApproved.length} previously approved, ${previouslyRejected.length} previously rejected, ${finalNeedsReview.length} left to review`);
-        } else {
-            // ✅ Brand new document — FIRST apply rejection filtering ============
-            console.log(`🔍 [NEW DOCUMENT] Applying rejection filtering...`);
+            console.log(`📊 Rescan: ${finalNeedsReview.length} skills left to review`);
             
-            let previouslyApprovedNew = [];
-            let previouslyRejectedNew = [];
-
-            // ============ METHOD 1: Check documents table ============
-            console.log(`🔍 [METHOD 1] Loading rejection history from previous documents...`);
+        } else {
+            // ============================================================
+            // OPTIMIZATION 5: Use global feedback for new documents (Rank 1)
+            // ============================================================
+            console.log(`🔍 [NEW DOCUMENT] Applying global feedback filtering...`);
+            
+            // Also get previous document feedback (documents table)
             const { data: allPreviousDocs, error: allDocsError } = await supabase
                 .from('documents')
-                .select('id, approved_skills, rejected_skills, file_name')
+                .select('approved_skills, rejected_skills')
                 .eq('employee_id', employeeId)
-                .eq('document_type', documentType)
-                .order('created_at', { ascending: false });
+                .eq('document_type', documentType);
 
-            if (!allDocsError && allPreviousDocs && allPreviousDocs.length > 0) {
+            const docApproved = new Set();
+            const docRejected = new Set();
+            
+            if (!allDocsError && allPreviousDocs) {
                 allPreviousDocs.forEach(doc => {
                     if (doc.approved_skills && Array.isArray(doc.approved_skills)) {
-                        previouslyApprovedNew.push(...doc.approved_skills.map(normalizeSkill));
+                        doc.approved_skills.map(normalizeSkill).forEach(s => docApproved.add(s.toLowerCase()));
                     }
                     if (doc.rejected_skills && Array.isArray(doc.rejected_skills)) {
-                        previouslyRejectedNew.push(...doc.rejected_skills.map(normalizeSkill));
+                        doc.rejected_skills.map(normalizeSkill).forEach(s => docRejected.add(s.toLowerCase()));
                     }
                 });
-                console.log(`   📝 Found ${allPreviousDocs.length} documents`);
-                console.log(`   ✅ From documents table: ${previouslyApprovedNew.length} approved, ${previouslyRejectedNew.length} rejected`);
-            } else {
-                console.log(`   ℹ️  No previous documents found`);
+                console.log(`   📝 Found ${allPreviousDocs.length} previous documents`);
+                console.log(`   ✅ From documents: ${docApproved.size} approved, ${docRejected.size} rejected`);
             }
 
-            // ============ METHOD 2: FALLBACK - Check feedback_training table directly ============
-            console.log(`🔍 [METHOD 2] FALLBACK - Loading from feedback_training table...`);
-            const { data: feedbackRecords, error: feedbackError } = await supabase
-                .from('feedback_training')
-                .select('phrase, label')
-                .eq('employee_id', employeeId);
+            // Combine all sources
+            const approvedSet = new Set([...globalApproved, ...docApproved]);
+            const rejectedSet = new Set([...globalRejected, ...docRejected]);
 
-            if (!feedbackError && feedbackRecords && feedbackRecords.length > 0) {
-                const feedbackApproved = feedbackRecords
-                    .filter(r => r.label === 'Skill')
-                    .map(r => normalizeSkill(r.phrase));
-                
-                const feedbackRejected = feedbackRecords
-                    .filter(r => r.label === 'Not Skill')
-                    .map(r => normalizeSkill(r.phrase));
-
-                previouslyApprovedNew.push(...feedbackApproved);
-                previouslyRejectedNew.push(...feedbackRejected);
-                
-                console.log(`   ✅ From feedback_training: ${feedbackApproved.length} approved, ${feedbackRejected.length} rejected`);
-                if (feedbackApproved.length > 0) console.log(`   Approved samples: ${feedbackApproved.slice(0, 3).join(', ')}`);
-                if (feedbackRejected.length > 0) console.log(`   Rejected samples: ${feedbackRejected.slice(0, 3).join(', ')}`);
-            } else {
-                console.log(`   ℹ️  No feedback records found in feedback_training`);
-            }
-
-            // ============ Deduplicate ============
-            if (previouslyApprovedNew.length > 0 || previouslyRejectedNew.length > 0) {
-                previouslyApprovedNew = [...new Set(previouslyApprovedNew.map(s => s.toLowerCase()))];
-                previouslyRejectedNew = [...new Set(previouslyRejectedNew.map(s => s.toLowerCase()))];
-                
-                console.log(`📊 FINAL REJECTION HISTORY:`);
-                console.log(`   ✅ Approved (total unique): ${previouslyApprovedNew.length}`);
-                console.log(`   ❌ Rejected (total unique): ${previouslyRejectedNew.length}`);
-            }
-
-            // ============ Filter out rejected, approved, name, and ID ============
-            const approvedSetNew = new Set(previouslyApprovedNew.map(s => s.toLowerCase()));
-            const rejectedSetNew = new Set(previouslyRejectedNew.map(s => s.toLowerCase()));
-            
-            // Also create a set of name/ID variations to exclude
+            // Name/ID exclusions
             const nameIdExclude = new Set([
                 employeeId.toLowerCase(),
                 firstName.toLowerCase(),
@@ -382,20 +375,17 @@ exports.processDocument = async (req, res) => {
             finalNeedsReview = finalNeedsReview.filter(skill => {
                 const skillLower = skill.toLowerCase();
                 
-                // Skip if it's the employee ID or name
                 if (nameIdExclude.has(skillLower)) {
                     console.log(`   ⏭️  Skipping "${skill}" (employee name/ID)`);
                     return false;
                 }
                 
-                // Skip if already approved
-                if (approvedSetNew.has(skillLower)) {
+                if (approvedSet.has(skillLower)) {
                     console.log(`   ⏭️  Skipping "${skill}" (already approved)`);
                     return false;
                 }
                 
-                // Skip if already rejected
-                if (rejectedSetNew.has(skillLower)) {
+                if (rejectedSet.has(skillLower)) {
                     console.log(`   ⏭️  Skipping "${skill}" (already REJECTED) ❌`);
                     return false;
                 }
@@ -444,11 +434,24 @@ exports.processDocument = async (req, res) => {
             documentId = documentData.id;
         }
 
+        // ============================================================
+        // OPTIMIZATION 6: Clean response - exclude large OCR text (Rank 2)
+        // ============================================================
+        // Only return essential OCR metadata, not the raw text
+        const ocrResponse = {
+            confidence: result.ocr?.confidence || 0,
+            word_count: result.ocr?.word_count || 0,
+            char_count: result.ocr?.char_count || 0,
+            method: result.ocr?.method || 'unknown',
+            processing_time: result.ocr?.processing_time || 0,
+            // ⚡ EXCLUDED: raw_text, cleaned_text (too large)
+        };
+
         return res.json({
             success: true,
             data: {
                 documentId,
-                ocr: result.ocr,
+                ocr: ocrResponse,  // ⚡ Reduced payload size
                 nlp: {
                     skills: result.nlp?.skills || [],
                     categorized_skills: result.nlp?.categorized_skills || [],
@@ -472,14 +475,29 @@ exports.processDocument = async (req, res) => {
     }
 };
 
+// ============================================================
+// OPTIMIZATION 7: Optimized getDocuments - Exclude large fields (Rank 2)
+// ============================================================
 exports.getDocuments = async (req, res) => {
     try {
         const { data: profileData, error } = await getProfileFromToken(req.user.id);
         if (error || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
 
+        // ⚡ SELECT only metadata, no large text fields
         const { data, error: fetchError } = await supabase
             .from('documents')
-            .select('*')
+            .select(`
+                id,
+                document_type,
+                file_name,
+                created_at,
+                processed_at,
+                feedback_pending,
+                skills_approved,
+                extraction_method,
+                ocr_confidence,
+                word_count
+            `)  // ⚡ EXCLUDED: raw_ocr_text, cleaned_ocr_text, extracted_skills
             .eq('employee_id', profileData.employee_id)
             .order('created_at', { ascending: false });
 
@@ -491,17 +509,70 @@ exports.getDocuments = async (req, res) => {
     }
 };
 
-exports.getCurrentProfile = async (req, res) => {
+// ============================================================
+// OPTIMIZATION 8: New endpoint for detailed document (Rank 2)
+// ============================================================
+exports.getDocumentDetails = async (req, res) => {
     try {
+        const { documentId } = req.params;
+        
         const { data: profileData, error } = await getProfileFromToken(req.user.id);
         if (error || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
 
-        res.json({ success: true, data: profileData });
+        const { data, error: fetchError } = await supabase
+            .from('documents')
+            .select('*')  // Full detail only when specifically requested
+            .eq('id', documentId)
+            .eq('employee_id', profileData.employee_id)
+            .single();
+
+        if (fetchError) throw fetchError;
+        res.json({ success: true, data });
+
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 };
 
+// ============================================================
+// OPTIMIZATION 9: Optimized getCurrentProfile (Rank 3)
+// ============================================================
+exports.getCurrentProfile = async (req, res) => {
+    try {
+        const { data: profileData, error } = await getProfileFromToken(req.user.id);
+        if (error || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
+
+        // ⚡ Return only what's needed
+        const { data, error: fetchError } = await supabase
+            .from('profiles')
+            .select(`
+                id,
+                employee_id,
+                first_name,
+                middle_name,
+                last_name,
+                email,
+                department,
+                role,
+                avatar_url,
+                contact_number,
+                location,
+                years_experience
+            `)  // ⚡ EXCLUDED: created_at, updated_at (not needed for current profile)
+            .eq('id', req.user.id)
+            .single();
+
+        if (fetchError) throw fetchError;
+        res.json({ success: true, data });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============================================================
+// OPTIMIZATION 10: Already optimized getProfile (Rank 3)
+// ============================================================
 exports.getProfile = async (req, res) => {
     try {
         const { employeeId } = req.params;
@@ -513,9 +584,25 @@ exports.getProfile = async (req, res) => {
             return res.status(403).json({ success: false, error: 'You can only view your own profile' });
         }
 
+        // Already optimized with explicit columns
         const { data, error } = await supabase
             .from('profiles')
-            .select('*')
+            .select(`
+                id,
+                employee_id,
+                first_name,
+                middle_name,
+                last_name,
+                email,
+                department,
+                role,
+                avatar_url,
+                contact_number,
+                location,
+                years_experience,
+                created_at,
+                updated_at
+            `)  
             .eq('employee_id', employeeId)
             .single();
 
@@ -527,6 +614,9 @@ exports.getProfile = async (req, res) => {
     }
 };
 
+// ============================================================
+// OPTIMIZATION 11: Optimized updateProfile (Rank 3)
+// ============================================================
 exports.updateProfile = async (req, res) => {
     try {
         const { data: ownProfile, error: ownError } = await getProfileFromToken(req.user.id);
@@ -549,7 +639,21 @@ exports.updateProfile = async (req, res) => {
             .from('profiles')
             .update(updateData)
             .eq('employee_id', employeeId)
-            .select()
+            .select(`
+                id,
+                employee_id,
+                first_name,
+                middle_name,
+                last_name,
+                email,
+                department,
+                role,
+                avatar_url,
+                contact_number,
+                location,
+                years_experience,
+                updated_at
+            `)  // ⚡ Only return what's needed
             .single();
 
         if (error) throw error;
@@ -560,19 +664,31 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
+// ============================================================
+// OPTIMIZATION 12: Optimized getSkills - Return flat structure (Rank 5)
+// ============================================================
 exports.getSkills = async (req, res) => {
     try {
         const { data: ownProfile, error } = await getProfileFromToken(req.user.id);
         if (error || !ownProfile) return res.json({ success: true, data: [] });
 
+        // ⚡ Only fetch skill names, not full objects
         const { data, error: skillsError } = await supabase
             .from('employee_skills')
-            .select(`id, skill_id, skills ( id, skill_name, created_at )`)
+            .select(`
+                skills (
+                    skill_name
+                )
+            `)  // ⚡ EXCLUDED: id, created_at (not needed)
             .eq('profile_id', ownProfile.id);
 
         if (skillsError) throw skillsError;
 
-        const skills = data.map(item => item.skills).filter(Boolean);
+        // Flatten to simple array of skill names
+        const skills = data
+            .map(item => item.skills?.skill_name)
+            .filter(Boolean);
+
         res.json({ success: true, data: skills });
 
     } catch (error) {
@@ -580,6 +696,9 @@ exports.getSkills = async (req, res) => {
     }
 };
 
+// ============================================================
+// OPTIMIZATION 13: getStats (unchanged - uses pythonService)
+// ============================================================
 exports.getStats = async (req, res) => {
     try {
         const stats = await pythonService.getStats();
