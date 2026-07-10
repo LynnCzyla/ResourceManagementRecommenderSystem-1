@@ -707,7 +707,7 @@ const handleCertUpload = async (e) => {
       {/* ═══════════════ TAB 1: CREDENTIALS ═══════════════ */}
       {mainTab === 'credentials' && (
         <div style={styles.grid}>
-          {/* Left: Resume Upload + Skills */}
+          {/* Left: Resume Upload */}
           <div style={styles.col}>
             <div className="glass-card" style={styles.card}>
               <h2 style={styles.sectionTitle}>Upload CV / Resume</h2>
@@ -775,7 +775,10 @@ const handleCertUpload = async (e) => {
                 </div>
               )}
             </div>
+          </div>
 
+          {/* Right: Skills Portfolio */}
+          <div style={styles.col}>
             <div className="glass-card" style={styles.card}>
               <h2 style={styles.sectionTitle}>Skills Portfolio</h2>
               <p style={styles.sectionSubtitle}>Verified skills extracted automatically from your resume profile.</p>
@@ -792,83 +795,6 @@ const handleCertUpload = async (e) => {
                         })
                       : <p style={styles.noSkills}>No skills extracted yet. Upload a resume to get started.</p>
                   }
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Certifications */}
-          <div style={styles.col}>
-            <div className="glass-card" style={styles.card}>
-              <h2 style={styles.sectionTitle}>Certifications</h2>
-              <p style={styles.sectionSubtitle}>Upload PDF/image to automatically parse and append certifications.</p>
-              <div style={{ ...styles.uploadZone, marginBottom: '20px' }}>
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                <label style={styles.uploadBtnLabel}>
-                  Upload Certificate
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleCertUpload} style={{ display: 'none' }} />
-                </label>
-                <span style={styles.uploadHelper}>Supported formats: PDF, PNG, JPG (Max 5MB)</span>
-              </div>
-
-              {certLoading && (
-                <div style={styles.ocrLoadingWrapper}>
-                  <div style={styles.ocrSpinner}></div>
-                  <span>Scanning document & extracting text tags...</span>
-                </div>
-              )}
-
-              {certOcrResult && (
-                <div style={styles.ocrResultCard}>
-                  <div style={styles.ocrResultHeader}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                        <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-                      </svg>
-                      {certOcrResult.fileName}
-                    </span>
-                    <span style={styles.ocrConfidence}>Confidence: {certOcrResult.confidence}</span>
-                  </div>
-                  <div style={styles.ocrSkillsExtracted}>
-                    <strong>Extracted Skills:</strong>
-                    <div style={styles.ocrSkillsList}>
-                        {Array.isArray(certOcrResult.extractedSkills) && certOcrResult.extractedSkills.map((sk, idx) => {
-                            // ============ FIX: Handle both string and object skills ============
-                            let skillName = sk;
-                            if (typeof sk === 'object' && sk !== null) {
-                                skillName = sk.skill_name || sk.skill_tag || sk.skill || String(sk);
-                            }
-                            return <span key={idx} style={styles.extractedTag}>+{String(skillName)}</span>;
-                        })}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={styles.certsList}>
-                {(employeeInfo?.certifications || []).length === 0 ? (
-                  <p style={styles.noCerts}>No certifications uploaded.</p>
-                ) : (
-                  (employeeInfo?.certifications || []).map(cert => (
-                    <div key={cert.id} style={styles.certItem}>
-                      <div style={styles.certMeta}>
-                        <h4 style={{ ...styles.certName, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
-                            <path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"/>
-                            <path d="M12 2a15.3 15.3 0 0 1 4 10H8a15.3 15.3 0 0 1 4-10z"/>
-                          </svg>
-                          {cert.name}
-                        </h4>
-                        <span style={styles.certIssuer}>{cert.issuer} | Issued: {cert.date} | Expiry: {cert.expiry}</span>
-                      </div>
-                      <button type="button" onClick={() => handleRemoveCert(cert.id)} style={styles.removeCertBtn}>Delete</button>
-                    </div>
-                  ))
-                )}
               </div>
             </div>
           </div>
@@ -1076,22 +1002,6 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: '8px',
   },
   noSkills: { fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center', padding: '20px 0' },
-
-  // ── Certifications ────────────────────────────────────────────────────────
-  certsList: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  noCerts: { fontSize: '12px', color: 'var(--color-text-muted)', textAlign: 'center', padding: '12px 0' },
-  certItem: {
-    padding: '12px', borderRadius: '6px', border: '1px solid var(--color-border)',
-    background: 'var(--color-bg-card-hover)', display: 'flex',
-    justifyContent: 'space-between', alignItems: 'center', textAlign: 'left',
-  },
-  certMeta: { display: 'flex', flexDirection: 'column' },
-  certName: { fontSize: '13px', fontWeight: '700', margin: 0 },
-  certIssuer: { fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' },
-  removeCertBtn: {
-    background: 'transparent', border: 'none', color: 'var(--color-danger)',
-    fontSize: '12px', fontWeight: '600', cursor: 'pointer',
-  },
 
   // ── Profile form ──────────────────────────────────────────────────────────
   profileForm: { display: 'flex', flexDirection: 'column', gap: '20px' },

@@ -51,14 +51,19 @@ class DocumentProcessor:
             print(f" Module 2: NLP processing for {doc_id}")
             
             # ============ FIX: Get full NLP result with auto_approved/needs_review ============
+            structured_text = ocr_result['ocr_data'].get('structured_ocr_text',
+                                                           ocr_result['ocr_data']['cleaned_ocr_text'])
             nlp_full_result = self.nlp.extract_skills_with_categories(
-                ocr_result['ocr_data']['cleaned_ocr_text']
+                ocr_result['ocr_data']['cleaned_ocr_text'],
+                structured_text  # ← NEW: line-preserved text for section/candidate detection
             )
             
-            # Prepare database records
+            # Prepare database records — reuse the result above instead of re-running
+            # extraction a second time (was calling NLP twice on the same document).
             nlp_result = self.nlp.prepare_db_records(
-                employee_id, 
-                ocr_result['ocr_data']['cleaned_ocr_text']
+                employee_id,
+                ocr_result['ocr_data']['cleaned_ocr_text'],
+                structured_text
             )
             
             log_entry['nlp_complete'] = datetime.now().isoformat()
