@@ -8,3 +8,4 @@ npm install multer
 npm install python-shell
 npm install uuid
 npm install pdfkit
+npm install jsonwebtoken
