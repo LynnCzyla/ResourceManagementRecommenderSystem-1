@@ -50,8 +50,22 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 15000);
-    return () => clearInterval(interval);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications();
+      }
+    }, 60000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') fetchNotifications();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [user?.id]);
 
   useEffect(() => {
