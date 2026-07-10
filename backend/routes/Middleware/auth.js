@@ -1,7 +1,19 @@
 // middleware/auth.js
 const path = require('path');
 const jwt = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
 const supabase = require(path.join(__dirname, '../../supabase'));
+
+const client = jwksClient({
+  jwksUri: `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`
+});
+
+function getKey(header, callback) {
+  client.getSigningKey(header.kid, (err, key) => {
+    if (err) return callback(err);
+    callback(null, key.getPublicKey());
+  });
+}
 
 console.log('✅ Auth middleware loaded, supabase:', !!supabase); // debug
 
@@ -48,14 +60,21 @@ const verifyToken = async (req, res, next) => {
 
     const token = authHeader.split(' ')[1];
 
-    // Verify token locally (no network call to Supabase = no egress per request)
+    // Verify token using Supabase's public JWKS (supports ES256/RS256 signing keys)
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
+      decoded = await new Promise((resolve, reject) => {
+        jwt.verify(token, getKey, { algorithms: ['ES256', 'RS256'] }, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
     } catch (err) {
+      console.error('❌ JWT Verify failed:', err.message);
       return res.status(401).json({
         success: false,
-        message: 'Invalid or expired token'
+        message: 'Invalid or expired token',
+        error: err.message
       });
     }
 
