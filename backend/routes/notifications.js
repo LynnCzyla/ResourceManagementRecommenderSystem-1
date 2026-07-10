@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
 
     const { data, error } = await supabase
       .from('notifications')
-      .select('*')
+      .select('id, type, text, read, created_at')
       .eq('recipient_id', userId)
       .order('created_at', { ascending: false })
       .limit(20);
