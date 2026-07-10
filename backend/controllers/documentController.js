@@ -149,14 +149,9 @@ exports.processDocument = async (req, res) => {
 
         const confirmMismatch = req.body.confirmMismatch === 'true' || req.body.confirmMismatch === true;
 
-        // ============================================================
-        // OPTIMIZATION 3: Load feedback history ONCE (Rank 1)
-        // ============================================================
+        // Load feedback history (for ML training, NOT for filtering)
         const feedbackHistory = await getFeedbackHistory(employeeId);
-        const globalApproved = new Set(feedbackHistory.approved);
-        const globalRejected = new Set(feedbackHistory.rejected);
-
-        console.log(`📊 Global feedback: ${globalApproved.size} approved, ${globalRejected.size} rejected`);
+        console.log(`📊 Global feedback: ${feedbackHistory.approved.length} approved, ${feedbackHistory.rejected.length} rejected`);
 
         // ✅ LAYER 1 SECURITY: Check filename for EMP-XXX pattern
         const filename = file.originalname;
@@ -168,7 +163,6 @@ exports.processDocument = async (req, res) => {
             if (fileEmployeeId !== employeeIdUpper) {
                 if (!confirmMismatch) {
                     console.log(`⚠️ Filename ID mismatch — expected "${employeeIdUpper}", filename says "${fileEmployeeId}". Awaiting user confirmation.`);
-
                     return res.status(409).json({
                         success: false,
                         error: 'DOCUMENT_MISMATCH',
@@ -219,7 +213,6 @@ exports.processDocument = async (req, res) => {
             if (foreignIds.length > 0) {
                 if (!confirmMismatch) {
                     console.log(`⚠️ Content ID mismatch — expected "${employeeIdUpper}", document mentions "${foreignIds.join(', ')}". Awaiting user confirmation.`);
-
                     return res.status(409).json({
                         success: false,
                         error: 'DOCUMENT_MISMATCH',
@@ -240,14 +233,12 @@ exports.processDocument = async (req, res) => {
         // ✅ LAYER 3 SECURITY: Check employee name in document content
         if (uniqueIds.length === 0 && rawText.length > 50) {
             console.log(`🔍 No EMP-ID found — checking name: ${firstName} ${lastName}`);
-
             const nameFound = checkNameInContent(rawText, firstName, middleName, lastName);
 
             if (!nameFound) {
                 if (!confirmMismatch) {
                     const foundName = extractPossibleName(rawText);
                     console.log(`⚠️ Name mismatch — expected "${firstName} ${lastName}", best guess "${foundName || 'none'}". Awaiting user confirmation.`);
-
                     return res.status(409).json({
                         success: false,
                         error: 'DOCUMENT_MISMATCH',
@@ -263,7 +254,6 @@ exports.processDocument = async (req, res) => {
                             : `This document doesn't appear to mention your name (${firstName} ${lastName}). The document doesn't appear to align with your information — are you sure you want to upload it?`
                     });
                 }
-
                 console.log(`⚠️ Name mismatch overridden by user (${employeeId}) — proceeding with upload`);
             } else {
                 console.log(`✅ Name check passed — "${firstName} ${lastName}" found in document`);
@@ -286,7 +276,7 @@ exports.processDocument = async (req, res) => {
         if (documentHash) {
             const { data: foundDoc } = await supabase
                 .from('documents')
-                .select('id, approved_skills, rejected_skills, file_name')
+                .select('id, approved_skills, rejected_skills, file_name, extracted_skills')
                 .eq('employee_id', employeeId)
                 .eq('document_type', documentType)
                 .eq('document_hash', documentHash)
@@ -301,99 +291,99 @@ exports.processDocument = async (req, res) => {
         let documentId;
 
         if (existingDoc) {
+            // ============================================================
+            // RESCAN: MERGE skills instead of filtering them out!
+            // ============================================================
             documentId = existingDoc.id;
             
-            // ============================================================
-            // OPTIMIZATION 4: Use global feedback history (Rank 1)
-            // ============================================================
-            // Get document-specific previously approved/rejected
-            const docApproved = (existingDoc.approved_skills || []).map(normalizeSkill).map(s => s.toLowerCase());
-            const docRejected = (existingDoc.rejected_skills || []).map(normalizeSkill).map(s => s.toLowerCase());
+            console.log(`🔄 Rescanning existing document - MERGING skills`);
             
-            // Combine with global feedback history
-            const approvedSet = new Set([...globalApproved, ...docApproved]);
-            const rejectedSet = new Set([...globalRejected, ...docRejected]);
+            // Get existing skills from the document
+            const existingSkills = (existingDoc.extracted_skills || []).map(normalizeSkill);
+            const existingApproved = new Set((existingDoc.approved_skills || []).map(s => s.toLowerCase()));
+            const existingRejected = new Set((existingDoc.rejected_skills || []).map(s => s.toLowerCase()));
+            
+            console.log(`   📊 Existing skills: ${existingSkills.length}`);
+            console.log(`   📊 New skills from this scan: ${finalNeedsReview.length}`);
+            
+            // MERGE: Keep existing skills + add any new ones
+            const mergedSkills = new Set([
+                ...existingSkills.map(s => s.toLowerCase()),
+                ...finalNeedsReview.map(s => s.toLowerCase())
+            ]);
+            
+            // Convert back to array
+            const allSkills = Array.from(mergedSkills);
+            
+            console.log(`   ✅ Merged total: ${allSkills.length} skills`);
+            
+            // Update the document with merged skills
+            const { data: updatedDoc, error: updateError } = await supabase
+                .from('documents')
+                .update({
+                    extracted_skills: allSkills,
+                    raw_ocr_text: result.ocr?.raw_text || '',
+                    cleaned_ocr_text: result.ocr?.cleaned_text || '',
+                    ocr_confidence: result.ocr?.confidence || 0,
+                    word_count: result.ocr?.word_count || 0,
+                    char_count: result.ocr?.char_count || 0,
+                    processed_at: new Date().toISOString(),
+                    // Keep existing approved/rejected skills
+                    approved_skills: existingDoc.approved_skills || [],
+                    rejected_skills: existingDoc.rejected_skills || []
+                })
+                .eq('id', documentId)
+                .select()
+                .single();
 
-            console.log(`📊 Rescan filtering: ${approvedSet.size} total approved, ${rejectedSet.size} total rejected`);
+            if (updateError) {
+                console.error('Error updating document:', updateError);
+                return res.status(500).json({
+                    success: false,
+                    error: updateError?.message || 'Failed to update document record'
+                });
+            }
 
-            finalNeedsReview = finalNeedsReview.filter(skill => {
+            // finalNeedsReview should be skills that are NOT yet approved/rejected
+            finalNeedsReview = allSkills.filter(skill => {
                 const skillLower = skill.toLowerCase();
-                if (approvedSet.has(skillLower) || rejectedSet.has(skillLower)) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already reviewed)`);
-                    return false;
-                }
-                return true;
+                return !existingApproved.has(skillLower) && !existingRejected.has(skillLower);
             });
 
-            console.log(`📊 Rescan: ${finalNeedsReview.length} skills left to review`);
+            console.log(`📊 Rescan complete: ${finalNeedsReview.length} new skills to review`);
             
         } else {
             // ============================================================
-            // OPTIMIZATION 5: Use global feedback for new documents (Rank 1)
+            // NEW DOCUMENT: NO GLOBAL FILTERING - KEEP ALL SKILLS!
             // ============================================================
-            console.log(`🔍 [NEW DOCUMENT] Applying global feedback filtering...`);
+            console.log(`🔍 [NEW DOCUMENT] Processing - keeping all skills for review`);
             
-            // Also get previous document feedback (documents table)
-            const { data: allPreviousDocs, error: allDocsError } = await supabase
-                .from('documents')
-                .select('approved_skills, rejected_skills')
-                .eq('employee_id', employeeId)
-                .eq('document_type', documentType);
-
-            const docApproved = new Set();
-            const docRejected = new Set();
-            
-            if (!allDocsError && allPreviousDocs) {
-                allPreviousDocs.forEach(doc => {
-                    if (doc.approved_skills && Array.isArray(doc.approved_skills)) {
-                        doc.approved_skills.map(normalizeSkill).forEach(s => docApproved.add(s.toLowerCase()));
-                    }
-                    if (doc.rejected_skills && Array.isArray(doc.rejected_skills)) {
-                        doc.rejected_skills.map(normalizeSkill).forEach(s => docRejected.add(s.toLowerCase()));
-                    }
-                });
-                console.log(`   📝 Found ${allPreviousDocs.length} previous documents`);
-                console.log(`   ✅ From documents: ${docApproved.size} approved, ${docRejected.size} rejected`);
-            }
-
-            // Combine all sources
-            const approvedSet = new Set([...globalApproved, ...docApproved]);
-            const rejectedSet = new Set([...globalRejected, ...docRejected]);
-
-            // Name/ID exclusions
+            // Only exclude employee name/ID (security, not skill filtering)
             const nameIdExclude = new Set([
                 employeeId.toLowerCase(),
                 firstName.toLowerCase(),
                 lastName.toLowerCase(),
                 `${firstName} ${lastName}`.toLowerCase(),
-                'emp-009 full name',
                 'full name',
                 'employee id',
                 'name'
             ]);
 
+            const originalCount = finalNeedsReview.length;
+            
             finalNeedsReview = finalNeedsReview.filter(skill => {
                 const skillLower = skill.toLowerCase();
                 
+                // Only filter employee name/ID
                 if (nameIdExclude.has(skillLower)) {
                     console.log(`   ⏭️  Skipping "${skill}" (employee name/ID)`);
                     return false;
                 }
                 
-                if (approvedSet.has(skillLower)) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already approved)`);
-                    return false;
-                }
-                
-                if (rejectedSet.has(skillLower)) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already REJECTED) ❌`);
-                    return false;
-                }
-                
-                return true;
+                return true;  // Keep ALL other skills!
             });
 
-            console.log(`📊 After filtering: ${finalNeedsReview.length} skills left to review`);
+            console.log(`📊 Before: ${originalCount} skills, After: ${finalNeedsReview.length} skills kept`);
 
             // ✅ Upload to storage and insert a fresh row
             const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
@@ -435,23 +425,21 @@ exports.processDocument = async (req, res) => {
         }
 
         // ============================================================
-        // OPTIMIZATION 6: Clean response - exclude large OCR text (Rank 2)
+        // Clean response - exclude large OCR text
         // ============================================================
-        // Only return essential OCR metadata, not the raw text
         const ocrResponse = {
             confidence: result.ocr?.confidence || 0,
             word_count: result.ocr?.word_count || 0,
             char_count: result.ocr?.char_count || 0,
             method: result.ocr?.method || 'unknown',
             processing_time: result.ocr?.processing_time || 0,
-            // ⚡ EXCLUDED: raw_text, cleaned_text (too large)
         };
 
         return res.json({
             success: true,
             data: {
                 documentId,
-                ocr: ocrResponse,  // ⚡ Reduced payload size
+                ocr: ocrResponse,
                 nlp: {
                     skills: result.nlp?.skills || [],
                     categorized_skills: result.nlp?.categorized_skills || [],
@@ -465,8 +453,8 @@ exports.processDocument = async (req, res) => {
                 pending_skills: finalNeedsReview
             },
             message: finalNeedsReview.length > 0
-                ? `Document processed. Please review ${finalNeedsReview.length} skill(s).`
-                : `Document processed. All skills already reviewed or auto-approved!`
+                ? `Document processed. Please review ${finalNeedsReview.length} new skill(s).`
+                : `Document processed. All skills already reviewed!`
         });
 
     } catch (error) {
