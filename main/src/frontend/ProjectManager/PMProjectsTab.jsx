@@ -405,19 +405,6 @@ export default function PMProjectsTab({ user }) {
                           <option value="Senior">Senior</option>
                         </select>
                       </div>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Assignment Type <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <select 
-                          value={res.assignment} 
-                          onChange={(e) => handleResourceChange(index, 'assignment', e.target.value)} 
-                          style={styles.modalSelect}
-                          required
-                        >
-                          <option value="Select Type" disabled>Select Type</option>
-                          <option value="Full-time">Full-time(40 hours/week)</option>
-                          <option value="Part-time">Part-time(20 hours/week)</option>
-                        </select>
-                      </div>
                     </div>
 
                     <div style={styles.formGroup}>
