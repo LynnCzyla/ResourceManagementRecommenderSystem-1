@@ -263,49 +263,202 @@ class NLPProcessor:
     
     def _save_knowledge_base_with_aliases(self):
         """
-        Save learned_skills.json with alias structure and rejection patterns.
+        Save learned_skills.json with alias structure - MERGE instead of OVERWRITE!
         """
         try:
+            # ============ LOAD EXISTING DATA FIRST ============
+            existing_data = {}
+            if os.path.exists(self.skill_db_path):
+                try:
+                    with open(self.skill_db_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                    print(f"[NLP] Loaded existing data with {len(existing_data.get('learned_skills', []))} skills")
+                except Exception as e:
+                    print(f"[NLP] Could not load existing data: {e}")
+            
             # Build alias structure from merge history if not already built
             if not self.skill_aliases and self.merge_history:
                 self._build_alias_structure_from_history()
             
+            # ============ MERGE: Combine existing + new ============
+            # 1. Merge learned_skills (UNION - keeps all!)
+            existing_skills = set(existing_data.get('learned_skills', []))
+            current_skills = set(self.learned_skills)
+            merged_skills = existing_skills | current_skills  # UNION operation
+            print(f"[NLP] Merging: {len(existing_skills)} existing + {len(current_skills)} current = {len(merged_skills)} total")
+            
+            # 2. Merge dictionary
+            existing_dict = existing_data.get('dictionary', {})
+            current_dict = self.skill_dictionary
+            merged_dict = {**existing_dict, **current_dict}
+            
+            # 3. Merge categories
+            existing_categories = existing_data.get('categories', {})
+            current_categories = self.skill_categories
+            merged_categories = {**existing_categories}
+            for category, skills in current_categories.items():
+                if category not in merged_categories:
+                    merged_categories[category] = []
+                for skill in skills:
+                    if skill not in merged_categories[category]:
+                        merged_categories[category].append(skill)
+            
+            # 4. Merge aliases
+            existing_aliases = existing_data.get('skill_aliases', {})
+            current_aliases = self.skill_aliases
+            merged_aliases = {**existing_aliases}
+            for master, aliases in current_aliases.items():
+                if master not in merged_aliases:
+                    merged_aliases[master] = []
+                for alias in aliases:
+                    if alias not in merged_aliases[master]:
+                        merged_aliases[master].append(alias)
+            
+            # 5. Merge alias_lookup
+            existing_lookup = existing_data.get('alias_lookup', {})
+            current_lookup = self.alias_lookup
+            merged_lookup = {**existing_lookup, **current_lookup}
+            
+            # 6. Merge rejection patterns
+            existing_rejected_phrases = existing_data.get('rejected_phrases', {})
+            current_rejected_phrases = dict(self.rejected_phrases)
+            merged_rejected_phrases = {**existing_rejected_phrases}
+            for phrase, count in current_rejected_phrases.items():
+                merged_rejected_phrases[phrase] = merged_rejected_phrases.get(phrase, 0) + count
+            
+            # 7. Merge feedback_log
+            existing_feedback = existing_data.get('feedback_log', {})
+            current_feedback = self.feedback_log
+            merged_feedback = {**existing_feedback}
+            for key in ['approved', 'rejected']:
+                if key in current_feedback:
+                    if key not in merged_feedback:
+                        merged_feedback[key] = []
+                    for item in current_feedback[key]:
+                        if item not in merged_feedback[key]:
+                            merged_feedback[key].append(item)
+            
+            # 8. Merge skill_importance
+            existing_importance = existing_data.get('skill_importance', {})
+            current_importance = self.skill_importance
+            merged_importance = {**existing_importance}
+            for skill, importance in current_importance.items():
+                merged_importance[skill] = merged_importance.get(skill, 0) + importance
+            
+            # 9. Merge merge_history
+            existing_history = existing_data.get('merge_history', [])
+            current_history = self.merge_history if hasattr(self, 'merge_history') else []
+            existing_entries = {(h.get('skill1'), h.get('skill2')): h for h in existing_history}
+            merged_history = existing_history.copy()
+            for entry in current_history:
+                key = (entry.get('skill1'), entry.get('skill2'))
+                if key not in existing_entries:
+                    merged_history.append(entry)
+                    existing_entries[key] = entry
+            
+            # 10. Merge other dictionaries
+            def merge_counter(existing, current, limit=1000):
+                merged = dict(existing)
+                for key, value in current.items():
+                    merged[key] = merged.get(key, 0) + value
+                # Sort and limit
+                sorted_items = sorted(merged.items(), key=lambda x: x[1], reverse=True)
+                return dict(sorted_items[:limit])
+            
+            merged_word_freq = merge_counter(
+                existing_data.get('word_frequency', {}),
+                dict(self.word_frequency),
+                1000
+            )
+            merged_phrase_freq = merge_counter(
+                existing_data.get('phrase_frequency', {}),
+                dict(self.phrase_frequency),
+                500
+            )
+            merged_skill_candidates = merge_counter(
+                existing_data.get('skill_candidates', {}),
+                dict(self.skill_candidates),
+                100
+            )
+            merged_skill_patterns = merge_counter(
+                existing_data.get('skill_patterns', {}),
+                dict(self.skill_patterns),
+                50
+            )
+            merged_non_skill_patterns = merge_counter(
+                existing_data.get('non_skill_patterns', {}),
+                dict(self.non_skill_patterns),
+                50
+            )
+            
+            # 11. Merge learned_sections
+            existing_sections = existing_data.get('learned_sections', {})
+            current_sections = self.learned_sections
+            merged_sections = {**existing_sections}
+            for section, count in current_sections.items():
+                merged_sections[section] = merged_sections.get(section, 0) + count
+            
+            # 12. Merge type_thresholds
+            existing_thresholds = existing_data.get('type_thresholds', {})
+            current_thresholds = self.type_thresholds
+            merged_thresholds = {**existing_thresholds, **current_thresholds}
+            
+            # 13. Merge learned_skill_keywords
+            existing_keywords = set(existing_data.get('learned_skill_keywords', []))
+            current_keywords = set(self.learned_skill_keywords)
+            merged_keywords = existing_keywords | current_keywords
+            
+            # ============ BUILD FINAL DATA ============
             data = {
-                'learned_skills': list(self.learned_skills),  # ALL skills (masters + aliases)
-                'dictionary': self.skill_dictionary,
-                'categories': self.skill_categories,
-                'skill_aliases': self.skill_aliases,      # master -> [aliases]
-                'alias_lookup': self.alias_lookup,        # alias -> master
-                # ============ NEW: Rejection patterns ============
-                'rejected_phrases': dict(self.rejected_phrases),
+                'learned_skills': list(merged_skills),  # ALL skills!
+                'dictionary': merged_dict,
+                'categories': merged_categories,
+                'skill_aliases': merged_aliases,
+                'alias_lookup': merged_lookup,
+                'rejected_phrases': merged_rejected_phrases,
                 'rejected_single_words': dict(self.rejected_single_words),
                 'rejected_names': dict(self.rejected_names),
                 'rejected_fragments': dict(self.rejected_fragments),
-                'learned_skill_keywords': list(self.learned_skill_keywords),
-                # ===================================================
-                'word_frequency': dict(self.word_frequency.most_common(1000)),
-                'phrase_frequency': dict(self.phrase_frequency.most_common(500)),
-                'skill_candidates': dict(self.skill_candidates.most_common(100)),
-                'skill_patterns': dict(self.skill_patterns.most_common(50)),
-                'non_skill_patterns': dict(self.non_skill_patterns.most_common(50)),
-                'documents_analyzed': self.stats['documents_analyzed'],
+                'learned_skill_keywords': list(merged_keywords),
+                'word_frequency': merged_word_freq,
+                'phrase_frequency': merged_phrase_freq,
+                'skill_candidates': merged_skill_candidates,
+                'skill_patterns': merged_skill_patterns,
+                'non_skill_patterns': merged_non_skill_patterns,
+                'documents_analyzed': max(
+                    existing_data.get('documents_analyzed', 0),
+                    self.stats['documents_analyzed']
+                ),
                 'last_updated': datetime.now().isoformat(),
-                'learned_sections': self.learned_sections,
-                'type_thresholds': self.type_thresholds,
-                'skill_importance': self.skill_importance,
-                'feedback_log': self.feedback_log,
-                'merge_history': self.merge_history[-1000:] if hasattr(self, 'merge_history') else []
+                'learned_sections': merged_sections,
+                'type_thresholds': merged_thresholds,
+                'skill_importance': merged_importance,
+                'feedback_log': merged_feedback,
+                'merge_history': merged_history[-1000:] if merged_history else []
             }
             
+            # ============ CREATE BACKUP BEFORE SAVING ============
+            if os.path.exists(self.skill_db_path):
+                backup_path = f"{self.skill_db_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                import shutil
+                shutil.copy2(self.skill_db_path, backup_path)
+                print(f"[BACKUP] Created: {backup_path}")
+            
+            # ============ SAVE WITH MERGED DATA ============
             with open(self.skill_db_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            print(f"[NLP] Saved knowledge base: {len(self.learned_skills)} skills, {len(self.skill_aliases)} alias groups")
-            print(f"[NLP] Saved {len(self.rejected_phrases)} rejected patterns")
+            print(f"[NLP] ✅ Saved knowledge base: {len(merged_skills)} skills")
+            print(f"[NLP]    Categories: {len(merged_categories)}")
+            print(f"[NLP]    Alias groups: {len(merged_aliases)}")
+            print(f"[NLP]    Rejected patterns: {len(merged_rejected_phrases)}")
+            print(f"[NLP]    Keywords: {len(merged_keywords)}")
             return True
             
         except Exception as e:
             print(f"[NLP] Error saving: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _build_alias_structure_from_history(self):
@@ -1501,13 +1654,11 @@ class NLPProcessor:
                     data = json.load(f)
                     existing_feedback = data.get('feedback_log', {})
                     if existing_feedback:
-                        # Merge existing approved
                         for skill in existing_feedback.get('approved', []):
                             if skill not in self.feedback_log.get('approved', []):
                                 if 'approved' not in self.feedback_log:
                                     self.feedback_log['approved'] = []
                                 self.feedback_log['approved'].append(skill)
-                        # Merge existing rejected
                         for skill in existing_feedback.get('rejected', []):
                             if skill not in self.feedback_log.get('rejected', []):
                                 if 'rejected' not in self.feedback_log:
@@ -1515,7 +1666,6 @@ class NLPProcessor:
                                 self.feedback_log['rejected'].append(skill)
             except Exception as e:
                 print(f"[FEEDBACK] Error loading existing: {e}")
-        # =============================================================
         
         # ============ APPEND NEW FEEDBACK ============
         for skill in approved_skills:
@@ -1544,39 +1694,38 @@ class NLPProcessor:
                 self.feedback_log['rejected'].append(skill)
                 self.skill_importance[skill] = self.skill_importance.get(skill, 0) - 1
 
-            # ============ LEARN FROM REJECTIONS - runs every time, not just once ============
+            # ============ LEARN FROM REJECTIONS ============
             skill_lower = skill.lower()
             words = skill_lower.split()
 
-            # 1. Track rejected phrases
             self.rejected_phrases[skill_lower] = self.rejected_phrases.get(skill_lower, 0) + 1
-            print(f"[LEARN] Learned rejected phrase: '{skill}' (count={self.rejected_phrases[skill_lower]})")
-
-            # 2. Track rejected single words
             if len(words) == 1 and len(skill_lower) > 2:
                 self.rejected_single_words[skill_lower] = self.rejected_single_words.get(skill_lower, 0) + 1
-
-            # 3. Track rejected name patterns
             if 2 <= len(words) <= 3 and all(w[0].isupper() for w in words if w):
                 self.rejected_names[skill_lower] = self.rejected_names.get(skill_lower, 0) + 1
-
-            # 4. Track rejected fragments
             connectors = ['and', 'for', 'with', 'to', 'of']
             if any(skill_lower.startswith(c) for c in connectors):
                 self.rejected_fragments[skill_lower] = self.rejected_fragments.get(skill_lower, 0) + 1
 
             print(f"[FEEDBACK] Rejected: {skill}")
-        # ================================================
         
-        # Add approved skills to learned_skills - store LOWERCASE so future
-        # candidate_lower lookups in _is_likely_skill() actually match.
+        # ✅ FIX: Don't overwrite categories for existing skills!
         for skill in approved_skills:
             skill_key = skill.strip().lower() if skill else ''
-            if skill_key and skill_key not in self.learned_skills:
-                self.learned_skills.add(skill_key)
-                self.skill_dictionary[skill_key] = 'Other'
-                print(f"[NLP] Added new skill to knowledge base: {skill_key}")
-                
+            if skill_key:
+                # Check if skill already exists
+                if skill_key not in self.learned_skills:
+                    # It's a NEW skill - add it
+                    self.learned_skills.add(skill_key)
+                    self.skill_dictionary[skill_key] = 'Other'
+                    print(f"[NLP] Added new skill: {skill_key}")
+                else:
+                    # It EXISTS - keep its existing category
+                    # But maybe update importance
+                    if skill_key not in self.skill_dictionary:
+                        self.skill_dictionary[skill_key] = 'Other'
+                    print(f"[NLP] Skill already exists: {skill_key} (keeping category: {self.skill_dictionary.get(skill_key, 'Other')})")
+                    
         # Re-run merge (this will create aliases, not delete)
         if len(self.learned_skills) > 5:
             merged = self.merge_synonyms_dynamically()
@@ -1588,7 +1737,6 @@ class NLPProcessor:
         if total_feedback >= 10:
             print(f"[ML] Training classifier with {total_feedback} feedback items...")
             try:
-                # Get all feedback for training
                 all_approved = self.feedback_log.get('approved', [])
                 all_rejected = self.feedback_log.get('rejected', [])
                 self.classifier.train_from_feedback(all_approved, all_rejected)
