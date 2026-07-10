@@ -51,6 +51,7 @@ function App() {
   const [sessionChecked, setSessionChecked] = useState(false);
 
   const userActivityRef = useRef(Date.now());
+  const lastActivityWriteRef = useRef(0);
   const logoutTimerRef = useRef(null);
   const forceLogoutTimerRef = useRef(null);
   const refreshTimeoutRef = useRef(null);
@@ -78,16 +79,25 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const THROTTLE_MS = 5000; // only record activity at most once every 5s
+
     const updateActivity = () => {
-      userActivityRef.current = Date.now();
+      const now = Date.now();
+      userActivityRef.current = now; // cheap, fine to do every time
+
+      // Throttle the expensive part (localStorage write + log) — mousemove/scroll
+      // can fire dozens of times per second and were blocking the main thread.
+      if (now - lastActivityWriteRef.current < THROTTLE_MS) return;
+      lastActivityWriteRef.current = now;
+
       const loginTime = localStorage.getItem('loginTime');
       if (loginTime) {
-        localStorage.setItem('loginTime', Date.now().toString());
+        localStorage.setItem('loginTime', now.toString());
         console.log('🔄 Activity detected - session extended');
       }
     };
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart', 'focus'];
-    events.forEach(event => window.addEventListener(event, updateActivity));
+    events.forEach(event => window.addEventListener(event, updateActivity, { passive: true }));
     return () => events.forEach(event => window.removeEventListener(event, updateActivity));
   }, []);
 
