@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 
+// ✅ Simple in-memory cache
+let cachedData = null;
+let cacheTimestamp = 0;
+const CACHE_DURATION = 60000; // 1 minute
 
 /**
  * GET /api/rm/employees
@@ -9,6 +13,15 @@ const supabase = require('../../supabase');
  */
 router.get('/employees', async (req, res) => {
   try {
+    // ✅ Check cache first
+    const now = Date.now();
+    if (cachedData && (now - cacheTimestamp) < CACHE_DURATION) {
+      console.log('👥 Returning CACHED employees data');
+      return res.json(cachedData);
+    }
+
+    console.log('👥 Fetching FRESH employees data...');
+
     const { data: profiles, error: profErr } = await supabase
       .from('profiles')
       .select(`
@@ -39,7 +52,7 @@ router.get('/employees', async (req, res) => {
         .map((d) => ({
           id: d.id,
           name: d.file_name,
-          issuer: 'WEA Records', // documents table has no "issuer" column
+          issuer: 'WEA Records',
           date: d.created_at ? d.created_at.split('T')[0] : '',
         }));
 
@@ -52,13 +65,17 @@ router.get('/employees', async (req, res) => {
         department: p.departments?.department_name || 'Unassigned',
         skills: (p.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
         certifications,
-        // "isVerified" has no backing column yet — see the migration note in this
-        // file's header / the README. Defaults to false until you add the column.
         isVerified: p.is_verified || false,
       };
     });
 
-    res.json({ success: true, employees });
+    const responseData = { success: true, employees };
+
+    // ✅ Store in cache
+    cachedData = responseData;
+    cacheTimestamp = Date.now();
+
+    res.json(responseData);
   } catch (err) {
     console.error('RM employees list error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -68,10 +85,6 @@ router.get('/employees', async (req, res) => {
 /**
  * PATCH /api/rm/employees/:id/verify
  * Toggles a "verified profile" flag.
- *
- * ⚠️ Requires a new column, since profiles has nothing like this today:
- *   ALTER TABLE public.profiles ADD COLUMN is_verified boolean NOT NULL DEFAULT false;
- * Remove/ignore this route until that column exists, or the update below will fail.
  */
 router.patch('/employees/:id/verify', async (req, res) => {
   const { id } = req.params;
@@ -92,6 +105,10 @@ router.patch('/employees/:id/verify', async (req, res) => {
       .single();
     if (error) throw error;
 
+    // ✅ Clear cache when data changes
+    cachedData = null;
+    cacheTimestamp = 0;
+
     res.json({ success: true, employee: data });
   } catch (err) {
     console.error('RM verify toggle error:', err);
@@ -101,8 +118,7 @@ router.patch('/employees/:id/verify', async (req, res) => {
 
 /**
  * POST /api/rm/employees/:id/assign
- * body: { projectId, startDate, role, notes }
- * Assigns an employee to a project from the directory card's modal.
+ * Assigns an employee to a project
  */
 router.post('/employees/:id/assign', async (req, res) => {
   const { id } = req.params;
@@ -127,8 +143,6 @@ router.post('/employees/:id/assign', async (req, res) => {
       .single();
     if (error) throw error;
 
-    // project_assignments has no "notes" column — logging it to audit_logs instead
-    // so it isn't silently dropped.
     if (notes) {
       await supabase.from('audit_logs').insert({
         user_id: req.user?.id || null,
@@ -137,6 +151,10 @@ router.post('/employees/:id/assign', async (req, res) => {
         log_description: `Assigned profile ${id} to project ${projectId}. Notes: ${notes}`,
       });
     }
+
+    // ✅ Clear cache when data changes
+    cachedData = null;
+    cacheTimestamp = 0;
 
     res.json({ success: true, assignment: data });
   } catch (err) {
