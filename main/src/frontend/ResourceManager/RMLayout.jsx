@@ -7,6 +7,37 @@ import RMProjectsTab from './RMProjectsTab';
 import RMRequestsTab from './RMRequestsTab';
 import ProfileSettings from '../ProfileSettings';
 
+// Isolated so its 1s tick doesn't re-render RMLayout (and therefore every tab) every second.
+function PHClock() {
+  const [phTime, setPhTime] = useState('');
+
+  useEffect(() => {
+    const options = {
+      timeZone: 'Asia/Manila',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    };
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    const updateTime = () => setPhTime(formatter.format(new Date()));
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div style={styles.phClockContainer}>
+      <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
+      <span style={styles.phClockTime}>{phTime}</span>
+    </div>
+  );
+}
+
 export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('rmActiveTab') || 'dashboard';
@@ -22,29 +53,6 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
     { id: 1, type: 'request', text: 'New resource allocation request for Substation Lighting design.', time: '5 mins ago', read: false },
     { id: 2, type: 'ocr', text: 'New employee Javier Santos profile parsed with 97.8% OCR confidence.', time: '2 hours ago', read: true }
   ]);
-  const [phTime, setPhTime] = useState('');
-
-  useEffect(() => {
-    const updateTime = () => {
-      const options = {
-        timeZone: 'Asia/Manila',
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-      };
-      const formatter = new Intl.DateTimeFormat('en-US', options);
-      setPhTime(formatter.format(new Date()));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   useEffect(() => {
     setCurrentAvatar(user.avatar);
   }, [user.avatar]);
@@ -87,20 +95,15 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
     }
   };
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <RMDashboardTab />;
-      case 'directory':
-        return <RMEmployeeDirectoryTab />;
-      case 'projects':
-        return <RMProjectsTab />;
-      case 'requests':
-        return <RMRequestsTab />;
-      default:
-        return <RMDashboardTab />;
-    }
-  };
+  // All four tabs stay mounted the whole session; we just show/hide with CSS.
+  // Switching tabs used to unmount the previous tab and mount a fresh one,
+  // which meant every single click refired fetchEmployees()/fetchProjects()/etc.
+  // from scratch and showed the "Loading…" screen again, even if you'd already
+  // loaded that tab seconds earlier. Now each tab loads once and stays cached
+  // in memory until the RM Portal session ends (logout / refresh).
+  const tabVisibility = (tabName) => ({
+    display: activeTab === tabName ? 'contents' : 'none',
+  });
 
   return (
     <div style={styles.layoutWrapper}>
@@ -222,10 +225,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
         <header style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Resource Manager Portal</span>
-            <div style={styles.phClockContainer}>
-              <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
-              <span style={styles.phClockTime}>{phTime}</span>
-            </div>
+            <PHClock />
           </div>
           
           <div style={styles.topbarRight}>
@@ -349,7 +349,10 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
         </header>
 
         <main style={styles.contentContainer}>
-          {renderContent()}
+          <div style={tabVisibility('dashboard')}><RMDashboardTab /></div>
+          <div style={tabVisibility('directory')}><RMEmployeeDirectoryTab /></div>
+          <div style={tabVisibility('projects')}><RMProjectsTab /></div>
+          <div style={tabVisibility('requests')}><RMRequestsTab /></div>
         </main>
       </div>
 
