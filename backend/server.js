@@ -23,11 +23,14 @@ const notificationsRouter = require('./routes/notifications');
 const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
-app.use('/api/rm', require('./routes/ResourceManager/Dashboard'));
-app.use('/api/rm', require('./routes/ResourceManager/Index'));
-app.use('/api/rm', require('./routes/ResourceManager/Projects'));
-app.use('/api/rm', require('./routes/ResourceManager/Employees'));
 
+// ✅ RM Routes - ONLY use the Index router (which applies middleware to all)
+app.use('/api/rm', require('./routes/ResourceManager/Index'));
+
+// ❌ REMOVE these individual route registrations:
+// app.use('/api/rm', require('./routes/ResourceManager/Dashboard'));
+// app.use('/api/rm', require('./routes/ResourceManager/Projects'));
+// app.use('/api/rm', require('./routes/ResourceManager/Employees'));
 
 app.use('/api/pm', require('./routes/ProjectManager'));
 
@@ -62,7 +65,6 @@ app.use((err, req, res, next) => {
     });
 });
 
-// ✅ ONE app.listen ONLY — at the very bottom
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

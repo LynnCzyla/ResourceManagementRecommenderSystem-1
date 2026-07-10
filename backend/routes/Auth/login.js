@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const jwt = require('jsonwebtoken'); // 👈 ADD THIS
 
 // Get max login attempts from system settings
 const getMaxLoginAttempts = async () => {
@@ -23,28 +24,28 @@ const getMaxLoginAttempts = async () => {
 
 // Get user ID from email
 const getUserIdByEmail = async (email) => {
-    try {
-      const { data, error } = await supabase.auth.admin.listUsers();
-  
-      if (error) {
-        console.error(error);
-        return null;
-      }
-  
-      const user = data.users.find(
-        u => u.email?.toLowerCase() === email.toLowerCase()
-      );
-  
-      console.log("Searching:", email);
-      console.log("Found:", user?.email);
-      console.log("Found ID:", user?.id);
-  
-      return user?.id || null;
-    } catch (error) {
+  try {
+    const { data, error } = await supabase.auth.admin.listUsers();
+
+    if (error) {
       console.error(error);
       return null;
     }
-  };
+
+    const user = data.users.find(
+      u => u.email?.toLowerCase() === email.toLowerCase()
+    );
+
+    console.log("Searching:", email);
+    console.log("Found:", user?.email);
+    console.log("Found ID:", user?.id);
+
+    return user?.id || null;
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
+};
 
 // Check if user is Admin
 const isUserAdmin = async (userId) => {
@@ -103,7 +104,7 @@ const lockUserAccount = async (userId) => {
     if (error) throw error;
     console.log(`🔒 Account locked for user: ${userId}`);
 
-    // ✅ Get the locked user's name
+    // Get the locked user's name
     const { data: lockedUser } = await supabase
       .from('profiles')
       .select('first_name, last_name')
@@ -114,7 +115,7 @@ const lockUserAccount = async (userId) => {
       ? `${lockedUser.first_name} ${lockedUser.last_name}`
       : 'A user';
 
-    // ✅ Notify the locked user
+    // Notify the locked user
     await supabase.from('notifications').insert({
       recipient_id: userId,
       type: 'alert',
@@ -122,7 +123,7 @@ const lockUserAccount = async (userId) => {
       read: false
     });
 
-    // ✅ Notify all admins
+    // Notify all admins
     const { data: admins } = await supabase
       .from('profiles')
       .select('id')
@@ -140,12 +141,12 @@ const lockUserAccount = async (userId) => {
       console.log(`✅ Notified ${admins.length} admin(s) about account lock`);
     }
 
-      await logAuditEvent({
-        userId,
-        action: 'Account Locked',
-        systemCategory: 'Auth',
-        logDescription: `Account auto-locked after repeated failed login attempts for user ${userId}`,
-      });
+    await logAuditEvent({
+      userId,
+      action: 'Account Locked',
+      systemCategory: 'Auth',
+      logDescription: `Account auto-locked after repeated failed login attempts for user ${userId}`,
+    });
 
     return { success: true, data };
   } catch (error) {
@@ -242,6 +243,7 @@ const resetLoginAttempts = async (userId) => {
   }
 };
 
+// 👇 ROUTE HANDLER
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -263,11 +265,6 @@ router.post('/login', async (req, res) => {
     console.log("Email:", email);
     console.log("User ID:", userId);
 
-    const attempts = await getUserLoginAttempts(userId);
-
-    console.log("Attempts Record:", attempts);
-    console.log("================================");
-    
     if (!userId) {
       console.log(`❌ User not found: ${email}`);
       return res.status(401).json({
@@ -275,6 +272,10 @@ router.post('/login', async (req, res) => {
         message: 'Invalid credentials'
       });
     }
+
+    const attempts = await getUserLoginAttempts(userId);
+    console.log("Attempts Record:", attempts);
+    console.log("================================");
 
     // Step 2: Check if user is Admin
     const isAdmin = await isUserAdmin(userId);
@@ -387,10 +388,22 @@ router.post('/login', async (req, res) => {
       logDescription: `User signed in successfully: ${email}`,
     });
 
+    // 👇 CREATE CUSTOM JWT TOKEN WITH ROLE
+    const token = jwt.sign(
+      { 
+        sub: authData.user.id,
+        email: authData.user.email,
+        role: userRole
+      },
+      process.env.SUPABASE_JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
     res.status(200).json({
       success: true,
       message: 'Login successful',
       user,
+      token: token,  // 👈 SEND CUSTOM TOKEN
       session: authData.session
     });
 
