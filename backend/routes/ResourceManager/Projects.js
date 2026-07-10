@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken } = require('../Middleware/auth');
 const supabase = require('../../supabase');
 
-router.use(verifyToken);
 
 /**
  * GET /api/rm/projects

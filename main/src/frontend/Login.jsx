@@ -143,22 +143,29 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
 
       if (data.success) {
         // Login successful
-        const { user, session } = data;
+        const { user, session, token } = data;  // ← ADD 'token' here
         
         const loginTime = Date.now();
         localStorage.setItem('user', JSON.stringify(user));
-        if (session?.access_token) {
+        
+        // 👇 USE THE CUSTOM TOKEN FROM YOUR BACKEND
+        if (token) {
+          localStorage.setItem('token', token);  // ← Use the custom token
+        } else if (session?.access_token) {
+          // Fallback to Supabase token if custom token isn't available
           localStorage.setItem('token', session.access_token);
         }
+        
         localStorage.setItem('loginTime', loginTime.toString());
-
+      
+        // Keep Supabase session for other features
         if (session?.access_token && session?.refresh_token) {
           await supabase.auth.setSession({
             access_token: session.access_token,
             refresh_token: session.refresh_token
           });
         }
-
+      
         window.history.replaceState(null, '', '/dashboard');
         onLogin(user);
       } else {
