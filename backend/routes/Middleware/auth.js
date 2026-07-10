@@ -1,9 +1,19 @@
-// middleware/auth.js
+// routes/Middleware/auth.js
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const supabase = require(path.join(__dirname, '../../supabase'));
 
-console.log('✅ Auth middleware loaded, supabase:', !!supabase); // debug
+console.log('✅ Auth middleware loaded, supabase:', !!supabase);
+
+// Check JWT secret
+const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+if (!jwtSecret) {
+  console.error('❌❌❌ SUPABASE_JWT_SECRET is NOT SET in .env file!');
+  console.error('❌❌❌ Please add it to backend/.env');
+} else {
+  console.log('✅ SUPABASE_JWT_SECRET is set (length:', jwtSecret.length, 'chars)');
+  console.log('✅ First 10 chars:', jwtSecret.substring(0, 10) + '...');
+}
 
 if (!process.env.SUPABASE_JWT_SECRET) {
   console.warn('⚠️ SUPABASE_JWT_SECRET is not set — add it to backend/.env (Supabase Dashboard → Settings → API → JWT Secret)');
