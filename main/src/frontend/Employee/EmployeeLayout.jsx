@@ -6,6 +6,38 @@ import EmployeeDashboardTab from './EmployeeDashboardTab';
 import EmployeeProfileTab from './EmployeeProfileTab';
 import EmployeeAssignmentsTab from './EmployeeAssignmentsTab';
 
+// Isolated so its 1s tick doesn't re-render EmployeeLayout (and therefore
+// whichever tab is showing) every second.
+function PHClock() {
+  const [phTime, setPhTime] = useState('');
+
+  useEffect(() => {
+    const options = {
+      timeZone: 'Asia/Manila',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    };
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    const updateTime = () => setPhTime(formatter.format(new Date()));
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div style={styles.phClockContainer}>
+      <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
+      <span style={styles.phClockTime}>{phTime}</span>
+    </div>
+  );
+}
+
 export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('employeeActiveTab') || 'dashboard';
@@ -13,28 +45,6 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [phTime, setPhTime] = useState('');
-
-  useEffect(() => {
-    const updateTime = () => {
-      const options = {
-        timeZone: 'Asia/Manila',
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-      };
-      const formatter = new Intl.DateTimeFormat('en-US', options);
-      setPhTime(formatter.format(new Date()));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const fetchNotifications = async () => {
     if (!user?.id) return;
@@ -141,18 +151,16 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
     }
   };
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <EmployeeDashboardTab user={user} />;
-      case 'profile':
-        return <EmployeeProfileTab user={user} />;
-      case 'assignments':
-        return <EmployeeAssignmentsTab user={user} />;
-      default:
-        return <EmployeeDashboardTab user={user} />;
-    }
-  };
+  // All three tabs stay mounted the whole session; we just show/hide with CSS.
+  // Switching tabs used to unmount the previous tab and mount a fresh one via
+  // renderContent(), which meant every click re-triggered each tab's own
+  // fetch effects from scratch and showed a "Loading…" state again even if
+  // you'd already loaded that tab seconds earlier. Now each tab loads once
+  // and stays cached in memory until the Employee Portal session ends
+  // (logout / refresh).
+  const tabVisibility = (tabName) => ({
+    display: activeTab === tabName ? 'contents' : 'none',
+  });
 
   return (
     <div style={styles.layoutWrapper}>
@@ -252,10 +260,7 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
         <header style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Employee Portal</span>
-            <div style={styles.phClockContainer}>
-              <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
-              <span style={styles.phClockTime}>{phTime}</span>
-            </div>
+            <PHClock />
           </div>
           
           <div style={styles.topbarRight}>
@@ -363,7 +368,9 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
         </header>
 
         <main style={styles.contentContainer}>
-          {renderContent()}
+          <div style={tabVisibility('dashboard')}><EmployeeDashboardTab user={user} /></div>
+          <div style={tabVisibility('profile')}><EmployeeProfileTab user={user} /></div>
+          <div style={tabVisibility('assignments')}><EmployeeAssignmentsTab user={user} /></div>
         </main>
       </div>
     </div>
