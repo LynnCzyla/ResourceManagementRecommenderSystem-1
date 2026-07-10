@@ -1,8 +1,13 @@
 // middleware/auth.js
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const supabase = require(path.join(__dirname, '../../supabase'));
 
 console.log('✅ Auth middleware loaded, supabase:', !!supabase); // debug
+
+if (!process.env.SUPABASE_JWT_SECRET) {
+  console.warn('⚠️ SUPABASE_JWT_SECRET is not set — add it to backend/.env (Supabase Dashboard → Settings → API → JWT Secret)');
+}
 
 let cachedSessionTimeout = 30;
 let lastFetchTime = 0;
@@ -42,16 +47,19 @@ const verifyToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // Verify token with Supabase
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    
-    if (error || !user) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid or expired token' 
+
+    // Verify token locally (no network call to Supabase = no egress per request)
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
       });
     }
+
+    const user = { id: decoded.sub, email: decoded.email, role: decoded.role };
 
     // Check session timeout from database
     const sessionTimeout = await getSessionTimeout();
