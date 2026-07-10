@@ -175,7 +175,6 @@ export default function PMResourceRequestsTab({ user }) {
               <tr style={styles.trHeader}>
                 <th style={styles.th}>Project</th>
                 <th style={styles.th}>Required Skills</th>
-                <th style={styles.th}>Timeline</th>
                 <th style={styles.th}>Duration</th>
                 <th style={styles.th}>Dates</th>
                 <th style={styles.th}>Qty</th>
@@ -185,7 +184,7 @@ export default function PMResourceRequestsTab({ user }) {
             <tbody>
               {requests.length === 0 ? (
                 <tr>
-                  <td colSpan="7" style={styles.emptyRow}>No resource requests found.</td>
+                  <td colSpan="6" style={styles.emptyRow}>No resource requests found.</td>
                 </tr>
               ) : (
                 filteredRequests.map(req => (
@@ -198,7 +197,6 @@ export default function PMResourceRequestsTab({ user }) {
                         ))}
                       </div>
                     </td>
-                    <td style={styles.td}>{req.timeline}</td>
                     <td style={styles.td}>{req.duration}</td>
                     <td style={styles.td}>{req.startDate} to {req.endDate}</td>
                     <td style={{ ...styles.td, fontWeight: '600' }}>{req.quantity}</td>
@@ -302,18 +300,6 @@ export default function PMResourceRequestsTab({ user }) {
                           <option value="Junior">Junior</option>
                           <option value="Intermediate">Intermediate</option>
                           <option value="Senior">Senior</option>
-                        </select>
-                      </div>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Assignment Type <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <select 
-                          value={res.assignment} 
-                          onChange={(e) => handleResourceChange(index, 'assignment', e.target.value)} 
-                          style={styles.modalSelect}
-                          required
-                        >
-                          <option value="Full-Time (40 hours/week)">Full-Time (40 hours/week)</option>
-                          <option value="Part-Time (20 hours/week)">Part-Time (20 hours/week)</option>
                         </select>
                       </div>
                     </div>
