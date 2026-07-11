@@ -94,7 +94,17 @@ function transformProject(row) {
 }
 
 const PROJECT_SELECT = `
-  *,
+  id,
+  project_name,
+  project_description,
+  team_size,
+  duration_days,
+  start_date,
+  end_date,
+  priority,
+  status,
+  created_by,
+  created_at,
   project_resource_requirements (
     id,
     quantity_needed,
@@ -112,12 +122,36 @@ const PROJECT_SELECT = `
   )
 `;
 
+// Simple in-memory cache for the list endpoint — avoids re-running the
+// expensive nested join on every tab switch. 30s TTL keeps data fresh
+// enough while killing repeat-fetch egress.
+const projectsCache = new Map();
+const CACHE_TTL_MS = 30 * 1000;
+
+function getCached(key) {
+  const entry = projectsCache.get(key);
+  if (entry && Date.now() - entry.time < CACHE_TTL_MS) return entry.data;
+  return null;
+}
+function setCached(key, data) {
+  projectsCache.set(key, { data, time: Date.now() });
+}
+function invalidateProjectsCache() {
+  projectsCache.clear();
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────
 
 // GET /api/pm/projects — list all projects (optional ?createdBy=<profileId>)
 router.get('/projects', async (req, res) => {
   try {
     const { createdBy } = req.query;
+    const cacheKey = `list:${createdBy || 'all'}`;
+
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.status(200).json({ success: true, data: cached, cached: true });
+    }
 
     let query = supabase
       .from('projects')
@@ -129,7 +163,10 @@ router.get('/projects', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    res.status(200).json({ success: true, data: (data || []).map(transformProject) });
+    const transformed = (data || []).map(transformProject);
+    setCached(cacheKey, transformed);
+
+    res.status(200).json({ success: true, data: transformed });
   } catch (error) {
     console.error('Error fetching projects:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch projects', error: error.message });
@@ -238,6 +275,8 @@ router.post('/projects', async (req, res) => {
       logDescription: `Created project ${name}`,
     });
 
+    invalidateProjectsCache();
+
     res.status(201).json({
       success: true,
       message: 'Project created successfully',
@@ -282,6 +321,7 @@ router.put('/projects/:id', async (req, res) => {
       logDescription: `Updated project ${id}`,
     });
 
+    invalidateProjectsCache();
     res.status(200).json({ success: true, message: 'Project updated successfully', data });
   } catch (error) {
     console.error('Error updating project:', error);
@@ -315,6 +355,7 @@ router.patch('/projects/:id/status', async (req, res) => {
       logDescription: `Updated project ${id} status to ${status}`,
     });
 
+    invalidateProjectsCache();
     res.status(200).json({ success: true, message: 'Project status updated', data });
   } catch (error) {
     console.error('Error updating project status:', error);
@@ -335,6 +376,7 @@ router.delete('/projects/:id', async (req, res) => {
       systemCategory: 'Resource Management',
       logDescription: `Deleted project ${id}`,
     });
+    invalidateProjectsCache();
     res.status(200).json({ success: true, message: 'Project deleted successfully' });
   } catch (error) {
     console.error('Error deleting project:', error);
