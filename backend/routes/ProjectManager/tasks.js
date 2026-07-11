@@ -25,42 +25,67 @@ function transformTask(row) {
 // created_by = creator), so the embed must specify which FK to follow —
 // otherwise PostgREST throws an ambiguous-relationship error (PGRST201).
 const TASK_SELECT = `
-  *,
+  id,
+  project_id,
+  profile_id,
+  title,
+  description,
+  priority,
+  status,
+  due_date,
+  progress_logs,
+  created_by,
+  created_at,
   projects ( id, project_name ),
   profiles!project_tasks_profile_id_fkey ( id, first_name, last_name )
 `;
+
+// Simple in-memory cache for the list endpoint — same rationale as
+// ProjectManager/projects.js: this query gets hit on every tab switch
+// with a deep join, so cache it briefly instead of re-querying each time.
+const tasksCache = new Map();
+const TASKS_CACHE_TTL_MS = 30 * 1000;
+
+function getTasksCached(key) {
+  const entry = tasksCache.get(key);
+  if (entry && Date.now() - entry.time < TASKS_CACHE_TTL_MS) return entry.data;
+  return null;
+}
+function setTasksCached(key, data) {
+  tasksCache.set(key, { data, time: Date.now() });
+}
+function invalidateTasksCache() {
+  tasksCache.clear();
+}
 
 // GET /api/pm/tasks — list tasks (optional ?projectId= / ?employeeId= filters)
 router.get('/tasks', async (req, res) => {
   try {
     const { projectId, employeeId } = req.query;
-    console.log('📋 PM Tasks endpoint called:', { projectId, employeeId });
+    const cacheKey = `list:${projectId || ''}:${employeeId || ''}`;
+
+    const cached = getTasksCached(cacheKey);
+    if (cached) {
+      return res.status(200).json({ success: true, data: cached, cached: true });
+    }
 
     let query = supabase
       .from('project_tasks')
       .select(TASK_SELECT)
       .order('created_at', { ascending: false });
 
-    if (projectId) {
-      console.log('  → Filtering by projectId:', projectId);
-      query = query.eq('project_id', projectId);
-    }
-    if (employeeId) {
-      console.log('  → Filtering by employeeId:', employeeId);
-      query = query.eq('profile_id', employeeId);
-    }
+    if (projectId) query = query.eq('project_id', projectId);
+    if (employeeId) query = query.eq('profile_id', employeeId);
 
     const { data, error } = await query;
-    console.log('  → Query result:', { count: data?.length, hasError: !!error });
-    if (error) {
-      console.error('  ✗ Supabase error:', JSON.stringify(error, null, 2));
-      throw error;
-    }
+    if (error) throw error;
 
-    console.log('  ✓ Returning', data.length, 'tasks');
-    res.status(200).json({ success: true, data: (data || []).map(transformTask) });
+    const transformed = (data || []).map(transformTask);
+    setTasksCached(cacheKey, transformed);
+
+    res.status(200).json({ success: true, data: transformed });
   } catch (error) {
-    console.error('❌ Error fetching tasks:', error);
+    console.error('Error fetching tasks:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch tasks', error: error.message });
   }
 });
@@ -114,6 +139,7 @@ router.post('/tasks', async (req, res) => {
       logDescription: `Assigned task "${title}" to employee ${employeeId}`,
     });
 
+    invalidateTasksCache();
     res.status(201).json({ success: true, message: 'Task created successfully', data: transformTask(data) });
   } catch (error) {
     console.error('Error creating task:', error);
@@ -152,6 +178,7 @@ router.put('/tasks/:id', async (req, res) => {
       logDescription: `Updated task ${id}`,
     });
 
+    invalidateTasksCache();
     res.status(200).json({ success: true, message: 'Task updated successfully', data: transformTask(data) });
   } catch (error) {
     console.error('Error updating task:', error);
@@ -221,6 +248,7 @@ router.post('/tasks/:id/progress', async (req, res) => {
       logDescription: `Logged ${newLog.percentage}% progress for task ${id}`,
     });
 
+    invalidateTasksCache();
     res.status(200).json({ success: true, message: 'Progress logged successfully', data: transformTask(data) });
   } catch (error) {
     console.error('Error logging task progress:', error);
@@ -241,6 +269,7 @@ router.delete('/tasks/:id', async (req, res) => {
       systemCategory: 'Resource Management',
       logDescription: `Deleted task ${id}`,
     });
+    invalidateTasksCache();
     res.status(200).json({ success: true, message: 'Task deleted successfully' });
   } catch (error) {
     console.error('Error deleting task:', error);
