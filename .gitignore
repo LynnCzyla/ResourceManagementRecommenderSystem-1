@@ -7,6 +7,8 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json  # Optional - but many teams commit this
 yarn.lock         # Optional - but many teams commit this
+shared-data/skills_db/learned_skills.json
+shared-data/skills_db/learned_skills.json.backup_*
 
 # ============ Python ============
 python/venv/
