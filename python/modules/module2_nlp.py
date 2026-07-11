@@ -443,6 +443,22 @@ class NLPProcessor:
                 import shutil
                 shutil.copy2(self.skill_db_path, backup_path)
                 print(f"[BACKUP] Created: {backup_path}")
+
+                # ============ KEEP ONLY THE 5 MOST RECENT BACKUPS ============
+                import glob
+                backup_dir = os.path.dirname(self.skill_db_path)
+                base_name = os.path.basename(self.skill_db_path)
+                all_backups = sorted(
+                    glob.glob(os.path.join(backup_dir, f"{base_name}.backup_*")),
+                    key=os.path.getmtime,
+                    reverse=True
+                )
+                for old_backup in all_backups[5:]:
+                    try:
+                        os.remove(old_backup)
+                        print(f"[BACKUP] Removed old backup: {old_backup}")
+                    except Exception as e:
+                        print(f"[BACKUP] Could not remove {old_backup}: {e}")
             
             # ============ SAVE WITH MERGED DATA ============
             with open(self.skill_db_path, 'w', encoding='utf-8') as f:
