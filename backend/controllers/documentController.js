@@ -5,14 +5,31 @@ const supabase = require('../supabase');
 const path = require('path');
 const fs = require('fs');
 
-// Helper: get full profile from token (includes name)
+// ============================================================
+// Cached Profile Helper — avoids re-querying `profiles` on every
+// request within a 5-minute window for the same user.
+// ============================================================
+const profileCache = new Map();
+
 const getProfileFromToken = async (userId) => {
+    if (profileCache.has(userId)) {
+        return profileCache.get(userId);
+    }
+
     const { data, error } = await supabase
         .from('profiles')
         .select('id, employee_id, first_name, middle_name, last_name')
         .eq('id', userId)
         .single();
-    return { data, error };
+
+    const result = { data, error };
+
+    if (!error && data) {
+        profileCache.set(userId, result);
+        setTimeout(() => profileCache.delete(userId), 5 * 60 * 1000);
+    }
+
+    return result;
 };
 
 // Helper: best-effort guess at a person's name in the document, for DISPLAY only
@@ -60,6 +77,15 @@ const checkNameInContent = (rawText, firstName, middleName, lastName) => {
     return false;
 };
 
+// Helper: normalize skill names consistently (module-level, used everywhere below)
+const normalizeSkill = (skill) => {
+    if (typeof skill === 'string') return skill.trim();
+    if (typeof skill === 'object' && skill !== null) {
+        return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
+    }
+    return String(skill).trim();
+};
+
 exports.processDocument = async (req, res) => {
     try {
         const file = req.file;
@@ -67,7 +93,7 @@ exports.processDocument = async (req, res) => {
 
         const { documentType } = req.body;
 
-        // ✅ STEP 1: Get logged-in employee from token (with full name)
+        // ✅ STEP 1: Get logged-in employee from token (with full name, cached)
         const { data: profileData, error: profileError } = await getProfileFromToken(req.user.id);
         if (profileError || !profileData) {
             return res.status(403).json({ success: false, error: 'Profile not found for logged-in user' });
@@ -81,10 +107,6 @@ exports.processDocument = async (req, res) => {
 
         // FormData sends booleans as strings, so check for both
         const confirmMismatch = req.body.confirmMismatch === 'true' || req.body.confirmMismatch === true;
-
-        // Load feedback history (for ML training, NOT for filtering)
-        const feedbackHistory = await getFeedbackHistory(employeeId);
-        console.log(`📊 Global feedback: ${feedbackHistory.approved.length} approved, ${feedbackHistory.rejected.length} rejected`);
 
         // ✅ LAYER 1 SECURITY: Check filename for EMP-XXX pattern
         const filename = file.originalname;
@@ -195,14 +217,6 @@ exports.processDocument = async (req, res) => {
         }
 
         // ============ NORMALIZE + SEPARATE AUTO-APPROVED VS NEEDS-REVIEW ============
-        const normalizeSkill = (skill) => {
-            if (typeof skill === 'string') return skill.trim();
-            if (typeof skill === 'object' && skill !== null) {
-                return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
-            }
-            return String(skill).trim();
-        };
-
         const autoApprovedNormalized = (result.nlp?.auto_approved || []).map(normalizeSkill);
         const needsReviewNormalized = (result.nlp?.needs_review || []).map(normalizeSkill);
         const autoApprovedSet = new Set(autoApprovedNormalized.map(s => s.toLowerCase()));
@@ -231,38 +245,39 @@ exports.processDocument = async (req, res) => {
         }
 
         let documentId;
-        let previouslyApproved = [];
-        let previouslyRejected = [];
 
         if (existingDoc) {
             // ============================================================
-            // RESCAN: MERGE skills instead of filtering them out!
+            // RESCAN: MERGE skills instead of filtering them out.
+            // Preserves original casing (e.g. "React" not "react") using
+            // a lowercase-key -> original-case-value map, instead of a
+            // plain lowercased Set.
             // ============================================================
             documentId = existingDoc.id;
-            
+
             console.log(`🔄 Rescanning existing document - MERGING skills`);
-            
-            // Get existing skills from the document
+
             const existingSkills = (existingDoc.extracted_skills || []).map(normalizeSkill);
             const existingApproved = new Set((existingDoc.approved_skills || []).map(s => s.toLowerCase()));
             const existingRejected = new Set((existingDoc.rejected_skills || []).map(s => s.toLowerCase()));
-            
+
             console.log(`   📊 Existing skills: ${existingSkills.length}`);
             console.log(`   📊 New skills from this scan: ${finalNeedsReview.length}`);
-            
-            // MERGE: Keep existing skills + add any new ones
-            const mergedSkills = new Set([
-                ...existingSkills.map(s => s.toLowerCase()),
-                ...finalNeedsReview.map(s => s.toLowerCase())
-            ]);
-            
-            // Convert back to array
-            const allSkills = Array.from(mergedSkills);
-            
+
+            // Map lowercase key -> first-seen original casing, so display
+            // casing survives the merge/dedupe step.
+            const mergedSkillsMap = new Map();
+            for (const s of [...existingSkills, ...finalNeedsReview]) {
+                const key = s.toLowerCase();
+                if (!mergedSkillsMap.has(key)) mergedSkillsMap.set(key, s);
+            }
+
+            const allSkills = Array.from(mergedSkillsMap.values()); // properly-cased, deduped
+
             console.log(`   ✅ Merged total: ${allSkills.length} skills`);
-            
+
             // Update the document with merged skills
-            const { data: updatedDoc, error: updateError } = await supabase
+            const { error: updateError } = await supabase
                 .from('documents')
                 .update({
                     extracted_skills: allSkills,
@@ -272,7 +287,7 @@ exports.processDocument = async (req, res) => {
                     word_count: result.ocr?.word_count || 0,
                     char_count: result.ocr?.char_count || 0,
                     processed_at: new Date().toISOString(),
-                    // Keep existing approved/rejected skills
+                    // Keep existing approved/rejected skills untouched
                     approved_skills: existingDoc.approved_skills || [],
                     rejected_skills: existingDoc.rejected_skills || []
                 })
@@ -288,21 +303,23 @@ exports.processDocument = async (req, res) => {
                 });
             }
 
-            // finalNeedsReview should be skills that are NOT yet approved/rejected
+            // finalNeedsReview = merged skills not yet approved/rejected,
+            // with original casing preserved for display.
             finalNeedsReview = allSkills.filter(skill => {
                 const skillLower = skill.toLowerCase();
                 return !existingApproved.has(skillLower) && !existingRejected.has(skillLower);
             });
 
             console.log(`📊 Rescan complete: ${finalNeedsReview.length} new skills to review`);
-            
+
         } else {
             // ============================================================
-            // NEW DOCUMENT: NO GLOBAL FILTERING - KEEP ALL SKILLS!
+            // NEW DOCUMENT: keep all extracted skills for review, only
+            // filtering out the employee's own name/ID (security, not
+            // skill filtering).
             // ============================================================
             console.log(`🔍 [NEW DOCUMENT] Processing - keeping all skills for review`);
-            
-            // Only exclude employee name/ID (security, not skill filtering)
+
             const nameIdExclude = new Set([
                 employeeId.toLowerCase(),
                 firstName.toLowerCase(),
@@ -314,22 +331,19 @@ exports.processDocument = async (req, res) => {
             ]);
 
             const originalCount = finalNeedsReview.length;
-            
+
             finalNeedsReview = finalNeedsReview.filter(skill => {
                 const skillLower = skill.toLowerCase();
-                
-                // Only filter employee name/ID
                 if (nameIdExclude.has(skillLower)) {
                     console.log(`   ⏭️  Skipping "${skill}" (employee name/ID)`);
                     return false;
                 }
-                
-                return true;  // Keep ALL other skills!
+                return true;
             });
 
             console.log(`📊 Before: ${originalCount} skills, After: ${finalNeedsReview.length} skills kept`);
 
-            // ✅ Upload to storage and insert a fresh row
+            // Upload to storage and insert a fresh row
             const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
 
             const { data: documentData, error: docError } = await supabase
@@ -407,30 +421,9 @@ exports.processDocument = async (req, res) => {
     }
 };
 
-exports.getDocumentDetails = async (req, res) => {
-    try {
-        const { documentId } = req.params;
-
-        const { data: profileData, error: profileError } = await getProfileFromToken(req.user.id);
-        if (profileError || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
-
-        const { data, error: fetchError } = await supabase
-            .from('documents')
-            .select('*')
-            .eq('id', documentId)
-            .eq('employee_id', profileData.employee_id)
-            .single();
-
-        if (fetchError) throw fetchError;
-        if (!data) return res.status(404).json({ success: false, error: 'Document not found' });
-
-        res.json({ success: true, data });
-
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
+// ============================================================
+// getDocuments — narrowed select, excludes large OCR text fields
+// ============================================================
 exports.getDocuments = async (req, res) => {
     try {
         const { data: profileData, error } = await getProfileFromToken(req.user.id);
@@ -443,6 +436,30 @@ exports.getDocuments = async (req, res) => {
             .order('created_at', { ascending: false });
 
         if (fetchError) throw fetchError;
+        res.json({ success: true, data });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.getDocumentDetails = async (req, res) => {
+    try {
+        const { documentId } = req.params;
+
+        const { data: profileData, error: profileError } = await getProfileFromToken(req.user.id);
+        if (profileError || !profileData) return res.status(403).json({ success: false, error: 'Profile not found' });
+
+        const { data, error: fetchError } = await supabase
+            .from('documents')
+            .select('*') // full detail only when specifically requested
+            .eq('id', documentId)
+            .eq('employee_id', profileData.employee_id)
+            .single();
+
+        if (fetchError) throw fetchError;
+        if (!data) return res.status(404).json({ success: false, error: 'Document not found' });
+
         res.json({ success: true, data });
 
     } catch (error) {
