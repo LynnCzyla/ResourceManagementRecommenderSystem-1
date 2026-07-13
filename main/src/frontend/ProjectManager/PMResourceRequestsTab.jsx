@@ -9,6 +9,10 @@ export default function PMResourceRequestsTab({ user }) {
   const [submitError, setSubmitError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('status');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageJumpValue, setPageJumpValue] = useState('');
+  const rowsPerPage = 10;
   const initialResources = [{
     role: '',
     quantity: 1,
@@ -115,15 +119,45 @@ export default function PMResourceRequestsTab({ user }) {
     }
   };
 
+  const statusOptions = [...new Set(requests.map(r => r.status).filter(Boolean))];
+
   const filteredRequests = requests.filter(req => 
-    req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    req.skills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()))
+    (req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.skills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()))) &&
+    (statusFilter === 'all' || req.status === statusFilter)
   ).sort((a, b) => {
     if (sortBy === 'status') return a.status.localeCompare(b.status);
     if (sortBy === 'project') return a.projectName.localeCompare(b.projectName);
     if (sortBy === 'quantity') return a.quantity - b.quantity;
     return 0;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredRequests.length / rowsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedRequests = filteredRequests.slice(
+    (safeCurrentPage - 1) * rowsPerPage,
+    safeCurrentPage * rowsPerPage
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, sortBy]);
+
+  const goToPage = (page) => {
+    const clamped = Math.min(Math.max(1, page), totalPages);
+    setCurrentPage(clamped);
+    setPageJumpValue('');
+  };
+
+  const handlePageJumpSubmit = (e) => {
+    e.preventDefault();
+    const page = parseInt(pageJumpValue, 10);
+    if (!isNaN(page)) goToPage(page);
+  };
+
+  const totalQuantityNeeded = requests.reduce((sum, r) => sum + (parseInt(r.quantity, 10) || 0), 0);
+  const pendingCount = requests.filter(r => r.status === 'Pending').length;
+  const filledCount = requests.filter(r => r.status === 'Approved' || r.status === 'Filled').length;
 
   return (
     <div style={styles.container}>
@@ -148,6 +182,16 @@ export default function PMResourceRequestsTab({ user }) {
               />
             </div>
             <select 
+              value={statusFilter} 
+              onChange={(e) => setStatusFilter(e.target.value)} 
+              style={styles.sortSelect}
+            >
+              <option value="all">All Statuses</option>
+              {statusOptions.map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+            <select 
               value={sortBy} 
               onChange={(e) => setSortBy(e.target.value)} 
               style={styles.sortSelect}
@@ -167,6 +211,26 @@ export default function PMResourceRequestsTab({ user }) {
         <div className="glass-card" style={styles.errorBanner}>{loadError}</div>
       )}
 
+      {/* Metric Cards */}
+      <div style={styles.metricsGrid}>
+        <div className="glass-card" style={styles.metricCard}>
+          <div style={styles.metricValue}>{requests.length}</div>
+          <div style={styles.metricLabel}>Total Requests</div>
+        </div>
+        <div className="glass-card" style={styles.metricCard}>
+          <div style={styles.metricValue}>{totalQuantityNeeded}</div>
+          <div style={styles.metricLabel}>Employees Needed</div>
+        </div>
+        <div className="glass-card" style={styles.metricCard}>
+          <div style={{ ...styles.metricValue, color: 'var(--color-warning)' }}>{pendingCount}</div>
+          <div style={styles.metricLabel}>Pending</div>
+        </div>
+        <div className="glass-card" style={styles.metricCard}>
+          <div style={{ ...styles.metricValue, color: 'var(--color-success)' }}>{filledCount}</div>
+          <div style={styles.metricLabel}>Filled</div>
+        </div>
+      </div>
+
       {/* Requests Table */}
       <div className="glass-card" style={styles.card}>
         <div style={styles.tableWrapper}>
@@ -182,12 +246,12 @@ export default function PMResourceRequestsTab({ user }) {
               </tr>
             </thead>
             <tbody>
-              {requests.length === 0 ? (
+              {paginatedRequests.length === 0 ? (
                 <tr>
                   <td colSpan="6" style={styles.emptyRow}>No resource requests found.</td>
                 </tr>
               ) : (
-                filteredRequests.map(req => (
+                paginatedRequests.map(req => (
                   <tr key={req.id} style={styles.trRow}>
                     <td style={{ ...styles.td, fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</td>
                     <td style={styles.td}>
@@ -215,6 +279,54 @@ export default function PMResourceRequestsTab({ user }) {
             </tbody>
           </table>
         </div>
+
+        {filteredRequests.length > 0 && (
+          <div style={styles.paginationBar}>
+            <span style={styles.paginationInfo}>
+              Showing {(safeCurrentPage - 1) * rowsPerPage + 1}
+              -{Math.min(safeCurrentPage * rowsPerPage, filteredRequests.length)} of {filteredRequests.length}
+            </span>
+            <div style={styles.paginationControls}>
+              <button
+                type="button"
+                onClick={() => goToPage(safeCurrentPage - 1)}
+                disabled={safeCurrentPage === 1}
+                style={{ ...styles.pageBtn, ...(safeCurrentPage === 1 ? styles.pageBtnDisabled : {}) }}
+              >
+                &lt;
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => goToPage(page)}
+                  style={{ ...styles.pageBtn, ...(page === safeCurrentPage ? styles.pageBtnActive : {}) }}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => goToPage(safeCurrentPage + 1)}
+                disabled={safeCurrentPage === totalPages}
+                style={{ ...styles.pageBtn, ...(safeCurrentPage === totalPages ? styles.pageBtnDisabled : {}) }}
+              >
+                &gt;
+              </button>
+              <form onSubmit={handlePageJumpSubmit} style={styles.pageJumpForm}>
+                <input
+                  type="number"
+                  min="1"
+                  max={totalPages}
+                  value={pageJumpValue}
+                  onChange={(e) => setPageJumpValue(e.target.value)}
+                  placeholder="Go to"
+                  style={styles.pageJumpInput}
+                />
+              </form>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Create Request Modal */}
@@ -285,22 +397,6 @@ export default function PMResourceRequestsTab({ user }) {
                           style={styles.modalInput} 
                           required
                         />
-                      </div>
-                    </div>
-
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Experience Level <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <select 
-                          value={res.experience} 
-                          onChange={(e) => handleResourceChange(index, 'experience', e.target.value)} 
-                          style={styles.modalSelect}
-                          required
-                        >
-                          <option value="Junior">Junior</option>
-                          <option value="Intermediate">Intermediate</option>
-                          <option value="Senior">Senior</option>
-                        </select>
                       </div>
                     </div>
 
@@ -411,6 +507,81 @@ const styles = {
     fontSize: '13px',
     outline: 'none',
     minWidth: '200px',
+  },
+  metricsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '16px',
+  },
+  metricCard: {
+    padding: '18px 20px',
+  },
+  metricValue: {
+    fontSize: '26px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+    marginBottom: '4px',
+  },
+  metricLabel: {
+    fontSize: '12px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    color: 'var(--color-text-muted)',
+  },
+  paginationBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '12px',
+    padding: '16px 8px 4px',
+    borderTop: '1px solid var(--color-border)',
+    marginTop: '12px',
+  },
+  paginationInfo: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+  },
+  paginationControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  pageBtn: {
+    minWidth: '32px',
+    height: '32px',
+    padding: '0 8px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
+  pageBtnActive: {
+    background: 'var(--color-primary)',
+    borderColor: 'var(--color-primary)',
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  pageBtnDisabled: {
+    opacity: 0.4,
+    cursor: 'not-allowed',
+  },
+  pageJumpForm: {
+    marginLeft: '4px',
+  },
+  pageJumpInput: {
+    width: '60px',
+    height: '32px',
+    padding: '0 8px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    outline: 'none',
   },
   sortSelect: {
     padding: '8px 12px',
