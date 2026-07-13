@@ -85,6 +85,13 @@ export function deleteProject(id) {
   return pm(`/projects/${id}`, { method: 'DELETE' });
 }
 
+export function assignEmployeeToProject(projectId, employeeId, role, assignedBy) {
+  return pm(`/projects/${projectId}/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ employeeId, role, assignedBy }),
+  });
+}
+
 // ── Resource requests ───────────────────────────────────────────────────
 export function getResourceRequests(projectId) {
   const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
