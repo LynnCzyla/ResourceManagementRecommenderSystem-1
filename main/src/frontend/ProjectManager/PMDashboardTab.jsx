@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { getDashboardStats, getEmployees, getTasks, getProjects } from './pmApi';
 
 export default function PMDashboardTab({ user }) {
@@ -58,7 +58,22 @@ export default function PMDashboardTab({ user }) {
     }
   }, [selectedProjectId, user]);
 
-  const getAssignedTasks = (id) => tasks.filter(task => task.employeeId === id && task.status !== 'Completed-Hidden');
+  // Pre-group tasks by employee once so per-row / per-employee lookups are
+  // O(1) instead of re-scanning the entire task list on every render.
+  const tasksByEmployee = useMemo(() => {
+    const map = new Map();
+    for (const t of tasks) {
+      if (!t.employeeId || t.status === 'Completed-Hidden') continue;
+      if (!map.has(t.employeeId)) map.set(t.employeeId, []);
+      map.get(t.employeeId).push(t);
+    }
+    return map;
+  }, [tasks]);
+
+  const getAssignedTasks = useCallback(
+    (id) => tasksByEmployee.get(id) || [],
+    [tasksByEmployee]
+  );
   
   const calculateSingleTaskCompletion = (task) => {
     if (task.progressLogs && task.progressLogs.length) {
@@ -69,12 +84,12 @@ export default function PMDashboardTab({ user }) {
     return 0;
   };
 
-  const getTaskCompletion = (id) => {
+  const getTaskCompletion = useCallback((id) => {
     const assigned = getAssignedTasks(id);
     if (!assigned.length) return 0;
     const percentages = assigned.map(task => calculateSingleTaskCompletion(task));
     return Math.round(percentages.reduce((sum, value) => sum + value, 0) / percentages.length);
-  };
+  }, [getAssignedTasks]);
 
   const getEmployeeProjectBreakdown = (empId) => {
     const empTasks = getAssignedTasks(empId);
@@ -119,39 +134,39 @@ export default function PMDashboardTab({ user }) {
     };
   };
 
-  const filteredEmployees = employees.filter(emp => 
-    emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    emp.role.toLowerCase().includes(searchQuery.toLowerCase())
-  ).sort((a, b) => {
-    if (sortBy === 'name') return a.name.localeCompare(b.name);
-    if (sortBy === 'role') return a.role.localeCompare(b.role);
-    if (sortBy === 'completion') {
-      const completionA = getTaskCompletion(a.id);
-      const completionB = getTaskCompletion(b.id);
-      return completionB - completionA; // Highest completion first
-    }
-    return 0;
-  });
+  const filteredEmployees = useMemo(() => {
+    return employees.filter(emp => 
+      emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      emp.role.toLowerCase().includes(searchQuery.toLowerCase())
+    ).sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'role') return a.role.localeCompare(b.role);
+      if (sortBy === 'completion') {
+        return getTaskCompletion(b.id) - getTaskCompletion(a.id); // Highest completion first
+      }
+      return 0;
+    });
+  }, [employees, searchQuery, sortBy, getTaskCompletion]);
 
-  const displayEmployees = selectedProjectId === 'all'
-    ? filteredEmployees
-    : filteredEmployees.filter(emp => 
-        projectEmployees.some(pe => pe.id === emp.id) ||
-        getAssignedTasks(emp.id).some(t => String(t.projectId) === String(selectedProjectId))
-      );
+  const projectTasks = useMemo(() => 
+    selectedProjectId === 'all' 
+      ? tasks 
+      : tasks.filter(t => String(t.projectId) === String(selectedProjectId)),
+    [tasks, selectedProjectId]
+  );
 
-  const displayEmployeesBreakdown = selectedProjectId === 'all'
-    ? filteredEmployees
-    : filteredEmployees.filter(emp => 
-        projectEmployees.some(pe => pe.id === emp.id) ||
-        getAssignedTasks(emp.id).some(t => String(t.projectId) === String(selectedProjectId))
-      );
+  const displayEmployees = useMemo(() => {
+    if (selectedProjectId === 'all') return filteredEmployees;
+    return filteredEmployees.filter(emp => 
+      projectEmployees.some(pe => pe.id === emp.id) ||
+      getAssignedTasks(emp.id).some(t => String(t.projectId) === String(selectedProjectId))
+    );
+  }, [filteredEmployees, selectedProjectId, projectEmployees, getAssignedTasks]);
 
-  const projectTasks = selectedProjectId === 'all' 
-    ? tasks 
-    : tasks.filter(t => String(t.projectId) === String(selectedProjectId));
-
-  const unassignedTasks = projectTasks.filter(task => !task.employeeId || !employees.some(emp => emp.id === task.employeeId));
+  const unassignedTasks = useMemo(() => 
+    projectTasks.filter(task => !task.employeeId || !employees.some(emp => emp.id === task.employeeId)),
+    [projectTasks, employees]
+  );
 
 
   return (
@@ -252,20 +267,19 @@ export default function PMDashboardTab({ user }) {
               </thead>
               <tbody>
                 {displayEmployees.map(emp => {
+                  const allAssigned = getAssignedTasks(emp.id);
                   const assignedTasks = selectedProjectId === 'all'
-                    ? getAssignedTasks(emp.id)
-                    : getAssignedTasks(emp.id).filter(t => String(t.projectId) === String(selectedProjectId));
+                    ? allAssigned
+                    : allAssigned.filter(t => String(t.projectId) === String(selectedProjectId));
                   
                   const completion = assignedTasks.length 
                     ? Math.round(assignedTasks.map(task => calculateSingleTaskCompletion(task)).reduce((sum, val) => sum + val, 0) / assignedTasks.length)
                     : 0;
 
-                  const taskLabel = assignedTasks.length ? assignedTasks.map(t => t.title).join(', ') : 'No task assigned';
                   const taskStatus = assignedTasks.length ? assignedTasks[0].status : 'Idle';
 
-                  const assignedTasksForSub = getAssignedTasks(emp.id);
-                  const assignedProjects = [...new Set(assignedTasksForSub.map(t => t.projectName).filter(Boolean))];
-                  const projectSubtitle = assignedProjects.length ? assignedProjects.join(', ') : 'Unassigned';
+                  const assignedProjects = [...new Set(allAssigned.map(t => t.projectName).filter(Boolean))];
+                  const projectSubtitle = assignedProjects.length ? 'Assigned' : 'Unassigned';
 
                   return (
                     <tr key={emp.id} style={styles.trRow}>
@@ -276,7 +290,15 @@ export default function PMDashboardTab({ user }) {
                           <div style={styles.empRole}>{projectSubtitle}</div>
                         </div>
                       </td>
-                      <td style={styles.tdVal}>{taskLabel}</td>
+                      <td style={styles.tdVal}>
+                        {assignedTasks.length ? (
+                          <ul style={styles.taskList}>
+                            {assignedTasks.map(t => (
+                              <li key={t.id} style={styles.taskListItem}>{t.title}</li>
+                            ))}
+                          </ul>
+                        ) : 'No task assigned'}
+                      </td>
                       <td style={styles.tdVal}>{assignedTasks.length}</td>
                       <td style={styles.tdVal}>{completion}%</td>
                       <td style={styles.tdVal}>{taskStatus}</td>
@@ -330,7 +352,7 @@ export default function PMDashboardTab({ user }) {
           </div>
 
           <div style={styles.attendanceList}>
-            {displayEmployeesBreakdown.map(emp => {
+            {displayEmployees.map(emp => {
               const breakdown = getEmployeeProjectBreakdown(emp.id);
               return (
                 <div key={emp.id} style={styles.breakdownCard}>
@@ -542,6 +564,14 @@ const styles = {
     padding: '12px 8px',
     fontSize: '13px',
     color: 'var(--color-text-secondary)',
+  },
+  taskList: {
+    margin: 0,
+    paddingLeft: '18px',
+    listStyleType: 'disc',
+  },
+  taskListItem: {
+    lineHeight: '1.6',
   },
   attendanceStats: {
     display: 'grid',
