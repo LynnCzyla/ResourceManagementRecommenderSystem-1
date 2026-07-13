@@ -61,7 +61,7 @@ router.get('/employees', async (req, res) => {
         employeeId: p.employee_id,
         name,
         avatar: p.avatar_url || fallbackAvatar,
-        role: p.positions?.position_name || 'Unassigned',
+        role: p.positions?.position_name || null,
         department: p.departments?.department_name || 'Unassigned',
         skills: (p.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
         certifications,
