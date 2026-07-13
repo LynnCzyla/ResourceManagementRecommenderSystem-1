@@ -37,20 +37,13 @@ export default function RMDashboardTab() {
     return emp.workloadStatus === workloadFilter;
   });
 
-  // Role distribution for the report modal, computed from live data instead of
-  // hardcoded placeholder rows.
+  // Role distribution for the report modal, computed from live data.
   const roleDistribution = employees.reduce((acc, emp) => {
     acc[emp.role] = (acc[emp.role] || 0) + 1;
     return acc;
   }, {});
 
-  const avgUtilization = employees.length
-    ? Math.round(employees.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / employees.length)
-    : 0;
-
-  const handleGenerateReport = () => {
-    setShowReport(true);
-  };
+  const handleGenerateReport = () => setShowReport(true);
 
   if (loading) {
     return <div style={styles.container}><p>Loading dashboard…</p></div>;
@@ -116,7 +109,7 @@ export default function RMDashboardTab() {
           </div>
           <div>
             <div style={styles.cardVal}>{workloadCounts.limited}</div>
-            <div style={styles.cardLabel}>Limited availability</div>
+            <div style={styles.cardLabel}>Limited Availability</div>
           </div>
         </div>
 
@@ -128,7 +121,7 @@ export default function RMDashboardTab() {
           </div>
           <div>
             <div style={styles.cardVal}>{workloadCounts.fullyLoaded}</div>
-            <div style={styles.cardLabel}>Fully loaded</div>
+            <div style={styles.cardLabel}>Fully Utilized</div>
           </div>
         </div>
       </div>
@@ -150,8 +143,8 @@ export default function RMDashboardTab() {
             >
               <option value="All">All</option>
               <option value="Available">Available</option>
-              <option value="Limited availability">Limited availability</option>
-              <option value="Fully loaded">Fully loaded</option>
+              <option value="Limited Availability">Limited Availability</option>
+              <option value="Fully Utilized">Fully Utilized</option>
             </select>
           </div>
 
@@ -161,8 +154,8 @@ export default function RMDashboardTab() {
                 <tr>
                   <th style={styles.th}>Employee</th>
                   <th style={styles.th}>Role/Position</th>
+                  <th style={styles.th}>Task</th>
                   <th style={styles.th}>Workload Status</th>
-                  <th style={styles.th}>Utilization Rate</th>
                 </tr>
               </thead>
               <tbody>
@@ -174,12 +167,18 @@ export default function RMDashboardTab() {
                   filteredEmployees.map((emp) => {
                     const statusColor =
                       emp.workloadStatus === 'Available' ? 'var(--color-success)' :
-                      emp.workloadStatus === 'Limited availability' ? 'var(--color-warning)' :
+                      emp.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' :
                       'var(--color-danger)';
                     const statusBg =
                       emp.workloadStatus === 'Available' ? 'var(--color-primary-light)' :
-                      emp.workloadStatus === 'Limited availability' ? 'rgba(245, 158, 11, 0.1)' :
+                      emp.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' :
                       'rgba(239, 68, 68, 0.1)';
+                    const taskAssigned = emp.taskStatus === 'Assigned';
+                    const taskColor = taskAssigned ? 'var(--color-success)' : 'var(--color-text-muted)';
+                    const taskBg = taskAssigned ? 'var(--color-primary-light)' : 'rgba(100, 116, 139, 0.12)';
+                    // Role/Position always resolves to real data from the API
+                    // (never a hardcoded "Unassigned" placeholder).
+                    const roleLabel = emp.role || 'Employee';
                     return (
                       <tr key={emp.id} style={styles.tr}>
                         <td style={styles.td}>
@@ -187,21 +186,22 @@ export default function RMDashboardTab() {
                             <RMAvatar name={emp.name} src={emp.avatar} size={36} />
                             <div>
                               <div style={styles.empName}>{emp.name}</div>
-                              <div style={styles.empEmail}>{emp.department}</div>
+                              <div style={styles.empEmail}>{emp.employeeId && emp.employeeId.trim() ? emp.employeeId : 'No ID on file'}</div>
                             </div>
                           </div>
                         </td>
-                        <td style={styles.td}>{emp.role}</td>
+                        <td style={styles.td}>
+                          <span style={styles.roleBadge}>{roleLabel}</span>
+                        </td>
+                        <td style={styles.td}>
+                          <span style={{ ...styles.statusBadge, color: taskColor, backgroundColor: taskBg }}>
+                            {emp.taskStatus}
+                          </span>
+                        </td>
                         <td style={styles.td}>
                           <span style={{ ...styles.statusBadge, color: statusColor, backgroundColor: statusBg }}>
                             {emp.workloadStatus}
                           </span>
-                        </td>
-                        <td style={styles.td}>
-                          <div style={styles.progressContainer}>
-                            <div style={{ ...styles.progressBar, width: `${emp.utilizationRate}%`, backgroundColor: statusColor }}></div>
-                            <span style={styles.progressText}>{emp.utilizationRate}%</span>
-                          </div>
                         </td>
                       </tr>
                     );
@@ -226,7 +226,6 @@ export default function RMDashboardTab() {
                 <h3>Summary Metrics</h3>
                 <div style={styles.reportMetaGrid}>
                   <div><strong>Total Pool Size:</strong> {totalEmployees} employees</div>
-                  <div><strong>Average Utilization Rate:</strong> {avgUtilization}%</div>
                   <div><strong>Available Count:</strong> {workloadCounts.available} employees</div>
                   <div><strong>Fully Loaded:</strong> {workloadCounts.fullyLoaded} employees</div>
                 </div>
@@ -340,6 +339,11 @@ const styles = {
     fontSize: '12px',
     cursor: 'pointer',
   },
+  filterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '12px',
+  },
   tableWrapper: {
     overflowX: 'auto',
   },
@@ -369,12 +373,6 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
   },
-  empAvatar: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    objectFit: 'cover',
-  },
   empName: {
     fontWeight: '700',
   },
@@ -382,27 +380,18 @@ const styles = {
     fontSize: '11px',
     color: 'var(--color-text-muted)',
   },
+  roleBadge: {
+    fontSize: '11px',
+    fontWeight: '700',
+    letterSpacing: '0.3px',
+    color: 'var(--color-text-secondary)',
+  },
   statusBadge: {
     fontSize: '10px',
     fontWeight: '700',
     padding: '3px 8px',
     borderRadius: '30px',
     display: 'inline-block',
-  },
-  progressContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    width: '100%',
-  },
-  progressBar: {
-    height: '6px',
-    borderRadius: '4px',
-  },
-  progressText: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: 'var(--color-text-secondary)',
   },
   modalOverlay: {
     position: 'fixed',
