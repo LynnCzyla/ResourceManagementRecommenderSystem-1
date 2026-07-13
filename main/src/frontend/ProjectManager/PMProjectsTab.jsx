@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { getProjects, createProject } from './pmApi';
 
+const calculateDurationDays = (startDate, endDate) => {
+  if (!startDate || !endDate) return '';
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return '';
+  const diffMs = end.getTime() - start.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+};
+
 export default function PMProjectsTab({ user }) {
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -277,15 +286,14 @@ export default function PMProjectsTab({ user }) {
                     />
                   </div>
                   <div style={{ ...styles.formGroup, flex: 1 }}>
-                    <label style={styles.formLabel}>Duration (Days) <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                    <label style={styles.formLabel}>Duration (Days)</label>
                     <input 
-                      type="number" 
-                      min="1"
-                      value={formData.duration} 
-                      onChange={(e) => setFormData({ ...formData, duration: e.target.value })} 
-                      style={styles.modalInput} 
-                      placeholder="Project duration"
-                      required
+                      type="text" 
+                      value={formData.duration ? `${formData.duration} day${formData.duration === 1 ? '' : 's'}` : ''} 
+                      readOnly
+                      disabled
+                      style={{ ...styles.modalInput, cursor: 'not-allowed', color: 'var(--color-text-muted)' }} 
+                      placeholder="Auto-filled from start/end date"
                     />
                   </div>
                 </div>
@@ -296,7 +304,7 @@ export default function PMProjectsTab({ user }) {
                     <input 
                       type="date" 
                       value={formData.startDate} 
-                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} 
+                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value, duration: calculateDurationDays(e.target.value, formData.endDate) })} 
                       style={styles.modalInput} 
                       required
                     />
@@ -306,7 +314,7 @@ export default function PMProjectsTab({ user }) {
                     <input 
                       type="date" 
                       value={formData.endDate} 
-                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} 
+                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value, duration: calculateDurationDays(formData.startDate, e.target.value) })} 
                       style={styles.modalInput} 
                       required
                     />
@@ -388,22 +396,6 @@ export default function PMProjectsTab({ user }) {
                           style={styles.modalInput} 
                           required
                         />
-                      </div>
-                    </div>
-
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Experience Level <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <select 
-                          value={res.experience} 
-                          onChange={(e) => handleResourceChange(index, 'experience', e.target.value)} 
-                          style={styles.modalSelect}
-                          required
-                        >
-                          <option value="Junior">Junior</option>
-                          <option value="Intermediate">Intermediate</option>
-                          <option value="Senior">Senior</option>
-                        </select>
                       </div>
                     </div>
 
