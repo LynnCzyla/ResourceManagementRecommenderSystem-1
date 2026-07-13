@@ -163,8 +163,8 @@ export default function RMEmployeeDirectoryTab() {
                         </span>
                       )}
                     </h3>
-                      <div style={styles.empRole}>{emp.role}</div>
-                      <div style={styles.empDept}>{emp.department}</div>
+                      <div style={styles.empId}>{emp.employeeId || 'No ID'}</div>
+                      <div style={styles.empRole}>{emp.role || 'Unassigned'}</div>
                   </div>
                 </div>
                 {!emp.isVerified && (
@@ -429,15 +429,18 @@ const styles = {
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   },
-  empRole: {
+  empId: {
     fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '700',
+    fontFamily: 'monospace',
+    marginTop: '2px',
+  },
+  empRole: {
+    fontSize: '12px',
     color: 'var(--color-text-secondary)',
     fontWeight: '600',
     marginTop: '2px',
-  },
-  empDept: {
-    fontSize: '10px',
-    color: 'var(--color-text-muted)',
   },
   section: {
     display: 'flex',
