@@ -9,6 +9,10 @@ const cache = {
   ttl: 60000 // 1 minute cache
 };
 
+// Statuses that mean "not started yet" — these automatically flip to
+// 'Active' once a member is assigned or the project's start date arrives.
+const NOT_STARTED_STATUSES = ['Pending', 'Pending Approval', 'Inactive'];
+
 /**
  * GET /api/rm/projects
  * Powers RMProjectsTab.jsx - OPTIMIZED VERSION
@@ -97,6 +101,7 @@ router.get('/projects', async (req, res) => {
 
     // ✅ Process projects in a single pass
     const result = [];
+    const toActivate = [];
     for (const proj of projects) {
       // Get unique skills for this project
       const projectSkills = requirementsByProject.get(proj.id) || [];
@@ -116,12 +121,22 @@ router.get('/projects', async (req, res) => {
         };
       });
 
+      // ✅ Auto-activate a not-yet-started project once it has at least one
+      // assigned member OR its start date has arrived.
+      let status = proj.status;
+      const hasMembers = assignedEmployees.length > 0;
+      const started = proj.start_date && new Date(proj.start_date) <= new Date();
+      if (NOT_STARTED_STATUSES.includes(status) && (hasMembers || started)) {
+        status = 'Active';
+        toActivate.push(proj.id);
+      }
+
       result.push({
         id: proj.id,
         code: proj.project_code,
         name: proj.project_name,
         description: proj.project_description,
-        status: proj.status,
+        status,
         startDate: proj.start_date,
         endDate: proj.end_date,
         priority: proj.priority,
@@ -131,6 +146,18 @@ router.get('/projects', async (req, res) => {
         teamSize: assignedEmployees.length,
         skillsCount: requiredSkills.length,
       });
+    }
+
+    // ✅ Persist start-date activations (best-effort, no need to block the response)
+    if (toActivate.length > 0) {
+      await Promise.all(
+        toActivate.map((pid) =>
+          supabase
+            .from('projects')
+            .update({ status: 'Active', updated_at: new Date().toISOString() })
+            .eq('id', pid)
+        )
+      );
     }
 
     const responseData = {
@@ -206,6 +233,21 @@ router.post('/projects/:id/assign', async (req, res) => {
       .single();
     
     if (error) throw error;
+
+    // ✅ A project with at least one assigned member is considered active.
+    // Flip a not-yet-started project to 'Active' on first assignment.
+    const { data: projectRow } = await supabase
+      .from('projects')
+      .select('status')
+      .eq('id', id)
+      .single();
+
+    if (projectRow && NOT_STARTED_STATUSES.includes(projectRow.status)) {
+      await supabase
+        .from('projects')
+        .update({ status: 'Active', updated_at: new Date().toISOString() })
+        .eq('id', id);
+    }
 
     // ✅ Clear cache since data changed
     clearProjectsCache();
