@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getEmployees, getTasks, createTask, updateTask, getProjects, updateProject } from './pmApi';
+import { getEmployees, getTasks, createTask, updateTask, getProjects, updateProject, assignEmployeeToProject } from './pmApi';
 
 export default function PMProjectTrackingTab({ user }) {
   const [employees, setEmployees] = useState([]);
@@ -14,6 +14,7 @@ export default function PMProjectTrackingTab({ user }) {
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [showEditTaskModal, setShowEditTaskModal] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState(null);
+  const [isRedoMode, setIsRedoMode] = useState(false);
   const [newTaskData, setNewTaskData] = useState({
     title: '',
     description: '',
@@ -21,7 +22,13 @@ export default function PMProjectTrackingTab({ user }) {
     priority: 'Medium',
     dueDate: ''
   });
-  const [editTaskData, setEditTaskData] = useState({ employeeId: '', status: '', dueDate: '' });
+  const [editTaskData, setEditTaskData] = useState({ 
+    title: '', 
+    description: '', 
+    employeeId: '', 
+    status: '', 
+    dueDate: '' 
+  });
   const [dailyStatusMap] = useState({
     'EMP-1014': 'Present',
     'EMP-1015': 'Absent',
@@ -32,28 +39,26 @@ export default function PMProjectTrackingTab({ user }) {
     'EMP-1020': 'Present',
   });
 
-  const loadEmployees = async (projectId) => {
-    if (!projectId) {
-      setEmployees([]);
-      return;
-    }
-    try {
-      // Scoped to this ONE project's assigned team, not every employee the
-      // PM has anywhere — this feeds the "Assigned Team" panel and the
-      // "Assign To" / reassignment dropdowns below, so it must never show
-      // employees who aren't actually staffed on this project.
+ const loadEmployees = async (projectId) => {
+  try {
+    if (projectId === 'all') {
+      setEmployees(await getEmployees(user?.id, undefined, undefined));
+    } else if (projectId) {
       setEmployees(await getEmployees(user?.id, undefined, projectId));
-    } catch (err) {
-      console.error('Failed to load employees:', err);
-      setLoadError(err.message || 'Failed to load employees');
+    } else {
+      setEmployees([]);
     }
-  };
+  } catch (err) {
+    console.error('Failed to load employees:', err);
+    setLoadError(err.message || 'Failed to load employees');
+  }
+};
 
   const loadProjects = async () => {
     try {
       const data = await getProjects(user?.id);
       setProjects(data);
-      setSelectedProjectId(prev => prev ?? (data.length ? data[0].id : null));
+      setSelectedProjectId(prev => prev ?? 'all');
     } catch (err) {
       console.error('Failed to load projects:', err);
       setLoadError(err.message || 'Failed to load projects');
@@ -61,14 +66,15 @@ export default function PMProjectTrackingTab({ user }) {
   };
 
   const loadTasks = async (projectId) => {
-    if (!projectId) {
-      console.log('⏭️  loadTasks: projectId is empty, skipping');
-      return;
-    }
     try {
-      console.log('📋 loadTasks: Fetching tasks for projectId:', projectId);
-      const result = await getTasks({ projectId });
-      console.log('✓ loadTasks: Got', result?.length || 0, 'tasks');
+      let result;
+      if (projectId === 'all') {
+        result = await getTasks();
+      } else if (projectId) {
+        result = await getTasks({ projectId });
+      } else {
+        return;
+      }
       setTasks(result || []);
     } catch (err) {
       console.error('❌ loadTasks: Failed to fetch tasks:', err);
@@ -116,33 +122,76 @@ export default function PMProjectTrackingTab({ user }) {
     }
   };
 
-
-
   const handleOpenEditTask = (task) => {
     setTaskToEdit(task);
     setEditTaskData({
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
       employeeId: task.employeeId,
       status: task.status,
       dueDate: task.dueDate
     });
+    setIsRedoMode(false);
     setShowEditTaskModal(true);
+  };
+
+  const handleOpenRedoTask = (task) => {
+    setTaskToEdit(task);
+    setEditTaskData({
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      employeeId: task.employeeId,
+      status: 'Pending',
+      dueDate: ''
+    });
+    setIsRedoMode(true);
+    setShowEditTaskModal(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditTaskModal(false);
+    setTaskToEdit(null);
+    setIsRedoMode(false);
   };
 
   const handleSaveTaskEdit = async (e) => {
     e.preventDefault();
     setFormError('');
     try {
-      await updateTask(taskToEdit.id, {
-        employeeId: editTaskData.employeeId,
-        status: editTaskData.status,
-        dueDate: editTaskData.dueDate,
-      });
+      if (isRedoMode) {
+        // Reopen the SAME task (reset to 0% / Pending) instead of creating a
+        // new one. This avoids the project showing the work twice after a redo.
+        await updateTask(taskToEdit.id, {
+          title: editTaskData.title,
+          description: editTaskData.description,
+          priority: editTaskData.priority,
+          employeeId: editTaskData.employeeId,
+          status: 'Pending',
+          dueDate: editTaskData.dueDate,
+          progressLogs: [],
+        });
+
+        // Outstanding work exists again, so the project goes back to Pending
+        await updateProject(taskToEdit.projectId, { status: 'Pending' });
+        await loadProjects();
+      } else {
+        await updateTask(taskToEdit.id, {
+          title: editTaskData.title,
+          description: editTaskData.description,
+          priority: editTaskData.priority,
+          employeeId: editTaskData.employeeId,
+          status: editTaskData.status,
+          dueDate: editTaskData.dueDate,
+        });
+      }
+
       await loadTasks(selectedProjectId);
-      setShowEditTaskModal(false);
-      setTaskToEdit(null);
+      handleCloseEditModal();
     } catch (err) {
-      console.error('Failed to update task:', err);
-      setFormError(err.message || 'Failed to update task');
+      console.error('Failed to save assignment:', err);
+      setFormError(err.message || 'Failed to save assignment');
     }
   };
 
@@ -188,19 +237,25 @@ export default function PMProjectTrackingTab({ user }) {
   };
 
   const handleMarkTaskDone = async (task) => {
-    try {
-      await updateTask(task.id, { status: 'Completed-Hidden' });
-      loadTasks(selectedProjectId);
-    } catch (err) {
-      console.error('Failed to mark task as done:', err);
-      alert(err.message || 'Failed to mark task as done');
-    }
-  };
+  try {
+    await updateTask(task.id, { status: 'Completed-Hidden' });
+    loadTasks(selectedProjectId);
+  } catch (err) {
+    console.error('Failed to mark task as done:', err);
+    alert(err.message || 'Failed to mark task as done');
+  }
+};
 
   // Filter tasks for current selected project
-  const currentProjectTasks = tasks.filter(t => t.projectId === selectedProjectId);
+  const currentProjectTasks = selectedProjectId === 'all'
+    ? tasks.filter(t => projects.some(p => p.id === t.projectId))
+    : tasks.filter(t => t.projectId === selectedProjectId);
   const currentProjectEmployees = employees; // employees is already scoped to selectedProjectId (see loadEmployees)
   const selectedProject = projects.find(p => p.id === selectedProjectId);
+  // When viewing "All Projects" the dropdown has no single selected project,
+  // but each task still belongs to a real project — use that for the deadline.
+  const taskProject = taskToEdit ? projects.find(p => p.id === taskToEdit.projectId) : null;
+  const modalProject = selectedProject || taskProject;
 
   const filteredProjects = projects.filter(p => 
     p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
@@ -230,7 +285,7 @@ export default function PMProjectTrackingTab({ user }) {
                 onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
               >
                 <span style={styles.projectDropdownValue}>
-                  {selectedProject ? selectedProject.name : 'Select a project'}
+                  {selectedProjectId === 'all' ? 'All Projects' : selectedProject ? selectedProject.name : 'Select a project'}
                 </span>
                 <svg style={styles.dropdownArrow} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="6 9 12 15 18 9"></polyline>
@@ -253,7 +308,22 @@ export default function PMProjectTrackingTab({ user }) {
                     />
                   </div>
                   <div style={styles.projectDropdownList}>
-                    {filteredProjects.length === 0 ? (
+                    {projectSearchQuery === '' && (
+                      <div
+                        style={{
+                          ...styles.projectDropdownItem,
+                          backgroundColor: selectedProjectId === 'all' ? 'var(--color-primary-light)' : 'transparent',
+                          color: selectedProjectId === 'all' ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                        }}
+                        onClick={() => {
+                          setSelectedProjectId('all');
+                          setProjectDropdownOpen(false);
+                        }}
+                      >
+                        All Projects
+                      </div>
+                    )}
+                    {filteredProjects.length === 0 && projectSearchQuery !== '' ? (
                       <div style={styles.noProjectsText}>No projects found</div>
                     ) : (
                       filteredProjects.map(p => (
@@ -279,43 +349,58 @@ export default function PMProjectTrackingTab({ user }) {
               )}
             </div>
           </div>
-          <button onClick={() => setShowCreateTaskModal(true)} style={styles.createBtn}>
-            + Assign Task
-          </button>
+          {selectedProjectId !== 'all' && (
+            <button onClick={() => setShowCreateTaskModal(true)} style={styles.createBtn}>
+              + Assign Task
+            </button>
+          )}
         </div>
       </div>
 
       <div style={styles.mainGrid}>
         {/* Team Members List */}
         <div className="glass-card" style={styles.teamPanel}>
-          <h2 style={styles.sectionTitle}>Assigned Team</h2>
-          <p style={styles.sectionSubtitle}>Members allocated to this project.</p>
+          <h2 style={styles.sectionTitle}>
+            {selectedProjectId === 'all' ? 'All Team Members' : 'Assigned Team'}
+          </h2>
+          <p style={styles.sectionSubtitle}>
+            {selectedProjectId === 'all' ? 'Active employees in the system.' : 'Members allocated to this project.'}
+          </p>
           
           <div style={styles.teamList}>
-            {currentProjectEmployees.map(emp => (
+           {currentProjectEmployees.map(emp => {
+            const isAssigned = !!(emp.assignments && emp.assignments.length > 0);
+            return (
               <div key={emp.id} style={styles.teamItem}>
                 <img src={emp.avatar} alt={emp.name} style={styles.teamAvatar} />
                 <div style={styles.teamMeta}>
                   <div style={styles.teamName}>{emp.name}</div>
-                  <div style={styles.teamRole}>{emp.role}</div>
-                  <div style={styles.teamDept}>{emp.department}</div>
+                  <div style={styles.teamRole}>
+                    {isAssigned ? 'Assigned' : 'Unassigned'}
+                  </div>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </div>
 
         {/* Task Columns */}
         <div style={styles.boardContainer}>
           {['Pending', 'In Progress', 'Completed'].map(columnStatus => {
-            const colTasks = currentProjectTasks.filter(t => t.status === columnStatus);
+            const colTasks = currentProjectTasks.filter(t => {
+              if (columnStatus === 'Completed') {
+                return t.status === 'Completed' || t.status === 'Completed-Hidden';
+              }
+              return t.status === columnStatus;
+            });
             return (
               <div key={columnStatus} className="glass-card" style={styles.boardColumn}>
                 <div style={styles.colHeader}>
                   <h3 style={styles.colTitle}>{columnStatus}</h3>
                   <span style={styles.colCount}>{colTasks.length}</span>
                 </div>
-
+ 
                 <div style={styles.cardList}>
                   {colTasks.length === 0 ? (
                     <div style={styles.emptyColText}>No tasks</div>
@@ -354,12 +439,21 @@ export default function PMProjectTrackingTab({ user }) {
                         </div>
                         <button style={styles.editTaskBtn} onClick={() => handleOpenEditTask(task)}>Edit Assignment</button>
                         {getTaskProgress(task) >= 100 && (
-                          <button 
-                            style={styles.doneTaskBtn} 
-                            onClick={() => handleMarkTaskDone(task)}
-                          >
-                            Done
-                          </button>
+                          task.status === 'Completed-Hidden' ? (
+                            <button 
+                              style={styles.redoTaskBtn} 
+                              onClick={() => handleOpenRedoTask(task)}
+                            >
+                              Redo
+                            </button>
+                          ) : (
+                            <button 
+                              style={styles.doneTaskBtn} 
+                              onClick={() => handleMarkTaskDone(task)}
+                            >
+                              Done
+                            </button>
+                          )
                         )}
                       </div>
                     ))
@@ -470,14 +564,16 @@ export default function PMProjectTrackingTab({ user }) {
       )}
 
 
-      {/* Edit Task Modal */}
+      {/* Edit / Redo Task Modal */}
       {showEditTaskModal && taskToEdit && (
         <div style={styles.modalOverlay}>
           <div className="glass-card" style={styles.modalCard}>
             <div style={styles.modalHeader}>
               <div style={styles.modalHeaderLeft}>
-                <h2 style={{ margin: 0, fontSize: 20 }}>Edit Assignment</h2>
-                {selectedProject && (
+                <h2 style={{ margin: 0, fontSize: 20 }}>
+                  {isRedoMode ? 'Redo Task' : 'Edit Assignment'}
+                </h2>
+                {modalProject && (
                   <span style={deadlineBadgeStyle}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
@@ -485,23 +581,54 @@ export default function PMProjectTrackingTab({ user }) {
                       <line x1="8" y1="2" x2="8" y2="6"></line>
                       <line x1="3" y1="10" x2="21" y2="10"></line>
                     </svg>
-                    {selectedProject.endDate
-                      ? `Project Deadline: ${formatDeadline(selectedProject.endDate)}`
+                    {modalProject.endDate
+                      ? `Project Deadline: ${formatDeadline(modalProject.endDate)}`
                       : 'No deadline set'}
                   </span>
                 )}
               </div>
-              <button onClick={() => setShowEditTaskModal(false)} style={styles.closeModalBtn}>&times;</button>
+              <button onClick={handleCloseEditModal} style={styles.closeModalBtn}>&times;</button>
             </div>
             <form onSubmit={handleSaveTaskEdit} style={{ marginTop: 16 }}>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Task</label>
-                <div style={{ ...styles.modalInput, padding: '12px 14px', background: 'var(--color-bg-card)' }}>
-                  {taskToEdit.title}
+              {formError && (
+                <div style={{ color: 'var(--color-danger)', fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+                  {formError}
                 </div>
+              )}
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Task Title</label>
+                <input
+                  type="text"
+                  value={editTaskData.title}
+                  onChange={(e) => setEditTaskData(prev => ({ ...prev, title: e.target.value }))}
+                  style={styles.modalInput}
+                  placeholder="e.g. Design OCR schema architecture"
+                  required
+                />
               </div>
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Assign To</label>
+                <label style={styles.formLabel}>Description</label>
+                <textarea
+                  value={editTaskData.description}
+                  onChange={(e) => setEditTaskData(prev => ({ ...prev, description: e.target.value }))}
+                  style={styles.modalTextarea}
+                  placeholder="Task details and deliverables..."
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Priority</label>
+                <select
+                  value={editTaskData.priority}
+                  onChange={(e) => setEditTaskData(prev => ({ ...prev, priority: e.target.value }))}
+                  style={styles.modalSelect}
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>{isRedoMode ? 'Reassign To' : 'Assign To'}</label>
                 <select
                   value={editTaskData.employeeId}
                   onChange={(e) => setEditTaskData(prev => ({ ...prev, employeeId: e.target.value }))}
@@ -514,18 +641,29 @@ export default function PMProjectTrackingTab({ user }) {
                   ))}
                 </select>
               </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Status</label>
-                <select
-                  value={editTaskData.status}
-                  onChange={(e) => setEditTaskData(prev => ({ ...prev, status: e.target.value }))}
-                  style={styles.modalSelect}
-                >
-                  <option value="Pending">Pending</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Completed">Completed</option>
-                </select>
-              </div>
+
+              {!isRedoMode && (
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Status</label>
+                  <select
+                    value={editTaskData.status}
+                    onChange={(e) => setEditTaskData(prev => ({ ...prev, status: e.target.value }))}
+                    style={styles.modalSelect}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </div>
+              )}
+
+              {isRedoMode && (
+                <div style={{ ...styles.formGroup, fontSize: 12, color: 'var(--color-text-muted)' }}>
+                  This reopens the same task at 0% progress with status <strong>Pending</strong>,
+                  replacing the completed record so the project's work isn't shown twice.
+                </div>
+              )}
+
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Due Date</label>
                 <input
@@ -558,8 +696,10 @@ export default function PMProjectTrackingTab({ user }) {
                 </div>
               </div>
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowEditTaskModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Save Assignment</button>
+                <button type="button" onClick={handleCloseEditModal} style={styles.cancelBtn}>Cancel</button>
+                <button type="submit" style={styles.saveBtn}>
+                  {isRedoMode ? 'Confirm Redo' : 'Save Assignment'}
+                </button>
               </div>
             </form>
           </div>
@@ -583,6 +723,21 @@ const styles = {
     flexWrap: 'wrap',
     gap: '12px',
   },
+
+  redoTaskBtn: {
+  width: '100%',
+  border: 'none',
+  background: 'var(--color-warning)',
+  color: '#ffffff',
+  padding: '10px 12px',
+  borderRadius: '10px',
+  fontSize: '12px',
+  fontWeight: '700',
+  cursor: 'pointer',
+  marginTop: '6px',
+  transition: 'background-color 0.2s',
+},
+
   title: {
     fontSize: '28px',
     fontWeight: '800',
@@ -741,6 +896,57 @@ const styles = {
   teamDept: {
     fontSize: '10px',
     color: 'var(--color-text-muted)',
+  },
+  unassignedBadge: {
+    display: 'inline-block',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    color: '#ef4444',
+    fontSize: '9px',
+    fontWeight: '700',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    textTransform: 'uppercase',
+    marginTop: '4px',
+  },
+  assignedBadge: {
+    display: 'block',
+    color: '#10b981',
+    fontSize: '9px',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginTop: '4px',
+  },
+  inlineAssignSelect: {
+    display: 'block',
+    width: '100%',
+    padding: '4px 6px',
+    fontSize: '11px',
+    borderRadius: '4px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    outline: 'none',
+    marginTop: '4px',
+    cursor: 'pointer',
+    maxWidth: '220px',
+  },
+  assignedProjects: {
+    marginTop: '4px',
+  },
+  projectNameList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    marginTop: '2px',
+  },
+  assignedProjectName: {
+    fontSize: '11px',
+    color: 'var(--color-text-secondary)',
+    fontWeight: '500',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '220px',
   },
   boardContainer: {
     display: 'grid',
