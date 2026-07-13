@@ -24,14 +24,7 @@ const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
 
-// ✅ RM Routes - ONLY use the Index router (which applies middleware to all)
 app.use('/api/rm', require('./routes/ResourceManager/Index'));
-
-// ❌ REMOVE these individual route registrations:
-// app.use('/api/rm', require('./routes/ResourceManager/Dashboard'));
-// app.use('/api/rm', require('./routes/ResourceManager/Projects'));
-// app.use('/api/rm', require('./routes/ResourceManager/Employees'));
-
 app.use('/api/pm', require('./routes/ProjectManager'));
 
 app.use('/api/notifications', notificationsRouter);
@@ -47,7 +40,10 @@ app.use("/api/admin", unlockRoutes);
 app.use("/api/settings", systemSettingsRoutes);
 app.use('/api/employee', documentRoutes);
 
-// Health check
+// ⭐ ADDED
+app.use('/api/employee', require('./routes/Employee/Assignments'));
+app.use('/api/employee', require('./routes/Employee/History'));
+
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
 });
@@ -56,7 +52,6 @@ app.get("/", (req, res) => {
     res.json({ message: "Backend API is running" });
 });
 
-// Error handler
 app.use((err, req, res, next) => {
     console.error('Error:', err);
     res.status(500).json({ 
