@@ -15,11 +15,16 @@ export default function LogsTab() {
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
 
+  const ROWS_PER_PAGE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [jumpPage, setJumpPage] = useState('');
+
   useEffect(() => {
     let isMounted = true;
     const fetchLogs = async () => {
       setLoading(true);
       setError('');
+      setCurrentPage(1);
       try {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -109,6 +114,13 @@ export default function LogsTab() {
     setStartDate('');
     setEndDate('');
   };
+
+  const totalPages = Math.max(1, Math.ceil(auditLogs.length / ROWS_PER_PAGE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * ROWS_PER_PAGE;
+  const pageLogs = auditLogs.slice(startIndex, startIndex + ROWS_PER_PAGE);
+  const rangeStart = auditLogs.length === 0 ? 0 : startIndex + 1;
+  const rangeEnd = Math.min(startIndex + ROWS_PER_PAGE, auditLogs.length);
 
   return (
     <div>
@@ -213,7 +225,7 @@ export default function LogsTab() {
                 </tr>
               </thead>
               <tbody>
-                {auditLogs.map((log) => (
+                {pageLogs.map((log) => (
                   <tr key={log.id} style={styles.tableBodyRow}>
                     <td style={styles.td}>{formatTimestamp(log.time || log.date)}</td>
                     <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{log.user || 'System'}</td>
@@ -234,6 +246,97 @@ export default function LogsTab() {
                 ))}
               </tbody>
             </table>
+
+            <div style={styles.pagination}>
+              <span style={styles.paginationInfo}>
+                Showing {rangeStart}–{rangeEnd} of {auditLogs.length}
+              </span>
+              <div style={styles.paginationControls}>
+                <button
+                  style={styles.pageBtn}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                >
+                  Prev
+                </button>
+                {(() => {
+                  const pages = [];
+                  const maxVisible = 3;
+                  let start = Math.max(1, safePage - 1);
+                  let end = Math.min(totalPages, start + maxVisible - 1);
+                  if (end - start + 1 < maxVisible) {
+                    start = Math.max(1, end - maxVisible + 1);
+                  }
+                  if (start > 1) {
+                    pages.push(1);
+                    if (start > 2) pages.push('...');
+                  }
+                  for (let i = start; i <= end; i++) {
+                    pages.push(i);
+                  }
+                  if (end < totalPages) {
+                    if (end < totalPages - 1) pages.push('...');
+                    pages.push(totalPages);
+                  }
+                  return pages.map((page, idx) =>
+                    page === '...' ? (
+                      <span key={`ellipsis-${idx}`} style={styles.ellipsis}>…</span>
+                    ) : (
+                      <button
+                        key={page}
+                        style={{
+                          ...styles.pageBtn,
+                          ...(page === safePage ? styles.pageBtnActive : {}),
+                        }}
+                        onClick={() => setCurrentPage(page)}
+                      >
+                        {page}
+                      </button>
+                    )
+                  );
+                })()}
+                <button
+                  style={styles.pageBtn}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                >
+                  Next
+                </button>
+
+                <span style={styles.pageJumpWrap}>
+                  <input
+                    type="number"
+                    min="1"
+                    max={totalPages}
+                    placeholder="Page"
+                    value={jumpPage}
+                    onChange={(e) => setJumpPage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const p = parseInt(jumpPage, 10);
+                        if (!Number.isNaN(p)) {
+                          setCurrentPage(Math.min(Math.max(1, p), totalPages));
+                        }
+                        setJumpPage('');
+                      }
+                    }}
+                    style={styles.pageJumpInput}
+                  />
+                  <button
+                    style={styles.pageBtn}
+                    onClick={() => {
+                      const p = parseInt(jumpPage, 10);
+                      if (!Number.isNaN(p)) {
+                        setCurrentPage(Math.min(Math.max(1, p), totalPages));
+                      }
+                      setJumpPage('');
+                    }}
+                  >
+                    Go
+                  </button>
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -398,6 +501,69 @@ const styles = {
     fontWeight: '700',
     padding: '3px 8px',
     borderRadius: '4px',
+  },
+  pagination: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '12px',
+    marginTop: '20px',
+  },
+  paginationInfo: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+  },
+  paginationControls: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  pageBtn: {
+    minWidth: '34px',
+    padding: '8px 10px',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'var(--color-border)',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s, border-color 0.2s',
+  },
+  pageBtnActive: {
+    background: 'var(--color-primary)',
+    borderColor: 'var(--color-primary)',
+    color: '#fff',
+  },
+  pageJumpWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginLeft: '4px',
+  },
+  pageJumpInput: {
+    width: '64px',
+    padding: '8px 10px',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'var(--color-border)',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    outline: 'none',
+  },
+  ellipsis: {
+    padding: '8px 6px',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
   },
 };
 
