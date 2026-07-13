@@ -9,6 +9,14 @@ const cache = {
   ttl: 60000 // Cache for 1 minute (60,000 milliseconds)
 };
 
+// Converts a string like "senior design engineer" or "SENIOR DESIGN ENGINEER"
+// into "Senior Design Engineer".
+const toTitleCase = (str) =>
+  (str || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+
 /**
  * GET /api/rm/dashboard
  * Powers RMDashboardTab.jsx - OPTIMIZED VERSION
@@ -25,8 +33,12 @@ router.get('/dashboard', async (req, res) => {
     console.log('📊 Fetching FRESH dashboard data...');
     const startTime = Date.now();
 
-    // ✅ Run all 3 queries in PARALLEL for speed
-    const [employeesResult, assignmentsResult, projectsResult] = await Promise.all([
+    // ✅ Run all 4 queries in PARALLEL for speed
+    // NOTE: previously this array only had 3 entries but the code below
+    // referenced a 4th (tasksResult) — that caused a ReferenceError on
+    // every request, which is why the dashboard fell back to blank/cached
+    // "Unassigned" data. Fixed by including the tasks query here.
+    const [employeesResult, assignmentsResult, projectsResult, tasksResult] = await Promise.all([
       supabase
         .from('profiles')
         .select(`
@@ -36,36 +48,55 @@ router.get('/dashboard', async (req, res) => {
           last_name,
           avatar_url,
           status,
+          role,
           positions ( position_name ),
           departments ( department_name )
         `)
         .eq('status', 'Active'),
-      
+
       supabase
         .from('project_assignments')
         .select('profile_id, status')
         .eq('status', 'Assigned'),
-      
+
       supabase
         .from('projects')
-        .select('id, status')
+        .select('id, status'),
+
+      supabase
+        .from('project_tasks')
+        .select('profile_id, status')
     ]);
 
     // Check for errors
     if (employeesResult.error) throw employeesResult.error;
     if (assignmentsResult.error) throw assignmentsResult.error;
     if (projectsResult.error) throw projectsResult.error;
+    if (tasksResult.error) throw tasksResult.error;
 
-    const employees = employeesResult.data || [];
+    // Admin accounts aren't assignable to projects/tasks, so they never
+    // belong in this table — filter them out before any counting happens.
+    const employees = (employeesResult.data || []).filter(
+      (emp) => (emp.role || '').trim().toLowerCase() !== 'admin'
+    );
     const assignments = assignmentsResult.data || [];
     const projects = projectsResult.data || [];
+    const tasks = tasksResult.data || [];
 
-    console.log(`📊 Data: ${employees.length} employees, ${assignments.length} assignments, ${projects.length} projects`);
+    console.log(`📊 Data: ${employees.length} employees, ${assignments.length} assignments, ${projects.length} projects, ${tasks.length} tasks`);
 
     // ✅ Count assignments efficiently (single pass)
     const assignmentCounts = {};
     for (const a of assignments) {
       assignmentCounts[a.profile_id] = (assignmentCounts[a.profile_id] || 0) + 1;
+    }
+
+    // ✅ Count tasks assigned to each employee (single pass)
+    const taskCounts = {};
+    for (const t of tasks) {
+      if (t.profile_id) {
+        taskCounts[t.profile_id] = (taskCounts[t.profile_id] || 0) + 1;
+      }
     }
 
     // ✅ Count active projects (single pass)
@@ -82,29 +113,58 @@ router.get('/dashboard', async (req, res) => {
 
     for (const emp of employees) {
       const count = assignmentCounts[emp.id] || 0;
+      // Workload is driven by assigned TASKS, not project links — an employee
+      // with no tasks is "Available" even if they're linked to a project.
+      const taskCount = taskCounts[emp.id] || 0;
       let workloadStatus;
-      
-      if (count === 0) {
+
+      if (taskCount === 0) {
         workloadStatus = 'Available';
         availableCount++;
-      } else if (count === 1) {
-        workloadStatus = 'Limited availability';
+      } else if (taskCount === 1) {
+        workloadStatus = 'Limited Availability';
         limitedCount++;
       } else {
-        workloadStatus = 'Fully loaded';
+        workloadStatus = 'Fully Utilized';
         fullyLoadedCount++;
       }
+
+      // Prefer the actual assigned position from the positions table. Only
+      // fall back to the profile's role if no real position record exists —
+      // and never fall back to the literal word "Employee" as a position,
+      // since that produced the bogus "Employee / Employee" display.
+      const rawPosition = emp.positions?.position_name?.trim();
+      const rawRole = (emp.role || '').trim();
+      const roleLower = rawRole.toLowerCase();
+
+      let displayRole;
+      if (roleLower === 'project manager') {
+        // Project Managers are shown plainly (no "Employee /" prefix).
+        displayRole = 'Project Manager';
+      } else if (roleLower === 'resource manager') {
+        // Resource Managers are also shown plainly.
+        displayRole = 'Resource Manager';
+      } else if (rawPosition && rawPosition.toLowerCase() !== 'employee') {
+        displayRole = `Employee / ${toTitleCase(rawPosition)}`;
+      } else if (rawRole && roleLower !== 'employee') {
+        displayRole = `Employee / ${toTitleCase(rawRole)}`;
+      } else {
+        displayRole = 'Employee';
+      }
+
+      const hasTask = (taskCounts[emp.id] || 0) > 0;
 
       employeeRows.push({
         id: emp.id,
         employeeId: emp.employee_id,
         name: `${emp.first_name} ${emp.last_name}`,
         avatar: emp.avatar_url,
-        role: emp.positions?.position_name || 'Unassigned',
+        role: displayRole,
         department: emp.departments?.department_name || 'Unassigned',
         workloadStatus,
-        utilizationRate: Math.min(count * 50, 100),
+        utilizationRate: Math.min(taskCount * 50, 100),
         assignmentCount: count,
+        taskStatus: hasTask ? 'Assigned' : 'Unassigned',
       });
     }
 
@@ -131,9 +191,9 @@ router.get('/dashboard', async (req, res) => {
 
   } catch (err) {
     console.error('❌ RM dashboard error:', err);
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
+    res.status(500).json({
+      success: false,
+      error: err.message
     });
   }
 });
