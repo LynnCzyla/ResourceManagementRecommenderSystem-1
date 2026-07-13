@@ -151,7 +151,7 @@ router.post('/tasks', async (req, res) => {
 router.put('/tasks/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { employeeId, status, dueDate, title, description, priority } = req.body;
+    const { employeeId, status, dueDate, title, description, priority, progressLogs } = req.body;
 
     const updateData = { updated_at: new Date().toISOString() };
     if (employeeId !== undefined) updateData.profile_id = employeeId;
@@ -160,6 +160,7 @@ router.put('/tasks/:id', async (req, res) => {
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
     if (priority !== undefined) updateData.priority = priority;
+    if (progressLogs !== undefined) updateData.progress_logs = progressLogs;
 
     const { data, error } = await supabase
       .from('project_tasks')
