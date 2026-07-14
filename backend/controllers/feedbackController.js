@@ -693,7 +693,30 @@ exports.getDocuments = async (req, res) => {
 
         const { data, error } = await supabase
             .from('documents')
-            .select('*')
+            .select(`
+                id,
+                employee_id,
+                document_type,
+                file_name,
+                file_path,
+                file_size,
+                mime_type,
+                created_at,
+                updated_at,
+                processed_at,
+                ocr_confidence,
+                word_count,
+                char_count,
+                document_hash,
+                extraction_method,
+                extracted_skills,
+                skills_approved,
+                feedback_pending,
+                approved_skills,
+                rejected_skills
+                -- raw_ocr_text EXCLUDED
+                -- cleaned_ocr_text EXCLUDED
+            `)
             .eq('employee_id', profileData.employee_id)
             .order('created_at', { ascending: false });
 
@@ -701,6 +724,56 @@ exports.getDocuments = async (req, res) => {
         res.json({ success: true, data: data });
 
     } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ✅ NEW: Get OCR text for a specific document (on-demand)
+exports.getDocumentOcrText = async (req, res) => {
+    try {
+        const { documentId } = req.params;
+
+        if (!documentId) {
+            return res.status(400).json({ success: false, error: 'Document ID is required' });
+        }
+
+        // Verify user owns this document
+        const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('employee_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
+        }
+
+        // Get only the OCR text for this specific document
+        const { data, error } = await supabase
+            .from('documents')
+            .select('id, raw_ocr_text, cleaned_ocr_text')
+            .eq('id', documentId)
+            .eq('employee_id', profileData.employee_id)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                return res.status(404).json({ success: false, error: 'Document not found' });
+            }
+            throw error;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                id: data.id,
+                raw_ocr_text: data.raw_ocr_text,
+                cleaned_ocr_text: data.cleaned_ocr_text
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching OCR text:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

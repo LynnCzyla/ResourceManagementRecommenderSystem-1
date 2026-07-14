@@ -33,11 +33,8 @@ router.get('/dashboard', async (req, res) => {
     console.log('📊 Fetching FRESH dashboard data...');
     const startTime = Date.now();
 
-    // ✅ Run all 4 queries in PARALLEL for speed
-    // NOTE: previously this array only had 3 entries but the code below
-    // referenced a 4th (tasksResult) — that caused a ReferenceError on
-    // every request, which is why the dashboard fell back to blank/cached
-    // "Unassigned" data. Fixed by including the tasks query here.
+    // ✅ Run all 4 queries in PARALLEL
+    // ✅ REMOVED avatar_url from employees select - only need basic info
     const [employeesResult, assignmentsResult, projectsResult, tasksResult] = await Promise.all([
       supabase
         .from('profiles')
@@ -46,7 +43,7 @@ router.get('/dashboard', async (req, res) => {
           employee_id,
           first_name,
           last_name,
-          avatar_url,
+          -- avatar_url,  // ❌ REMOVED - not needed for dashboard
           status,
           role,
           positions ( position_name ),
@@ -139,10 +136,8 @@ router.get('/dashboard', async (req, res) => {
 
       let displayRole;
       if (roleLower === 'project manager') {
-        // Project Managers are shown plainly (no "Employee /" prefix).
         displayRole = 'Project Manager';
       } else if (roleLower === 'resource manager') {
-        // Resource Managers are also shown plainly.
         displayRole = 'Resource Manager';
       } else if (rawPosition && rawPosition.toLowerCase() !== 'employee') {
         displayRole = `Employee / ${toTitleCase(rawPosition)}`;
@@ -158,7 +153,8 @@ router.get('/dashboard', async (req, res) => {
         id: emp.id,
         employeeId: emp.employee_id,
         name: `${emp.first_name} ${emp.last_name}`,
-        avatar: emp.avatar_url,
+        // ✅ No avatar in dashboard - use generated URL in frontend
+        avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(`${emp.first_name} ${emp.last_name}`)}`,
         role: displayRole,
         department: emp.departments?.department_name || 'Unassigned',
         workloadStatus,
