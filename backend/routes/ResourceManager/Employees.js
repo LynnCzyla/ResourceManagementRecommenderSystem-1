@@ -30,7 +30,6 @@ router.get('/employees', async (req, res) => {
         employee_id,
         first_name,
         last_name,
-        -- avatar_url,  // ❌ REMOVED - was causing egress bloat
         status,
         positions ( position_name ),
         departments ( department_name ),
@@ -100,7 +99,7 @@ router.get('/employees/:id', async (req, res) => {
         employee_id,
         first_name,
         last_name,
-        avatar_url,  // ✅ Only include avatar in detail view
+        avatar_url,  
         status,
         positions ( position_name ),
         departments ( department_name ),

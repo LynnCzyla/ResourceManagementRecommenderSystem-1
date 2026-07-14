@@ -3,38 +3,34 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 
-// GET /api/pm/dashboard — aggregate stats for the PM dashboard
-// REMOVED: totalHoursThisWeek since it's fetched by employees endpoint
 router.get('/dashboard', async (req, res) => {
   try {
     const { createdBy } = req.query;
 
-    // Use Promise.all for parallel queries
-    const [projectsResult, tasksResult] = await Promise.all([
-      // Fetch projects
-      supabase
-        .from('projects')
-        .select('id, status')
-        .eq('created_by', createdBy),
-      
-      // Fetch tasks - separate query to avoid complex joins
-      supabase
-        .from('project_tasks')
-        .select('id, status, project_id')
-    ]);
+    // ✅ FIXED: Fetch projects first
+    const projectsResult = await supabase
+      .from('projects')
+      .select('id, status')
+      .eq('created_by', createdBy);
 
     if (projectsResult.error) throw projectsResult.error;
-    if (tasksResult.error) throw tasksResult.error;
 
     const projects = projectsResult.data || [];
-    const allTasks = tasksResult.data || [];
-
     const projectIds = projects.map(p => p.id);
-    
-    // Filter tasks for these projects
-    const projectTasks = allTasks.filter(t => projectIds.includes(t.project_id));
 
-    // Get assignments in parallel
+    // ✅ FIXED: Only fetch tasks for these project IDs
+    let tasks = [];
+    if (projectIds.length > 0) {
+      const { data, error } = await supabase
+        .from('project_tasks')
+        .select('id, status, project_id')
+        .in('project_id', projectIds);
+      
+      if (error) throw error;
+      tasks = data || [];
+    }
+
+    // ✅ FIXED: Get assignments for these projects
     let assignments = [];
     if (projectIds.length > 0) {
       const { data, error } = await supabase
@@ -54,12 +50,11 @@ router.get('/dashboard', async (req, res) => {
         activeProjectsCount: projects.filter(p => p.status === 'Active').length,
         totalProjectsCount: projects.length,
         totalTeamMembers: uniqueTeamMemberIds.length,
-        // REMOVED: totalHoursThisWeek - fetched by employees endpoint
-        totalTasksCount: projectTasks.length,
+        totalTasksCount: tasks.length,
         tasksByStatus: {
-          Pending: projectTasks.filter(t => t.status === 'Pending').length,
-          'In Progress': projectTasks.filter(t => t.status === 'In Progress').length,
-          Completed: projectTasks.filter(t => t.status === 'Completed').length,
+          Pending: tasks.filter(t => t.status === 'Pending').length,
+          'In Progress': tasks.filter(t => t.status === 'In Progress').length,
+          Completed: tasks.filter(t => t.status === 'Completed').length,
         },
       },
     });

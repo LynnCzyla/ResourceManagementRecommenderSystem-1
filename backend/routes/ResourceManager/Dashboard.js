@@ -23,7 +23,7 @@ const toTitleCase = (str) =>
  */
 router.get('/dashboard', async (req, res) => {
   try {
-    // ✅ Check if we have cached data that's still fresh
+    // ✅ Check cache first
     const now = Date.now();
     if (cache.data && (now - cache.timestamp) < cache.ttl) {
       console.log('📊 Returning CACHED dashboard data');
@@ -33,8 +33,7 @@ router.get('/dashboard', async (req, res) => {
     console.log('📊 Fetching FRESH dashboard data...');
     const startTime = Date.now();
 
-    // ✅ Run all 4 queries in PARALLEL
-    // ✅ REMOVED avatar_url from employees select - only need basic info
+    // ✅ Run queries in PARALLEL
     const [employeesResult, assignmentsResult, projectsResult, tasksResult] = await Promise.all([
       supabase
         .from('profiles')
@@ -43,7 +42,6 @@ router.get('/dashboard', async (req, res) => {
           employee_id,
           first_name,
           last_name,
-          -- avatar_url,  // ❌ REMOVED - not needed for dashboard
           status,
           role,
           positions ( position_name ),
@@ -62,23 +60,28 @@ router.get('/dashboard', async (req, res) => {
 
       supabase
         .from('project_tasks')
-        .select('profile_id, status')
+        .select('profile_id, status, project_id')
     ]);
 
-    // Check for errors
+    // ✅ Check for errors FIRST
     if (employeesResult.error) throw employeesResult.error;
     if (assignmentsResult.error) throw assignmentsResult.error;
     if (projectsResult.error) throw projectsResult.error;
     if (tasksResult.error) throw tasksResult.error;
 
-    // Admin accounts aren't assignable to projects/tasks, so they never
-    // belong in this table — filter them out before any counting happens.
+    // ✅ Define projects BEFORE using it
+    const projects = projectsResult.data || [];
+    const projectIds = projects.map(p => p.id);  // ✅ Now defined!
+
+    // ✅ Filter tasks to only include relevant projects
+    const allTasks = tasksResult.data || [];
+    const tasks = allTasks.filter(t => projectIds.includes(t.project_id));
+
+    // Admin accounts aren't assignable to projects/tasks
     const employees = (employeesResult.data || []).filter(
       (emp) => (emp.role || '').trim().toLowerCase() !== 'admin'
     );
     const assignments = assignmentsResult.data || [];
-    const projects = projectsResult.data || [];
-    const tasks = tasksResult.data || [];
 
     console.log(`📊 Data: ${employees.length} employees, ${assignments.length} assignments, ${projects.length} projects, ${tasks.length} tasks`);
 
@@ -110,8 +113,6 @@ router.get('/dashboard', async (req, res) => {
 
     for (const emp of employees) {
       const count = assignmentCounts[emp.id] || 0;
-      // Workload is driven by assigned TASKS, not project links — an employee
-      // with no tasks is "Available" even if they're linked to a project.
       const taskCount = taskCounts[emp.id] || 0;
       let workloadStatus;
 
@@ -126,10 +127,6 @@ router.get('/dashboard', async (req, res) => {
         fullyLoadedCount++;
       }
 
-      // Prefer the actual assigned position from the positions table. Only
-      // fall back to the profile's role if no real position record exists —
-      // and never fall back to the literal word "Employee" as a position,
-      // since that produced the bogus "Employee / Employee" display.
       const rawPosition = emp.positions?.position_name?.trim();
       const rawRole = (emp.role || '').trim();
       const roleLower = rawRole.toLowerCase();
@@ -153,7 +150,6 @@ router.get('/dashboard', async (req, res) => {
         id: emp.id,
         employeeId: emp.employee_id,
         name: `${emp.first_name} ${emp.last_name}`,
-        // ✅ No avatar in dashboard - use generated URL in frontend
         avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(`${emp.first_name} ${emp.last_name}`)}`,
         role: displayRole,
         department: emp.departments?.department_name || 'Unassigned',
