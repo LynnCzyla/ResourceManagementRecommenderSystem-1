@@ -17,20 +17,46 @@ export default function LogsTab() {
 
   const ROWS_PER_PAGE = 10;
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [jumpPage, setJumpPage] = useState('');
+
+  // Fetch filter dropdown options once — not tied to pagination
+  useEffect(() => {
+    const fetchFilters = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await fetch('http://localhost:5000/api/admin/audit-logs/filters', { headers });
+        const json = await res.json();
+        if (json.success) {
+          setCategoriesList(json.data.categories || []);
+          setActionsList(json.data.actions || []);
+        }
+      } catch (err) {
+        console.error('Error fetching filter options:', err);
+      }
+    };
+    fetchFilters();
+  }, []);
+
+  // Reset to page 1 whenever a filter changes (not when the page itself changes)
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, categoryFilter, actionFilter, startDate, endDate]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchLogs = async () => {
       setLoading(true);
       setError('');
-      setCurrentPage(1);
       try {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
         const params = new URLSearchParams();
-        params.append('limit', '200');
+        params.append('limit', String(ROWS_PER_PAGE));
+        params.append('page', String(currentPage));
         if (searchQuery.trim()) params.append('search', searchQuery.trim());
         if (categoryFilter) params.append('category', categoryFilter);
         if (actionFilter) params.append('action', actionFilter);
@@ -42,16 +68,9 @@ export default function LogsTab() {
 
         if (isMounted) {
           if (json.success) {
-            const logs = json.data || [];
-            setAuditLogs(logs);
-
-            // Populate unique category and action filters on initial load when filters are empty
-            if (categoriesList.length === 0 && actionsList.length === 0 && logs.length > 0 && !categoryFilter && !actionFilter && !searchQuery && !startDate && !endDate) {
-              const uniqueCats = Array.from(new Set(logs.map(log => log.category).filter(Boolean)));
-              const uniqueActions = Array.from(new Set(logs.map(log => log.action).filter(Boolean)));
-              setCategoriesList(uniqueCats.sort());
-              setActionsList(uniqueActions.sort());
-            }
+            setAuditLogs(json.data || []);
+            setTotalPages(json.pagination?.totalPages || 1);
+            setTotalCount(json.pagination?.total || 0);
           } else {
             setError(json.error || 'Failed to load audit logs.');
           }
@@ -68,11 +87,18 @@ export default function LogsTab() {
       }
     };
 
-    fetchLogs();
+    // Wait 500ms after the user stops typing/changing filters before firing
+    // the request — this is what stops a fresh request from firing on every
+    // single keystroke while searching (was the main egress driver here).
+    // Page changes (Prev/Next/number click) fire immediately since they're
+    // deliberate clicks, not typing.
+    const timeoutId = setTimeout(fetchLogs, 500);
+
     return () => {
       isMounted = false;
+      clearTimeout(timeoutId);
     };
-  }, [searchQuery, categoryFilter, actionFilter, startDate, endDate]);
+  }, [searchQuery, categoryFilter, actionFilter, startDate, endDate, currentPage]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -114,13 +140,6 @@ export default function LogsTab() {
     setStartDate('');
     setEndDate('');
   };
-
-  const totalPages = Math.max(1, Math.ceil(auditLogs.length / ROWS_PER_PAGE));
-  const safePage = Math.min(currentPage, totalPages);
-  const startIndex = (safePage - 1) * ROWS_PER_PAGE;
-  const pageLogs = auditLogs.slice(startIndex, startIndex + ROWS_PER_PAGE);
-  const rangeStart = auditLogs.length === 0 ? 0 : startIndex + 1;
-  const rangeEnd = Math.min(startIndex + ROWS_PER_PAGE, auditLogs.length);
 
   return (
     <div>
@@ -225,7 +244,7 @@ export default function LogsTab() {
                 </tr>
               </thead>
               <tbody>
-                {pageLogs.map((log) => (
+                {auditLogs.map((log) => (
                   <tr key={log.id} style={styles.tableBodyRow}>
                     <td style={styles.td}>{formatTimestamp(log.time || log.date)}</td>
                     <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{log.user || 'System'}</td>
@@ -249,20 +268,21 @@ export default function LogsTab() {
 
             <div style={styles.pagination}>
               <span style={styles.paginationInfo}>
-                Showing {rangeStart}–{rangeEnd} of {auditLogs.length}
+                Showing {totalCount === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}
+                –{Math.min(currentPage * ROWS_PER_PAGE, totalCount)} of {totalCount}
               </span>
               <div style={styles.paginationControls}>
                 <button
                   style={styles.pageBtn}
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={safePage <= 1}
+                  disabled={currentPage <= 1}
                 >
-                  Prev
+                  {'<'}
                 </button>
                 {(() => {
                   const pages = [];
                   const maxVisible = 3;
-                  let start = Math.max(1, safePage - 1);
+                  let start = Math.max(1, currentPage - 1);
                   let end = Math.min(totalPages, start + maxVisible - 1);
                   if (end - start + 1 < maxVisible) {
                     start = Math.max(1, end - maxVisible + 1);
@@ -286,7 +306,7 @@ export default function LogsTab() {
                         key={page}
                         style={{
                           ...styles.pageBtn,
-                          ...(page === safePage ? styles.pageBtnActive : {}),
+                          ...(page === currentPage ? styles.pageBtnActive : {}),
                         }}
                         onClick={() => setCurrentPage(page)}
                       >
@@ -298,9 +318,9 @@ export default function LogsTab() {
                 <button
                   style={styles.pageBtn}
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={safePage >= totalPages}
+                  disabled={currentPage >= totalPages}
                 >
-                  Next
+                  {'>'}
                 </button>
 
                 <span style={styles.pageJumpWrap}>
