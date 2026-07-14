@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { getDashboardStats, getEmployees, getTasks, getProjects } from './pmApi';
 
 export default function PMDashboardTab({ user }) {
@@ -10,53 +10,156 @@ export default function PMDashboardTab({ user }) {
     tasksByStatus: { Pending: 0, 'In Progress': 0, Completed: 0 },
   });
   const [employees, setEmployees] = useState([]);
-  const [projectEmployees, setProjectEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('all');
   const [loadError, setLoadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('name');
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Use refs to track if data is already loaded for this user
+  const loadedUserIdRef = useRef(null);
+  const isLoadingRef = useRef(false);
+  // Add this ref near your other refs
+  const abortControllerRef = useRef(null);
 
-  const loadDashboard = async () => {
+  // SINGLE load function - not two separate ones
+  const loadDashboard = useCallback(async (userId, forceRefresh = false) => {
+    // Prevent duplicate loads for the same user
+    if (!forceRefresh && loadedUserIdRef.current === userId && employees.length > 0) {
+      console.log('📦 Using cached dashboard data');
+      return;
+    }
+
+    // Prevent concurrent loads
+    if (isLoadingRef.current) {
+      console.log('⏳ Load already in progress, skipping');
+      return;
+    }
+
+    if (!userId) {
+      console.warn('No user ID provided, skipping load');
+      return;
+    }
+
+      // ✅ NEW: Cancel previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // ✅ NEW: Create new abort controller
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
+      isLoadingRef.current = true;
+      setIsLoading(true);
+      setLoadError('');
+
+      console.log('🚀 Loading dashboard data for user:', userId);
+      
+      // Only fetch employees ONCE - we'll filter client-side
+        // ✅ NEW: Pass signal to all API calls
       const [statsData, employeesData, tasksData, projectsData] = await Promise.all([
-        getDashboardStats(user?.id),
-        getEmployees(user?.id),
-        getTasks(),
-        getProjects(user?.id),
+        getDashboardStats(userId, controller.signal),
+        getEmployees(userId, null, null, controller.signal),
+        getTasks({}, controller.signal),
+        getProjects(userId, controller.signal),
       ]);
+
+      console.log('✅ Dashboard data loaded:', {
+        stats: statsData,
+        employees: employeesData?.length,
+        tasks: tasksData?.length,
+        projects: projectsData?.length,
+      });
+
       setStats(statsData);
-      setEmployees(employeesData);
+      setEmployees(employeesData || []);
       setTasks(tasksData || []);
       setProjects(projectsData || []);
-      setLoadError('');
+      
+      // Mark as loaded for this user
+      loadedUserIdRef.current = userId;
+      
     } catch (err) {
-      console.error('Failed to load dashboard:', err);
+       // ✅ NEW: Handle aborted requests gracefully
+      if (err.name === 'AbortError') {
+        console.log('🛑 Request was cancelled');
+        return;
+      }
+
+      console.error('❌ Failed to load dashboard:', err);
       setLoadError(err.message || 'Failed to load dashboard');
+    } finally {
+      setIsLoading(false);
+      isLoadingRef.current = false;
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
-  };
+  }, [employees.length]); // ✅ FIX: Added employees.length dependency
 
+  // ✅ NEW: Add cleanup on unmount
   useEffect(() => {
-    loadDashboard();
-  }, [user]);
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
-  const loadProjectEmployees = async () => {
-    try {
-      const pmId = user?.id;
-      const projId = selectedProjectId === 'all' ? undefined : selectedProjectId;
-      const employeesData = await getEmployees(pmId, undefined, projId);
-      setProjectEmployees(employeesData || []);
-    } catch (err) {
-      console.error('Failed to load project employees:', err);
-    }
-  };
-
+  // Initial load - only when user changes
   useEffect(() => {
     if (user?.id) {
-      loadProjectEmployees();
+      // Only reload if user changed
+      if (loadedUserIdRef.current !== user.id) {
+        loadDashboard(user.id);
+      }
     }
-  }, [selectedProjectId, user]);
+  }, [user?.id, loadDashboard]);
+
+  // ✅ FIX: Add isMounted check
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadData = async () => {
+      if (!isMounted) return;
+      if (user?.id && loadedUserIdRef.current !== user.id) {
+        await loadDashboard(user.id);
+      }
+    };
+    
+    loadData();
+    
+    return () => {
+      isMounted = false;
+      // Cancel any pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [user?.id, loadDashboard]);
+
+    // REMOVED: Separate loadProjectEmployees useEffect - we filter client-side now
+
+    // Client-side filtering of employees by project (no API call needed)
+    const filteredByProjectEmployees = useMemo(() => {
+      if (selectedProjectId === 'all') {
+        return employees;
+      }
+      
+      // Filter employees who have tasks in the selected project
+      const employeesWithTasksInProject = new Set();
+      tasks.forEach(task => {
+        if (String(task.projectId) === String(selectedProjectId) && task.employeeId) {
+          employeesWithTasksInProject.add(task.employeeId);
+        }
+      });
+      
+      return employees.filter(emp => employeesWithTasksInProject.has(emp.id));
+    }, [employees, tasks, selectedProjectId]);
 
   // Pre-group tasks by employee once so per-row / per-employee lookups are
   // O(1) instead of re-scanning the entire task list on every render.
@@ -75,23 +178,23 @@ export default function PMDashboardTab({ user }) {
     [tasksByEmployee]
   );
   
-  const calculateSingleTaskCompletion = (task) => {
+  const calculateSingleTaskCompletion = useCallback((task) => {
     if (task.progressLogs && task.progressLogs.length) {
       return Math.min(100, task.progressLogs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0));
     }
     if (task.status === 'Completed' || task.status === 'Completed-Hidden') return 100;
     if (task.status === 'In Progress') return 50;
     return 0;
-  };
+  }, []);
 
   const getTaskCompletion = useCallback((id) => {
     const assigned = getAssignedTasks(id);
     if (!assigned.length) return 0;
     const percentages = assigned.map(task => calculateSingleTaskCompletion(task));
     return Math.round(percentages.reduce((sum, value) => sum + value, 0) / percentages.length);
-  }, [getAssignedTasks]);
+  }, [getAssignedTasks, calculateSingleTaskCompletion]);
 
-  const getEmployeeProjectBreakdown = (empId) => {
+  const getEmployeeProjectBreakdown = useCallback((empId) => {
     const empTasks = getAssignedTasks(empId);
     if (!empTasks.length) {
       return {
@@ -132,21 +235,21 @@ export default function PMDashboardTab({ user }) {
       projects: projectList,
       overall
     };
-  };
+  }, [getAssignedTasks, calculateSingleTaskCompletion]);
 
   const filteredEmployees = useMemo(() => {
-    return employees.filter(emp => 
-      emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      emp.role.toLowerCase().includes(searchQuery.toLowerCase())
+    return filteredByProjectEmployees.filter(emp => 
+      emp.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      emp.role?.toLowerCase().includes(searchQuery.toLowerCase())
     ).sort((a, b) => {
-      if (sortBy === 'name') return a.name.localeCompare(b.name);
-      if (sortBy === 'role') return a.role.localeCompare(b.role);
+      if (sortBy === 'name') return a.name?.localeCompare(b.name || '') || 0;
+      if (sortBy === 'role') return a.role?.localeCompare(b.role || '') || 0;
       if (sortBy === 'completion') {
         return getTaskCompletion(b.id) - getTaskCompletion(a.id); // Highest completion first
       }
       return 0;
     });
-  }, [employees, searchQuery, sortBy, getTaskCompletion]);
+  }, [filteredByProjectEmployees, searchQuery, sortBy, getTaskCompletion]);
 
   const projectTasks = useMemo(() => 
     selectedProjectId === 'all' 
@@ -155,25 +258,41 @@ export default function PMDashboardTab({ user }) {
     [tasks, selectedProjectId]
   );
 
-  const displayEmployees = useMemo(() => {
-    if (selectedProjectId === 'all') return filteredEmployees;
-    return filteredEmployees.filter(emp => 
-      projectEmployees.some(pe => pe.id === emp.id) ||
-      getAssignedTasks(emp.id).some(t => String(t.projectId) === String(selectedProjectId))
-    );
-  }, [filteredEmployees, selectedProjectId, projectEmployees, getAssignedTasks]);
+  // ✅ NEW: Memoize task status counts
+  const taskStatusCounts = useMemo(() => ({
+    Pending: projectTasks.filter(t => t.status === 'Pending').length,
+    'In Progress': projectTasks.filter(t => t.status === 'In Progress').length,
+    Completed: projectTasks.filter(t => t.status === 'Completed').length,
+  }), [projectTasks]);
 
+  // Compute unassigned tasks
   const unassignedTasks = useMemo(() => 
     projectTasks.filter(task => !task.employeeId || !employees.some(emp => emp.id === task.employeeId)),
     [projectTasks, employees]
   );
 
+  // Loading state
+  if (isLoading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>Project Manager Dashboard</h1>
+          <p style={styles.subtitle}>Loading dashboard data...</p>
+        </div>
+        <div style={styles.loadingContainer}>
+          <div style={styles.loadingSpinner}></div>
+          <p>Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>Project Manager Dashboard</h1>
         <p style={styles.subtitle}>Overview of project metrics, team utilization, and resource readiness.</p>
+       
       </div>
 
       {loadError && (
@@ -206,8 +325,6 @@ export default function PMDashboardTab({ user }) {
             <div style={styles.statLabel}>My Team Members</div>
           </div>
         </div>
-
-
       </div>
 
       <div style={styles.gridContainer}>
@@ -266,7 +383,7 @@ export default function PMDashboardTab({ user }) {
                 </tr>
               </thead>
               <tbody>
-                {displayEmployees.map(emp => {
+                {filteredEmployees.map(emp => {
                   const allAssigned = getAssignedTasks(emp.id);
                   const assignedTasks = selectedProjectId === 'all'
                     ? allAssigned
@@ -336,23 +453,24 @@ export default function PMDashboardTab({ user }) {
           <h2 style={styles.panelTitle}>Task Status Breakdown</h2>
           <p style={styles.panelSubtitle}>How your team's tasks are distributed right now.</p>
 
+          {/* ✅ CHANGE: Use taskStatusCounts instead of filtering */}
           <div style={styles.attendanceStats}>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{projectTasks.filter(t => t.status === 'Pending').length}</span>
+              <span style={styles.attendanceValue}>{taskStatusCounts.Pending}</span>
               <span style={styles.attendanceLabel}>Pending</span>
             </div>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{projectTasks.filter(t => t.status === 'In Progress').length}</span>
+              <span style={styles.attendanceValue}>{taskStatusCounts['In Progress']}</span>
               <span style={styles.attendanceLabel}>In Progress</span>
             </div>
             <div style={styles.attendanceMetric}>
-              <span style={styles.attendanceValue}>{projectTasks.filter(t => t.status === 'Completed').length}</span>
+              <span style={styles.attendanceValue}>{taskStatusCounts.Completed}</span>
               <span style={styles.attendanceLabel}>Completed</span>
             </div>
           </div>
 
           <div style={styles.attendanceList}>
-            {displayEmployees.map(emp => {
+            {filteredEmployees.map(emp => {
               const breakdown = getEmployeeProjectBreakdown(emp.id);
               return (
                 <div key={emp.id} style={styles.breakdownCard}>
@@ -401,6 +519,7 @@ export default function PMDashboardTab({ user }) {
   );
 }
 
+// ... styles remain the same as your original file ...
 const styles = {
   container: {
     display: 'flex',
@@ -419,6 +538,42 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  lastUpdated: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    marginTop: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  refreshButton: {
+    padding: '4px 12px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card)',
+    color: 'var(--color-text-primary)',
+    cursor: 'pointer',
+    fontSize: '12px',
+    '&:hover': {
+      background: 'var(--color-bg-card-hover)',
+    },
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '60px 20px',
+    gap: '16px',
+  },
+  loadingSpinner: {
+    width: '40px',
+    height: '40px',
+    border: '3px solid var(--color-border)',
+    borderTop: '3px solid var(--color-primary)',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
   },
   errorBanner: {
     padding: '12px 16px',
@@ -475,6 +630,7 @@ const styles = {
     display: 'flex',
     gap: '12px',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   searchWrapper: {
     position: 'relative',

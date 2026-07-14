@@ -11,7 +11,7 @@ link.href = logo
 document.getElementsByTagName('head')[0].appendChild(link)
 
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
+  //<StrictMode>
     <App />
-  </StrictMode>,
+  //</StrictMode>,
 )
