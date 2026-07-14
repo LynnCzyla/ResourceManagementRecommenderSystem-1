@@ -1,27 +1,73 @@
 // backend/utils/loginAttempts.js
 const supabase = require('../supabase');
 
+// ✅ FIXED: Cache with pending promise lock to prevent stampede
+let cachedMaxAttempts = 5;
+let lastFetchTime = 0;
+let pendingAttemptsPromise = null;
+
 /**
- * Get the max login attempts from system settings
+ * Get the max login attempts from system settings (with caching)
+ * ✅ FIXED: No more cache stampede
  */
 const getMaxLoginAttempts = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('system_settings')
-      .select('max_login_attempts')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (error) throw error;
-    
-    if (data && data.length > 0) {
-      return data[0].max_login_attempts;
-    }
-    return 5; // Default
-  } catch (error) {
-    console.error('Error fetching max login attempts:', error);
-    return 5;
+  const now = Date.now();
+  const isStale = now - lastFetchTime > 5 * 60 * 1000;
+  
+  // If there's already a pending fetch, wait for it
+  if (pendingAttemptsPromise) {
+    console.log('⏳ Waiting for pending max attempts fetch...');
+    return pendingAttemptsPromise;
   }
+  
+  // If cache is fresh, return cached value
+  if (!isStale) {
+    return cachedMaxAttempts;
+  }
+  
+  // Set lastFetchTime BEFORE the query starts to prevent stampede
+  lastFetchTime = now;
+  
+  // Create the pending promise
+  pendingAttemptsPromise = (async () => {
+    try {
+      console.log('🔄 Fetching max login attempts from database...');
+      
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('max_login_attempts')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (!error && data && data.length > 0) {
+        cachedMaxAttempts = data[0].max_login_attempts;
+        console.log(`✅ Max login attempts cached: ${cachedMaxAttempts}`);
+      } else {
+        // If error or no data, keep existing cached value
+        console.warn('⚠️ No max login attempts found, using cached value:', cachedMaxAttempts);
+      }
+      
+      return cachedMaxAttempts;
+    } catch (error) {
+      console.error('❌ Error fetching max login attempts:', error);
+      // Roll back lastFetchTime so next request retries
+      lastFetchTime = 0;
+      return cachedMaxAttempts;
+    } finally {
+      pendingAttemptsPromise = null;
+    }
+  })();
+  
+  return pendingAttemptsPromise;
+};
+
+/**
+ * ✅ NEW: Clear the cache (for admin use)
+ */
+const clearMaxAttemptsCache = () => {
+  lastFetchTime = 0;
+  pendingAttemptsPromise = null;
+  console.log('🧹 Max login attempts cache cleared');
 };
 
 /**
@@ -69,7 +115,7 @@ const isUserLocked = async (userId) => {
       };
     }
     
-    const maxAttempts = await getMaxLoginAttempts();
+    const maxAttempts = await getMaxLoginAttempts(); // ✅ Now cached
     
     // Check if attempts exceed max (auto-lock)
     if (attempts.failed_attempts >= maxAttempts) {
@@ -155,7 +201,7 @@ const unlockUserAccount = async (userId) => {
  */
 const recordFailedAttempt = async (userId) => {
   try {
-    const maxAttempts = await getMaxLoginAttempts();
+    const maxAttempts = await getMaxLoginAttempts(); // ✅ Now cached
     const existing = await getUserLoginAttempts(userId);
     
     if (existing) {
@@ -255,109 +301,103 @@ const getRemainingAttempts = async (userId) => {
 
 /**
  * Get all locked users (for admin)
- * Fixed to not use nested select
- */
-// backend/utils/loginAttempts.js - Updated getLockedUsers function
-
-/**
- * Get all locked users (for admin)
- * Fetches from both profiles and auth.users
  */
 const getLockedUsers = async () => {
-    try {
-      console.log('🔍 getLockedUsers() called');
-      
-      // First, get all locked user IDs from user_login_attempts
-      const { data: lockedUsers, error } = await supabase
-        .from('user_login_attempts')
-        .select('user_id, locked_by, locked_at, failed_attempts')
-        .eq('locked', true);
-      
-      if (error) {
-        console.error('❌ Error in getLockedUsers:', error);
-        return [];
-      }
-      
-      if (!lockedUsers || lockedUsers.length === 0) {
-        console.log('ℹ️ No locked users found');
-        return [];
-      }
-      
-      console.log(`📊 Found ${lockedUsers.length} locked users`);
-      
-      // Get user IDs
-      const userIds = lockedUsers.map(item => item.user_id);
-      console.log('📊 User IDs:', userIds);
-      
-      // First, try to fetch from profiles table
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, first_name, middle_name, last_name, email, role')
-        .in('id', userIds);
-      
-      if (profileError) {
-        console.error('❌ Error fetching profiles:', profileError);
-      }
-      
-      // Create a map of user_id to profile
-      const profileMap = {};
-      if (profiles) {
-        profiles.forEach(profile => {
-          profileMap[profile.id] = profile;
-        });
-      }
-      
-      // For users without profiles, try to get from auth.users
-      const usersWithoutProfiles = userIds.filter(id => !profileMap[id]);
-      
-      if (usersWithoutProfiles.length > 0) {
-        console.log(`📊 ${usersWithoutProfiles.length} users don't have profiles, fetching from auth.users`);
-        
-        // Get from auth.users using the admin API
-        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
-        
-        if (!authError && authUsers) {
-          authUsers.users.forEach(authUser => {
-            // Check if this user ID is in our list of users without profiles
-            if (usersWithoutProfiles.includes(authUser.id)) {
-              // Create a profile-like object from auth user data
-              const userMetadata = authUser.user_metadata || {};
-              profileMap[authUser.id] = {
-                id: authUser.id,
-                first_name: userMetadata.first_name || userMetadata.full_name?.split(' ')[0] || 'Unknown',
-                middle_name: userMetadata.middle_name || '',
-                last_name: userMetadata.last_name || userMetadata.full_name?.split(' ').slice(1).join(' ') || 'User',
-                email: authUser.email || 'N/A',
-                role: userMetadata.role || 'Employee'
-              };
-            }
-          });
-        }
-      }
-      
-      // Combine the data
-      const result = lockedUsers.map(item => {
-        const profile = profileMap[item.user_id];
-        return {
-          user_id: item.user_id,
-          locked_by: item.locked_by,
-          locked_at: item.locked_at,
-          failed_attempts: item.failed_attempts,
-          user: profile || null
-        };
-      });
-      
-      console.log(`✅ Returning ${result.length} users with profiles`);
-      return result;
-      
-    } catch (error) {
-      console.error('❌ Error getting locked users:', error);
+  try {
+    console.log('🔍 getLockedUsers() called');
+    
+    // First, get all locked user IDs from user_login_attempts
+    const { data: lockedUsers, error } = await supabase
+      .from('user_login_attempts')
+      .select('user_id, locked_by, locked_at, failed_attempts')
+      .eq('locked', true);
+    
+    if (error) {
+      console.error('❌ Error in getLockedUsers:', error);
       return [];
     }
-  };
+    
+    if (!lockedUsers || lockedUsers.length === 0) {
+      console.log('ℹ️ No locked users found');
+      return [];
+    }
+    
+    console.log(`📊 Found ${lockedUsers.length} locked users`);
+    
+    // Get user IDs
+    const userIds = lockedUsers.map(item => item.user_id);
+    console.log('📊 User IDs:', userIds);
+    
+    // First, try to fetch from profiles table
+    const { data: profiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, first_name, middle_name, last_name, email, role')
+      .in('id', userIds);
+    
+    if (profileError) {
+      console.error('❌ Error fetching profiles:', profileError);
+    }
+    
+    // Create a map of user_id to profile
+    const profileMap = {};
+    if (profiles) {
+      profiles.forEach(profile => {
+        profileMap[profile.id] = profile;
+      });
+    }
+    
+    // For users without profiles, try to get from auth.users
+    const usersWithoutProfiles = userIds.filter(id => !profileMap[id]);
+    
+    if (usersWithoutProfiles.length > 0) {
+      console.log(`📊 ${usersWithoutProfiles.length} users don't have profiles, fetching from auth.users`);
+      
+      // Get from auth.users using the admin API
+      const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+      
+      if (!authError && authUsers) {
+        authUsers.users.forEach(authUser => {
+          // Check if this user ID is in our list of users without profiles
+          if (usersWithoutProfiles.includes(authUser.id)) {
+            // Create a profile-like object from auth user data
+            const userMetadata = authUser.user_metadata || {};
+            profileMap[authUser.id] = {
+              id: authUser.id,
+              first_name: userMetadata.first_name || userMetadata.full_name?.split(' ')[0] || 'Unknown',
+              middle_name: userMetadata.middle_name || '',
+              last_name: userMetadata.last_name || userMetadata.full_name?.split(' ').slice(1).join(' ') || 'User',
+              email: authUser.email || 'N/A',
+              role: userMetadata.role || 'Employee'
+            };
+          }
+        });
+      }
+    }
+    
+    // Combine the data
+    const result = lockedUsers.map(item => {
+      const profile = profileMap[item.user_id];
+      return {
+        user_id: item.user_id,
+        locked_by: item.locked_by,
+        locked_at: item.locked_at,
+        failed_attempts: item.failed_attempts,
+        user: profile || null
+      };
+    });
+    
+    console.log(`✅ Returning ${result.length} users with profiles`);
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Error getting locked users:', error);
+    return [];
+  }
+};
 
 module.exports = {
   getMaxLoginAttempts,
+  clearMaxAttemptsCache, // ✅ NEW: Export cache clear function
   getUserLoginAttempts,
   isUserLocked,
   lockUserAccount,
