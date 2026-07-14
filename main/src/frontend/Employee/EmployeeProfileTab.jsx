@@ -584,44 +584,190 @@ const handleCertUpload = async (e) => {
 
   const handleRemoveCert = (certId) => setCertifications(certifications.filter(c => c.id !== certId));
 
+  const showErrorAlert = (message, title = 'Error') => {
+    return Swal.fire({
+      title,
+      text: message,
+      icon: 'error',
+      zIndex: 10050,
+      confirmButtonText: 'OK',
+      confirmButtonColor: 'var(--color-primary)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      customClass: {
+        popup: 'swal-custom-popup',
+        confirmButton: 'swal-custom-confirm',
+      },
+      didOpen: () => {
+        const container = Swal.getContainer();
+        if (container) container.style.zIndex = '10050';
+      }
+    });
+  };
+
+  const validateProfileForm = () => {
+    const { firstName, lastName, email, role } = profileForm;
+
+    if (!firstName.trim() || !lastName.trim()) {
+      return 'First name and last name are required.';
+    }
+    if (!role.trim()) {
+      return 'Role title is required.';
+    }
+    if (email && email.trim() !== '') {
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailPattern.test(email.trim())) {
+        return 'Please enter a valid email address.';
+      }
+    }
+    return null;
+  };
+
+  const [profileSaving, setProfileSaving] = useState(false);
+  // Holds the raw File object selected for upload (not a base64 string).
+  const [avatarFile, setAvatarFile] = useState(null);
+
+  // Uploads the picked file to Supabase Storage and returns its public URL.
+  // Replaces the old approach of storing the entire image as base64 text
+  // directly in profiles.avatar_url, which bloated the database and blew up
+  // egress usage every time employee lists/dashboards were fetched.
+  const uploadAvatarToStorage = async (file) => {
+    const fileExt = file.name.split('.').pop();
+    const filePath = `avatars/${employeeId}/avatar.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  };
+
   const handleSaveProfile = async (e) => {
     e.preventDefault();
-    if (!employeeId) { alert('Please log in to update your profile'); return; }
+    if (!employeeId) { showErrorAlert('Please log in to update your profile'); return; }
+
+    // 1. Validate input
+    const validationError = validateProfileForm();
+    if (validationError) {
+      showErrorAlert(validationError, 'Invalid Input');
+      return;
+    }
+
+    setProfileSaving(true);
     try {
+      let newAvatarUrl = profilePicture;
+
+      // If a new local image was picked, upload it to Storage first and use
+      // the resulting public URL — never write raw base64 into the database.
+      if (avatarFile) {
+        newAvatarUrl = await uploadAvatarToStorage(avatarFile);
+      }
+
       const authHeader = await getAuthHeader();
       const response = await axios.put(`${API_URL}/employee/profile`, {
         employeeId,
-        first_name: profileForm.firstName,
-        last_name: profileForm.lastName,
-        email: profileForm.email,
+        first_name: profileForm.firstName.trim(),
+        last_name: profileForm.lastName.trim(),
+        email: profileForm.email.trim(),
         department: profileForm.department,
-        role: profileForm.role,
-        avatar_url: profilePicture
+        role: profileForm.role.trim(),
+        avatar_url: newAvatarUrl || null
       }, { headers: authHeader });
-      if (response.data.success) { await showSuccessAlert('Profile updated successfully.'); await fetchEmployeeData(); }
-      else alert('Failed to update profile');
+
+      // 2 & 3. Save to DB, then refresh the displayed profile on success
+      if (response.data.success) {
+        setAvatarFile(null);
+        await fetchEmployeeData();
+        await showSuccessAlert(response.data.message || 'Profile updated successfully.');
+      } else {
+        showErrorAlert(response.data.error || 'Failed to update profile.');
+      }
     } catch (error) {
       console.error('Update error:', error);
-      alert('Failed to update profile');
+      showErrorAlert(error.response?.data?.error || 'Failed to update profile. Please try again.');
+    } finally {
+      setProfileSaving(false);
     }
   };
 
   const handleProfilePictureChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setProfilePicture(reader.result);
-      reader.readAsDataURL(file);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showErrorAlert('Please select an image file (JPG, PNG, WEBP).');
+      return;
     }
+    if (file.size > 2 * 1024 * 1024) {
+      showErrorAlert('Image must be smaller than 2MB.');
+      return;
+    }
+
+    setAvatarFile(file);
+
+    // Local-only preview via a blob URL — never touches the database, just
+    // lets the <img> show the picture before Update Profile Info is clicked.
+    const previewUrl = URL.createObjectURL(file);
+    setProfilePicture(previewUrl);
   };
 
-  const handlePasswordChange = (e) => {
+  const [passwordSaving, setPasswordSaving] = useState(false);
+
+  const handlePasswordChange = async (e) => {
     e.preventDefault();
     setPasswordError('');
+
     if (!currentPassword) { setPasswordError('Please enter your current password.'); return; }
     if (newPassword !== confirmPassword) { setPasswordError('New password and confirm password do not match.'); return; }
     if (newPassword.length < 8) { setPasswordError('Password must be at least 8 characters long.'); return; }
-    showSuccessAlert('Password changed successfully.');
+    if (newPassword === currentPassword) { setPasswordError('New password must be different from your current password.'); return; }
+
+    const email = user?.email || profileForm.email;
+    if (!email) {
+      setPasswordError('Unable to verify your account email. Please re-login and try again.');
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      // Verify the current password is correct by attempting a real sign-in.
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentPassword
+      });
+
+      if (verifyError) {
+        setPasswordError('Current password is incorrect.');
+        setPasswordSaving(false);
+        return;
+      }
+
+      // Now actually change the password.
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (updateError) {
+        setPasswordError(updateError.message || 'Failed to change password.');
+        setPasswordSaving(false);
+        return;
+      }
+
+      await showSuccessAlert('Password changed successfully.');
+    } catch (err) {
+      console.error('Password change error:', err);
+      setPasswordError('Failed to change password. Please try again.');
+      setPasswordSaving(false);
+      return;
+    }
+
+    setPasswordSaving(false);
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
@@ -852,7 +998,9 @@ const handleCertUpload = async (e) => {
                   <input type="text" value={profileForm.role} onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })} style={styles.formInput} required />
                 </div>
               </div>
-              <button type="submit" style={styles.saveBtn}>Update Profile Info</button>
+              <button type="submit" style={styles.saveBtn} disabled={profileSaving}>
+                {profileSaving ? 'Saving...' : 'Update Profile Info'}
+              </button>
             </form>
 
             <div style={styles.accountSectionSpacer} />
@@ -874,7 +1022,9 @@ const handleCertUpload = async (e) => {
                   <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm new password" style={styles.formInput} required />
                 </div>
               </div>
-              <button type="submit" style={styles.saveBtn}>Change Password</button>
+              <button type="submit" style={styles.saveBtn} disabled={passwordSaving}>
+                {passwordSaving ? 'Changing...' : 'Change Password'}
+              </button>
             </form>
         </div>
       )}
