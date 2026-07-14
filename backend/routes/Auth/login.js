@@ -73,7 +73,7 @@ const getUserLoginAttempts = async (userId) => {
   try {
     const { data, error } = await supabase
       .from('user_login_attempts')
-      .select('*')
+      .select('failed_attempts, locked')
       .eq('user_id', userId)
       .single();
     
@@ -353,7 +353,7 @@ router.post('/login', async (req, res) => {
     // Step 7: Get user profile
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select('role, first_name, middle_name, last_name, employee_id')
       .eq('id', authUserId)
       .single();
 
