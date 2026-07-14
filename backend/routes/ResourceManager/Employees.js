@@ -9,7 +9,7 @@ const CACHE_DURATION = 60000; // 1 minute
 
 /**
  * GET /api/rm/employees
- * Powers RMEmployeeDirectoryTab.jsx
+ * Powers RMEmployeeDirectoryTab.jsx - OPTIMIZED (avatar removed from list)
  */
 router.get('/employees', async (req, res) => {
   try {
@@ -22,6 +22,7 @@ router.get('/employees', async (req, res) => {
 
     console.log('👥 Fetching FRESH employees data...');
 
+    // ✅ REMOVED avatar_url from select - only fetch what's needed
     const { data: profiles, error: profErr } = await supabase
       .from('profiles')
       .select(`
@@ -29,7 +30,7 @@ router.get('/employees', async (req, res) => {
         employee_id,
         first_name,
         last_name,
-        avatar_url,
+        -- avatar_url,  // ❌ REMOVED - was causing egress bloat
         status,
         positions ( position_name ),
         departments ( department_name ),
@@ -46,6 +47,7 @@ router.get('/employees', async (req, res) => {
 
     const employees = (profiles || []).map((p) => {
       const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unnamed';
+      // ✅ Generate avatar URL instead of storing/transmitting base64
       const fallbackAvatar = `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`;
       const certifications = (documents || [])
         .filter((d) => d.employee_id === p.employee_id)
@@ -60,7 +62,8 @@ router.get('/employees', async (req, res) => {
         id: p.id,
         employeeId: p.employee_id,
         name,
-        avatar: p.avatar_url || fallbackAvatar,
+        // ✅ Use generated avatar URL instead of stored base64
+        avatar: fallbackAvatar,  // Always use generated avatar in list views
         role: p.positions?.position_name || null,
         department: p.departments?.department_name || 'Unassigned',
         skills: (p.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
@@ -79,6 +82,57 @@ router.get('/employees', async (req, res) => {
   } catch (err) {
     console.error('RM employees list error:', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/rm/employees/:id (NEW - For detail view with avatar)
+ * Use this endpoint when you need the actual avatar
+ */
+router.get('/employees/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        employee_id,
+        first_name,
+        last_name,
+        avatar_url,  // ✅ Only include avatar in detail view
+        status,
+        positions ( position_name ),
+        departments ( department_name ),
+        employee_skills ( skills ( skill_name ) )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    if (!profile) {
+      return res.status(404).json({ success: false, error: 'Employee not found' });
+    }
+
+    const name = `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed';
+    const fallbackAvatar = `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`;
+
+    res.json({
+      success: true,
+      employee: {
+        id: profile.id,
+        employeeId: profile.employee_id,
+        name,
+        avatar: profile.avatar_url || fallbackAvatar,  // ✅ Return actual avatar for detail
+        role: profile.positions?.position_name || null,
+        department: profile.departments?.department_name || 'Unassigned',
+        skills: (profile.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
+        isVerified: profile.is_verified || false,
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching employee detail:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

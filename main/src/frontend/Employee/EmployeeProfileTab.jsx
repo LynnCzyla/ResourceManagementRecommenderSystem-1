@@ -696,6 +696,36 @@ const handleCertUpload = async (e) => {
     }
   };
 
+  // Add this function to EmployeeProfileTab.jsx
+
+  // ✅ NEW: Fetch OCR text for a specific document
+  const fetchDocumentOcrText = async (documentId) => {
+    try {
+        const authHeader = await getAuthHeader();
+        const response = await axios.get(
+            `${API_URL}/employee/documents/${documentId}/ocr`,
+            { headers: authHeader }
+        );
+        
+        if (response.data.success) {
+            return response.data.data;
+        }
+        return null;
+    } catch (error) {
+        console.error('Error fetching OCR text:', error);
+        return null;
+    }
+  };
+
+  // Example usage: When user clicks "View OCR Text" on a document
+  const handleViewOcr = async (documentId) => {
+    const ocrData = await fetchDocumentOcrText(documentId);
+    if (ocrData) {
+        // Show OCR text in a modal or expandable section
+        console.log('OCR Text:', ocrData.cleaned_ocr_text || ocrData.raw_ocr_text);
+    }
+  };
+
   const handleProfilePictureChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;

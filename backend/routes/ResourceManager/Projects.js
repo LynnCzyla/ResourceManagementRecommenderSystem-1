@@ -67,12 +67,12 @@ router.get('/projects', async (req, res) => {
         .filter(Boolean)
     )];
 
-    // ✅ Fetch profiles for assigned employees (only if needed)
+    // ✅ Fetch profiles for assigned employees (✅ WITHOUT avatar_url for list view)
     let profileById = new Map();
     if (assignedProfileIds.length > 0) {
       const { data: assignedProfiles, error: profileErr } = await supabase
         .from('profiles')
-        .select('id, first_name, last_name, avatar_url')
+        .select('id, first_name, last_name')  // ✅ REMOVED avatar_url
         .in('id', assignedProfileIds);
       
       if (!profileErr && assignedProfiles) {
@@ -117,7 +117,10 @@ router.get('/projects', async (req, res) => {
             ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown'
             : 'Unknown',
           role: a.assigned_role,
-          avatar: profile?.avatar_url,
+          // ✅ No avatar in list view - use generated URL in frontend
+          avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(
+            profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown' : 'Unknown'
+          )}`,
         };
       });
 
@@ -185,6 +188,63 @@ router.get('/projects', async (req, res) => {
   } catch (err) {
     console.error('❌ RM projects list error:', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/rm/projects/:id (NEW - For project detail with avatars)
+ * Use this endpoint when you need actual avatars
+ */
+router.get('/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: project, error } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        project_code,
+        project_name,
+        project_description,
+        status,
+        start_date,
+        end_date,
+        priority,
+        project_assignments (
+          profile_id,
+          assigned_role,
+          status,
+          profiles (
+            id,
+            first_name,
+            last_name,
+            avatar_url  // ✅ Only include avatar in detail view
+          )
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    if (!project) {
+      return res.status(404).json({ success: false, error: 'Project not found' });
+    }
+
+    res.json({
+      success: true,
+      project: {
+        ...project,
+        assignedEmployees: (project.project_assignments || []).map((a) => ({
+          employeeId: a.profile_id,
+          employeeName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : 'Unknown',
+          role: a.assigned_role,
+          avatar: a.profiles?.avatar_url || null,  // ✅ Return actual avatar for detail
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching project detail:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
