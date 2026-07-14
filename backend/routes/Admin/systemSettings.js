@@ -10,7 +10,7 @@ router.get('/system-settings', async (req, res) => {
     // Get the most recent settings (assuming only one row)
     const { data, error } = await supabase
       .from('system_settings')
-      .select('*')
+      .select('session_timeout, max_login_attempts, max_file_upload_size, min_password_length, require_uppercase, min_uppercase, require_lowercase, min_lowercase, require_number, min_number, require_special, min_special')
       .order('created_at', { ascending: false })
       .limit(1);
 
