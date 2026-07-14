@@ -32,7 +32,7 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
       try {
         const { data, error } = await supabase
           .from('system_settings')
-          .select('*')
+          .select('min_password_length, require_uppercase, min_uppercase, require_lowercase, min_lowercase, require_number, min_number, require_special, min_special')
           .limit(1)
           .single();
 
