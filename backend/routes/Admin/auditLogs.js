@@ -17,7 +17,10 @@ const supabase = require("../../supabase");
 
 router.get("/audit-logs", async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit, 10) || 200;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
     const search = (req.query.search || "").trim();
     const category = (req.query.category || "").trim();
@@ -28,10 +31,11 @@ router.get("/audit-logs", async (req, res) => {
     let query = supabase
       .from("audit_logs")
       .select(
-        "id,user_id,action,system_category,log_description,created_at"
+        "id,user_id,action,system_category,log_description,created_at",
+        { count: "exact" }
       )
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .range(from, to);
 
     if (search) {
       query = query.or(
@@ -55,7 +59,7 @@ router.get("/audit-logs", async (req, res) => {
       query = query.lte("created_at", `${endDate}T23:59:59`);
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
 
     if (error) throw error;
 
@@ -94,6 +98,12 @@ router.get("/audit-logs", async (req, res) => {
     res.json({
       success: true,
       data: logs,
+      pagination: {
+        page,
+        limit,
+        total: count || 0,
+        totalPages: Math.max(1, Math.ceil((count || 0) / limit)),
+      },
     });
   } catch (err) {
     console.error(err);
@@ -110,6 +120,32 @@ router.get("/audit-logs", async (req, res) => {
  *
  * Exports filtered logs as PDF
  */
+
+/**
+ * GET /api/admin/audit-logs/filters
+ *
+ * Returns distinct category/action values for the filter dropdowns.
+ * Fetched once on mount instead of derived from the paginated page,
+ * so the dropdowns stay complete even though the table itself is paginated.
+ */
+router.get("/audit-logs/filters", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("action,system_category")
+      .limit(1000);
+
+    if (error) throw error;
+
+    const categories = [...new Set((data || []).map(r => r.system_category).filter(Boolean))].sort();
+    const actions = [...new Set((data || []).map(r => r.action).filter(Boolean))].sort();
+
+    res.json({ success: true, data: { categories, actions } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 router.get("/audit-logs/export", async (req, res) => {
   try {
