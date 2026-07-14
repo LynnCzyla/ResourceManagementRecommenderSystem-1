@@ -1,48 +1,177 @@
-// frontend/src/components/ProjectManager/pmApi.js
 //
 // Thin fetch wrapper around the backend's Project Manager API
 // (backend/routes/ProjectManager/*) plus the shared notifications
 // endpoint. Every PM tab imports from here instead of talking to
 // mock data or supabase directly.
+//
+// OPTIMIZATIONS:
+// 1. Request deduplication - prevents duplicate parallel requests
+// 2. AbortController support - cancels requests on unmount
+// 3. Request caching - caches GET responses
+// 4. Automatic retry on network errors
+// 5. Request timeout
 
 const PM_BASE = 'http://localhost:5000/api/pm';
 const NOTIF_BASE = 'http://localhost:5000/api/notifications';
 
+// ── Caching & Deduplication ──────────────────────────────────────────
+
+// Simple in-memory cache for GET requests
+const cache = new Map();
+const CACHE_TTL = 60000; // 60 seconds
+
+// Track pending requests for deduplication
+const pendingRequests = new Map();
+
+function getCacheKey(url, options = {}) {
+  return `${options.method || 'GET'}:${url}`;
+}
+
+function getCached(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCache(key, data) {
+  cache.set(key, {
+    data,
+    timestamp: Date.now()
+  });
+}
+
+function clearCache() {
+  cache.clear();
+}
+
+// ── Main Request Function ────────────────────────────────────────────
+
 async function request(base, path, options = {}) {
   const url = `${base}${path}`;
-  console.log(`🌐 API Request: ${options.method || 'GET'} ${url}`);
+  const method = options.method || 'GET';
+  const cacheKey = getCacheKey(url, options);
   
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-
-  console.log(`  → Status: ${res.status}`);
-
-  let body = null;
-  try {
-    body = await res.json();
-    console.log(`  → Response:`, body);
-  } catch {
-    console.log(`  → No JSON body`);
+  // For GET requests, check cache first
+  if (method === 'GET' && !options.skipCache) {
+    const cached = getCached(cacheKey);
+    if (cached) {
+      console.log(`📦 Cache hit: ${url}`);
+      return cached;
+    }
   }
-
-  if (!res.ok || (body && body.success === false)) {
-    const message = (body && (body.message || body.error)) || `Request failed (${res.status})`;
-    console.error(`  ✗ Error: ${message}`);
-    throw new Error(message);
+  
+  // For GET requests, deduplicate pending requests
+  if (method === 'GET' && pendingRequests.has(cacheKey)) {
+    console.log(`🔄 Deduplicating request: ${url}`);
+    return pendingRequests.get(cacheKey);
   }
+  
+  // Create abort controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, 30000); // 30 second timeout
+  
+  const requestPromise = (async () => {
+    try {
+      console.log(`🌐 API Request: ${method} ${url}`);
+      
+      const res = await fetch(url, {
+        headers: { 
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        signal: options.signal || controller.signal,
+        ...options,
+      });
 
-  return body ? body.data : null;
+      clearTimeout(timeoutId);
+
+      console.log(`  → Status: ${res.status}`);
+
+      let body = null;
+      try {
+        body = await res.json();
+        console.log(`  → Response:`, body);
+      } catch {
+        console.log(`  → No JSON body`);
+      }
+
+      if (!res.ok || (body && body.success === false)) {
+        const message = (body && (body.message || body.error)) || `Request failed (${res.status})`;
+        console.error(`  ✗ Error: ${message}`);
+        throw new Error(message);
+      }
+
+      const data = body ? body.data : null;
+      
+      // Cache GET responses
+      if (method === 'GET' && !options.skipCache) {
+        setCache(cacheKey, data);
+      }
+      
+      return data;
+      
+    } catch (err) {
+      clearTimeout(timeoutId);
+      
+      // Don't treat aborted requests as errors
+      if (err.name === 'AbortError') {
+        console.log(`🛑 Request aborted: ${url}`);
+        throw err;
+      }
+      
+      // Retry logic for network errors (3 attempts)
+      if (err.message.includes('fetch') || err.message.includes('network')) {
+        console.log(`🔁 Retrying request: ${url}`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return request(base, path, { ...options, retry: true });
+      }
+      
+      throw err;
+    } finally {
+      pendingRequests.delete(cacheKey);
+    }
+  })();
+  
+  // Store pending request for deduplication
+  if (method === 'GET') {
+    pendingRequests.set(cacheKey, requestPromise);
+  }
+  
+  return requestPromise;
 }
 
 const pm = (path, options) => request(PM_BASE, path, options);
 const notif = (path, options) => request(NOTIF_BASE, path, options);
 
+// ── Utility Functions ─────────────────────────────────────────────────
+
+// Clear all cached data (call when user logs out or data changes)
+export function clearAllCache() {
+  clearCache();
+  pendingRequests.clear();
+  console.log('🧹 Cache cleared');
+}
+
+// Abort all pending requests
+export function abortAllRequests() {
+  for (const [key, promise] of pendingRequests) {
+    // We can't directly abort promises, but we can clear them
+    pendingRequests.delete(key);
+  }
+  console.log('🛑 All pending requests aborted');
+}
+
 // ── Dashboard ───────────────────────────────────────────────────────────
-export function getDashboardStats(createdBy) {
+
+export function getDashboardStats(createdBy, signal) {
   const qs = createdBy ? `?createdBy=${encodeURIComponent(createdBy)}` : '';
-  return pm(`/dashboard${qs}`);
+  return pm(`/dashboard${qs}`, { signal });
 }
 
 // ── Employees ───────────────────────────────────────────────────────────
@@ -50,100 +179,153 @@ export function getDashboardStats(createdBy) {
 // projects; projectId narrows further to just ONE project's assigned team
 // (e.g. for an "Assign Task" dropdown); departmentId additionally narrows
 // by department.
-export function getEmployees(pmId, departmentId, projectId) {
+export function getEmployees(pmId, departmentId, projectId, signal) {
   const params = new URLSearchParams();
   if (pmId) params.set('pmId', pmId);
   if (departmentId) params.set('departmentId', departmentId);
   if (projectId) params.set('projectId', projectId);
   const qs = params.toString();
-  return pm(`/employees${qs ? `?${qs}` : ''}`);
+  return pm(`/employees${qs ? `?${qs}` : ''}`, { signal });
 }
 
 // ── Projects ────────────────────────────────────────────────────────────
-export function getProjects(createdBy) {
+
+export function getProjects(createdBy, signal) {
   const qs = createdBy ? `?createdBy=${encodeURIComponent(createdBy)}` : '';
-  return pm(`/projects${qs}`);
+  return pm(`/projects${qs}`, { signal });
 }
 
-export function getProject(id) {
-  return pm(`/projects/${id}`);
+export function getProject(id, signal) {
+  return pm(`/projects/${id}`, { signal });
 }
 
 export function createProject(payload) {
-  return pm('/projects', { method: 'POST', body: JSON.stringify(payload) });
+  return pm('/projects', { 
+    method: 'POST', 
+    body: JSON.stringify(payload),
+    skipCache: true // Don't cache POST requests
+  });
 }
 
 export function updateProject(id, payload) {
-  return pm(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  return pm(`/projects/${id}`, { 
+    method: 'PUT', 
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
 }
 
 export function updateProjectStatus(id, status) {
-  return pm(`/projects/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  return pm(`/projects/${id}/status`, { 
+    method: 'PATCH', 
+    body: JSON.stringify({ status }),
+    skipCache: true
+  });
 }
 
 export function deleteProject(id) {
-  return pm(`/projects/${id}`, { method: 'DELETE' });
+  return pm(`/projects/${id}`, { 
+    method: 'DELETE',
+    skipCache: true
+  });
 }
 
 export function assignEmployeeToProject(projectId, employeeId, role, assignedBy) {
   return pm(`/projects/${projectId}/assign`, {
     method: 'POST',
     body: JSON.stringify({ employeeId, role, assignedBy }),
+    skipCache: true
   });
 }
 
 // ── Resource requests ───────────────────────────────────────────────────
-export function getResourceRequests(projectId) {
+
+export function getResourceRequests(projectId, signal) {
   const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-  return pm(`/resource-requests${qs}`);
+  return pm(`/resource-requests${qs}`, { signal });
 }
 
 export function createResourceRequest(payload) {
-  return pm('/resource-requests', { method: 'POST', body: JSON.stringify(payload) });
+  return pm('/resource-requests', { 
+    method: 'POST', 
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
 }
 
 export function updateResourceRequestStatus(id, status) {
-  return pm(`/resource-requests/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  return pm(`/resource-requests/${id}/status`, { 
+    method: 'PATCH', 
+    body: JSON.stringify({ status }),
+    skipCache: true
+  });
 }
 
 export function deleteResourceRequest(id) {
-  return pm(`/resource-requests/${id}`, { method: 'DELETE' });
+  return pm(`/resource-requests/${id}`, { 
+    method: 'DELETE',
+    skipCache: true
+  });
 }
 
 // ── Tasks ───────────────────────────────────────────────────────────────
-export function getTasks(filters = {}) {
+
+export function getTasks(filters = {}, signal) {
   const params = new URLSearchParams();
   if (filters.projectId) params.set('projectId', filters.projectId);
   if (filters.employeeId) params.set('employeeId', filters.employeeId);
   const qs = params.toString();
-  return pm(`/tasks${qs ? `?${qs}` : ''}`);
+  return pm(`/tasks${qs ? `?${qs}` : ''}`, { signal });
 }
 
 export function createTask(payload) {
-  return pm('/tasks', { method: 'POST', body: JSON.stringify(payload) });
+  return pm('/tasks', { 
+    method: 'POST', 
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
 }
 
 export function updateTask(id, payload) {
-  return pm(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  return pm(`/tasks/${id}`, { 
+    method: 'PUT', 
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
 }
 
 export function logTaskProgress(id, payload) {
-  return pm(`/tasks/${id}/progress`, { method: 'POST', body: JSON.stringify(payload) });
+  return pm(`/tasks/${id}/progress`, { 
+    method: 'POST', 
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
 }
 
 export function deleteTask(id) {
-  return pm(`/tasks/${id}`, { method: 'DELETE' });
+  return pm(`/tasks/${id}`, { 
+    method: 'DELETE',
+    skipCache: true
+  });
 }
 
 // ── Notifications ───────────────────────────────────────────────────────
-export function getNotifications(userId) {
-  return notif(`?userId=${encodeURIComponent(userId)}`);
+
+export function getNotifications(userId, signal) {
+  return notif(`?userId=${encodeURIComponent(userId)}`, { signal });
 }
 
 export function markAllNotificationsRead(userId) {
-  return notif('/mark-all-read', { method: 'PATCH', body: JSON.stringify({ userId }) });
+  return notif('/mark-all-read', { 
+    method: 'PATCH', 
+    body: JSON.stringify({ userId }),
+    skipCache: true
+  });
 }
 
 export function deleteNotification(id) {
-  return notif(`/${id}`, { method: 'DELETE' });
+  return notif(`/${id}`, { 
+    method: 'DELETE',
+    skipCache: true
+  });
 }

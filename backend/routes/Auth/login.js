@@ -3,24 +3,10 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
-const jwt = require('jsonwebtoken'); // 👈 ADD THIS
+const jwt = require('jsonwebtoken');
 
-// Get max login attempts from system settings
-const getMaxLoginAttempts = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('system_settings')
-      .select('max_login_attempts')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (error) throw error;
-    return data && data.length > 0 ? data[0].max_login_attempts : 5;
-  } catch (error) {
-    console.error('Error fetching max login attempts:', error);
-    return 5;
-  }
-};
+// ✅ FIXED: Import from utils instead of duplicating
+const { getMaxLoginAttempts } = require('../../utils/loginAttempts');
 
 // Get user ID from email
 const getUserIdByEmail = async (email) => {
@@ -158,7 +144,7 @@ const lockUserAccount = async (userId) => {
 // Record failed attempt (ONLY for non-admin)
 const recordFailedAttempt = async (userId) => {
   try {
-    const maxAttempts = await getMaxLoginAttempts();
+    const maxAttempts = await getMaxLoginAttempts(); // ✅ Now using cached version
     const existing = await getUserLoginAttempts(userId);
     
     if (existing) {
@@ -403,7 +389,7 @@ router.post('/login', async (req, res) => {
       success: true,
       message: 'Login successful',
       user,
-      token: token,  // 👈 SEND CUSTOM TOKEN
+      token: token,
       session: authData.session
     });
 

@@ -1,4 +1,4 @@
-// routes/Middleware/auth.js
+// backend/routes/Middleware/auth.js
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
@@ -15,20 +15,40 @@ function getKey(header, callback) {
   });
 }
 
-console.log('✅ Auth middleware loaded, supabase:', !!supabase); // debug
+console.log('✅ Auth middleware loaded, supabase:', !!supabase);
 
 if (!process.env.SUPABASE_JWT_SECRET) {
   console.warn('⚠️ SUPABASE_JWT_SECRET is not set — add it to backend/.env (Supabase Dashboard → Settings → API → JWT Secret)');
 }
 
+// ✅ FIXED: Cache with pending promise lock to prevent stampede
 let cachedSessionTimeout = 30;
 let lastFetchTime = 0;
+let pendingTimeoutPromise = null;
 
 const getSessionTimeout = async () => {
   const now = Date.now();
-  // Refresh cache every 5 minutes
-  if (now - lastFetchTime > 5 * 60 * 1000) {
+  const isStale = now - lastFetchTime > 5 * 60 * 1000;
+  
+  // If there's already a pending fetch, wait for it
+  if (pendingTimeoutPromise) {
+    console.log('⏳ Waiting for pending session timeout fetch...');
+    return pendingTimeoutPromise;
+  }
+  
+  // If cache is fresh, return cached value
+  if (!isStale) {
+    return cachedSessionTimeout;
+  }
+  
+  // Set lastFetchTime BEFORE the query starts to prevent stampede
+  lastFetchTime = now;
+  
+  // Create the pending promise
+  pendingTimeoutPromise = (async () => {
     try {
+      console.log('🔄 Fetching session timeout from database...');
+      
       const { data, error } = await supabase
         .from('system_settings')
         .select('session_timeout')
@@ -37,14 +57,24 @@ const getSessionTimeout = async () => {
       
       if (!error && data && data.length > 0) {
         cachedSessionTimeout = data[0].session_timeout;
-        lastFetchTime = now;
-        console.log(`Session timeout: ${cachedSessionTimeout} minutes`);
+        console.log(`✅ Session timeout cached: ${cachedSessionTimeout} minutes`);
+      } else {
+        // If error or no data, keep existing cached value
+        console.warn('⚠️ No session timeout found, using cached value:', cachedSessionTimeout);
       }
+      
+      return cachedSessionTimeout;
     } catch (error) {
-      console.error('Error fetching session timeout:', error);
+      console.error('❌ Error fetching session timeout:', error);
+      // Roll back lastFetchTime so next request retries
+      lastFetchTime = 0;
+      return cachedSessionTimeout;
+    } finally {
+      pendingTimeoutPromise = null;
     }
-  }
-  return cachedSessionTimeout;
+  })();
+  
+  return pendingTimeoutPromise;
 };
 
 const verifyToken = async (req, res, next) => {
@@ -60,7 +90,7 @@ const verifyToken = async (req, res, next) => {
 
     const token = authHeader.split(' ')[1];
 
-    // Verify token using Supabase's public JWKS (supports ES256/RS256 signing keys)
+    // Verify token using Supabase's public JWKS
     let decoded;
     try {
       decoded = await new Promise((resolve, reject) => {
@@ -106,4 +136,11 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-module.exports = { verifyToken };
+// ✅ Add cache clear function for admin use
+const clearSessionTimeoutCache = () => {
+  lastFetchTime = 0;
+  pendingTimeoutPromise = null;
+  console.log('🧹 Session timeout cache cleared');
+};
+
+module.exports = { verifyToken, clearSessionTimeoutCache };
