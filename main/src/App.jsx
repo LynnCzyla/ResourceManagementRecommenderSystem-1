@@ -258,7 +258,7 @@ function App() {
 
           const { data: profileData } = await supabase
             .from('profiles')
-            .select('*')
+            .select('role, first_name, middle_name, last_name, avatar_url, employee_id')
             .eq('id', session.user.id)
             .single();
 
@@ -406,7 +406,7 @@ function App() {
       try {
         const { data: profileData } = await supabase
           .from('profiles')
-          .select('*')
+          .select('role, first_name, middle_name, last_name, avatar_url, employee_id')
           .eq('id', userProfile.id)
           .single();
 
