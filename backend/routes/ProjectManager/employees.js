@@ -3,8 +3,35 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 
-// Transform a profiles row (joined with positions/departments) into the
-// shape the PM tabs expect (PMDashboardTab, PMProjectTrackingTab).
+// Simple in-memory cache with TTL
+const cache = new Map();
+const CACHE_TTL = 60000; // 60 seconds
+
+function getCacheKey(params) {
+  return JSON.stringify(Object.keys(params).sort().reduce((obj, key) => {
+    obj[key] = params[key];
+    return obj;
+  }, {}));
+}
+
+function getCached(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCache(key, data) {
+  cache.set(key, {
+    data,
+    timestamp: Date.now()
+  });
+}
+
+// Transform a profiles row into the shape the PM tabs expect
 function transformEmployee(row) {
   const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unnamed';
   return {
@@ -32,32 +59,51 @@ const EMPLOYEE_SELECT = `
   departments ( department_name )
 `;
 
-// GET /api/pm/employees — list active employees.
-// Optional ?departmentId= narrows by department.
-// Optional ?pmId=<profileId> scopes the list to ONLY the employees who are
-// actually assigned (via project_assignments) to a project that this PM
-// created — a PM should not see the entire company roster, just their
-// own team members.
-// Optional ?projectId=<projectId> narrows further (or on its own) to only
-// the employees assigned to that ONE project — e.g. so a "Assign Task"
-// dropdown for Project A doesn't list employees who are only staffed on
-// Project B.
+// GET /api/pm/employees — list active employees with caching
 router.get('/employees', async (req, res) => {
   try {
     const { departmentId, pmId, projectId } = req.query;
 
+    // Check cache for this exact query
+    const cacheKey = getCacheKey({ departmentId, pmId, projectId });
+    const cachedData = getCached(cacheKey);
+    if (cachedData) {
+      console.log(`📦 Cache hit for employees: ${cacheKey}`);
+      return res.status(200).json({ success: true, data: cachedData });
+    }
+
+    console.log(`🔍 Cache miss for employees: ${cacheKey}`);
+
     let allowedProfileIds = null;
 
+    // Optimize: If no pmId and no projectId, return all active employees
+    // (but only if no pmId or projectId filter)
+    if (!pmId && !projectId && !departmentId) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(EMPLOYEE_SELECT)
+        .eq('status', 'Active')
+        .order('first_name', { ascending: true });
+
+      if (error) throw error;
+      
+      const transformed = (data || []).map(transformEmployee);
+      setCache(cacheKey, transformed);
+      
+      return res.status(200).json({ success: true, data: transformed });
+    }
+
     if (projectId) {
-      // Scoped to a single project — optionally still verify that project
-      // belongs to this PM if pmId was also supplied.
+      // Scoped to a single project
       if (pmId) {
+        // Verify project belongs to this PM
         const { data: project, error: projectError } = await supabase
           .from('projects')
           .select('id')
           .eq('id', projectId)
           .eq('created_by', pmId)
           .maybeSingle();
+        
         if (projectError) throw projectError;
         if (!project) {
           return res.status(200).json({ success: true, data: [] });
@@ -68,6 +114,7 @@ router.get('/employees', async (req, res) => {
         .from('project_assignments')
         .select('profile_id')
         .eq('project_id', projectId);
+      
       if (assignmentsError) throw assignmentsError;
 
       allowedProfileIds = [...new Set((assignments || []).map(a => a.profile_id))];
@@ -75,10 +122,12 @@ router.get('/employees', async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
       }
     } else if (pmId) {
+      // Get all projects for this PM
       const { data: pmProjects, error: projectsError } = await supabase
         .from('projects')
         .select('id')
         .eq('created_by', pmId);
+      
       if (projectsError) throw projectsError;
 
       const projectIds = (pmProjects || []).map(p => p.id);
@@ -86,10 +135,12 @@ router.get('/employees', async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
       }
 
+      // Get all assignments for these projects
       const { data: assignments, error: assignmentsError } = await supabase
         .from('project_assignments')
         .select('profile_id')
         .in('project_id', projectIds);
+      
       if (assignmentsError) throw assignmentsError;
 
       allowedProfileIds = [...new Set((assignments || []).map(a => a.profile_id))];
@@ -98,23 +149,44 @@ router.get('/employees', async (req, res) => {
       }
     }
 
+    // Build the final query
     let query = supabase
       .from('profiles')
       .select(EMPLOYEE_SELECT)
       .eq('status', 'Active')
       .order('first_name', { ascending: true });
 
-    if (departmentId) query = query.eq('department_id', departmentId);
-    if (allowedProfileIds) query = query.in('id', allowedProfileIds);
+    if (departmentId) {
+      query = query.eq('department_id', departmentId);
+    }
+    
+    if (allowedProfileIds) {
+      query = query.in('id', allowedProfileIds);
+    }
 
     const { data, error } = await query;
     if (error) throw error;
 
-    res.status(200).json({ success: true, data: (data || []).map(transformEmployee) });
+    const transformed = (data || []).map(transformEmployee);
+    
+    // Cache the result
+    setCache(cacheKey, transformed);
+
+    res.status(200).json({ success: true, data: transformed });
   } catch (error) {
     console.error('Error fetching employees:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch employees', error: error.message });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch employees', 
+      error: error.message 
+    });
   }
+});
+
+// Add a cache clear endpoint (optional, for when employees are updated)
+router.post('/employees/cache/clear', (req, res) => {
+  cache.clear();
+  res.status(200).json({ success: true, message: 'Employee cache cleared' });
 });
 
 module.exports = router;
