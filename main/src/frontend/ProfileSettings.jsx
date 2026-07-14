@@ -58,7 +58,7 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
       try {
         const { data, error } = await supabase
           .from('system_settings')
-          .select('*')
+          .select('min_password_length, require_uppercase, min_uppercase, require_lowercase, min_lowercase, require_number, min_number, require_special, min_special')
           .limit(1)
           .single();
 
@@ -164,7 +164,7 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('*')
+        .select('first_name, middle_name, last_name, contact_number, department_id, avatar_url')
         .eq('id', user.id)
         .single();
 
