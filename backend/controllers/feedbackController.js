@@ -714,8 +714,6 @@ exports.getDocuments = async (req, res) => {
                 feedback_pending,
                 approved_skills,
                 rejected_skills
-                -- raw_ocr_text EXCLUDED
-                -- cleaned_ocr_text EXCLUDED
             `)
             .eq('employee_id', profileData.employee_id)
             .order('created_at', { ascending: false });
