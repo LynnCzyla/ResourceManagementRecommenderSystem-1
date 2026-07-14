@@ -8,8 +8,9 @@
 // 1. Request deduplication - prevents duplicate parallel requests
 // 2. AbortController support - cancels requests on unmount
 // 3. Request caching - caches GET responses
-// 4. Automatic retry on network errors
+// 4. Automatic retry on network errors (max 1 retry)
 // 5. Request timeout
+// 6. Cache invalidation after mutations
 
 const PM_BASE = 'http://localhost:5000/api/pm';
 const NOTIF_BASE = 'http://localhost:5000/api/notifications';
@@ -125,9 +126,9 @@ async function request(base, path, options = {}) {
         throw err;
       }
       
-      // Retry logic for network errors (3 attempts)
-      if (err.message.includes('fetch') || err.message.includes('network')) {
-        console.log(`🔁 Retrying request: ${url}`);
+      // ✅ FIXED: Only retry once (check if it's already a retry)
+      if (!options.retry && (err.message.includes('fetch') || err.message.includes('network'))) {
+        console.log(`🔁 Retrying request (attempt 2): ${url}`);
         await new Promise(resolve => setTimeout(resolve, 1000));
         return request(base, path, { ...options, retry: true });
       }
@@ -156,6 +157,34 @@ export function clearAllCache() {
   clearCache();
   pendingRequests.clear();
   console.log('🧹 Cache cleared');
+}
+
+// Clear cache for specific endpoints
+export function clearCacheForEndpoints(endpoints) {
+  const keysToDelete = [];
+  for (const [key] of cache) {
+    for (const endpoint of endpoints) {
+      if (key.includes(endpoint)) {
+        keysToDelete.push(key);
+        break;
+      }
+    }
+  }
+  keysToDelete.forEach(key => cache.delete(key));
+  console.log(`🧹 Cleared cache for: ${endpoints.join(', ')}`);
+}
+
+// Invalidate cache after mutations
+export function invalidateCache() {
+  clearAllCache();
+  // Optionally call the backend cache clear endpoint
+  fetch('http://localhost:5000/api/pm/employees/cache/clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  }).catch(() => {
+    // Silently fail - backend cache will eventually expire
+    console.log('⚠️ Could not clear backend cache');
+  });
 }
 
 // Abort all pending requests
@@ -200,14 +229,16 @@ export function getProject(id, signal) {
 }
 
 export function createProject(payload) {
+  clearCacheForEndpoints(['/projects', '/dashboard']);
   return pm('/projects', { 
     method: 'POST', 
     body: JSON.stringify(payload),
-    skipCache: true // Don't cache POST requests
+    skipCache: true
   });
 }
 
 export function updateProject(id, payload) {
+  clearCacheForEndpoints(['/projects', '/dashboard']);
   return pm(`/projects/${id}`, { 
     method: 'PUT', 
     body: JSON.stringify(payload),
@@ -216,6 +247,7 @@ export function updateProject(id, payload) {
 }
 
 export function updateProjectStatus(id, status) {
+  clearCacheForEndpoints(['/projects', '/dashboard']);
   return pm(`/projects/${id}/status`, { 
     method: 'PATCH', 
     body: JSON.stringify({ status }),
@@ -224,6 +256,7 @@ export function updateProjectStatus(id, status) {
 }
 
 export function deleteProject(id) {
+  clearCacheForEndpoints(['/projects', '/dashboard', '/employees']);
   return pm(`/projects/${id}`, { 
     method: 'DELETE',
     skipCache: true
@@ -231,6 +264,7 @@ export function deleteProject(id) {
 }
 
 export function assignEmployeeToProject(projectId, employeeId, role, assignedBy) {
+  clearCacheForEndpoints(['/employees', '/dashboard']);
   return pm(`/projects/${projectId}/assign`, {
     method: 'POST',
     body: JSON.stringify({ employeeId, role, assignedBy }),
@@ -246,6 +280,7 @@ export function getResourceRequests(projectId, signal) {
 }
 
 export function createResourceRequest(payload) {
+  clearCacheForEndpoints(['/resource-requests', '/dashboard']);
   return pm('/resource-requests', { 
     method: 'POST', 
     body: JSON.stringify(payload),
@@ -254,6 +289,7 @@ export function createResourceRequest(payload) {
 }
 
 export function updateResourceRequestStatus(id, status) {
+  clearCacheForEndpoints(['/resource-requests', '/dashboard']);
   return pm(`/resource-requests/${id}/status`, { 
     method: 'PATCH', 
     body: JSON.stringify({ status }),
@@ -262,6 +298,7 @@ export function updateResourceRequestStatus(id, status) {
 }
 
 export function deleteResourceRequest(id) {
+  clearCacheForEndpoints(['/resource-requests', '/dashboard']);
   return pm(`/resource-requests/${id}`, { 
     method: 'DELETE',
     skipCache: true
@@ -279,6 +316,7 @@ export function getTasks(filters = {}, signal) {
 }
 
 export function createTask(payload) {
+  clearCacheForEndpoints(['/tasks', '/dashboard']);
   return pm('/tasks', { 
     method: 'POST', 
     body: JSON.stringify(payload),
@@ -287,6 +325,7 @@ export function createTask(payload) {
 }
 
 export function updateTask(id, payload) {
+  clearCacheForEndpoints(['/tasks', '/dashboard']);
   return pm(`/tasks/${id}`, { 
     method: 'PUT', 
     body: JSON.stringify(payload),
@@ -295,6 +334,7 @@ export function updateTask(id, payload) {
 }
 
 export function logTaskProgress(id, payload) {
+  clearCacheForEndpoints(['/tasks', '/dashboard']);
   return pm(`/tasks/${id}/progress`, { 
     method: 'POST', 
     body: JSON.stringify(payload),
@@ -303,6 +343,7 @@ export function logTaskProgress(id, payload) {
 }
 
 export function deleteTask(id) {
+  clearCacheForEndpoints(['/tasks', '/dashboard']);
   return pm(`/tasks/${id}`, { 
     method: 'DELETE',
     skipCache: true
@@ -316,6 +357,7 @@ export function getNotifications(userId, signal) {
 }
 
 export function markAllNotificationsRead(userId) {
+  clearCacheForEndpoints(['/notifications']);
   return notif('/mark-all-read', { 
     method: 'PATCH', 
     body: JSON.stringify({ userId }),
@@ -324,6 +366,7 @@ export function markAllNotificationsRead(userId) {
 }
 
 export function deleteNotification(id) {
+  clearCacheForEndpoints(['/notifications']);
   return notif(`/${id}`, { 
     method: 'DELETE',
     skipCache: true
