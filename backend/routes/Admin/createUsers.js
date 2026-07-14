@@ -262,7 +262,7 @@ router.post("/resend-password/:userId", async (req, res) => {
     // Get user profile
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("first_name, last_name")
       .eq("id", userId)
       .single();
 
