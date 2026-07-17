@@ -30,6 +30,23 @@ function statusColor(status) {
   return 'var(--color-text-muted)';
 }
 
+// Icon components
+const IconAssignments = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <line x1="16" y1="13" x2="8" y2="13"/>
+    <line x1="16" y1="17" x2="8" y2="17"/>
+  </svg>
+);
+
+const IconHistory = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </svg>
+);
+
 export default function EmployeeAssignmentsTab({ user }) {
   const [subTab, setSubTab] = useState('assignments'); // 'assignments' | 'history'
 
@@ -249,6 +266,7 @@ export default function EmployeeAssignmentsTab({ user }) {
             ...(subTab === 'assignments' ? styles.subTabBtnActive : {})
           }}
         >
+          <IconAssignments />
           Assignments
         </button>
         <button
@@ -259,6 +277,7 @@ export default function EmployeeAssignmentsTab({ user }) {
             ...(subTab === 'history' ? styles.subTabBtnActive : {})
           }}
         >
+          <IconHistory />
           History
           {completedCount > 0 && <span style={styles.subTabCount}>{completedCount}</span>}
         </button>
@@ -651,30 +670,30 @@ const styles = {
   },
   subTabBar: {
     display: 'flex',
-    gap: '4px',
-    padding: '4px',
-    borderRadius: '12px',
-    background: 'var(--color-bg-card-hover)',
-    border: '1px solid var(--color-border)',
-    width: 'fit-content',
+    gap: '6px',
+    borderBottom: '1px solid var(--color-border)',
+    paddingBottom: '0',
   },
   subTabBtn: {
-    display: 'flex',
+    display: 'inline-flex',
     alignItems: 'center',
-    gap: '8px',
-    padding: '8px 18px',
-    borderRadius: '9px',
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--color-text-secondary)',
+    gap: '7px',
+    padding: '10px 20px',
     fontSize: '13px',
     fontWeight: '600',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    marginBottom: '-1px',
+    background: 'transparent',
+    color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    transition: 'all 0.15s ease',
+    borderRadius: '6px 6px 0 0',
+    transition: 'color 0.15s',
   },
   subTabBtnActive: {
-    background: 'var(--color-primary)',
-    color: '#ffffff',
+    color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+    background: 'var(--color-primary-light)',
   },
   subTabCount: {
     fontSize: '10px',

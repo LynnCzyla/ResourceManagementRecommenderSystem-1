@@ -726,11 +726,24 @@ export default function DepartmentsTab() {
       <div style={styles.subTabsContainer}>
         <button
           onClick={() => setActiveSubTab('departments')}
+          onMouseEnter={(e) => {
+            if (activeSubTab !== 'departments') {
+              e.currentTarget.style.background = 'var(--color-primary-light)';
+              e.currentTarget.style.color = 'var(--color-primary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activeSubTab !== 'departments') {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
+            }
+          }}
           style={{
             ...styles.subTabBtn,
             borderBottomColor: activeSubTab === 'departments' ? 'var(--color-primary)' : 'transparent',
             color: activeSubTab === 'departments' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
             fontWeight: activeSubTab === 'departments' ? '700' : '500',
+            ...(activeSubTab === 'departments' ? styles.subTabBtnHover : {})
           }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
@@ -741,11 +754,24 @@ export default function DepartmentsTab() {
         </button>
         <button
           onClick={() => setActiveSubTab('positions')}
+          onMouseEnter={(e) => {
+            if (activeSubTab !== 'positions') {
+              e.currentTarget.style.background = 'var(--color-primary-light)';
+              e.currentTarget.style.color = 'var(--color-primary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activeSubTab !== 'positions') {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
+            }
+          }}
           style={{
             ...styles.subTabBtn,
             borderBottomColor: activeSubTab === 'positions' ? 'var(--color-primary)' : 'transparent',
             color: activeSubTab === 'positions' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
             fontWeight: activeSubTab === 'positions' ? '700' : '500',
+            ...(activeSubTab === 'positions' ? styles.subTabBtnHover : {})
           }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
@@ -778,20 +804,29 @@ const styles = {
 
   subTabsContainer: {
     display: 'flex',
-    gap: 24,
+    gap: '6px',
     borderBottom: '1px solid var(--color-border)',
-    marginBottom: 28,
+    paddingBottom: '0',
   },
   subTabBtn: {
-    display: 'flex',
+    display: 'inline-flex',
     alignItems: 'center',
-    background: 'transparent',
+    gap: '7px',
+    padding: '10px 20px',
+    fontSize: '13px',
+    fontWeight: '600',
     border: 'none',
-    borderBottom: '3px solid transparent',
-    padding: '12px 4px',
-    fontSize: 15,
+    borderBottom: '2px solid transparent',
+    marginBottom: '-1px',
+    background: 'transparent',
+    color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    borderRadius: '6px 6px 0 0',
+    transition: 'color 0.15s',
+  },
+  subTabBtnHover: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
   },
 
   // Toolbar
