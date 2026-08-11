@@ -5,6 +5,7 @@ import RMDashboardTab from './RMDashboardTab';
 import RMEmployeeDirectoryTab from './RMEmployeeDirectoryTab';
 import RMProjectsTab from './RMProjectsTab';
 import RMRequestsTab from './RMRequestsTab';
+import RMResourceRequestFormTab from './RMResourceRequestFormTab';
 import ProfileSettings from '../ProfileSettings';
 
 // Isolated so its 1s tick doesn't re-render RMLayout (and therefore every tab) every second.
@@ -210,6 +211,24 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
             </svg>
             {!sidebarCollapsed && <span style={styles.navText}>Resource Requests</span>}
           </div>
+
+          {/* Request Form */}
+          <div 
+            onClick={() => handleNavClick('requestForm')} 
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'requestForm' ? 'var(--color-primary-light)' : 'transparent',
+              borderLeftColor: activeTab === 'requestForm' ? 'var(--color-primary)' : 'transparent',
+            }}
+            title="Request Form"
+            className="hover-sidebar-item"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            {!sidebarCollapsed && <span style={styles.navText}>Request Form</span>}
+          </div>
         </nav>
 
         {!sidebarCollapsed && (
@@ -353,6 +372,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
           <div style={tabVisibility('directory')}><RMEmployeeDirectoryTab /></div>
           <div style={tabVisibility('projects')}><RMProjectsTab /></div>
           <div style={tabVisibility('requests')}><RMRequestsTab /></div>
+          <div style={tabVisibility('requestForm')}><RMResourceRequestFormTab /></div>
         </main>
       </div>
 

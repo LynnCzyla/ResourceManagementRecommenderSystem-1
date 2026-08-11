@@ -5,7 +5,7 @@ import { supabase, getSession } from '../lib/supabaseClient';
 import ForgotPassword from './ForgotPassword';
 import ContactAdmin from './ContactAdmin';
 
-export default function Login({ onLogin, isDark, toggleTheme }) {
+export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -126,6 +126,27 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
     setLockMessage('');
 
     try {
+      // Hardcoded HR credentials for frontend testing
+      if (email === 'hr@wea.com' && password === 'hr123') {
+        const hrUser = {
+          id: 'hr-user-001',
+          name: 'HR Administrator',
+          email: 'hr@wea.com',
+          role: 'HR',
+          avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=100',
+        };
+        
+        const loginTime = Date.now();
+        localStorage.setItem('user', JSON.stringify(hrUser));
+        localStorage.setItem('token', 'hr-token-' + Date.now());
+        localStorage.setItem('loginTime', loginTime.toString());
+        
+        window.history.replaceState(null, '', '/dashboard');
+        onLogin(hrUser);
+        setIsLoading(false);
+        return;
+      }
+
       // Call backend API for login with attempts tracking
       const response = await fetch('http://localhost:5000/api/auth/login', {
         method: 'POST',
@@ -345,6 +366,20 @@ export default function Login({ onLogin, isDark, toggleTheme }) {
               }}
             >
               Contact Administrator
+            </a>
+          </div>
+
+          <div style={{ marginTop: '12px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+            Looking for job opportunities?{' '}
+            <a
+              href="#"
+              style={{ color: 'var(--color-accent)', textDecoration: 'underline', fontWeight: '600' }}
+              onClick={(e) => {
+                e.preventDefault();
+                onApplicantPortal();
+              }}
+            >
+              Go to Applicant Portal
             </a>
           </div>
 

@@ -17,6 +17,7 @@ export default function RMEmployeeDirectoryTab() {
     notes: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  const [expandedSkills, setExpandedSkills] = useState({});
 
   useEffect(() => {
     loadEmployees();
@@ -94,6 +95,15 @@ export default function RMEmployeeDirectoryTab() {
   });
 
   const uniqueRoles = ['All', ...new Set(employees.map(emp => emp.role))];
+
+  const toggleSkillsExpand = (empId) => {
+    setExpandedSkills(prev => ({
+      ...prev,
+      [empId]: !prev[empId]
+    }));
+  };
+
+  const MAX_VISIBLE_SKILLS = 4;
 
   if (loading) {
     return <div style={styles.container}><p>Loading employee directory…</p></div>;
@@ -181,37 +191,19 @@ export default function RMEmployeeDirectoryTab() {
                   {emp.skills.length === 0 ? (
                     <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No skills on file.</span>
                   ) : (
-                    emp.skills.map((skill, idx) => (
-                      <span key={idx} style={styles.skillPill}>{skill}</span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Certifications Section */}
-              <div style={styles.section}>
-                <h4 style={styles.sectionHeader}>Certifications</h4>
-                <div style={styles.certList}>
-                  {emp.certifications.length === 0 ? (
-                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No certifications verified.</span>
-                  ) : (
-                    emp.certifications.map(cert => (
-                      <div key={cert.id} style={styles.certItem}>
-                        <div style={styles.certMeta}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                              <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-                              <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-                              <path d="M4 22h16"></path>
-                              <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"></path>
-                              <path d="M12 2a15.3 15.3 0 0 1 4 10H8a15.3 15.3 0 0 1 4-10z"></path>
-                            </svg>
-                            <strong>{cert.name}</strong>
-                          </span>
-                          <span>{cert.issuer} | Issued: {cert.date}</span>
-                        </div>
-                      </div>
-                    ))
+                    <>
+                      {emp.skills.slice(0, expandedSkills[emp.id] ? emp.skills.length : MAX_VISIBLE_SKILLS).map((skill, idx) => (
+                        <span key={idx} style={styles.skillPill}>{skill}</span>
+                      ))}
+                      {emp.skills.length > MAX_VISIBLE_SKILLS && (
+                        <button
+                          onClick={() => toggleSkillsExpand(emp.id)}
+                          style={styles.seeMoreBtn}
+                        >
+                          {expandedSkills[emp.id] ? 'See less' : `+${emp.skills.length - MAX_VISIBLE_SKILLS} more`}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -469,22 +461,16 @@ const styles = {
     borderRadius: '4px',
     fontWeight: '600',
   },
-  certList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  certItem: {
-    padding: '8px 12px',
-    background: 'rgba(255, 255, 255, 0.01)',
-    border: '1px solid var(--color-border)',
-    borderRadius: '6px',
-  },
-  certMeta: {
-    display: 'flex',
-    flexDirection: 'column',
+  seeMoreBtn: {
     fontSize: '11px',
-    gap: '2px',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-primary)',
+    padding: '3px 8px',
+    borderRadius: '4px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    textDecoration: 'none',
   },
   cardFooter: {
     marginTop: 'auto',
