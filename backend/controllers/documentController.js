@@ -86,6 +86,45 @@ const normalizeSkill = (skill) => {
     return String(skill).trim();
 };
 
+// ============ NEW: canonical key for ALL comparisons/dedup ============
+// Case-insensitive, whitespace-collapsed. Never used for display — only for matching.
+const skillKey = (skill) => normalizeSkill(skill).toLowerCase().replace(/\s+/g, ' ').trim();
+
+// ============ NEW: load this employee's full feedback history ============
+// Pulls every skill this employee has ever approved or rejected from the
+// feedback_training table (across ALL documents, not just the current one),
+// so a skill rejected once (e.g. "Level", "Engr") never resurfaces in
+// "Pending" again — whether it's a brand-new document or a rescan.
+async function getEmployeeFeedbackHistory(employeeId) {
+    const approvedKeys = new Set();
+    const rejectedKeys = new Set();
+
+    try {
+        const { data: feedbackRows, error } = await supabase
+            .from('feedback_training')
+            .select('phrase, label')
+            .eq('employee_id', employeeId);
+
+        if (error) {
+            console.error('⚠️ Could not load feedback_training history:', error.message);
+            return { approvedKeys, rejectedKeys };
+        }
+
+        for (const row of feedbackRows || []) {
+            const key = skillKey(row.phrase);
+            if (!key) continue;
+            if (row.label === 'Skill') approvedKeys.add(key);
+            if (row.label === 'Not Skill') rejectedKeys.add(key);
+        }
+
+        console.log(`📊 Feedback history for ${employeeId}: ${approvedKeys.size} approved, ${rejectedKeys.size} rejected`);
+    } catch (e) {
+        console.error('⚠️ Error loading feedback history:', e.message);
+    }
+
+    return { approvedKeys, rejectedKeys };
+}
+
 exports.processDocument = async (req, res) => {
     try {
         const file = req.file;
@@ -231,15 +270,48 @@ exports.processDocument = async (req, res) => {
             console.log('⚠️ Could not load knowledge base skills for auto-approve fallback:', kbError.message);
         }
 
-        const knowledgeBaseSet = new Set(knowledgeBaseSkills.map(s => s.toLowerCase()));
-        const fallbackAutoApproved = extractedSkills.filter(skill => knowledgeBaseSet.has(skill.toLowerCase()));
+        const knowledgeBaseSet = new Set(knowledgeBaseSkills.map(s => skillKey(s)));
+        const fallbackAutoApproved = extractedSkills.filter(skill => knowledgeBaseSet.has(skillKey(skill)));
 
-        const autoApprovedNormalized = pythonAutoApproved.length > 0 ? pythonAutoApproved : fallbackAutoApproved;
-        const autoApprovedSet = new Set(autoApprovedNormalized.map(s => s.toLowerCase()));
-
+        let autoApprovedNormalized = pythonAutoApproved.length > 0 ? pythonAutoApproved : fallbackAutoApproved;
         let finalNeedsReview = (needsReviewNormalized.length > 0 ? needsReviewNormalized : extractedSkills).filter(skill =>
-            !autoApprovedSet.has(skill.toLowerCase()) && skill.length > 0
+            !new Set(autoApprovedNormalized.map(s => skillKey(s))).has(skillKey(skill)) && skill.length > 0
         );
+
+        // ============ NEW: FILTER OUT SKILLS THIS EMPLOYEE HAS ALREADY REVIEWED ============
+        // Reads the employee's full feedback_training history (approved + rejected,
+        // across ALL of their documents) and strips those skills out of both
+        // finalNeedsReview and autoApprovedNormalized. This is the fix: previously
+        // this controller only checked approved_skills/rejected_skills on a single
+        // document row, so a skill rejected on Document A (e.g. "Level", "Engr",
+        // "Basic Use") would still show up as "Pending" on Document B, C, etc.
+        const { approvedKeys: historyApprovedKeys, rejectedKeys: historyRejectedKeys } =
+            await getEmployeeFeedbackHistory(employeeId);
+
+        let previouslyRejected = [...historyRejectedKeys];
+
+        if (historyApprovedKeys.size > 0 || historyRejectedKeys.size > 0) {
+            const beforeCount = finalNeedsReview.length;
+
+            finalNeedsReview = finalNeedsReview.filter(skill => {
+                const key = skillKey(skill);
+                if (historyRejectedKeys.has(key)) {
+                    console.log(`   ⏭️  Skipping "${skill}" (already REJECTED by this employee before) ❌`);
+                    return false;
+                }
+                if (historyApprovedKeys.has(key)) {
+                    console.log(`   ⏭️  Skipping "${skill}" (already approved by this employee before)`);
+                    return false;
+                }
+                return true;
+            });
+
+            // A knowledge-base skill that this employee specifically rejected before
+            // should not silently auto-approve again either.
+            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !historyRejectedKeys.has(skillKey(skill)));
+
+            console.log(`📊 History filter: ${beforeCount} → ${finalNeedsReview.length} skills left to review`);
+        }
 
         // ============ CHECK FOR EXISTING DOCUMENT (SAME FILE RESCANNED) ============
         const documentHash = result.ocr?.document_hash || '';
@@ -261,7 +333,6 @@ exports.processDocument = async (req, res) => {
         }
 
         let documentId;
-        let previouslyRejected = [];
 
         if (existingDoc) {
             // ============================================================
@@ -275,9 +346,14 @@ exports.processDocument = async (req, res) => {
             console.log(`🔄 Rescanning existing document - MERGING skills`);
 
             const existingSkills = (existingDoc.extracted_skills || []).map(normalizeSkill);
-            const existingApproved = new Set((existingDoc.approved_skills || []).map(s => s.toLowerCase()));
-            const existingRejected = new Set((existingDoc.rejected_skills || []).map(s => s.toLowerCase()));
-            previouslyRejected = [...existingRejected];
+            const existingApproved = new Set((existingDoc.approved_skills || []).map(s => skillKey(s)));
+            const existingRejected = new Set((existingDoc.rejected_skills || []).map(s => skillKey(s)));
+
+            // Combine this document's own history with the employee's global
+            // feedback_training history so nothing rejected anywhere slips back in.
+            const combinedRejected = new Set([...existingRejected, ...historyRejectedKeys]);
+            const combinedApproved = new Set([...existingApproved, ...historyApprovedKeys]);
+            previouslyRejected = [...combinedRejected];
 
             console.log(`   📊 Existing skills: ${existingSkills.length}`);
             console.log(`   📊 New skills from this scan: ${finalNeedsReview.length}`);
@@ -286,7 +362,7 @@ exports.processDocument = async (req, res) => {
             // casing survives the merge/dedupe step.
             const mergedSkillsMap = new Map();
             for (const s of [...existingSkills, ...finalNeedsReview]) {
-                const key = s.toLowerCase();
+                const key = skillKey(s);
                 if (!mergedSkillsMap.has(key)) mergedSkillsMap.set(key, s);
             }
 
@@ -321,22 +397,26 @@ exports.processDocument = async (req, res) => {
                 });
             }
 
-            // finalNeedsReview = merged skills not yet approved/rejected,
-            // with original casing preserved for display.
+            // finalNeedsReview = merged skills not yet approved/rejected — checked
+            // against BOTH this document's history AND the employee's global
+            // feedback_training history, with original casing preserved for display.
             finalNeedsReview = allSkills.filter(skill => {
-                const skillLower = skill.toLowerCase();
-                return !existingApproved.has(skillLower) && !existingRejected.has(skillLower);
+                const key = skillKey(skill);
+                return !combinedApproved.has(key) && !combinedRejected.has(key);
             });
+
+            // Same global-rejection guard applied to auto-approved skills on rescan.
+            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !combinedRejected.has(skillKey(skill)));
 
             console.log(`📊 Rescan complete: ${finalNeedsReview.length} new skills to review`);
 
         } else {
             // ============================================================
-            // NEW DOCUMENT: keep all extracted skills for review, only
-            // filtering out the employee's own name/ID (security, not
-            // skill filtering).
+            // NEW DOCUMENT: keep extracted skills for review, filtering out
+            // the employee's own name/ID (security) AND anything already
+            // in this employee's feedback_training history (done above).
             // ============================================================
-            console.log(`🔍 [NEW DOCUMENT] Processing - keeping all skills for review`);
+            console.log(`🔍 [NEW DOCUMENT] Processing - keeping unreviewed skills for review`);
 
             const nameIdExclude = new Set([
                 employeeId.toLowerCase(),
