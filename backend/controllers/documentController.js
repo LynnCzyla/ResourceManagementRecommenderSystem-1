@@ -217,11 +217,27 @@ exports.processDocument = async (req, res) => {
         }
 
         // ============ NORMALIZE + SEPARATE AUTO-APPROVED VS NEEDS-REVIEW ============
-        const autoApprovedNormalized = (result.nlp?.auto_approved || []).map(normalizeSkill);
-        const needsReviewNormalized = (result.nlp?.needs_review || []).map(normalizeSkill);
+        const extractedSkills = (result.nlp?.skills || []).map(normalizeSkill).filter(Boolean);
+        const pythonAutoApproved = (result.nlp?.auto_approved || []).map(normalizeSkill).filter(Boolean);
+        const needsReviewNormalized = (result.nlp?.needs_review || []).map(normalizeSkill).filter(Boolean);
+
+        let knowledgeBaseSkills = [];
+        try {
+            const { data: kbSkills } = await supabase
+                .from('skills')
+                .select('skill_name');
+            knowledgeBaseSkills = Array.isArray(kbSkills) ? kbSkills.map(row => normalizeSkill(row.skill_name)).filter(Boolean) : [];
+        } catch (kbError) {
+            console.log('⚠️ Could not load knowledge base skills for auto-approve fallback:', kbError.message);
+        }
+
+        const knowledgeBaseSet = new Set(knowledgeBaseSkills.map(s => s.toLowerCase()));
+        const fallbackAutoApproved = extractedSkills.filter(skill => knowledgeBaseSet.has(skill.toLowerCase()));
+
+        const autoApprovedNormalized = pythonAutoApproved.length > 0 ? pythonAutoApproved : fallbackAutoApproved;
         const autoApprovedSet = new Set(autoApprovedNormalized.map(s => s.toLowerCase()));
 
-        let finalNeedsReview = needsReviewNormalized.filter(skill =>
+        let finalNeedsReview = (needsReviewNormalized.length > 0 ? needsReviewNormalized : extractedSkills).filter(skill =>
             !autoApprovedSet.has(skill.toLowerCase()) && skill.length > 0
         );
 
@@ -245,6 +261,7 @@ exports.processDocument = async (req, res) => {
         }
 
         let documentId;
+        let previouslyRejected = [];
 
         if (existingDoc) {
             // ============================================================
@@ -260,6 +277,7 @@ exports.processDocument = async (req, res) => {
             const existingSkills = (existingDoc.extracted_skills || []).map(normalizeSkill);
             const existingApproved = new Set((existingDoc.approved_skills || []).map(s => s.toLowerCase()));
             const existingRejected = new Set((existingDoc.rejected_skills || []).map(s => s.toLowerCase()));
+            previouslyRejected = [...existingRejected];
 
             console.log(`   📊 Existing skills: ${existingSkills.length}`);
             console.log(`   📊 New skills from this scan: ${finalNeedsReview.length}`);
@@ -403,6 +421,7 @@ exports.processDocument = async (req, res) => {
                     categorized_skills: result.nlp?.categorized_skills || [],
                     auto_approved: autoApprovedNormalized,
                     needs_review: finalNeedsReview,
+                    previously_rejected_skills: previouslyRejected,
                     prc_license: result.nlp?.prc_license || null,
                     prc_verified: result.nlp?.prc_verified || false
                 },
