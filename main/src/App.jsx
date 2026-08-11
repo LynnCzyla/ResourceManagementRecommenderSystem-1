@@ -2,9 +2,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './frontend/Login';
 import ResetPassword from './frontend/ResetPassword';
+import ApplicantPortal from './frontend/ApplicantPortal';
 import AdminLayout from './frontend/Admin/AdminLayout';
 import PMLayout from './frontend/ProjectManager/PMLayout';
 import RMLayout from './frontend/ResourceManager/RMLayout';
+import HRLayout from './frontend/HumanResource/HRLayout';
 import EmployeeLayout from './frontend/Employee/EmployeeLayout';
 import { supabase, getSession, establishSessionFromUrl } from './lib/supabaseClient';
 import Swal from 'sweetalert2';
@@ -19,6 +21,7 @@ const ACTIVE_TAB_STORAGE_KEYS = [
   'adminActiveTab',
   'pmActiveTab',
   'rmActiveTab',
+  'hrActiveTab',
   'employeeActiveTab'
 ];
 
@@ -49,6 +52,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [sessionTimeout, setSessionTimeout] = useState(30);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [isApplicantPortal, setIsApplicantPortal] = useState(false);
 
   const userActivityRef = useRef(Date.now());
   const lastActivityWriteRef = useRef(0);
@@ -490,6 +494,8 @@ function App() {
         return <PMLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       case 'Resource Manager':
         return <RMLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+      case 'HR':
+        return <HRLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       default:
         return <EmployeeLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
     }
@@ -508,8 +514,10 @@ function App() {
 
   return (
     <>
-      {!isLoggedIn ? (
-        <Login onLogin={handleLogin} isDark={isDark} toggleTheme={toggleTheme} />
+      {isApplicantPortal ? (
+        <ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />
+      ) : !isLoggedIn ? (
+        <Login onLogin={handleLogin} isDark={isDark} toggleTheme={toggleTheme} onApplicantPortal={() => setIsApplicantPortal(true)} />
       ) : (
         renderLayout()
       )}

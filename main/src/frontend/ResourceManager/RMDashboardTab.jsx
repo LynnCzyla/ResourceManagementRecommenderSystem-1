@@ -128,6 +128,7 @@ export default function RMDashboardTab() {
 
       {/* Main Grid */}
       <div style={styles.mainGrid}>
+        {/* Employee Utilization Panel */}
         <div className="glass-card" style={styles.panel}>
           <div style={styles.panelHeader}>
             <h2 style={styles.panelTitle}>Employee Utilization & Workload</h2>
@@ -176,8 +177,6 @@ export default function RMDashboardTab() {
                     const taskAssigned = emp.taskStatus === 'Assigned';
                     const taskColor = taskAssigned ? 'var(--color-success)' : 'var(--color-text-muted)';
                     const taskBg = taskAssigned ? 'var(--color-primary-light)' : 'rgba(100, 116, 139, 0.12)';
-                    // Role/Position always resolves to real data from the API
-                    // (never a hardcoded "Unassigned" placeholder).
                     const roleLabel = emp.role || 'Employee';
                     return (
                       <tr key={emp.id} style={styles.tr}>
@@ -209,6 +208,112 @@ export default function RMDashboardTab() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* Data Analytics Panel */}
+        <div className="glass-card" style={styles.panel}>
+          <div style={styles.panelHeader}>
+            <h2 style={styles.panelTitle}>Resource Analytics</h2>
+          </div>
+
+          {/* Resource Utilization Chart */}
+          <div style={styles.analyticsSection}>
+            <h3 style={styles.analyticsTitle}>Resource Utilization by Department</h3>
+            <div style={styles.barChart}>
+              <div style={styles.barContainer}>
+                <span style={styles.barLabel}>Engineering</span>
+                <div style={styles.barWrapper}>
+                  <div style={{ ...styles.bar, width: '85%', backgroundColor: 'var(--color-primary)' }}></div>
+                  <span style={styles.barValue}>85%</span>
+                </div>
+              </div>
+              <div style={styles.barContainer}>
+                <span style={styles.barLabel}>Design</span>
+                <div style={styles.barWrapper}>
+                  <div style={{ ...styles.bar, width: '72%', backgroundColor: 'var(--color-accent)' }}></div>
+                  <span style={styles.barValue}>72%</span>
+                </div>
+              </div>
+              <div style={styles.barContainer}>
+                <span style={styles.barLabel}>Analytics</span>
+                <div style={styles.barWrapper}>
+                  <div style={{ ...styles.bar, width: '68%', backgroundColor: 'var(--color-success)' }}></div>
+                  <span style={styles.barValue}>68%</span>
+                </div>
+              </div>
+              <div style={styles.barContainer}>
+                <span style={styles.barLabel}>Operations</span>
+                <div style={styles.barWrapper}>
+                  <div style={{ ...styles.bar, width: '91%', backgroundColor: 'var(--color-warning)' }}></div>
+                  <span style={styles.barValue}>91%</span>
+                </div>
+              </div>
+              <div style={styles.barContainer}>
+                <span style={styles.barLabel}>Marketing</span>
+                <div style={styles.barWrapper}>
+                  <div style={{ ...styles.bar, width: '54%', backgroundColor: 'var(--color-danger)' }}></div>
+                  <span style={styles.barValue}>54%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Workload Distribution */}
+          <div style={styles.analyticsSection}>
+            <h3 style={styles.analyticsTitle}>Workload Distribution</h3>
+            <div style={styles.pieChartContainer}>
+              <div style={styles.pieChart}>
+                <div style={{ ...styles.pieSegment, background: 'conic-gradient(var(--color-success) 0deg 144deg, var(--color-warning) 144deg 252deg, var(--color-danger) 252deg 360deg)' }}></div>
+              </div>
+              <div style={styles.pieLegend}>
+                <div style={styles.legendItem}>
+                  <span style={{ ...styles.legendColor, backgroundColor: 'var(--color-success)' }}></span>
+                  <span style={styles.legendLabel}>Available (40%)</span>
+                </div>
+                <div style={styles.legendItem}>
+                  <span style={{ ...styles.legendColor, backgroundColor: 'var(--color-warning)' }}></span>
+                  <span style={styles.legendLabel}>Limited (30%)</span>
+                </div>
+                <div style={styles.legendItem}>
+                  <span style={{ ...styles.legendColor, backgroundColor: 'var(--color-danger)' }}></span>
+                  <span style={styles.legendLabel}>Fully Loaded (30%)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Monthly Trend */}
+          <div style={styles.analyticsSection}>
+            <h3 style={styles.analyticsTitle}>Monthly Resource Requests Trend</h3>
+            <div style={styles.lineChart}>
+              <div style={styles.lineChartBars}>
+                <div style={styles.lineBar}>
+                  <div style={{ ...styles.lineBarFill, height: '40%' }}></div>
+                  <span style={styles.lineBarLabel}>Jan</span>
+                </div>
+                <div style={styles.lineBar}>
+                  <div style={{ ...styles.lineBarFill, height: '65%' }}></div>
+                  <span style={styles.lineBarLabel}>Feb</span>
+                </div>
+                <div style={styles.lineBar}>
+                  <div style={{ ...styles.lineBarFill, height: '55%' }}></div>
+                  <span style={styles.lineBarLabel}>Mar</span>
+                </div>
+                <div style={styles.lineBar}>
+                  <div style={{ ...styles.lineBarFill, height: '80%' }}></div>
+                  <span style={styles.lineBarLabel}>Apr</span>
+                </div>
+                <div style={styles.lineBar}>
+                  <div style={{ ...styles.lineBarFill, height: '70%' }}></div>
+                  <span style={styles.lineBarLabel}>May</span>
+                </div>
+                <div style={styles.lineBar}>
+                  <div style={{ ...styles.lineBarFill, height: '90%' }}></div>
+                  <span style={styles.lineBarLabel}>Jun</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -312,7 +417,7 @@ const styles = {
   },
   mainGrid: {
     display: 'grid',
-    gridTemplateColumns: '1fr',
+    gridTemplateColumns: '1fr 1fr',
     gap: '24px',
   },
   panel: {
@@ -338,6 +443,111 @@ const styles = {
     fontWeight: '700',
     fontSize: '12px',
     cursor: 'pointer',
+  },
+  analyticsSection: {
+    marginBottom: '32px',
+  },
+  analyticsTitle: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+    marginBottom: '12px',
+  },
+  barChart: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  barContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  barLabel: {
+    width: '100px',
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+    fontWeight: '500',
+  },
+  barWrapper: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  bar: {
+    height: '24px',
+    borderRadius: '4px',
+    transition: 'width 0.3s ease',
+  },
+  barValue: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    minWidth: '35px',
+  },
+  pieChartContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '24px',
+  },
+  pieChart: {
+    width: '120px',
+    height: '120px',
+    borderRadius: '50%',
+  },
+  pieSegment: {
+    width: '100%',
+    height: '100%',
+    borderRadius: '50%',
+  },
+  pieLegend: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  legendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+  },
+  legendColor: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '2px',
+  },
+  legendLabel: {
+    fontWeight: '500',
+  },
+  lineChart: {
+    marginTop: '8px',
+  },
+  lineChartBars: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    height: '120px',
+    gap: '8px',
+  },
+  lineBar: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  lineBarFill: {
+    width: '100%',
+    backgroundColor: 'var(--color-primary)',
+    borderRadius: '4px 4px 0 0',
+    transition: 'height 0.3s ease',
+  },
+  lineBarLabel: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '500',
   },
   filterRow: {
     display: 'flex',
