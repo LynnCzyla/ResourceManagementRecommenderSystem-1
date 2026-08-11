@@ -167,11 +167,7 @@ export default function RMEmployeeDirectoryTab() {
                       <div style={styles.empRole}>{emp.role || 'Unassigned'}</div>
                   </div>
                 </div>
-                {!emp.isVerified && (
-                  <button onClick={() => handleToggleVerify(emp.id)} style={styles.verifyToggleBtn}>
-                    Mark Verified
-                  </button>
-                )}
+                
               </div>
 
               {/* Skills Section */}
@@ -190,10 +186,10 @@ export default function RMEmployeeDirectoryTab() {
 
               {/* Certifications Section */}
               <div style={styles.section}>
-                <h4 style={styles.sectionHeader}>Certifications</h4>
+                <h4 style={styles.sectionHeader}>INTERNAL RESUME</h4>
                 <div style={styles.certList}>
                   {emp.certifications.length === 0 ? (
-                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No certifications verified.</span>
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No Internal Resume.</span>
                   ) : (
                     emp.certifications.map(cert => (
                       <div key={cert.id} style={styles.certItem}>
