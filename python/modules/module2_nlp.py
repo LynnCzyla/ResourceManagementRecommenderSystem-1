@@ -16,6 +16,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from modules.skill_classifier import SkillClassifier
+from modules.supabase_client import supabase
 
 # ============ FIX: connectors that should never lead a skill phrase ============
 LEADING_CONNECTORS = ('and', 'of', 'for', 'with', 'to', 'in', 'on', 'at')
@@ -40,14 +41,6 @@ class NLPProcessor:
         self.prc_pattern = re.compile(r'\bPRC\s*[\#]?\s*(\d{7})\b', re.IGNORECASE)
         self.email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
         self.phone_pattern = re.compile(r'\b\d{4}\s*\d{3}\s*\d{4}\b|\b\d{3}-\d{4}\b')
-        
-        # Certificate patterns (structural only)
-        self.cert_patterns = {
-            'certificate_name': re.compile(r'CERTIFICATE\s+OF\s+([A-Z\s]+)', re.IGNORECASE),
-            'certificate_number': re.compile(r'(?:CERTIFICATE|WTR)\s*(?:NO|NUMBER|#)\s*[:.]?\s*([A-Z0-9.-]+)', re.IGNORECASE),
-            'issuing_org': re.compile(r'(?:Issued by|Awarded by|Presented by)\s*[:.]?\s*([A-Za-z\s&.,]+)', re.IGNORECASE),
-            'issue_date': re.compile(r'(?:Date|Issued|Awarded)\s*[:.]?\s*([A-Za-z]+\s+\d{1,2}[,.]?\s+\d{4})', re.IGNORECASE),
-        }
         
         # ============ PURELY DYNAMIC - EMPTY INITIAL ============
         self.skill_db_path = skill_db_path or self._get_default_db_path()
@@ -134,9 +127,12 @@ class NLPProcessor:
         return skill_dir / 'learned_skills.json'
     
     def _load_data(self):
-        """Load all learned data - with alias structure support"""
-
-        # ============ FIX: Initialize stats if missing ============
+        """
+        Load facts (skills, categories, aliases, feedback) from Supabase —
+        this is the system of record now, not the JSON file.
+        Ephemeral learning state (word frequencies, thresholds, merge
+        history) still loads from the local JSON cache.
+        """
         if not hasattr(self, 'stats'):
             self.stats = {
                 'total_processed': 0,
@@ -146,79 +142,106 @@ class NLPProcessor:
                 'new_categories_created': 0,
                 'documents_analyzed': 0
             }
-        # =============================================================
-        
-        # Load rejection patterns
+
+        # ============ LOAD FACTS FROM SUPABASE ============
+        try:
+            client = supabase.get_client()
+            if client:
+                # 1. Skills + categories
+                skills_resp = client.table('skills').select('id, skill_name, category').execute()
+                for row in skills_resp.data:
+                    name = row['skill_name'].lower()
+                    self.learned_skills.add(name)
+                    category = row.get('category') or 'Other'
+                    self.skill_dictionary[name] = category
+                    self.skill_categories.setdefault(category, [])
+                    if name not in self.skill_categories[category]:
+                        self.skill_categories[category].append(name)
+
+                # 2. Aliases
+                aliases_resp = client.table('skill_aliases').select(
+                    'master_skill_id, alias_skill_id, skills!skill_aliases_master_skill_id_fkey(skill_name), skills!skill_aliases_alias_skill_id_fkey(skill_name)'
+                ).execute()
+                # NOTE: Supabase-py aliasing for two FKs to the same table needs
+                # explicit relationship names configured in Supabase, or two
+                # separate queries. Simplest reliable version: fetch id->name
+                # map once, then join in Python.
+                id_to_name = {row['id']: row['skill_name'].lower() for row in skills_resp.data}
+                alias_rows = client.table('skill_aliases').select('master_skill_id, alias_skill_id').execute()
+                for row in alias_rows.data:
+                    master = id_to_name.get(row['master_skill_id'])
+                    alias = id_to_name.get(row['alias_skill_id'])
+                    if master and alias:
+                        self.skill_aliases.setdefault(master, [])
+                        if alias not in self.skill_aliases[master]:
+                            self.skill_aliases[master].append(alias)
+                        self.alias_lookup[alias] = master
+
+                # 3. Feedback (approved/rejected) — drives rejection filters
+                feedback_resp = client.table('feedback_training').select('phrase, label').execute()
+                for row in feedback_resp.data:
+                    phrase = row['phrase'].lower()
+                    words = phrase.split()
+                    if row['label'] == 'Skill':
+                        # Approved training examples must also enter the
+                        # knowledge base, otherwise _is_likely_skill() will
+                        # never hit its auto-approve branch for them.
+                        self.learned_skills.add(phrase)
+                        self.skill_dictionary.setdefault(phrase, 'Other')
+                        self.skill_categories.setdefault('Other', [])
+                        if phrase not in self.skill_categories['Other']:
+                            self.skill_categories['Other'].append(phrase)
+
+                        self.feedback_log.setdefault('approved', [])
+                        if row['phrase'] not in self.feedback_log['approved']:
+                            self.feedback_log['approved'].append(row['phrase'])
+                        for w in words:
+                            if len(w) > 3:
+                                self.learned_skill_keywords.add(w)
+                    else:
+                        self.feedback_log.setdefault('rejected', [])
+                        if row['phrase'] not in self.feedback_log['rejected']:
+                            self.feedback_log['rejected'].append(row['phrase'])
+                        self.rejected_phrases[phrase] += 1
+                        if len(words) == 1:
+                            self.rejected_single_words[phrase] += 1
+
+                print(f"[NLP] Loaded from Supabase: {len(self.learned_skills)} skills, "
+                      f"{len(self.skill_aliases)} alias groups, "
+                      f"{len(self.feedback_log.get('approved', []))} approved / "
+                      f"{len(self.feedback_log.get('rejected', []))} rejected feedback rows")
+            else:
+                print("[NLP] Supabase client not available — skills/feedback start empty")
+        except Exception as e:
+            print(f"[NLP] Error loading from Supabase: {e}")
+        # =====================================================
+
+        # ============ LOAD EPHEMERAL STATE FROM LOCAL JSON ============
         if os.path.exists(self.skill_db_path):
             try:
                 with open(self.skill_db_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    
-                    # ============ MERGE, DON'T REPLACE! ============
-                    # 1. Merge learned_skills (ALL skills, including aliases)
-                    loaded_skills = set(data.get('learned_skills', []))
-                    self.learned_skills.update(loaded_skills)
-                    
-                    # 2. Merge dictionary
-                    loaded_dict = data.get('dictionary', {})
-                    self.skill_dictionary.update(loaded_dict)
-                    
-                    # 3. Merge categories
-                    loaded_categories = data.get('categories', {})
-                    for category, skills in loaded_categories.items():
-                        if category not in self.skill_categories:
-                            self.skill_categories[category] = []
-                        for skill in skills:
-                            if skill not in self.skill_categories[category]:
-                                self.skill_categories[category].append(skill)
-                    
-                    # 4. Load alias structures (NEW)
-                    self.skill_aliases = data.get('skill_aliases', {})
-                    self.alias_lookup = data.get('alias_lookup', {})
-                    
-                    # 5. Load rejection patterns (NEW)
-                    self.rejected_phrases = defaultdict(int, data.get('rejected_phrases', {}))
-                    self.rejected_single_words = defaultdict(int, data.get('rejected_single_words', {}))
-                    self.rejected_names = defaultdict(int, data.get('rejected_names', {}))
-                    self.rejected_fragments = defaultdict(int, data.get('rejected_fragments', {}))
-                    self.learned_skill_keywords = set(data.get('learned_skill_keywords', []))
-                    
-                    # 6. Merge word_frequency
+
                     loaded_wf = data.get('word_frequency', {})
                     for word, count in loaded_wf.items():
                         self.word_frequency[word] += count
-                    
-                    # 7. Merge phrase_frequency
+
                     loaded_pf = data.get('phrase_frequency', {})
                     for phrase, count in loaded_pf.items():
                         self.phrase_frequency[phrase] += count
-                    
-                    # 8. Merge skill_candidates
+
                     loaded_sc = data.get('skill_candidates', {})
                     for word, count in loaded_sc.items():
                         self.skill_candidates[word] += count
-                    
-                    # 9. Merge skill_patterns
+
                     loaded_sp = data.get('skill_patterns', {})
                     for word, count in loaded_sp.items():
                         self.skill_patterns[word] += count
-                    
-                    # 10. Merge non_skill_patterns
+
                     loaded_nsp = data.get('non_skill_patterns', {})
                     for word, count in loaded_nsp.items():
                         self.non_skill_patterns[word] += count
-                    
-                    # 11. MERGE feedback_log
-                    loaded_feedback = data.get('feedback_log', {})
-                    for key in ['approved', 'rejected']:
-                        if key in loaded_feedback:
-                            if key not in self.feedback_log:
-                                self.feedback_log[key] = []
-                            for item in loaded_feedback[key]:
-                                if item not in self.feedback_log[key]:
-                                    self.feedback_log[key].append(item)
-                    
-                    # 12. MERGE merge_history
+
                     loaded_history = data.get('merge_history', [])
                     if loaded_history:
                         existing_entries = {(h.get('skill1'), h.get('skill2')): h for h in self.merge_history}
@@ -227,41 +250,171 @@ class NLPProcessor:
                             if key not in existing_entries:
                                 self.merge_history.append(entry)
                                 existing_entries[key] = entry
-                    
-                    # 13. Merge skill_importance
-                    loaded_importance = data.get('skill_importance', {})
-                    for skill, importance in loaded_importance.items():
-                        self.skill_importance[skill] = self.skill_importance.get(skill, 0) + importance
-                    
-                    # 14. Merge learned_sections
+
                     loaded_sections = data.get('learned_sections', {})
                     for section, count in loaded_sections.items():
                         self.learned_sections[section] = self.learned_sections.get(section, 0) + count
-                    
-                    # 15. Merge type_thresholds
+
                     loaded_thresholds = data.get('type_thresholds', {})
                     for key, value in loaded_thresholds.items():
                         self.type_thresholds[key] = value
-                    
-                    # Update stats
+
                     self.stats['documents_analyzed'] = data.get('documents_analyzed', 0)
-                    
-                    print(f"[NLP] Merged data from file: {len(self.learned_skills)} skills, {len(self.feedback_log.get('approved', []))} approved, {len(self.merge_history)} merge entries")
-                    print(f"[NLP] Alias groups: {len(self.skill_aliases)}, Aliases: {len(self.alias_lookup)}")
-                    print(f"[NLP] Learned {len(self.learned_skill_keywords)} skill keywords from feedback")
-                    return
+                    print(f"[NLP] Loaded ephemeral state: {self.stats['documents_analyzed']} docs analyzed, "
+                          f"{len(self.merge_history)} merge history entries")
             except Exception as e:
-                print(f"[NLP] Error loading data: {e}")
-        
-        # Start completely empty if no file
-        print("[NLP] Starting with empty learning data")
-        self._save_data()
+                print(f"[NLP] Error loading ephemeral JSON: {e}")
+        else:
+            print("[NLP] No local ephemeral cache yet — starting fresh")
+        # ==================================================================
     
     def _save_data(self):
-        """Save all learned data with alias structure and rejection patterns"""
-        return self._save_knowledge_base_with_aliases()
+            """Save ephemeral learning state locally. Facts (skills, aliases,
+            feedback) are written to Supabase at the point they're created —
+            see _save_skill_to_db / _save_alias_to_db / learn_from_feedback."""
+            return self._save_ephemeral_json()
     
-    def _save_knowledge_base_with_aliases(self):
+    def _save_ephemeral_json(self):
+        """
+        Save only the disposable learning state locally: word/phrase
+        frequencies, skill/non-skill pattern counters, merge history,
+        learned section names, and merge thresholds. None of this is a
+        source of truth — if lost, it simply re-learns as more documents
+        are processed. Facts (skills, aliases, feedback) live in Supabase.
+        """
+        try:
+            existing_data = {}
+            if os.path.exists(self.skill_db_path):
+                try:
+                    with open(self.skill_db_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                except Exception as e:
+                    print(f"[NLP] Could not load existing ephemeral data: {e}")
+
+            def merge_counter(existing, current, limit=1000):
+                merged = dict(existing)
+                for key, value in current.items():
+                    merged[key] = merged.get(key, 0) + value
+                sorted_items = sorted(merged.items(), key=lambda x: x[1], reverse=True)
+                return dict(sorted_items[:limit])
+
+            merged_word_freq = merge_counter(existing_data.get('word_frequency', {}), dict(self.word_frequency), 1000)
+            merged_phrase_freq = merge_counter(existing_data.get('phrase_frequency', {}), dict(self.phrase_frequency), 500)
+            merged_skill_candidates = merge_counter(existing_data.get('skill_candidates', {}), dict(self.skill_candidates), 100)
+            merged_skill_patterns = merge_counter(existing_data.get('skill_patterns', {}), dict(self.skill_patterns), 50)
+            merged_non_skill_patterns = merge_counter(existing_data.get('non_skill_patterns', {}), dict(self.non_skill_patterns), 50)
+
+            existing_history = existing_data.get('merge_history', [])
+            existing_entries = {(h.get('skill1'), h.get('skill2')): h for h in existing_history}
+            merged_history = existing_history.copy()
+            for entry in (self.merge_history or []):
+                key = (entry.get('skill1'), entry.get('skill2'))
+                if key not in existing_entries:
+                    merged_history.append(entry)
+                    existing_entries[key] = entry
+
+            existing_sections = existing_data.get('learned_sections', {})
+            merged_sections = {**existing_sections}
+            for section, count in self.learned_sections.items():
+                merged_sections[section] = merged_sections.get(section, 0) + count
+
+            merged_thresholds = {**existing_data.get('type_thresholds', {}), **self.type_thresholds}
+
+            data = {
+                'word_frequency': merged_word_freq,
+                'phrase_frequency': merged_phrase_freq,
+                'skill_candidates': merged_skill_candidates,
+                'skill_patterns': merged_skill_patterns,
+                'non_skill_patterns': merged_non_skill_patterns,
+                'merge_history': merged_history[-1000:] if merged_history else [],
+                'learned_sections': merged_sections,
+                'type_thresholds': merged_thresholds,
+                'documents_analyzed': max(existing_data.get('documents_analyzed', 0), self.stats['documents_analyzed']),
+                'last_updated': datetime.now().isoformat(),
+            }
+
+            if os.path.exists(self.skill_db_path):
+                backup_path = f"{self.skill_db_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                import shutil
+                shutil.copy2(self.skill_db_path, backup_path)
+
+                import glob
+                backup_dir = os.path.dirname(self.skill_db_path)
+                base_name = os.path.basename(self.skill_db_path)
+                all_backups = sorted(
+                    glob.glob(os.path.join(backup_dir, f"{base_name}.backup_*")),
+                    key=os.path.getmtime, reverse=True
+                )
+                for old_backup in all_backups[5:]:
+                    try:
+                        os.remove(old_backup)
+                    except Exception:
+                        pass
+
+            with open(self.skill_db_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            print(f"[NLP] Saved ephemeral state ({len(merged_word_freq)} words, "
+                  f"{len(merged_history)} merge entries)")
+            return True
+        except Exception as e:
+            print(f"[NLP] Error saving ephemeral state: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    # ============ NEW: DB WRITE HELPERS ============
+
+    def _get_or_create_skill_id(self, skill_name, category='Other'):
+        """Upsert a skill into Supabase and return its id."""
+        client = supabase.get_client()
+        if not client:
+            return None
+        result = client.table('skills').upsert(
+            {'skill_name': skill_name, 'category': category},
+            on_conflict='skill_name'
+        ).execute()
+        return result.data[0]['id'] if result.data else None
+
+    def _save_skill_to_db(self, skill_name, category='Other'):
+        """Persist a single skill fact to Supabase."""
+        try:
+            return self._get_or_create_skill_id(skill_name, category)
+        except Exception as e:
+            print(f"[NLP] Error saving skill '{skill_name}' to DB: {e}")
+            return None
+
+    def _save_alias_to_db(self, master_name, alias_name, similarity=None):
+        """Persist a master/alias relationship to Supabase."""
+        try:
+            client = supabase.get_client()
+            if not client:
+                return
+            master_id = self._get_or_create_skill_id(master_name)
+            alias_id = self._get_or_create_skill_id(alias_name)
+            if master_id and alias_id:
+                client.table('skill_aliases').upsert(
+                    {'master_skill_id': master_id, 'alias_skill_id': alias_id, 'similarity': similarity},
+                    on_conflict='master_skill_id,alias_skill_id'
+                ).execute()
+        except Exception as e:
+            print(f"[NLP] Error saving alias '{alias_name}' -> '{master_name}': {e}")
+
+    def _save_feedback_to_db(self, phrase, label, document_id=None, employee_id=None, reviewed_by=None):
+        """Insert one approve/reject decision into feedback_training."""
+        try:
+            client = supabase.get_client()
+            if not client:
+                return
+            client.table('feedback_training').insert({
+                'phrase': phrase,
+                'label': label,
+                'document_id': document_id,
+                'employee_id': employee_id,
+                'reviewed_by': reviewed_by,
+            }).execute()
+        except Exception as e:
+            print(f"[NLP] Error saving feedback for '{phrase}': {e}")
         """
         Save learned_skills.json with alias structure - MERGE instead of OVERWRITE!
         """
@@ -1105,7 +1258,23 @@ class NLPProcessor:
                             whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
         
         # ============ STEP 4: Extract from bullet points anywhere ============
-        bullet_matches = re.findall(r'[•\-\*][ \t]*([A-Za-z0-9 \t,&]+)', text)
+        # ============ FIX: bullet marker must be at LINE START only ============
+        # The old pattern `[•\-\*][ \t]*(...)` treated ANY hyphen as a bullet
+        # marker, including hyphens inside compound words like "After-Sales"
+        # or "Why-Why". That mid-word hyphen would end one match early and
+        # immediately start a new "bullet" match right after it, shredding a
+        # single skill into two fragments (e.g. "Customer Service and After"
+        # + "Sales Support Systems"). Anchoring to line start (optional
+        # leading whitespace) via MULTILINE fixes this.
+        # The capture class also now includes ()- so a phrase isn't truncated
+        # right before a parenthetical, e.g. "Uninterruptible Power Supply
+        # (UPS) Systems" no longer gets cut to "Uninterruptible Power Supply".
+        bullet_matches = re.findall(
+            r'^[ \t]*[•\-\*][ \t]+([A-Za-z0-9 \t,&()\-]+)',
+            text,
+            re.MULTILINE
+        )
+        # ========================================================================
         for match in bullet_matches:
             clean = match.strip()
             if 3 < len(clean) < 100 and clean:
@@ -1190,7 +1359,28 @@ class NLPProcessor:
                 continue
             final_candidates.add(c)
 
-        return final_candidates  # ← ONLY cleaned candidates, NO long phrases, NO leading connectors, NO stray "/"
+        # ============ NEW: drop truncated-prefix duplicates ============
+        # If two candidates are the same skill at different lengths — e.g.
+        # "Uninterruptible Power Supply" vs "Uninterruptible Power Supply
+        # Systems" — keep only the longer, complete one. A candidate is
+        # considered a truncated duplicate only when it is an exact,
+        # word-for-word PREFIX of another (longer) candidate, so unrelated
+        # skills that merely share a first word are never affected.
+        sorted_by_len = sorted(final_candidates, key=lambda s: len(s.split()), reverse=True)
+        deduped = []
+        for cand in sorted_by_len:
+            cand_words = cand.lower().split()
+            is_prefix_of_existing = any(
+                len(cand_words) < len(kept.lower().split())
+                and kept.lower().split()[:len(cand_words)] == cand_words
+                for kept in deduped
+            )
+            if not is_prefix_of_existing:
+                deduped.append(cand)
+        final_candidates = set(deduped)
+        # ======================================================================
+
+        return final_candidates  # ← ONLY cleaned candidates, NO long phrases, NO leading connectors, NO stray "/", NO truncated duplicates
     
     def _clean_candidate_text(self, text):
         """Clean extracted candidate text"""
@@ -1360,6 +1550,17 @@ class NLPProcessor:
         
         return False
         
+    def _normalize_skill_text(self, text):
+        """
+        Normalize text for KB/exact-match comparison only (display text is
+        untouched). Collapses whitespace and strips punctuation so trivial
+        formatting differences ("Microsoft Word." vs "microsoft word") don't
+        cause a KB hit to be missed and fall through to Pending.
+        """
+        text = text.lower().strip()
+        text = re.sub(r'[^\w\s]', '', text)
+        return ' '.join(text.split())
+
     # In module2_nlp.py - Updated predict method
 
     def _is_likely_skill(self, candidate):
@@ -1374,7 +1575,7 @@ class NLPProcessor:
         if not candidate or len(candidate) < 3:
             return False
         
-        candidate_lower = candidate.lower()
+        candidate_lower = self._normalize_skill_text(candidate)
         if self._is_obvious_non_skill(candidate):
             print(f"[REJECT-LEARNED] '{candidate}' -> previously rejected")
             return False
@@ -1388,9 +1589,10 @@ class NLPProcessor:
         # ============================================================
         # LAYER 1: Knowledge Base - Auto-approve known skills
         # ============================================================
-        if candidate_lower in {s.lower() for s in self.learned_skills}:
+        normalized_kb = {self._normalize_skill_text(s) for s in self.learned_skills}
+        if candidate_lower in normalized_kb:
             print(f"[KB] '{candidate}' -> Already in knowledge base (auto-approved)")
-            return candidate
+            return candidate_lower
         
         # ============================================================
         # LAYER 2: ML Classifier - Predict for NEW skills
@@ -1557,7 +1759,7 @@ class NLPProcessor:
                             'timestamp': datetime.now().isoformat()
                         })
                 
-                # Store aliases in knowledge base
+                # Store aliases in knowledge base (in-memory) and persist to Supabase
                 if aliases and master in self.learned_skills:
                     if master not in self.skill_aliases:
                         self.skill_aliases[master] = []
@@ -1565,6 +1767,8 @@ class NLPProcessor:
                         if alias not in self.skill_aliases[master]:
                             self.skill_aliases[master].append(alias)
                         self.alias_lookup[alias] = master
+                        sim = self._calculate_similarity(alias, master)
+                        self._save_alias_to_db(master, alias, sim)
                 
                 # Ensure master is in dictionary
                 if master not in self.skill_dictionary:
@@ -1572,7 +1776,7 @@ class NLPProcessor:
         
         if merged_count > 0:
             self._discover_categories()
-            self._save_knowledge_base_with_aliases()
+            self._save_ephemeral_json()
             print(f"[NLP] Dynamically merged {merged_count} skills (kept all as aliases)")
             for detail in merged_details[:5]:
                 print(f"   {detail}")
@@ -1660,28 +1864,15 @@ class NLPProcessor:
     
     # ============ FEEDBACK LEARNING ============
     
-    def learn_from_feedback(self, approved_skills, rejected_skills):
-        """Learn from user feedback - DYNAMICALLY learns what's NOT a skill"""
-        
-        # ============ LOAD EXISTING FEEDBACK FROM FILE ============
-        if os.path.exists(self.skill_db_path):
-            try:
-                with open(self.skill_db_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    existing_feedback = data.get('feedback_log', {})
-                    if existing_feedback:
-                        for skill in existing_feedback.get('approved', []):
-                            if skill not in self.feedback_log.get('approved', []):
-                                if 'approved' not in self.feedback_log:
-                                    self.feedback_log['approved'] = []
-                                self.feedback_log['approved'].append(skill)
-                        for skill in existing_feedback.get('rejected', []):
-                            if skill not in self.feedback_log.get('rejected', []):
-                                if 'rejected' not in self.feedback_log:
-                                    self.feedback_log['rejected'] = []
-                                self.feedback_log['rejected'].append(skill)
-            except Exception as e:
-                print(f"[FEEDBACK] Error loading existing: {e}")
+    def learn_from_feedback(self, approved_skills, rejected_skills,
+                             document_id=None, employee_id=None, reviewed_by=None):
+        """Learn from user feedback - writes facts to Supabase, not JSON.
+        document_id/employee_id/reviewed_by are optional but let
+        feedback_training rows carry proper context — pass them through
+        from module3_integration.py's caller when available."""
+
+        # feedback_log is already populated in memory from _load_data()
+        # (queried from Supabase on startup) — no file read needed here.
         
         # ============ APPEND NEW FEEDBACK ============
         for skill in approved_skills:
@@ -1690,14 +1881,14 @@ class NLPProcessor:
                     self.feedback_log['approved'] = []
                 self.feedback_log['approved'].append(skill)
                 self.skill_importance[skill] = self.skill_importance.get(skill, 0) + 1
-                
-                # ============ LEARN SKILL KEYWORDS ============
+
                 words = skill.lower().split()
                 for word in words:
                     if len(word) > 3 and word not in self.learned_skill_keywords:
                         self.learned_skill_keywords.add(word)
                         print(f"[LEARN] Learned skill keyword: '{word}' from '{skill}'")
-                
+
+                self._save_feedback_to_db(skill, 'Skill', document_id, employee_id, reviewed_by)
                 print(f"[FEEDBACK] Approved: {skill}")
         
         for skill in rejected_skills:
@@ -1723,21 +1914,19 @@ class NLPProcessor:
             if any(skill_lower.startswith(c) for c in connectors):
                 self.rejected_fragments[skill_lower] = self.rejected_fragments.get(skill_lower, 0) + 1
 
+            self._save_feedback_to_db(skill, 'Not Skill', document_id, employee_id, reviewed_by)
             print(f"[FEEDBACK] Rejected: {skill}")
         
-        # ✅ FIX: Don't overwrite categories for existing skills!
+        # Don't overwrite categories for existing skills
         for skill in approved_skills:
             skill_key = skill.strip().lower() if skill else ''
             if skill_key:
-                # Check if skill already exists
                 if skill_key not in self.learned_skills:
-                    # It's a NEW skill - add it
                     self.learned_skills.add(skill_key)
                     self.skill_dictionary[skill_key] = 'Other'
+                    self._save_skill_to_db(skill_key, 'Other')
                     print(f"[NLP] Added new skill: {skill_key}")
                 else:
-                    # It EXISTS - keep its existing category
-                    # But maybe update importance
                     if skill_key not in self.skill_dictionary:
                         self.skill_dictionary[skill_key] = 'Other'
                     print(f"[NLP] Skill already exists: {skill_key} (keeping category: {self.skill_dictionary.get(skill_key, 'Other')})")
@@ -1748,9 +1937,10 @@ class NLPProcessor:
             if merged > 0:
                 print(f"[NLP] Auto-merged {merged} duplicate skills (kept as aliases)")
         
-        # Train ML
+        # Train ML — lowered from 10 so the classifier activates sooner
+        # while you're still in the early feedback-gathering phase.
         total_feedback = len(self.feedback_log.get('approved', [])) + len(self.feedback_log.get('rejected', []))
-        if total_feedback >= 10:
+        if total_feedback >= 5:
             print(f"[ML] Training classifier with {total_feedback} feedback items...")
             try:
                 all_approved = self.feedback_log.get('approved', [])
@@ -1762,7 +1952,7 @@ class NLPProcessor:
             except Exception as e:
                 print(f"[ML] Error: {e}")
         
-        self._save_knowledge_base_with_aliases()
+        self._save_ephemeral_json()
         return len(approved_skills)
     
     # ============ SIMILARITY CALCULATION ============
@@ -1842,9 +2032,9 @@ class NLPProcessor:
         
         self.stats['documents_analyzed'] += 1
         
-        # Save periodically
+        # Save ephemeral state periodically (facts already persisted at write-time)
         if self.stats['documents_analyzed'] % 5 == 0:
-            self._save_knowledge_base_with_aliases()
+            self._save_ephemeral_json()
         
         return new_skills
     
@@ -1852,6 +2042,11 @@ class NLPProcessor:
     
     def extract_entities(self, text, structured_text=None):
         """Extract entities using learned patterns"""
+        # ============ DEBUG: confirm KB state at extraction time ============
+        # Temporary — remove once you've confirmed the KB is actually populated.
+        print(f"[DEBUG] learned_skills count in memory: {len(self.learned_skills)}")
+        print(f"[DEBUG] sample: {list(self.learned_skills)[:10]}")
+        # =======================================================================
         cleaned_text = self.clean_text(text)
         doc = self.nlp(cleaned_text)
         
@@ -1985,8 +2180,8 @@ class NLPProcessor:
                 'extracted_at': datetime.now().isoformat()
             })
         
-        self._save_knowledge_base_with_aliases()
-        
+        self._save_ephemeral_json()
+
         return {
             'employee_update': employee_update,
             'skills_master': skills_master,
@@ -2029,10 +2224,9 @@ if __name__ == "__main__":
     nlp = NLPProcessor()
     
     test_text = """
-    AUTODESK - MICROCADD INSTITUTE INC.
-    CERTIFICATE OF TRAINING
-    Mark Anthony Reyes completed:
-    Technical Drafting NC II
+    Mark Anthony Reyes
+    RESUME
+    Objective: Seeking a position as a Drafting Technician.
     Skills: AutoCAD 2D, AutoCAD 3D, Architectural Drafting
     """
     
