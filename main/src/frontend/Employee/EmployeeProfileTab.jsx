@@ -29,6 +29,7 @@ export default function EmployeeProfileTab() {
   const [pendingSkills, setPendingSkills] = useState([]);
   const [autoApprovedSkills, setAutoApprovedSkills] = useState([]);
   const [needsReviewSkills, setNeedsReviewSkills] = useState([]);
+  const [previouslyRejectedSkills, setPreviouslyRejectedSkills] = useState([]);
 
   // Progress states
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -349,6 +350,7 @@ export default function EmployeeProfileTab() {
             const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
             const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
             const needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+            const previouslyRejected = Array.isArray(nlp.previously_rejected_skills) ? nlp.previously_rejected_skills : [];
             const categorizedSkills = nlp.categorized_skills || {};
             
             // FIX: If needsReview is empty but we have skills, use all skills
@@ -369,6 +371,7 @@ export default function EmployeeProfileTab() {
                 extractedSkills: allSkills,  // ← Must be an array
                 needsReview: finalNeedsReview,
                 autoApproved: finalAutoApproved,
+                previouslyRejected,
                 method: data.ocr?.method || 'unknown',
                 processingTime: data.ocr?.processing_time || 0
             });
@@ -393,6 +396,7 @@ export default function EmployeeProfileTab() {
                 // ============ Store for modal ============
                 setAutoApprovedSkills(finalAutoApproved);
                 setNeedsReviewSkills(finalNeedsReview);
+                setPreviouslyRejectedSkills(previouslyRejected);
                 setPendingSkills(finalNeedsReview);
                 
                 // ============ LOGIC: Show modal ONLY if there are skills to review ============
@@ -460,6 +464,7 @@ const handleCertUpload = async (e) => {
           const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
           const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
           let needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+          const previouslyRejected = Array.isArray(nlp.previously_rejected_skills) ? nlp.previously_rejected_skills : [];
           
           // 🔥 FIX: If needsReview is empty but we have skills, use allSkills
           if (needsReview.length === 0 && allSkills.length > 0) {
@@ -482,6 +487,7 @@ const handleCertUpload = async (e) => {
                   extractedSkills: allSkills,
                   needsReview: needsReview,
                   autoApproved: autoApproved,
+                    previouslyRejected,
                   method: data.ocr?.method || 'unknown',
                   processingTime: data.ocr?.processing_time || 0,
               });
@@ -491,6 +497,7 @@ const handleCertUpload = async (e) => {
               setNeedsReviewSkills(needsReview);  // ← THIS WAS MISSING!
               setPendingSkills(needsReview);       // ← Set this too
               setAutoApprovedSkills(autoApproved); // ← And this
+              setPreviouslyRejectedSkills(previouslyRejected);
               setPendingDocumentType('Certificate');
               setShowFeedbackModal(true);
               
@@ -533,6 +540,7 @@ const handleCertUpload = async (e) => {
     setNeedsReviewSkills([]);
     setPendingSkills([]);
     setAutoApprovedSkills([]);
+    setPreviouslyRejectedSkills([]);
     setShowFeedbackModal(false);
     setPendingDocumentId(null);
     await fetchEmployeeData();
@@ -576,6 +584,7 @@ const handleCertUpload = async (e) => {
     setNeedsReviewSkills([]);
     setPendingSkills([]);
     setAutoApprovedSkills([]);
+    setPreviouslyRejectedSkills([]);
     fetchEmployeeData();
     setProcessingStatus('Done!');
     setProcessingStep('complete');
@@ -841,6 +850,7 @@ const handleCertUpload = async (e) => {
           setNeedsReviewSkills([]);
           setPendingSkills([]);
           setAutoApprovedSkills([]);
+          setPreviouslyRejectedSkills([]);
           handleSkipFeedback(); 
         }}
         documentId={pendingDocumentId}
@@ -848,6 +858,7 @@ const handleCertUpload = async (e) => {
         // ✅ FIX: Use the separated lists
         needsReview={needsReviewSkills || []}
         autoApproved={autoApprovedSkills || []}                               // ← No auto-approved yet
+        previouslyRejected={previouslyRejectedSkills || []}
         documentType={pendingDocumentType}
         onFeedbackSubmitted={handleFeedbackSubmitted}
         onSkip={handleSkipFeedback}
