@@ -177,11 +177,7 @@ export default function RMEmployeeDirectoryTab() {
                       <div style={styles.empRole}>{emp.role || 'Unassigned'}</div>
                   </div>
                 </div>
-                {!emp.isVerified && (
-                  <button onClick={() => handleToggleVerify(emp.id)} style={styles.verifyToggleBtn}>
-                    Mark Verified
-                  </button>
-                )}
+                
               </div>
 
               {/* Skills Section */}
