@@ -21,6 +21,17 @@ from modules.supabase_client import supabase
 # ============ FIX: connectors that should never lead a skill phrase ============
 LEADING_CONNECTORS = ('and', 'of', 'for', 'with', 'to', 'in', 'on', 'at')
 
+# ============ SUPABASE FACTS CACHE ============
+# Each PDF upload spawns a brand-new Python process (see pythonService.js's
+# spawn() call), so an in-memory cache alone is useless — the process, and
+# everything in it, is gone before the next upload starts. To avoid
+# re-downloading the full skills + skill_aliases + feedback_training tables
+# on every single upload, we snapshot them to a small local JSON file and
+# reuse that snapshot for FACTS_CACHE_TTL_SECONDS before hitting Supabase
+# again. Any new skill/alias/feedback write invalidates the cache immediately
+# so freshly-approved data is never stale for longer than one write.
+FACTS_CACHE_TTL_SECONDS = 600  # 10 minutes
+
 
 class NLPProcessor:
     """100% Dynamic NLP - Learns everything from documents"""
@@ -143,77 +154,21 @@ class NLPProcessor:
                 'documents_analyzed': 0
             }
 
-        # ============ LOAD FACTS FROM SUPABASE ============
-        try:
-            client = supabase.get_client()
-            if client:
-                # 1. Skills + categories
-                skills_resp = client.table('skills').select('id, skill_name, category').execute()
-                for row in skills_resp.data:
-                    name = row['skill_name'].lower()
-                    self.learned_skills.add(name)
-                    category = row.get('category') or 'Other'
-                    self.skill_dictionary[name] = category
-                    self.skill_categories.setdefault(category, [])
-                    if name not in self.skill_categories[category]:
-                        self.skill_categories[category].append(name)
+        # ============ LOAD FACTS (skills/categories/aliases/feedback) ============
+        # Cache-first: reuse the local snapshot if it's still fresh, only
+        # hit Supabase when it's missing/expired. See FACTS_CACHE_TTL_SECONDS.
+        facts_cache_path = self._get_facts_cache_path()
+        facts = self._load_facts_from_cache(facts_cache_path)
 
-                # 2. Aliases
-                aliases_resp = client.table('skill_aliases').select(
-                    'master_skill_id, alias_skill_id, skills!skill_aliases_master_skill_id_fkey(skill_name), skills!skill_aliases_alias_skill_id_fkey(skill_name)'
-                ).execute()
-                # NOTE: Supabase-py aliasing for two FKs to the same table needs
-                # explicit relationship names configured in Supabase, or two
-                # separate queries. Simplest reliable version: fetch id->name
-                # map once, then join in Python.
-                id_to_name = {row['id']: row['skill_name'].lower() for row in skills_resp.data}
-                alias_rows = client.table('skill_aliases').select('master_skill_id, alias_skill_id').execute()
-                for row in alias_rows.data:
-                    master = id_to_name.get(row['master_skill_id'])
-                    alias = id_to_name.get(row['alias_skill_id'])
-                    if master and alias:
-                        self.skill_aliases.setdefault(master, [])
-                        if alias not in self.skill_aliases[master]:
-                            self.skill_aliases[master].append(alias)
-                        self.alias_lookup[alias] = master
+        if facts is None:
+            facts = self._fetch_facts_from_supabase()
+            if facts is not None:
+                self._save_facts_cache(facts_cache_path, facts)
 
-                # 3. Feedback (approved/rejected) — drives rejection filters
-                feedback_resp = client.table('feedback_training').select('phrase, label').execute()
-                for row in feedback_resp.data:
-                    phrase = row['phrase'].lower()
-                    words = phrase.split()
-                    if row['label'] == 'Skill':
-                        # Approved training examples must also enter the
-                        # knowledge base, otherwise _is_likely_skill() will
-                        # never hit its auto-approve branch for them.
-                        self.learned_skills.add(phrase)
-                        self.skill_dictionary.setdefault(phrase, 'Other')
-                        self.skill_categories.setdefault('Other', [])
-                        if phrase not in self.skill_categories['Other']:
-                            self.skill_categories['Other'].append(phrase)
-
-                        self.feedback_log.setdefault('approved', [])
-                        if row['phrase'] not in self.feedback_log['approved']:
-                            self.feedback_log['approved'].append(row['phrase'])
-                        for w in words:
-                            if len(w) > 3:
-                                self.learned_skill_keywords.add(w)
-                    else:
-                        self.feedback_log.setdefault('rejected', [])
-                        if row['phrase'] not in self.feedback_log['rejected']:
-                            self.feedback_log['rejected'].append(row['phrase'])
-                        self.rejected_phrases[phrase] += 1
-                        if len(words) == 1:
-                            self.rejected_single_words[phrase] += 1
-
-                print(f"[NLP] Loaded from Supabase: {len(self.learned_skills)} skills, "
-                      f"{len(self.skill_aliases)} alias groups, "
-                      f"{len(self.feedback_log.get('approved', []))} approved / "
-                      f"{len(self.feedback_log.get('rejected', []))} rejected feedback rows")
-            else:
-                print("[NLP] Supabase client not available — skills/feedback start empty")
-        except Exception as e:
-            print(f"[NLP] Error loading from Supabase: {e}")
+        if facts is not None:
+            self._apply_facts(facts)
+        else:
+            print("[NLP] No facts available (Supabase unreachable and no local cache) — skills/feedback start empty")
         # =====================================================
 
         # ============ LOAD EPHEMERAL STATE FROM LOCAL JSON ============
@@ -268,6 +223,156 @@ class NLPProcessor:
             print("[NLP] No local ephemeral cache yet — starting fresh")
         # ==================================================================
     
+    # ---------------- Supabase facts cache helpers ----------------
+
+    def _get_facts_cache_path(self):
+        """Local snapshot of the skills/skill_aliases/feedback_training
+        tables, shared by every short-lived Python process."""
+        base_dir = Path(__file__).parent.parent.parent
+        cache_dir = base_dir / 'shared-data' / 'skills_db'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / 'supabase_facts_cache.json'
+
+    def _load_facts_from_cache(self, cache_path):
+        """Return the cached facts dict if present and younger than
+        FACTS_CACHE_TTL_SECONDS, else None (meaning: go fetch from Supabase)."""
+        if not os.path.exists(cache_path):
+            return None
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                facts = json.load(f)
+            fetched_at = datetime.fromisoformat(facts.get('fetched_at'))
+            age = (datetime.now() - fetched_at).total_seconds()
+            if age > FACTS_CACHE_TTL_SECONDS:
+                print(f"[NLP] Facts cache is {int(age)}s old (> {FACTS_CACHE_TTL_SECONDS}s) — refreshing from Supabase")
+                return None
+            print(f"[NLP] Using cached facts ({int(age)}s old, no Supabase call): "
+                  f"{len(facts.get('skills', []))} skills, {len(facts.get('aliases', []))} aliases, "
+                  f"{len(facts.get('feedback', []))} feedback rows")
+            return facts
+        except Exception as e:
+            print(f"[NLP] Could not read facts cache, will refetch: {e}")
+            return None
+
+    def _fetch_facts_from_supabase(self):
+        """Pull skills/aliases/feedback fresh from Supabase. Only ONE query
+        against skill_aliases now — previously the table was queried twice
+        (a complex joined query whose result was never actually used, plus
+        the simple query that was). The unused query was pure wasted egress."""
+        try:
+            client = supabase.get_client()
+            if not client:
+                print("[NLP] Supabase client not available — skills/feedback start empty")
+                return None
+
+            # 1. Skills + categories
+            skills_resp = client.table('skills').select('id, skill_name, category').execute()
+            id_to_name = {row['id']: row['skill_name'].lower() for row in skills_resp.data}
+
+            # 2. Aliases (single query — see note above)
+            alias_rows = client.table('skill_aliases').select('master_skill_id, alias_skill_id').execute()
+
+            # 3. Feedback (approved/rejected) — drives rejection filters
+            feedback_resp = client.table('feedback_training').select('phrase, label').execute()
+
+            facts = {
+                'fetched_at': datetime.now().isoformat(),
+                'skills': [
+                    {'name': row['skill_name'], 'category': row.get('category') or 'Other'}
+                    for row in skills_resp.data
+                ],
+                'aliases': [
+                    {'master': id_to_name.get(row['master_skill_id']), 'alias': id_to_name.get(row['alias_skill_id'])}
+                    for row in alias_rows.data
+                    if id_to_name.get(row['master_skill_id']) and id_to_name.get(row['alias_skill_id'])
+                ],
+                'feedback': [
+                    {'phrase': row['phrase'], 'label': row['label']}
+                    for row in feedback_resp.data
+                ],
+            }
+            print(f"[NLP] Fetched FRESH facts from Supabase: {len(facts['skills'])} skills, "
+                  f"{len(facts['aliases'])} aliases, {len(facts['feedback'])} feedback rows")
+            return facts
+        except Exception as e:
+            print(f"[NLP] Error loading from Supabase: {e}")
+            return None
+
+    def _save_facts_cache(self, cache_path, facts):
+        """Write the facts snapshot to disk so the next process (next
+        upload) can reuse it instead of hitting Supabase again."""
+        try:
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(facts, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[NLP] Could not write facts cache: {e}")
+
+    def _invalidate_facts_cache(self):
+        """Delete the local snapshot so the very next process refetches
+        fresh from Supabase. Called right after any write (new skill, new
+        alias, new feedback) so approvals/rejections are never stale for
+        longer than a single write — same freshness guarantee as before,
+        just without re-downloading on every read."""
+        try:
+            cache_path = self._get_facts_cache_path()
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+        except Exception as e:
+            print(f"[NLP] Could not invalidate facts cache: {e}")
+
+    def _apply_facts(self, facts):
+        """Populate in-memory skill/alias/feedback structures from a facts
+        dict, whether it came fresh from Supabase or from the local cache."""
+        for row in facts.get('skills', []):
+            name = row['name'].lower()
+            self.learned_skills.add(name)
+            category = row.get('category') or 'Other'
+            self.skill_dictionary[name] = category
+            self.skill_categories.setdefault(category, [])
+            if name not in self.skill_categories[category]:
+                self.skill_categories[category].append(name)
+
+        for row in facts.get('aliases', []):
+            master = row.get('master')
+            alias = row.get('alias')
+            if master and alias:
+                self.skill_aliases.setdefault(master, [])
+                if alias not in self.skill_aliases[master]:
+                    self.skill_aliases[master].append(alias)
+                self.alias_lookup[alias] = master
+
+        for row in facts.get('feedback', []):
+            phrase = row['phrase'].lower()
+            words = phrase.split()
+            if row['label'] == 'Skill':
+                # Approved training examples must also enter the knowledge
+                # base, otherwise _is_likely_skill() will never hit its
+                # auto-approve branch for them.
+                self.learned_skills.add(phrase)
+                self.skill_dictionary.setdefault(phrase, 'Other')
+                self.skill_categories.setdefault('Other', [])
+                if phrase not in self.skill_categories['Other']:
+                    self.skill_categories['Other'].append(phrase)
+
+                self.feedback_log.setdefault('approved', [])
+                if row['phrase'] not in self.feedback_log['approved']:
+                    self.feedback_log['approved'].append(row['phrase'])
+                for w in words:
+                    if len(w) > 3:
+                        self.learned_skill_keywords.add(w)
+            else:
+                self.feedback_log.setdefault('rejected', [])
+                if row['phrase'] not in self.feedback_log['rejected']:
+                    self.feedback_log['rejected'].append(row['phrase'])
+                self.rejected_phrases[phrase] += 1
+                if len(words) == 1:
+                    self.rejected_single_words[phrase] += 1
+
+        print(f"[NLP] Facts applied: {len(self.learned_skills)} skills, "
+              f"{len(self.skill_aliases)} alias groups, "
+              f"{len(self.feedback_log.get('approved', []))} approved / "
+              f"{len(self.feedback_log.get('rejected', []))} rejected feedback rows")
+
     def _save_data(self):
             """Save ephemeral learning state locally. Facts (skills, aliases,
             feedback) are written to Supabase at the point they're created —
@@ -379,7 +484,9 @@ class NLPProcessor:
     def _save_skill_to_db(self, skill_name, category='Other'):
         """Persist a single skill fact to Supabase."""
         try:
-            return self._get_or_create_skill_id(skill_name, category)
+            result = self._get_or_create_skill_id(skill_name, category)
+            self._invalidate_facts_cache()
+            return result
         except Exception as e:
             print(f"[NLP] Error saving skill '{skill_name}' to DB: {e}")
             return None
@@ -397,6 +504,7 @@ class NLPProcessor:
                     {'master_skill_id': master_id, 'alias_skill_id': alias_id, 'similarity': similarity},
                     on_conflict='master_skill_id,alias_skill_id'
                 ).execute()
+                self._invalidate_facts_cache()
         except Exception as e:
             print(f"[NLP] Error saving alias '{alias_name}' -> '{master_name}': {e}")
 
@@ -413,6 +521,7 @@ class NLPProcessor:
                 'employee_id': employee_id,
                 'reviewed_by': reviewed_by,
             }).execute()
+            self._invalidate_facts_cache()
         except Exception as e:
             print(f"[NLP] Error saving feedback for '{phrase}': {e}")
         """
