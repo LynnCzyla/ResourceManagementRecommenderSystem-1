@@ -11,7 +11,9 @@ export default function SkillFeedbackModal({
     employeeId, 
     needsReview = [],      // ← Only pending skills
     autoApproved = [],     // ← Already approved skills
+    previouslyRejected = [],
     documentType = 'Resume',
+    documentName = '',     // ← Name of the uploaded file, shown next to the title
     onFeedbackSubmitted,
     onSkip
 }) {
@@ -102,11 +104,17 @@ export default function SkillFeedbackModal({
         setSubmitting(true);
         try {
             const authHeader = await getAuthHeader();
+            // Auto-approved skills (matched from the knowledge base) must always be
+            // saved alongside whatever the user manually approved — otherwise they
+            // never reach the employee_skills table.
+            const skillsToApprove = nothingToReview
+                ? normalizedAutoApproved
+                : [...new Set([...normalizedAutoApproved, ...approved])];
             const response = await axios.post(
                 `${API_URL}/employee/skill-feedback`,
                 {
                     documentId,
-                    approved_skills: approved,
+                    approved_skills: skillsToApprove,
                     rejected_skills: rejected,
                     document_type: documentType
                 },
@@ -137,157 +145,249 @@ export default function SkillFeedbackModal({
     };
 
     // ============ Normalize all skill arrays ============
-    const normalizedNeedsReview = normalizeSkills(needsReview);
-    const normalizedAutoApproved = normalizeSkills(autoApproved);
-    
+    const rawNormalizedAutoApproved = normalizeSkills(autoApproved);
+    const rawNormalizedNeedsReview = normalizeSkills(needsReview);
+    const rawNormalizedPreviouslyRejected = normalizeSkills(previouslyRejected);
+
+    // De-duplicate: some skills come back in BOTH the auto-approved list and the
+    // needs-review list (same name, different casing/whitespace). If a skill was
+    // already auto-approved, it should never also sit in the pending list.
+    const autoApprovedKeySet = new Set(
+        rawNormalizedAutoApproved.map(s => s.toLowerCase().trim())
+    );
+    const normalizedAutoApproved = rawNormalizedAutoApproved;
+    const normalizedNeedsReview = rawNormalizedNeedsReview.filter(
+        s => !autoApprovedKeySet.has(s.toLowerCase().trim())
+    );
+    const normalizedPreviouslyRejected = rawNormalizedPreviouslyRejected.filter(
+        s =>
+            !autoApprovedKeySet.has(s.toLowerCase().trim()) &&
+            !normalizedNeedsReview.some(n => n.toLowerCase().trim() === s.toLowerCase().trim())
+    );
+
     // Get pending skills (not yet approved or rejected)
     const pendingSkills = normalizedNeedsReview.filter(s => 
         !approved.includes(s) && !rejected.includes(s)
     );
     const canSave = !!documentId && !submitting;
 
+    // Nothing needed manual review — every extracted skill matched the knowledge base
+    // and was auto-approved. No noise to clean up, so skip the full review UI.
+    const nothingToReview = normalizedNeedsReview.length === 0 && normalizedAutoApproved.length > 0 && normalizedPreviouslyRejected.length === 0;
+    // Truly nothing was extracted at all (no auto-approved, no pending)
+    const nothingExtracted = normalizedNeedsReview.length === 0 && normalizedAutoApproved.length === 0 && normalizedPreviouslyRejected.length === 0;
+
     if (!isOpen) return null;
 
     return (
         <div style={modalStyles.overlay}>
             <div style={modalStyles.modal}>
-                <div style={modalStyles.header}>
+                <div style={nothingToReview ? modalStyles.headerSimple : modalStyles.headerSimple}>
                     <div style={modalStyles.headerLeft}>
-                        <h2 style={modalStyles.title}>📋 Review Extracted Skills</h2>
+                        <div style={modalStyles.titleRow}>
+                            <h2 style={modalStyles.title}>
+                                {nothingToReview ? 'Extracted Skills' : 'Review Extracted Skills'}
+                            </h2>
+                            {documentName && (
+                                <span style={modalStyles.titleFileName}>{documentName}</span>
+                            )}
+                        </div>
                         <p style={modalStyles.subtitle}>
-                            {documentType === 'Certificate' 
-                                ? 'Review skills extracted from your certificate.' 
-                                : 'Review skills extracted from your resume.'
-                            }
-                            {' '}The system will learn from your feedback.
+                            {nothingToReview ? (
+                                'Every skill we found already matched your knowledge base — nothing needs your review. It has been saved to your profile.'
+                            ) : (
+                                <>
+                                    {documentType === 'Certificate'
+                                        ? 'Review skills extracted from your certificate.'
+                                        : 'Review skills extracted from your resume.'
+                                    }
+                                    {' '}The system will learn from your feedback.
+                                </>
+                            )}
                         </p>
                     </div>
                     <button onClick={onClose} style={modalStyles.closeBtn}>✕</button>
                 </div>
 
-                <div style={modalStyles.badgeContainer}>
-                    {normalizedAutoApproved.length > 0 && (
-                        <span style={{...modalStyles.badge, ...modalStyles.badgeAutoApproved}}>
-                            ✅ Auto-Approved: {normalizedAutoApproved.length}
+                {/* Badge row is only useful while there's something to review — hide it
+                    entirely once everything auto-matched and there's nothing pending.
+                    Kept to a single neutral style (like the simple view) instead of
+                    four different fill colors, so it reads as calm status text rather
+                    than a wall of colored pills. */}
+                {!nothingToReview && (
+                    <div style={modalStyles.badgeContainer}>
+                        {normalizedAutoApproved.length > 0 && (
+                            <span style={modalStyles.badge}>
+                                Auto-Approved: <strong>{normalizedAutoApproved.length}</strong>
+                            </span>
+                        )}
+                        {normalizedPreviouslyRejected.length > 0 && (
+                            <span style={modalStyles.badge}>
+                                Previously Rejected: <strong>{normalizedPreviouslyRejected.length}</strong>
+                            </span>
+                        )}
+                        <span style={modalStyles.badge}>
+                            Approved: <strong>{approved.length}</strong>
                         </span>
-                    )}
-                    <span style={{...modalStyles.badge, ...modalStyles.badgeApproved}}>
-                        ✅ Approved: {approved.length}
-                    </span>
-                    <span style={{...modalStyles.badge, ...modalStyles.badgeRejected}}>
-                        ❌ Rejected: {rejected.length}
-                    </span>
-                    <span style={{...modalStyles.badge, ...modalStyles.badgePending}}>
-                        ⏳ Pending: {pendingSkills.length}
-                    </span>
-                    {hasExistingFeedback && (
-                        <span style={{...modalStyles.badge, ...modalStyles.badgeExisting}}>
-                            📝 Previously reviewed
+                        <span style={modalStyles.badge}>
+                            Rejected: <strong>{rejected.length}</strong>
                         </span>
-                    )}
-                </div>
-
-                {normalizedAutoApproved.length > 0 && (
-                    <div style={modalStyles.autoApprovedContainer}>
-                        <div style={modalStyles.autoApprovedHeader}>
-                            <span>✅ Auto-Approved Skills (from knowledge base)</span>
-                        </div>
-                        <div style={modalStyles.autoApprovedList}>
-                            {normalizedAutoApproved.map((skill, index) => (
-                                <span key={index} style={modalStyles.autoApprovedTag}>
-                                    {skill}
-                                </span>
-                            ))}
-                        </div>
+                        <span style={{...modalStyles.badge, ...modalStyles.badgePending}}>
+                            Pending: <strong>{pendingSkills.length}</strong>
+                        </span>
+                        {hasExistingFeedback && (
+                            <span style={modalStyles.badge}>
+                                Previously reviewed
+                            </span>
+                        )}
                     </div>
                 )}
 
-                <div style={modalStyles.body}>
-                    {normalizedNeedsReview.length === 0 ? (
-                        <div style={modalStyles.empty}>
-                            <p style={modalStyles.emptyText}>
-                                {normalizedAutoApproved.length > 0 
-                                    ? '🎉 All skills have been auto-approved from the knowledge base!' 
-                                    : 'No skills extracted from this document.'}
-                            </p>
-                            <button onClick={onClose} style={modalStyles.doneBtn}>
-                                Done
-                            </button>
-                        </div>
-                    ) : (
-                        <>
-                            {/* Pending Skills */}
-                            {pendingSkills.map((skill, index) => (
-                                <div key={`pending-${index}`} style={modalStyles.skillItem}>
-                                    <span style={modalStyles.skillText}>{skill}</span>
-                                    <div style={modalStyles.actions}>
-                                        <button 
-                                            onClick={() => handleApprove(skill)}
-                                            style={modalStyles.approveBtn}
-                                            title="Approve this skill"
-                                        >
-                                            ✅ Approve
-                                        </button>
-                                        <button 
-                                            onClick={() => handleReject(skill)}
-                                            style={modalStyles.rejectBtn}
-                                            title="Reject this skill"
-                                        >
-                                            ❌ Reject
-                                        </button>
-                                    </div>
-                                </div>
+                {nothingToReview ? (
+                    /* ============ SIMPLE "EXTRACTED SKILLS" VIEW ============
+                       Nothing needs review — just a clean summary list, no
+                       badges, no sidebar, no approve/reject controls. */
+                    <div style={modalStyles.simpleBody}>
+                        <h3 style={modalStyles.simpleHeading}>
+                            Approved Skills: {normalizedAutoApproved.length}
+                        </h3>
+                        <ul style={modalStyles.simpleList}>
+                            {normalizedAutoApproved.map((skill, index) => (
+                                <li key={index} style={modalStyles.simpleListItem}>
+                                    {skill}
+                                </li>
                             ))}
-
-                            {/* Approved Skills */}
-                            {approved.length > 0 && (
-                                <div style={modalStyles.section}>
-                                    <h4 style={modalStyles.sectionTitle}>✅ Approved Skills</h4>
-                                    {approved.map((skill, index) => (
-                                        <div key={`approved-${index}`} style={modalStyles.skillItemApproved}>
-                                            <span style={modalStyles.skillTextApproved}>{skill}</span>
-                                            <button 
-                                                onClick={() => handleUndo(skill)}
-                                                style={modalStyles.undoBtn}
-                                            >
-                                                ↩️ Undo
-                                            </button>
+                        </ul>
+                        {normalizedPreviouslyRejected.length > 0 && (
+                            <>
+                                <h3 style={{ ...modalStyles.simpleHeading, marginTop: '20px' }}>
+                                    Previously Rejected Skills: {normalizedPreviouslyRejected.length}
+                                </h3>
+                                <ul style={modalStyles.simpleList}>
+                                    {normalizedPreviouslyRejected.map((skill, index) => (
+                                        <li key={`previously-rejected-${index}`} style={modalStyles.simpleListItem}>
+                                            {skill}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </>
+                        )}
+                    </div>
+                ) : (
+                    <div style={modalStyles.contentRow}>
+                        <div style={modalStyles.body}>
+                            {nothingExtracted ? (
+                                <div style={modalStyles.empty}>
+                                    <p style={modalStyles.emptyText}>
+                                        No skills extracted from this document.
+                                    </p>
+                                    <button onClick={onClose} style={modalStyles.doneBtn}>
+                                        Done
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Pending Skills — same neutral card as the simple view,
+                                        with quiet outlined actions instead of solid color blocks */}
+                                    {pendingSkills.map((skill, index) => (
+                                        <div key={`pending-${index}`} style={modalStyles.skillItem}>
+                                            <span style={modalStyles.skillText}>{skill}</span>
+                                            <div style={modalStyles.actions}>
+                                                <button 
+                                                    onClick={() => handleApprove(skill)}
+                                                    style={modalStyles.approveBtn}
+                                                    title="Approve this skill"
+                                                >
+                                                    Approve
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleReject(skill)}
+                                                    style={modalStyles.rejectBtn}
+                                                    title="Reject this skill"
+                                                >
+                                                    Reject
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
-                                </div>
-                            )}
 
-                            {/* Rejected Skills */}
-                            {rejected.length > 0 && (
-                                <div style={modalStyles.section}>
-                                    <h4 style={modalStyles.sectionTitle}>❌ Rejected Skills</h4>
-                                    {rejected.map((skill, index) => (
-                                        <div key={`rejected-${index}`} style={modalStyles.skillItemRejected}>
-                                            <span style={modalStyles.skillTextRejected}>{skill}</span>
-                                            <button 
-                                                onClick={() => handleUndo(skill)}
-                                                style={modalStyles.undoBtn}
-                                            >
-                                                ↩️ Undo
-                                            </button>
+                                    {/* Approved Skills */}
+                                    {approved.length > 0 && (
+                                        <div style={modalStyles.section}>
+                                            <h4 style={modalStyles.sectionTitle}>Approved Skills</h4>
+                                            {approved.map((skill, index) => (
+                                                <div key={`approved-${index}`} style={modalStyles.skillItemNeutral}>
+                                                    <span style={modalStyles.skillTextApproved}>{skill}</span>
+                                                    <button 
+                                                        onClick={() => handleUndo(skill)}
+                                                        style={modalStyles.undoBtn}
+                                                    >
+                                                        Undo
+                                                    </button>
+                                                </div>
+                                            ))}
                                         </div>
+                                    )}
+
+                                    {/* Rejected Skills */}
+                                    {rejected.length > 0 && (
+                                        <div style={modalStyles.section}>
+                                            <h4 style={modalStyles.sectionTitle}>Rejected Skills</h4>
+                                            {rejected.map((skill, index) => (
+                                                <div key={`rejected-${index}`} style={modalStyles.skillItemNeutral}>
+                                                    <span style={modalStyles.skillTextRejected}>{skill}</span>
+                                                    <button 
+                                                        onClick={() => handleUndo(skill)}
+                                                        style={modalStyles.undoBtn}
+                                                    >
+                                                        Undo
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {normalizedPreviouslyRejected.length > 0 && (
+                                        <div style={modalStyles.section}>
+                                            <h4 style={modalStyles.sectionTitle}>Previously Rejected Skills</h4>
+                                            {normalizedPreviouslyRejected.map((skill, index) => (
+                                                <div key={`previously-rejected-${index}`} style={modalStyles.skillItemNeutral}>
+                                                    <span style={modalStyles.skillTextRejected}>{skill}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* All Done Message */}
+                                    {pendingSkills.length === 0 && approved.length > 0 && (
+                                        <div style={modalStyles.allDone}>
+                                            <span style={modalStyles.allDoneText}>All skills reviewed!</span>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+
+                        {normalizedAutoApproved.length > 0 && (
+                            <div style={modalStyles.autoApprovedSidebar}>
+                                <div style={modalStyles.autoApprovedHeader}>
+                                    <span>Auto-Approved Skills (from knowledge base)</span>
+                                </div>
+                                <div style={modalStyles.autoApprovedList}>
+                                    {normalizedAutoApproved.map((skill, index) => (
+                                        <span key={index} style={modalStyles.autoApprovedTag}>
+                                            {skill}
+                                        </span>
                                     ))}
                                 </div>
-                            )}
-
-                            {/* All Done Message */}
-                            {pendingSkills.length === 0 && approved.length > 0 && (
-                                <div style={modalStyles.allDone}>
-                                    <span style={modalStyles.allDoneText}>🎉 All skills reviewed!</span>
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div style={modalStyles.footer}>
                     <button onClick={handleSkip} style={modalStyles.skipBtn}>
-                        ⏭️ Skip for now
+                        Skip for now
                     </button>
                     <div style={modalStyles.footerRight}>
                         <button onClick={onClose} style={modalStyles.cancelBtn}>
@@ -302,14 +402,14 @@ export default function SkillFeedbackModal({
                             }}
                             disabled={!canSave}
                         >
-                            {submitting ? '💾 Saving...' : '💾 Save Feedback'}
+                            {submitting ? 'Saving...' : 'Save Feedback'}
                         </button>
                     </div>
                 </div>
 
                 {pendingSkills.length > 0 && (
                     <div style={modalStyles.footerWarning}>
-                        ⚠️ Please review {pendingSkills.length} skill(s) before saving
+                        Please review {pendingSkills.length} skill(s) before saving
                     </div>
                 )}
             </div>
@@ -318,7 +418,18 @@ export default function SkillFeedbackModal({
 }
 
 
-// ============ STYLES ============
+// ============ STYLES (uses the app's theme CSS variables so it matches
+// light/dark mode automatically instead of being hardcoded white) ============
+//
+// Palette rules for a calmer "Review Extracted Skills" view (matches the
+// simple "Extracted Skills" summary view):
+//  - Cards are always the same neutral bg/border, whether pending, approved,
+//    or rejected — the state is communicated by the small text color +
+//    undo/approve/reject controls, not by a big colored panel.
+//  - Status badges are neutral text pills except "Pending", which keeps a
+//    single warm accent because it's the one that blocks saving.
+//  - Approve/Reject buttons are quiet outlined pills (colored border + text
+//    on a neutral background) instead of solid color blocks.
 const modalStyles = {
     overlay: {
         position: 'fixed',
@@ -336,38 +447,53 @@ const modalStyles = {
         padding: '20px',
     },
     modal: {
-        backgroundColor: '#ffffff',
-        borderRadius: '16px',
-        maxWidth: '800px',
+        backgroundColor: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+        fontFamily: 'var(--font-body)',
+        borderRadius: 'var(--radius-lg)',
+        maxWidth: '1000px',
         width: '100%',
         maxHeight: '90vh',
         display: 'flex',
         flexDirection: 'column',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        boxShadow: 'var(--shadow-lg)',
+        border: '1px solid var(--color-border)',
         animation: 'slideUp 0.3s ease-out',
         overflow: 'hidden',
     },
-    header: {
+    headerSimple: {
         padding: '20px 24px',
-        borderBottom: '2px solid #e5e7eb',
+        borderBottom: '3px solid var(--color-primary)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         flexShrink: 0,
-        backgroundColor: '#fafafa',
+        backgroundColor: 'var(--color-bg-card-hover)',
     },
     headerLeft: {
         flex: 1,
         marginRight: '16px',
     },
+    titleRow: {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '10px',
+        flexWrap: 'wrap',
+    },
     title: {
+        fontFamily: 'var(--font-heading)',
         fontSize: '20px',
         fontWeight: '700',
-        color: '#1f2937',
+        color: 'var(--color-text-primary)',
         margin: 0,
     },
+    titleFileName: {
+        fontSize: '13px',
+        fontWeight: '500',
+        color: 'var(--color-text-muted)',
+    },
     subtitle: {
-        color: '#6b7280',
+        color: 'var(--color-text-secondary)',
         fontSize: '14px',
         marginTop: '4px',
         marginBottom: 0,
@@ -376,10 +502,10 @@ const modalStyles = {
         background: 'none',
         border: 'none',
         fontSize: '24px',
-        color: '#9ca3af',
+        color: 'var(--color-text-muted)',
         cursor: 'pointer',
         padding: '4px 8px',
-        borderRadius: '6px',
+        borderRadius: 'var(--radius-sm)',
         transition: 'all 0.2s',
         flexShrink: 0,
     },
@@ -387,134 +513,155 @@ const modalStyles = {
         display: 'flex',
         gap: '10px',
         padding: '12px 24px',
-        borderBottom: '1px solid #e5e7eb',
+        borderBottom: '1px solid var(--color-border)',
         flexWrap: 'wrap',
-        backgroundColor: '#f9fafb',
+        backgroundColor: 'var(--color-bg-root)',
         flexShrink: 0,
     },
+    // Neutral badge: same card look everywhere (bg-card-hover + border),
+    // no per-status fill color. Keeps the header calm like the simple view.
     badge: {
         padding: '4px 14px',
         borderRadius: '20px',
         fontSize: '13px',
-        fontWeight: '600',
+        fontWeight: '500',
+        color: 'var(--color-text-secondary)',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        border: '1px solid var(--color-border)',
         display: 'inline-flex',
         alignItems: 'center',
         gap: '4px',
     },
-    badgeApproved: {
-        backgroundColor: '#d1fae5',
-        color: '#065f46',
-    },
-    badgeRejected: {
-        backgroundColor: '#fee2e2',
-        color: '#991b1b',
-    },
+    // The one exception — pending count keeps a soft accent since it's the
+    // status that actually blocks saving.
     badgePending: {
-        backgroundColor: '#fef3c7',
-        color: '#92400e',
+        color: 'var(--color-warning)',
+        borderColor: 'var(--color-warning)',
     },
-    badgeAutoApproved: {
-        backgroundColor: '#dbeafe',
-        color: '#1e40af',
+    contentRow: {
+        display: 'flex',
+        flex: 1,
+        minHeight: 0,
+        overflow: 'hidden',
     },
-    badgeExisting: {
-        backgroundColor: '#e0e7ff',
-        color: '#3730a3',
-    },
-    autoApprovedContainer: {
-        padding: '12px 24px',
-        borderBottom: '1px solid #e5e7eb',
-        backgroundColor: '#eff6ff',
+    // Sidebar widened (was 260px) with a bit more breathing room around the tags.
+    autoApprovedSidebar: {
+        width: '320px',
         flexShrink: 0,
+        borderLeft: '1px solid var(--color-border)',
+        backgroundColor: 'var(--color-bg-root)',
+        padding: '20px',
+        overflowY: 'auto',
     },
     autoApprovedHeader: {
         fontSize: '13px',
         fontWeight: '600',
-        color: '#1e40af',
-        marginBottom: '8px',
+        color: 'var(--color-text-secondary)',
+        marginBottom: '12px',
     },
     autoApprovedList: {
         display: 'flex',
         flexWrap: 'wrap',
-        gap: '6px',
+        gap: '8px',
     },
+    // Tags now match the neutral card style instead of a bright accent fill.
     autoApprovedTag: {
-        padding: '4px 12px',
-        backgroundColor: '#dbeafe',
-        color: '#1e40af',
+        padding: '5px 14px',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        color: 'var(--color-text-primary)',
         borderRadius: '16px',
         fontSize: '13px',
-        border: '1px solid #bfdbfe',
+        border: '1px solid var(--color-border)',
     },
     body: {
         padding: '20px 24px',
         overflowY: 'auto',
         flex: 1,
+        minWidth: 0,
+    },
+    simpleBody: {
+        padding: '24px',
+        overflowY: 'auto',
+        flex: 1,
+    },
+    simpleHeading: {
+        fontFamily: 'var(--font-heading)',
+        fontSize: '16px',
+        fontWeight: '700',
+        color: 'var(--color-text-primary)',
+        margin: '0 0 16px 0',
+    },
+    simpleList: {
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+    },
+    simpleListItem: {
+        fontSize: '14px',
+        color: 'var(--color-text-primary)',
+        padding: '10px 14px',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-sm)',
     },
     section: {
         marginTop: '16px',
-        borderTop: '1px solid #f3f4f6',
+        borderTop: '1px solid var(--color-border)',
         paddingTop: '16px',
     },
     sectionTitle: {
         fontSize: '13px',
         fontWeight: '600',
-        color: '#6b7280',
+        color: 'var(--color-text-muted)',
         marginBottom: '10px',
         marginTop: 0,
     },
+    // Same neutral card as simpleListItem — used for pending, approved, and
+    // rejected rows alike so the list doesn't turn into a rainbow.
     skillItem: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: '12px 16px',
         marginBottom: '8px',
-        backgroundColor: '#f9fafb',
-        borderRadius: '10px',
-        border: '1px solid #e5e7eb',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--color-border)',
         transition: 'all 0.2s',
         gap: '12px',
     },
-    skillItemApproved: {
+    skillItemNeutral: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: '10px 16px',
         marginBottom: '6px',
-        backgroundColor: '#ecfdf5',
-        borderRadius: '8px',
-        border: '1px solid #a7f3d0',
-        gap: '12px',
-    },
-    skillItemRejected: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '10px 16px',
-        marginBottom: '6px',
-        backgroundColor: '#fef2f2',
-        borderRadius: '8px',
-        border: '1px solid #fca5a5',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--color-border)',
         gap: '12px',
     },
     skillText: {
         fontSize: '15px',
         fontWeight: '500',
-        color: '#1f2937',
+        color: 'var(--color-text-primary)',
         flex: 1,
         wordBreak: 'break-word',
     },
     skillTextApproved: {
         fontSize: '14px',
         fontWeight: '500',
-        color: '#065f46',
+        color: 'var(--color-primary)',
         flex: 1,
         wordBreak: 'break-word',
     },
     skillTextRejected: {
         fontSize: '14px',
         fontWeight: '500',
-        color: '#991b1b',
+        color: 'var(--color-danger)',
         flex: 1,
         wordBreak: 'break-word',
         textDecoration: 'line-through',
@@ -524,12 +671,13 @@ const modalStyles = {
         gap: '8px',
         flexShrink: 0,
     },
+    // Quiet outlined pills instead of solid color blocks.
     approveBtn: {
         padding: '6px 16px',
-        backgroundColor: '#10b981',
-        color: '#ffffff',
-        border: 'none',
-        borderRadius: '6px',
+        backgroundColor: 'transparent',
+        color: 'var(--color-primary)',
+        border: '1px solid var(--color-primary)',
+        borderRadius: 'var(--radius-sm)',
         fontSize: '13px',
         fontWeight: '600',
         cursor: 'pointer',
@@ -538,10 +686,10 @@ const modalStyles = {
     },
     rejectBtn: {
         padding: '6px 16px',
-        backgroundColor: '#ef4444',
-        color: '#ffffff',
-        border: 'none',
-        borderRadius: '6px',
+        backgroundColor: 'transparent',
+        color: 'var(--color-danger)',
+        border: '1px solid var(--color-danger)',
+        borderRadius: 'var(--radius-sm)',
         fontSize: '13px',
         fontWeight: '600',
         cursor: 'pointer',
@@ -550,10 +698,10 @@ const modalStyles = {
     },
     undoBtn: {
         padding: '4px 12px',
-        backgroundColor: '#e5e7eb',
-        color: '#374151',
-        border: 'none',
-        borderRadius: '6px',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        color: 'var(--color-text-secondary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-sm)',
         fontSize: '12px',
         cursor: 'pointer',
         transition: 'all 0.2s',
@@ -561,12 +709,12 @@ const modalStyles = {
     },
     footer: {
         padding: '16px 24px',
-        borderTop: '2px solid #e5e7eb',
+        borderTop: '1px solid var(--color-border)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexShrink: 0,
-        backgroundColor: '#fafafa',
+        backgroundColor: 'var(--color-bg-card-hover)',
         flexWrap: 'wrap',
         gap: '12px',
     },
@@ -578,9 +726,9 @@ const modalStyles = {
     skipBtn: {
         padding: '10px 20px',
         backgroundColor: 'transparent',
-        color: '#6b7280',
-        border: '1px solid #d1d5db',
-        borderRadius: '8px',
+        color: 'var(--color-text-secondary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
         fontSize: '14px',
         fontWeight: '500',
         cursor: 'pointer',
@@ -589,9 +737,9 @@ const modalStyles = {
     cancelBtn: {
         padding: '10px 24px',
         backgroundColor: 'transparent',
-        color: '#6b7280',
-        border: '1px solid #d1d5db',
-        borderRadius: '8px',
+        color: 'var(--color-text-secondary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
         fontSize: '14px',
         fontWeight: '600',
         cursor: 'pointer',
@@ -599,10 +747,10 @@ const modalStyles = {
     },
     submitBtn: {
         padding: '10px 28px',
-        backgroundColor: '#3b82f6',
+        backgroundColor: 'var(--color-primary)',
         color: '#ffffff',
         border: 'none',
-        borderRadius: '8px',
+        borderRadius: 'var(--radius-md)',
         fontSize: '14px',
         fontWeight: '600',
         cursor: 'pointer',
@@ -610,11 +758,11 @@ const modalStyles = {
     },
     footerWarning: {
         padding: '8px 24px 16px 24px',
-        color: '#d97706',
+        color: 'var(--color-warning)',
         fontSize: '13px',
         fontWeight: '500',
-        backgroundColor: '#fffbeb',
-        borderTop: '1px solid #fde68a',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        borderTop: '1px solid var(--color-border)',
         flexShrink: 0,
     },
     empty: {
@@ -622,16 +770,16 @@ const modalStyles = {
         padding: '40px 20px',
     },
     emptyText: {
-        color: '#6b7280',
+        color: 'var(--color-text-secondary)',
         fontSize: '16px',
         marginBottom: '16px',
     },
     doneBtn: {
         padding: '10px 32px',
-        backgroundColor: '#3b82f6',
+        backgroundColor: 'var(--color-primary)',
         color: '#ffffff',
         border: 'none',
-        borderRadius: '8px',
+        borderRadius: 'var(--radius-md)',
         fontSize: '14px',
         fontWeight: '600',
         cursor: 'pointer',
@@ -640,13 +788,14 @@ const modalStyles = {
         textAlign: 'center',
         padding: '20px',
         marginTop: '12px',
-        backgroundColor: '#d1fae5',
-        borderRadius: '8px',
+        backgroundColor: 'var(--color-bg-card-hover)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--color-primary)',
     },
     allDoneText: {
         fontSize: '16px',
         fontWeight: '600',
-        color: '#065f46',
+        color: 'var(--color-primary)',
     },
 };
 
