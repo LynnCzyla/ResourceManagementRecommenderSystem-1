@@ -11,7 +11,6 @@ export default function SkillFeedbackModal({
     employeeId, 
     needsReview = [],      // ← Only pending skills
     autoApproved = [],     // ← Already approved skills
-    previouslyRejected = [],
     documentType = 'Resume',
     documentName = '',     // ← Name of the uploaded file, shown next to the title
     onFeedbackSubmitted,
@@ -147,7 +146,6 @@ export default function SkillFeedbackModal({
     // ============ Normalize all skill arrays ============
     const rawNormalizedAutoApproved = normalizeSkills(autoApproved);
     const rawNormalizedNeedsReview = normalizeSkills(needsReview);
-    const rawNormalizedPreviouslyRejected = normalizeSkills(previouslyRejected);
 
     // De-duplicate: some skills come back in BOTH the auto-approved list and the
     // needs-review list (same name, different casing/whitespace). If a skill was
@@ -159,11 +157,6 @@ export default function SkillFeedbackModal({
     const normalizedNeedsReview = rawNormalizedNeedsReview.filter(
         s => !autoApprovedKeySet.has(s.toLowerCase().trim())
     );
-    const normalizedPreviouslyRejected = rawNormalizedPreviouslyRejected.filter(
-        s =>
-            !autoApprovedKeySet.has(s.toLowerCase().trim()) &&
-            !normalizedNeedsReview.some(n => n.toLowerCase().trim() === s.toLowerCase().trim())
-    );
 
     // Get pending skills (not yet approved or rejected)
     const pendingSkills = normalizedNeedsReview.filter(s => 
@@ -173,9 +166,9 @@ export default function SkillFeedbackModal({
 
     // Nothing needed manual review — every extracted skill matched the knowledge base
     // and was auto-approved. No noise to clean up, so skip the full review UI.
-    const nothingToReview = normalizedNeedsReview.length === 0 && normalizedAutoApproved.length > 0 && normalizedPreviouslyRejected.length === 0;
+    const nothingToReview = normalizedNeedsReview.length === 0 && normalizedAutoApproved.length > 0;
     // Truly nothing was extracted at all (no auto-approved, no pending)
-    const nothingExtracted = normalizedNeedsReview.length === 0 && normalizedAutoApproved.length === 0 && normalizedPreviouslyRejected.length === 0;
+    const nothingExtracted = normalizedNeedsReview.length === 0 && normalizedAutoApproved.length === 0;
 
     if (!isOpen) return null;
 
@@ -221,11 +214,6 @@ export default function SkillFeedbackModal({
                                 Auto-Approved: <strong>{normalizedAutoApproved.length}</strong>
                             </span>
                         )}
-                        {normalizedPreviouslyRejected.length > 0 && (
-                            <span style={modalStyles.badge}>
-                                Previously Rejected: <strong>{normalizedPreviouslyRejected.length}</strong>
-                            </span>
-                        )}
                         <span style={modalStyles.badge}>
                             Approved: <strong>{approved.length}</strong>
                         </span>
@@ -258,20 +246,6 @@ export default function SkillFeedbackModal({
                                 </li>
                             ))}
                         </ul>
-                        {normalizedPreviouslyRejected.length > 0 && (
-                            <>
-                                <h3 style={{ ...modalStyles.simpleHeading, marginTop: '20px' }}>
-                                    Previously Rejected Skills: {normalizedPreviouslyRejected.length}
-                                </h3>
-                                <ul style={modalStyles.simpleList}>
-                                    {normalizedPreviouslyRejected.map((skill, index) => (
-                                        <li key={`previously-rejected-${index}`} style={modalStyles.simpleListItem}>
-                                            {skill}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </>
-                        )}
                     </div>
                 ) : (
                     <div style={modalStyles.contentRow}>
@@ -342,17 +316,6 @@ export default function SkillFeedbackModal({
                                                     >
                                                         Undo
                                                     </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    {normalizedPreviouslyRejected.length > 0 && (
-                                        <div style={modalStyles.section}>
-                                            <h4 style={modalStyles.sectionTitle}>Previously Rejected Skills</h4>
-                                            {normalizedPreviouslyRejected.map((skill, index) => (
-                                                <div key={`previously-rejected-${index}`} style={modalStyles.skillItemNeutral}>
-                                                    <span style={modalStyles.skillTextRejected}>{skill}</span>
                                                 </div>
                                             ))}
                                         </div>
