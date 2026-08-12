@@ -1,291 +1,262 @@
-import React, { useState, useEffect } from 'react';
+// main/src/frontend/ResourceManager/RMRequestsTab.jsx
+import React, { useState, useEffect, useMemo } from 'react';
 import Swal from 'sweetalert2';
-import { getRequests, getEmployees, getProjects } from '../mockState';
 import RMAvatar from './RMAvatar';
+import {
+  fetchRequirements,
+  fetchEmployees,
+  fetchAssignments,
+  fetchRecommendations,
+  createAssignment,
+  updateRequirementStatus
+} from './Rmapi';
 
 export default function RMRequestsTab() {
   const [requests, setRequests] = useState([]);
   const [employees, setEmployees] = useState([]);
-  const [projects, setProjects] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [activeRequestDetails, setActiveRequestDetails] = useState(null);
+  const [recommendations, setRecommendations] = useState({ recommended: [], all: [] });
   const [recommendationTab, setRecommendationTab] = useState('Recommended');
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  // ✅ Start with all projects expanded - use a Set
+  const [expandedProjects, setExpandedProjects] = useState(new Set());
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [showUnassignedOnly, setShowUnassignedOnly] = useState(true);
 
   useEffect(() => {
-    setRequests(getRequests());
-    setEmployees(getEmployees());
-    setProjects(getProjects());
+    fetchData();
   }, []);
 
-  const showSuccessAlert = (message, title = 'Success!') => {
-    Swal.fire({
-      title,
-      text: message,
-      icon: 'success',
-      confirmButtonColor: 'var(--color-primary)',
-      confirmButtonText: 'OK',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-      iconColor: 'var(--color-success)',
-      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
-    });
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [requestsData, employeesData, assignmentsData] = await Promise.all([
+        fetchRequirements(),
+        fetchEmployees(),
+        fetchAssignments()
+      ]);
+
+      setRequests(requestsData.data || requestsData || []);
+      setEmployees(employeesData.data || employeesData || []);
+      setAssignments(assignmentsData.data || assignmentsData || []);
+    } catch (error) {
+      console.error('❌ Error fetching data:', error);
+      Swal.fire({
+        title: 'Error!',
+        text: error.message || 'Failed to load data. Please try again.',
+        icon: 'error',
+        confirmButtonColor: 'var(--color-danger)',
+        confirmButtonText: 'OK',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const showErrorAlert = (message, title = 'Error!') => {
-    Swal.fire({
-      title,
-      text: message,
-      icon: 'error',
-      confirmButtonColor: 'var(--color-danger)',
-      confirmButtonText: 'OK',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-      iconColor: 'var(--color-danger)',
-      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
-    });
+  const getAssignmentCount = (requestId) => {
+    return assignments.filter(a => a.requirement_id === requestId).length;
   };
 
-  const handleReject = (reqId) => {
-    const updated = requests.map(req => req.id === reqId ? { ...req, status: 'Rejected' } : req);
-    setRequests(updated);
-    showSuccessAlert('Request rejected.');
+  const getAssignedEmployees = (requestId) => {
+    return assignments
+      .filter(a => a.requirement_id === requestId)
+      .map(a => employees.find(e => e.id === a.profile_id) || { name: 'Unknown' });
   };
 
-  const handleAllocateCandidate = (request, candidate) => {
-    // 1. Update project mock state only
-    const targetProjectName = request.projectName;
-    let projectFound = false;
+  const groupRequestsByProject = (requestsList) => {
+    const groups = new Map();
 
-    const updatedProjects = projects.map(proj => {
-      if (proj.name.toLowerCase() === targetProjectName.toLowerCase()) {
-        projectFound = true;
-        const currentAssigned = proj.assignedEmployees || [];
-        if (currentAssigned.some(a => a.employeeId === candidate.id)) {
-          return proj; // already assigned
-        }
-        return {
-          ...proj,
-          assignedEmployees: [
-            ...currentAssigned,
-            {
-              employeeId: candidate.id,
-              employeeName: candidate.name,
-              role: candidate.role,
-              hoursAllocated: 8,
-              avatar: candidate.avatar
-            }
-          ]
-        };
+    requestsList.forEach(req => {
+      const key = req.project_id || 'unknown';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          projectId: key,
+          projectName: req.projectName || 'Unnamed Project',
+          requirements: [],
+          totalNeeded: 0,
+          totalFilled: 0,
+          isFullyAssigned: true
+        });
       }
-      return proj;
+
+      const group = groups.get(key);
+      const assignedCount = getAssignmentCount(req.id);
+      const reqWithCount = { ...req, assignedCount };
+      group.requirements.push(reqWithCount);
+      group.totalNeeded += req.quantity || 1;
+      group.totalFilled += assignedCount;
+      group.isFullyAssigned = group.totalFilled >= group.totalNeeded;
     });
 
-    if (!projectFound) {
-      // Create new project if it wasn't there
-      const newProj = {
-        id: Date.now(),
-        name: targetProjectName,
-        description: `Deployment for resource request: ${targetProjectName}`,
-        startDate: request.startDate || new Date().toISOString().split('T')[0],
-        endDate: request.endDate || new Date().toISOString().split('T')[0],
-        status: 'Active',
-        requiredSkills: request.skills,
-        manpowerNeeded: request.quantity,
-        assignedEmployees: [
-          {
-            employeeId: candidate.id,
-            employeeName: candidate.name,
-            role: candidate.role,
-            hoursAllocated: 8,
-            avatar: candidate.avatar
-          }
-        ]
-      };
-      updatedProjects.push(newProj);
+    return Array.from(groups.values());
+  };
+
+  const filteredRequests = useMemo(() => {
+    return requests.filter(req => {
+      const matchesSearch =
+        req.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.role_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.skills?.some(skill => skill?.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
+
+      const assignedCount = getAssignmentCount(req.id);
+      const hasAssignments = assignedCount > 0;
+      const matchesUnassigned = showUnassignedOnly ? !hasAssignments : true;
+
+      return matchesSearch && matchesStatus && matchesUnassigned;
+    });
+  }, [requests, searchQuery, statusFilter, showUnassignedOnly]);
+
+  const groupedProjects = useMemo(
+    () => groupRequestsByProject(filteredRequests),
+    [filteredRequests]
+  );
+
+  // ✅ Auto-expand ALL projects when data loads
+  useEffect(() => {
+    if (groupedProjects.length > 0) {
+      const newExpanded = new Set();
+      groupedProjects.forEach(project => {
+        newExpanded.add(project.projectId);
+      });
+      setExpandedProjects(newExpanded);
+      console.log('✅ Projects expanded:', newExpanded.size);
     }
+  }, [groupedProjects]);
 
-    setProjects(updatedProjects);
+  const handleAllocateCandidate = async (request, candidate) => {
+    try {
+      await createAssignment({
+        project_id: request.project_id,
+        profile_id: candidate.id,
+        requirement_id: request.id,
+        assigned_role: candidate.role,
+        start_date: request.start_date,
+        end_date: request.end_date,
+        status: 'Assigned'
+      });
 
-    // 2. Update Request status to Approved locally
-    const updatedRequests = requests.map(req =>
-      req.id === request.id ? { ...req, status: 'Approved' } : req
+      await fetchData();
+      setActiveRequestDetails(null);
+
+      Swal.fire({
+        title: 'Success!',
+        text: `Allocated ${candidate.name} to ${request.projectName}`,
+        icon: 'success',
+        confirmButtonColor: 'var(--color-primary)',
+        confirmButtonText: 'OK',
+      });
+    } catch (error) {
+      console.error('Error allocating:', error);
+      Swal.fire({
+        title: 'Error!',
+        text: error.message || 'Failed to allocate candidate. Please try again.',
+        icon: 'error',
+        confirmButtonColor: 'var(--color-danger)',
+        confirmButtonText: 'OK',
+      });
+    }
+  };
+
+  const handleReject = async (reqId) => {
+    const result = await Swal.fire({
+      title: 'Reject Request?',
+      text: 'Are you sure you want to reject this resource request?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: 'var(--color-danger)',
+      cancelButtonColor: 'var(--color-text-secondary)',
+      confirmButtonText: 'Yes, Reject',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (result.isConfirmed) {
+      try {
+        await updateRequirementStatus(reqId, 'Rejected');
+        await fetchData();
+        Swal.fire({
+          title: 'Rejected!',
+          text: 'Request has been rejected.',
+          icon: 'success',
+          confirmButtonColor: 'var(--color-primary)',
+          confirmButtonText: 'OK',
+        });
+      } catch (error) {
+        console.error('Error rejecting:', error);
+        Swal.fire({
+          title: 'Error!',
+          text: error.message || 'Failed to reject request.',
+          icon: 'error',
+          confirmButtonColor: 'var(--color-danger)',
+          confirmButtonText: 'OK',
+        });
+      }
+    }
+  };
+
+  const fetchRecommendationsData = async (requirementId) => {
+    try {
+      const data = await fetchRecommendations(requirementId);
+      setRecommendations(data.data || data || { recommended: [], all: [] });
+    } catch (error) {
+      console.error('Error fetching recommendations:', error);
+      setRecommendations({ recommended: [], all: [] });
+    }
+  };
+
+  const handleViewRecommendations = async (req) => {
+    console.log('🔍 Viewing recommendations for:', req.role_title);
+    setActiveRequestDetails(req);
+    setRecommendationTab('Recommended');
+    setSelectedCandidateId(null);
+    await fetchRecommendationsData(req.id);
+  };
+
+  const toggleProjectExpansion = (projectId) => {
+    setExpandedProjects(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(projectId)) {
+        newSet.delete(projectId);
+      } else {
+        newSet.add(projectId);
+      }
+      console.log('📂 Toggled project:', projectId, 'Expanded:', newSet.has(projectId));
+      return newSet;
+    });
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'TBD';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return 'TBD';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>Resource Allocation Requests</h1>
+          <p style={styles.subtitle}>Loading requests...</p>
+        </div>
+        <div style={styles.loadingContainer}>
+          <div style={styles.loadingSpinner}></div>
+        </div>
+      </div>
     );
-    setRequests(updatedRequests);
+  }
 
-    setActiveRequestDetails(null);
-    showSuccessAlert(`Allocated ${candidate.name} to ${targetProjectName}.`);
-  };
-
-  const hardcodedRecommendations = {
-    1: {
-      recommended: [
-        {
-          employee: {
-            id: 'EMP-1014',
-            name: 'Javier Santos',
-            role: 'Senior Cad Drafter & Lighting Designer',
-            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 100,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
-        },
-        {
-          employee: {
-            id: 'EMP-1023',
-            name: 'Grace Villanueva',
-            role: 'Technical Associate',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 60,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
-        },
-        {
-          employee: {
-            id: 'EMP-1025',
-            name: 'Jack Forester',
-            role: 'Senior Cad Drafter & Lighting Designer',
-            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 50,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
-        }
-      ],
-      all: [
-        {
-          employee: {
-            id: 'EMP-1014',
-            name: 'Javier Santos',
-            role: 'Senior Cad Drafter & Lighting Designer',
-            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 100,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
-        },
-        {
-          employee: {
-            id: 'EMP-1023',
-            name: 'Grace Villanueva',
-            role: 'Technical Associate',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 60,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
-        },
-        {
-          employee: {
-            id: 'EMP-1025',
-            name: 'Jack Forester',
-            role: 'Senior Cad Drafter & Lighting Designer',
-            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 50,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Dialux Lighting Calculation']
-        },
-        {
-          employee: {
-            id: 'EMP-1019',
-            name: 'Clarisse Valenzuela',
-            role: 'Senior Sales Engineer',
-            avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 40,
-          matchedSkills: ['Sales', 'Application Engineering']
-        }
-      ]
-    },
-    2: {
-      recommended: [
-        {
-          employee: {
-            id: 'EMP-1015',
-            name: 'Vincent Miguel P. Soriano',
-            role: 'Inside Sales / UPS Technical Engineer',
-            avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 95,
-          matchedSkills: ['UPS installation and Commissioning', 'Maintenance & Troubleshooting']
-        },
-        {
-          employee: {
-            id: 'EMP-1020',
-            name: 'David Lim',
-            role: 'Sales Engineer',
-            avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 70,
-          matchedSkills: ['Sales', 'Client relationship management']
-        },
-        {
-          employee: {
-            id: 'EMP-1021',
-            name: 'Elena Guerrero',
-            role: 'Inside Sales Engineer',
-            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 55,
-          matchedSkills: ['Sales', 'Technical Documentation']
-        }
-      ],
-      all: [
-        {
-          employee: {
-            id: 'EMP-1015',
-            name: 'Vincent Miguel P. Soriano',
-            role: 'Inside Sales / UPS Technical Engineer',
-            avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 95,
-          matchedSkills: ['UPS installation and Commissioning', 'Maintenance & Troubleshooting']
-        },
-        {
-          employee: {
-            id: 'EMP-1020',
-            name: 'David Lim',
-            role: 'Sales Engineer',
-            avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 70,
-          matchedSkills: ['Sales', 'Client relationship management']
-        },
-        {
-          employee: {
-            id: 'EMP-1021',
-            name: 'Elena Guerrero',
-            role: 'Inside Sales Engineer',
-            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 55,
-          matchedSkills: ['Sales', 'Technical Documentation']
-        },
-        {
-          employee: {
-            id: 'EMP-1022',
-            name: 'Francis Tolentino',
-            role: 'Design Engineer',
-            avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=100'
-          },
-          score: 45,
-          matchedSkills: ['AutoCAD 2D & 3D', 'Lighting Calculation']
-        }
-      ]
-    }
-  };
-
-  const recommendationResults = activeRequestDetails ? hardcodedRecommendations[activeRequestDetails.id] || hardcodedRecommendations[1] : { recommended: [], all: [] };
   const displayedRecommendations = recommendationTab === 'View all'
-    ? recommendationResults.all
-    : recommendationResults.recommended;
-
-  const filteredRequests = requests.filter(req => {
-    const matchesSearch = 
-      req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      req.skills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+    ? recommendations.all
+    : recommendations.recommended;
 
   return (
     <div style={styles.container}>
@@ -295,8 +266,8 @@ export default function RMRequestsTab() {
       </div>
 
       <div style={styles.mainLayout}>
-        {/* Requests List */}
-        <div className="glass-card" style={styles.panel}>
+        {/* Left Panel - Requests List */}
+        <div style={styles.panel}>
           <div style={styles.panelHeader}>
             <h2 style={styles.panelTitle}>Pending Requests</h2>
             <div style={styles.controls}>
@@ -313,9 +284,9 @@ export default function RMRequestsTab() {
                   style={styles.searchInput}
                 />
               </div>
-              <select 
-                value={statusFilter} 
-                onChange={(e) => setStatusFilter(e.target.value)} 
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
                 style={styles.filterSelect}
               >
                 <option value="All">All Status</option>
@@ -323,175 +294,264 @@ export default function RMRequestsTab() {
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
               </select>
+              <button
+                onClick={() => setShowUnassignedOnly(!showUnassignedOnly)}
+                style={{
+                  ...styles.unassignedBtn,
+                  backgroundColor: showUnassignedOnly ? 'var(--color-primary)' : 'transparent',
+                  color: showUnassignedOnly ? '#ffffff' : 'var(--color-text-secondary)',
+                }}
+              >
+                {showUnassignedOnly ? 'Unassigned Only' : 'Show All'}
+              </button>
             </div>
           </div>
-          <div style={styles.reqList}>
-            {filteredRequests.length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center', padding: '24px 0' }}>
-                No active allocation requests found.
+
+          <div style={styles.requestList}>
+            {groupedProjects.length === 0 ? (
+              <div style={styles.emptyState}>
+                {showUnassignedOnly ? 'No unassigned requests found.' : 'No requests found.'}
               </div>
             ) : (
-              filteredRequests.map(req => (
-                <div
-                  key={req.id}
-                  style={{
-                    ...styles.reqItem,
-                    borderColor: activeRequestDetails?.id === req.id ? 'var(--color-primary)' : 'var(--color-border)',
-                    boxShadow: activeRequestDetails?.id === req.id ? '0 0 10px rgba(59, 130, 246, 0.15)' : 'none'
-                  }}
-                >
-                  <div style={styles.reqHeader}>
-                    <h3 style={styles.projName}>{req.projectName}</h3>
-                    <span style={{
-                      ...styles.statusBadge,
-                      backgroundColor: req.status === 'Approved' ? 'var(--color-primary-light)' : req.status === 'Pending' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                      color: req.status === 'Approved' ? 'var(--color-success)' : req.status === 'Pending' ? 'var(--color-warning)' : 'var(--color-danger)'
-                    }}>
-                      {req.status}
-                    </span>
-                  </div>
+              groupedProjects.map(project => {
+                const isExpanded = expandedProjects.has(project.projectId);
 
-                  <div style={styles.reqMeta}>
-                    <span>Quantity Needed: <strong>{req.quantity}</strong></span>
-                    <span>Timeline: <strong>{req.startDate} to {req.endDate}</strong></span>
-                  </div>
-
-                  <div style={styles.skillsRow}>
-                    {req.skills.map((sk, i) => (
-                      <span key={i} style={styles.skillPill}>{sk}</span>
-                    ))}
-                  </div>
-
-                  <div style={styles.actions}>
-                    <button
-                      onClick={() => {
-                        setActiveRequestDetails(req);
-                        setRecommendationTab('Recommended');
-                        setSelectedCandidateId(null);
-                      }}
-                      style={styles.viewRecsBtn}
-                      disabled={req.status === 'Approved' || req.status === 'Rejected'}
+                return (
+                  <div key={project.projectId} style={styles.projectCard}>
+                    {/* Project Header */}
+                    <div
+                      style={styles.projectHeader}
+                      onClick={() => toggleProjectExpansion(project.projectId)}
                     >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center', width: '100%' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="11" cy="11" r="8"></circle>
-                          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                        </svg>
-                        View Recommendations
-                      </span>
-                    </button>
-                    {req.status === 'Pending' && (
-                      <button
-                        onClick={() => handleReject(req.id)}
-                        style={styles.rejectBtn}
-                      >
-                        Reject
-                      </button>
+                      <div style={styles.projectHeaderLeft}>
+                        <span style={styles.expandIcon}>
+                          {isExpanded ? '▾' : '▸'}
+                        </span>
+                        <div style={styles.projectInfo}>
+                          <h3 style={styles.projectName}>{project.projectName}</h3>
+                          <div style={styles.projectSubtitle}>
+                            <span>{project.requirements.length} role{project.requirements.length > 1 ? 's' : ''}</span>
+                            <span style={styles.dot}>•</span>
+                            <span>{project.totalFilled}/{project.totalNeeded} filled</span>
+                            <span style={styles.dot}>•</span>
+                            <span style={{
+                              color: project.isFullyAssigned ? '#22c55e' : '#f59e0b',
+                              fontWeight: '600',
+                            }}>
+                              {project.isFullyAssigned ? '✅ Fully Staffed' : '⏳ Needs Staff'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={styles.projectHeaderRight}>
+                        <span style={{
+                          ...styles.projectStatusBadge,
+                          backgroundColor: project.isFullyAssigned ? 'rgba(34, 197, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                          color: project.isFullyAssigned ? '#22c55e' : '#f59e0b',
+                        }}>
+                          {project.isFullyAssigned ? '✅ Staffed' : '⏳ Needs Staff'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Requirements - ALWAYS SHOW when expanded */}
+                    {isExpanded && (
+                      <div style={styles.requirementsContainer}>
+                        {project.requirements.map(req => {
+                          const assignedCount = req.assignedCount;
+                          const assignedEmployees = getAssignedEmployees(req.id);
+                          const isFullyAssigned = assignedCount >= (req.quantity || 1);
+                          const hasTimeline = req.start_date || req.end_date;
+
+                          return (
+                            <div key={req.id} style={styles.requirementCard}>
+                              <div style={styles.requirementHeader}>
+                                <div style={styles.requirementTitle}>
+                                  <span style={styles.requirementRole}>
+                                    {req.role_title || 'Role Not Specified'}
+                                  </span>
+                                  <span style={styles.requirementFillStatus}>
+                                    {assignedCount}/{req.quantity || 1} filled
+                                  </span>
+                                </div>
+                                <div style={styles.requirementActions}>
+                                  {req.status === 'Pending' && (
+                                    <span style={styles.pendingBadge}>Pending</span>
+                                  )}
+                                  {isFullyAssigned && (
+                                    <span style={styles.staffedBadge}>✅ Staffed</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Timeline */}
+                              {hasTimeline && (
+                                <div style={styles.requirementTimeline}>
+                                  <span style={styles.timelineLabel}>📅</span>
+                                  <span>
+                                    {formatDate(req.start_date)} → {formatDate(req.end_date)}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Assigned Employees */}
+                              {assignedCount > 0 && (
+                                <div style={styles.assignedContainer}>
+                                  <span style={styles.assignedLabel}>Assigned:</span>
+                                  <div style={styles.assignedList}>
+                                    {assignedEmployees.map((emp, i) => (
+                                      <span key={i} style={styles.assignedPill}>
+                                        {emp.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Skills */}
+                              {req.skills && req.skills.length > 0 && (
+                                <div style={styles.skillsContainer}>
+                                  {req.skills.map((skill, i) => (
+                                    <span key={i} style={styles.skillPill}>{skill}</span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* ✅ ACTIONS - Always visible */}
+                              <div style={styles.requirementFooter}>
+                                <button
+                                  onClick={() => handleViewRecommendations(req)}
+                                  style={{
+                                    ...styles.viewBtn,
+                                    opacity: (req.status === 'Rejected' || isFullyAssigned) ? 0.5 : 1,
+                                    cursor: (req.status === 'Rejected' || isFullyAssigned) ? 'not-allowed' : 'pointer'
+                                  }}
+                                  disabled={req.status === 'Rejected' || isFullyAssigned}
+                                >
+                                  {isFullyAssigned ? '✅ Staffed' : 'View Candidates'}
+                                </button>
+                                {req.status === 'Pending' && !isFullyAssigned && (
+                                  <button
+                                    onClick={() => handleReject(req.id)}
+                                    style={styles.rejectBtn}
+                                  >
+                                    Reject
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* Recommender Panel */}
-        <div className="glass-card" style={styles.panel}>
-          <h2 style={styles.panelTitle}>Resource Recommendations</h2>
+        {/* Right Panel - Recommendations */}
+        <div style={styles.panel}>
+          <h2 style={styles.panelTitle}>Recommendations</h2>
 
           {!activeRequestDetails ? (
             <div style={styles.emptyPanelState}>
-              Select a pending allocation request to see system-ranked candidates.
+              <div style={styles.emptyIcon}>👤</div>
+              <p>Select a role to see candidates</p>
+              <span style={styles.emptySubtext}>Click "View Candidates" on any request</span>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={styles.tabRow}>
+            <div>
+              <div style={styles.requestInfoBar}>
+                <div>
+                  <strong style={styles.infoProject}>{activeRequestDetails.projectName}</strong>
+                  <span style={styles.infoRole}>{activeRequestDetails.role_title || 'Role'}</span>
+                </div>
+                <div style={styles.infoStats}>
+                  <span>{activeRequestDetails.quantity || 1} position{activeRequestDetails.quantity > 1 ? 's' : ''}</span>
+                </div>
+              </div>
+
+              <div style={styles.tabs}>
                 <button
                   onClick={() => setRecommendationTab('Recommended')}
                   style={{
-                    ...styles.subTabBtn,
-                    ...(recommendationTab === 'Recommended' ? styles.subTabBtnActive : {})
+                    ...styles.tabBtn,
+                    ...(recommendationTab === 'Recommended' ? styles.tabActive : {})
                   }}
                 >
-                  Recommended
+                  Top Matches
                 </button>
                 <button
                   onClick={() => setRecommendationTab('View all')}
                   style={{
-                    ...styles.subTabBtn,
-                    ...(recommendationTab === 'View all' ? styles.subTabBtnActive : {})
+                    ...styles.tabBtn,
+                    ...(recommendationTab === 'View all' ? styles.tabActive : {})
                   }}
                 >
-                  View all
+                  All Candidates
                 </button>
               </div>
 
-              <div style={styles.recommendationsList}>
+              <div style={styles.recommendationList}>
                 {displayedRecommendations.length === 0 ? (
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', padding: '20px 0', textAlign: 'center' }}>
-                    No recommended candidates available for this request.
+                  <div style={styles.emptyRecommendation}>
+                    <p>No candidates found</p>
+                    <span style={styles.emptySubtext}>Try adjusting the search criteria</span>
                   </div>
                 ) : (
-                  displayedRecommendations.map((rec, idx) => {
-                    const workloadLabel = idx % 3 === 0 ? 'Available' : idx % 3 === 1 ? 'Limited availability' : 'Fully loaded';
-                    const selected = selectedCandidateId === rec.employee.id;
+                  displayedRecommendations.map((rec) => {
+                    const isAlreadyAssigned = assignments.some(
+                      a => a.requirement_id === activeRequestDetails.id && a.profile_id === rec.employee.id
+                    );
+
                     return (
-                    <div key={rec.employee.id} style={styles.recItemCard}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCandidateId(rec.employee.id)}
-                          style={{
-                            ...styles.checkCircle,
-                            ...(selected ? styles.checkCircleSelected : {})
-                          }}
-                          aria-label={`Select ${rec.employee.name}`}
-                        >
-                          {selected ? '✓' : ''}
-                        </button>
-
-                        <div style={styles.recCardBody}>
-                          <div style={styles.recHeaderRow}>
-                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                              <RMAvatar name={rec.employee.name} src={rec.employee.avatar} size={36} />
-                              <div>
-                                <div style={styles.recName}>{rec.employee.name}</div>
-                                <div style={styles.recRole}>{rec.employee.role}</div>
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                              <span style={styles.workloadBadge}>{workloadLabel}</span>
-                              <div style={{
-                                ...styles.matchScore,
-                                color: rec.score > 75 ? 'var(--color-success)' : rec.score > 40 ? 'var(--color-warning)' : 'var(--color-danger)'
-                              }}>
-                                {rec.score}% Match
-                              </div>
-                            </div>
+                      <div key={rec.employee.id} style={styles.recCard}>
+                        <div style={styles.recHeader}>
+                          <RMAvatar name={rec.employee.name} src={rec.employee.avatar} size={40} />
+                          <div style={styles.recInfo}>
+                            <div style={styles.recName}>{rec.employee.name}</div>
+                            <div style={styles.recRole}>{rec.employee.role || 'Employee'}</div>
                           </div>
-
-                          <div style={{ marginTop: '8px' }}>
-                            <span style={styles.skillsHeading}>Matching Extracted Skills:</span>
-                            <div style={styles.miniSkillsList}>
-                              {rec.matchedSkills.length === 0 ? (
-                                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>None matched</span>
-                              ) : (
-                                rec.matchedSkills.map((ms, i) => (
-                                  <span key={i} style={styles.matchingSkillPill}>✓ {ms}</span>
-                                ))
-                              )}
-                            </div>
+                          <div style={styles.recScore}>
+                            <span style={{
+                              ...styles.scoreValue,
+                              color: rec.score > 75 ? '#22c55e' : rec.score > 40 ? '#f59e0b' : '#ef4444'
+                            }}>
+                              {rec.score}%
+                            </span>
+                            <span style={styles.scoreLabel}>match</span>
                           </div>
-
-                          <button
-                            onClick={() => handleAllocateCandidate(activeRequestDetails, rec.employee)}
-                            style={styles.allocateBtn}
-                          >
-                            Approve & Allocate Resource
-                          </button>
                         </div>
+
+                        {rec.matchedSkills && rec.matchedSkills.length > 0 && (
+                          <div style={styles.recSkills}>
+                            {rec.matchedSkills.slice(0, 3).map((skill, i) => (
+                              <span key={i} style={styles.matchingSkill}>✓ {skill}</span>
+                            ))}
+                            {rec.matchedSkills.length > 3 && (
+                              <span style={styles.moreSkills}>+{rec.matchedSkills.length - 3} more</span>
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => handleAllocateCandidate(activeRequestDetails, rec.employee)}
+                          style={{
+                            ...styles.allocateBtn,
+                            opacity: isAlreadyAssigned ? 0.5 : 1,
+                            cursor: isAlreadyAssigned ? 'not-allowed' : 'pointer',
+                            backgroundColor: isAlreadyAssigned ? 'var(--color-text-muted)' : 'var(--color-primary)',
+                          }}
+                          disabled={isAlreadyAssigned}
+                        >
+                          {isAlreadyAssigned ? '✓ Already Assigned' : 'Allocate Resource'}
+                        </button>
                       </div>
                     );
-                  }))}
+                  })
+                )}
               </div>
             </div>
           )}
@@ -506,7 +566,9 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '24px',
-    textAlign: 'left',
+    padding: '20px',
+    maxWidth: '1400px',
+    margin: '0 auto',
   },
   header: {
     marginBottom: '8px',
@@ -516,6 +578,7 @@ const styles = {
     fontWeight: '800',
     letterSpacing: '-0.75px',
     marginBottom: '4px',
+    color: 'var(--color-text-primary)',
   },
   subtitle: {
     fontSize: '15px',
@@ -527,28 +590,32 @@ const styles = {
     gap: '24px',
   },
   panel: {
+    background: 'var(--color-bg-card)',
+    borderRadius: '12px',
     padding: '24px',
-  },
-  panelTitle: {
-    fontSize: '18px',
-    fontWeight: '700',
-    marginBottom: '16px',
-    borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '10px',
-    margin: 0,
+    border: '1px solid var(--color-border)',
   },
   panelHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '10px',
     marginBottom: '16px',
     borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '10px',
+    paddingBottom: '12px',
+  },
+  panelTitle: {
+    fontSize: '18px',
+    fontWeight: '700',
+    margin: 0,
+    color: 'var(--color-text-primary)',
   },
   controls: {
     display: 'flex',
     gap: '10px',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   searchWrapper: {
     position: 'relative',
@@ -561,279 +628,431 @@ const styles = {
     color: 'var(--color-text-muted)',
   },
   searchInput: {
-    paddingLeft: '32px',
     padding: '6px 10px 6px 32px',
-    borderRadius: 'var(--radius-md)',
+    borderRadius: '6px',
     border: '1px solid var(--color-border)',
     background: 'var(--color-bg-root)',
     color: 'var(--color-text-primary)',
     fontSize: '12px',
     outline: 'none',
-    minWidth: '160px',
+    minWidth: '180px',
   },
   filterSelect: {
     padding: '6px 10px',
-    borderRadius: 'var(--radius-md)',
+    borderRadius: '6px',
     border: '1px solid var(--color-border)',
     background: 'var(--color-bg-root)',
     color: 'var(--color-text-primary)',
     fontSize: '12px',
     outline: 'none',
   },
-  reqList: {
+  unassignedBtn: {
+    padding: '6px 12px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    whiteSpace: 'nowrap',
+  },
+  requestList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
-    marginTop: '16px',
+    gap: '12px',
+    maxHeight: '600px',
+    overflowY: 'auto',
+    paddingRight: '4px',
   },
-  reqItem: {
-    padding: '16px',
+  projectCard: {
     borderRadius: '8px',
     border: '1px solid var(--color-border)',
-    background: 'rgba(255, 255, 255, 0.01)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
+    background: 'var(--color-bg-card)',
+    overflow: 'hidden',
   },
-  reqHeader: {
+  projectHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    padding: '14px 16px',
+    cursor: 'pointer',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    borderBottom: '1px solid var(--color-border)',
+    transition: 'all 0.2s ease',
   },
-  projName: {
+  projectHeaderLeft: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+    flex: 1,
+    minWidth: 0,
+  },
+  projectInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  expandIcon: {
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
+    flexShrink: 0,
+    marginTop: '2px',
+  },
+  projectName: {
     fontSize: '15px',
     fontWeight: '700',
     margin: 0,
+    color: 'var(--color-text-primary)',
+    wordBreak: 'break-word',
+    lineHeight: 1.3,
   },
-  statusBadge: {
-    fontSize: '10px',
-    fontWeight: '700',
-    padding: '2px 6px',
-    borderRadius: '30px',
-  },
-  reqMeta: {
-    display: 'flex',
-    justifyContent: 'space-between',
+  projectSubtitle: {
     fontSize: '12px',
     color: 'var(--color-text-secondary)',
+    display: 'flex',
+    gap: '6px',
+    marginTop: '2px',
+    flexWrap: 'wrap',
   },
-  skillsRow: {
+  dot: {
+    color: 'var(--color-border)',
+  },
+  projectHeaderRight: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginLeft: '12px',
+  },
+  projectStatusBadge: {
+    fontSize: '11px',
+    fontWeight: '600',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    whiteSpace: 'nowrap',
+  },
+  requirementsContainer: {
+    padding: '8px',
+  },
+  requirementCard: {
+    padding: '14px 16px',
+    borderRadius: '6px',
+    backgroundColor: 'var(--color-bg-root)',
+    marginBottom: '8px',
+    border: '1px solid var(--color-border-light)',
+    '&:last-child': {
+      marginBottom: 0,
+    },
+  },
+  requirementHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  requirementTitle: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  requirementRole: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+  },
+  requirementFillStatus: {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    padding: '2px 8px',
+    borderRadius: '12px',
+  },
+  requirementActions: {
+    display: 'flex',
+    gap: '8px',
+  },
+  pendingBadge: {
+    fontSize: '10px',
+    fontWeight: '600',
+    padding: '2px 10px',
+    borderRadius: '12px',
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    color: '#f59e0b',
+  },
+  staffedBadge: {
+    fontSize: '10px',
+    fontWeight: '600',
+    padding: '2px 10px',
+    borderRadius: '12px',
+    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+    color: '#22c55e',
+  },
+  requirementTimeline: {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+    marginBottom: '8px',
+    display: 'flex',
+    gap: '6px',
+    alignItems: 'center',
+  },
+  timelineLabel: {
+    fontSize: '14px',
+  },
+  assignedContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+    marginBottom: '8px',
+  },
+  assignedLabel: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: 'var(--color-text-muted)',
+  },
+  assignedList: {
     display: 'flex',
     flexWrap: 'wrap',
     gap: '4px',
+  },
+  assignedPill: {
+    fontSize: '10px',
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+    padding: '2px 8px',
+    borderRadius: '12px',
+    fontWeight: '500',
+  },
+  skillsContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px',
+    marginBottom: '10px',
   },
   skillPill: {
     fontSize: '10px',
     background: 'var(--color-bg-card-hover)',
     border: '1px solid var(--color-border)',
     color: 'var(--color-text-primary)',
-    padding: '2px 6px',
+    padding: '3px 10px',
     borderRadius: '4px',
+    maxWidth: '100%',
+    wordBreak: 'break-word',
   },
-  actions: {
+  requirementFooter: {
     display: 'flex',
-    gap: '8px',
-    marginTop: '6px',
+    gap: '10px',
+    marginTop: '4px',
   },
-  viewRecsBtn: {
+  viewBtn: {
     flex: 1,
     backgroundColor: 'var(--color-primary)',
     color: '#ffffff',
     border: 'none',
-    padding: '8px',
+    padding: '8px 16px',
     borderRadius: '6px',
-    fontWeight: '700',
+    fontWeight: '600',
     fontSize: '12px',
     cursor: 'pointer',
+    transition: 'all 0.2s',
+    minWidth: '120px',
+    '&:hover': {
+      opacity: 0.9,
+    },
     '&:disabled': {
       opacity: 0.5,
       cursor: 'not-allowed',
-    }
+    },
   },
   rejectBtn: {
     backgroundColor: 'transparent',
     color: 'var(--color-danger)',
     border: '1px solid var(--color-danger)',
-    padding: '8px 12px',
+    padding: '8px 16px',
     borderRadius: '6px',
     fontWeight: '600',
     fontSize: '12px',
     cursor: 'pointer',
+    transition: 'all 0.2s',
+    whiteSpace: 'nowrap',
+    '&:hover': {
+      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    },
+  },
+  emptyState: {
+    padding: '40px 20px',
+    textAlign: 'center',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
   },
   emptyPanelState: {
     padding: '60px 20px',
     textAlign: 'center',
     color: 'var(--color-text-muted)',
-    fontSize: '13px',
-  },
-  recommenderHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    background: 'var(--color-bg-card-hover)',
-    padding: '12px',
-    borderRadius: '6px',
-    border: '1px solid var(--color-border)',
-  },
-  matchingTag: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: 'var(--color-primary)',
-  },
-  recommendationsList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
-  },
-  recItemCard: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '12px',
-    padding: '16px',
-    background: 'var(--color-bg-card-hover)',
-    borderRadius: '10px',
-    border: '1px solid var(--color-border)',
-    position: 'relative',
-  },
-  rankBadge: {
-    position: 'absolute',
-    top: '12px',
-    left: '12px',
-    backgroundColor: 'var(--color-primary)',
-    color: '#ffffff',
-    fontSize: '11px',
-    fontWeight: '700',
-    width: '20px',
-    height: '20px',
-    borderRadius: '50%',
-    display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recCardBody: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-  },
-  recHeaderRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  recAvatar: {
-    width: '36px',
-    height: '36px',
-    borderRadius: '50%',
-    objectFit: 'cover',
-  },
-  recName: {
-    fontSize: '13px',
-    fontWeight: '700',
-  },
-  recRole: {
-    fontSize: '11px',
-    color: 'var(--color-text-muted)',
-  },
-  matchScore: {
-    fontSize: '13px',
-    fontWeight: '800',
-  },
-  skillsHeading: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: 'var(--color-text-muted)',
-  },
-  miniSkillsList: {
-    display: 'flex',
-    flexWrap: 'wrap',
     gap: '8px',
-    marginTop: '6px',
   },
-  matchingSkillPill: {
-    fontSize: '10px',
-    color: 'var(--color-success)',
-    backgroundColor: 'var(--color-primary-light)',
-    padding: '1px 6px',
-    borderRadius: '4px',
-    fontWeight: '600',
+  emptyIcon: {
+    fontSize: '48px',
+    marginBottom: '8px',
   },
-  allocateBtn: {
-    backgroundColor: 'var(--color-primary)',
-    color: '#ffffff',
-    border: 'none',
-    padding: '12px 16px',
-    borderRadius: '8px',
-    fontWeight: '700',
-    fontSize: '13px',
-    cursor: 'pointer',
-    marginTop: '14px',
-    width: '100%',
+  emptySubtext: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
   },
-  tabRow: {
+  tabs: {
     display: 'flex',
-    gap: '10px',
+    gap: '0',
     marginBottom: '16px',
+    borderBottom: '1px solid var(--color-border)',
   },
-  subTabBtn: {
-    flex: 1,
-    padding: '10px 14px',
-    borderBottom: '2px solid transparent',
-    borderRadius: '0',
+  tabBtn: {
+    padding: '8px 16px',
     border: 'none',
     background: 'transparent',
     cursor: 'pointer',
-    fontWeight: '700',
-    fontSize: '12px',
+    fontWeight: '600',
+    fontSize: '13px',
     color: 'var(--color-text-secondary)',
-    transition: 'color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease',
+    borderBottom: '2px solid transparent',
+    transition: 'all 0.2s',
   },
-  subTabBtnActive: {
+  tabActive: {
     color: 'var(--color-primary)',
     borderBottomColor: 'var(--color-primary)',
   },
-  tabButton: {
-    flex: 1,
-    padding: '10px 14px',
-    borderRadius: '12px',
-    border: '1px solid var(--color-border)',
-    background: 'transparent',
-    cursor: 'pointer',
-    fontWeight: '700',
-    fontSize: '12px',
-  },
-  tabButtonActive: {
-    background: 'var(--color-primary)',
-    color: '#ffffff',
-    borderColor: 'var(--color-primary)',
-  },
-  checkCircle: {
-    width: '26px',
-    height: '26px',
-    minWidth: '26px',
-    borderRadius: '50%',
-    border: '2px solid var(--color-border)',
-    background: 'transparent',
-    display: 'inline-flex',
+  requestInfoBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
+    padding: '12px 16px',
+    background: 'var(--color-bg-card-hover)',
+    borderRadius: '8px',
+    marginBottom: '16px',
+    border: '1px solid var(--color-border)',
+  },
+  infoProject: {
+    fontSize: '14px',
+    color: 'var(--color-text-primary)',
+    marginRight: '8px',
+  },
+  infoRole: {
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+  },
+  infoStats: {
     fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+  },
+  recommendationList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    maxHeight: '500px',
+    overflowY: 'auto',
+    paddingRight: '4px',
+  },
+  recCard: {
+    padding: '14px 16px',
+    background: 'var(--color-bg-card-hover)',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    transition: 'all 0.2s',
+  },
+  recHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  recInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recName: {
+    fontSize: '14px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+    wordBreak: 'break-word',
   },
-  checkCircleSelected: {
-    borderColor: 'var(--color-primary)',
-    background: 'var(--color-primary)',
+  recRole: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    wordBreak: 'break-word',
+  },
+  recScore: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  scoreValue: {
+    fontSize: '18px',
+    fontWeight: '800',
+  },
+  scoreLabel: {
+    fontSize: '9px',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  recSkills: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+  },
+  matchingSkill: {
+    fontSize: '11px',
+    color: 'var(--color-success)',
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    padding: '2px 10px',
+    borderRadius: '4px',
+    fontWeight: '500',
+  },
+  moreSkills: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    padding: '2px 4px',
+  },
+  allocateBtn: {
+    padding: '8px',
+    borderRadius: '6px',
+    fontWeight: '600',
+    fontSize: '13px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
     color: '#ffffff',
+    border: 'none',
+    '&:hover': {
+      opacity: 0.9,
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+    },
   },
-  workloadBadge: {
-    fontSize: '10px',
-    fontWeight: '700',
-    padding: '4px 10px',
-    borderRadius: '999px',
-    backgroundColor: 'var(--color-bg-root)',
-    color: 'var(--color-text-secondary)',
-  }
+  emptyRecommendation: {
+    padding: '40px 20px',
+    textAlign: 'center',
+    color: 'var(--color-text-muted)',
+  },
+  loadingContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '400px',
+  },
+  loadingSpinner: {
+    width: '40px',
+    height: '40px',
+    border: '4px solid var(--color-border)',
+    borderTop: '4px solid var(--color-primary)',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+  },
 };

@@ -1,3 +1,4 @@
+// backend/routes/ResourceManager/Employees.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
@@ -11,7 +12,8 @@ const CACHE_DURATION = 60000; // 1 minute
  * GET /api/rm/employees
  * Powers RMEmployeeDirectoryTab.jsx - OPTIMIZED (avatar removed from list)
  */
-router.get('/employees', async (req, res) => {
+// ✅ CHANGE: Remove '/employees' from the path - just use '/'
+router.get('/', async (req, res) => {
   try {
     // ✅ Check cache first
     const now = Date.now();
@@ -88,7 +90,8 @@ router.get('/employees', async (req, res) => {
  * GET /api/rm/employees/:id (NEW - For detail view with avatar)
  * Use this endpoint when you need the actual avatar
  */
-router.get('/employees/:id', async (req, res) => {
+// ✅ CHANGE: Remove '/employees' from the path - just use '/:id'
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -139,7 +142,8 @@ router.get('/employees/:id', async (req, res) => {
  * PATCH /api/rm/employees/:id/verify
  * Toggles a "verified profile" flag.
  */
-router.patch('/employees/:id/verify', async (req, res) => {
+// ✅ CHANGE: Remove '/employees' from the path - just use '/:id/verify'
+router.patch('/:id/verify', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -173,7 +177,8 @@ router.patch('/employees/:id/verify', async (req, res) => {
  * POST /api/rm/employees/:id/assign
  * Assigns an employee to a project
  */
-router.post('/employees/:id/assign', async (req, res) => {
+// ✅ CHANGE: Remove '/employees' from the path - just use '/:id/assign'
+router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
   const { projectId, startDate, role, notes } = req.body;
 
