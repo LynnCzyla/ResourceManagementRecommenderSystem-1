@@ -9,15 +9,15 @@ const cache = {
   ttl: 60000 // 1 minute cache
 };
 
-// Statuses that mean "not started yet" — these automatically flip to
-// 'Active' once a member is assigned or the project's start date arrives.
+// Statuses that mean "not started yet"
 const NOT_STARTED_STATUSES = ['Pending', 'Pending Approval', 'Inactive'];
 
 /**
  * GET /api/rm/projects
  * Powers RMProjectsTab.jsx - OPTIMIZED VERSION
  */
-router.get('/projects', async (req, res) => {
+// ✅ CHANGE: Remove '/projects' from path - use '/'
+router.get('/', async (req, res) => {
   try {
     // ✅ Check cache first
     const now = Date.now();
@@ -67,12 +67,12 @@ router.get('/projects', async (req, res) => {
         .filter(Boolean)
     )];
 
-    // ✅ Fetch profiles for assigned employees (✅ WITHOUT avatar_url for list view)
+    // ✅ Fetch profiles for assigned employees
     let profileById = new Map();
     if (assignedProfileIds.length > 0) {
       const { data: assignedProfiles, error: profileErr } = await supabase
         .from('profiles')
-        .select('id, first_name, last_name')  // ✅ REMOVED avatar_url
+        .select('id, first_name, last_name')
         .in('id', assignedProfileIds);
       
       if (!profileErr && assignedProfiles) {
@@ -80,7 +80,7 @@ router.get('/projects', async (req, res) => {
       }
     }
 
-    // ✅ Build project requirements map for faster lookup
+    // ✅ Build project requirements map
     const requirementsByProject = new Map();
     for (const req of requirements) {
       if (!requirementsByProject.has(req.project_id)) {
@@ -90,7 +90,7 @@ router.get('/projects', async (req, res) => {
       requirementsByProject.get(req.project_id).push(...skills.map(s => s.skills).filter(Boolean));
     }
 
-    // ✅ Build assignments map for faster lookup
+    // ✅ Build assignments map
     const assignmentsByProject = new Map();
     for (const assignment of assignments) {
       if (!assignmentsByProject.has(assignment.project_id)) {
@@ -103,11 +103,9 @@ router.get('/projects', async (req, res) => {
     const result = [];
     const toActivate = [];
     for (const proj of projects) {
-      // Get unique skills for this project
       const projectSkills = requirementsByProject.get(proj.id) || [];
       const requiredSkills = [...new Set(projectSkills)];
 
-      // Get assigned employees for this project
       const projectAssignments = assignmentsByProject.get(proj.id) || [];
       const assignedEmployees = projectAssignments.map((a) => {
         const profile = profileById.get(a.profile_id);
@@ -117,15 +115,12 @@ router.get('/projects', async (req, res) => {
             ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown'
             : 'Unknown',
           role: a.assigned_role,
-          // ✅ No avatar in list view - use generated URL in frontend
           avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(
             profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown' : 'Unknown'
           )}`,
         };
       });
 
-      // ✅ Auto-activate a not-yet-started project once it has at least one
-      // assigned member OR its start date has arrived.
       let status = proj.status;
       const hasMembers = assignedEmployees.length > 0;
       const started = proj.start_date && new Date(proj.start_date) <= new Date();
@@ -145,13 +140,11 @@ router.get('/projects', async (req, res) => {
         priority: proj.priority,
         requiredSkills,
         assignedEmployees,
-        // ✅ Add some useful stats
         teamSize: assignedEmployees.length,
         skillsCount: requiredSkills.length,
       });
     }
 
-    // ✅ Persist start-date activations (best-effort, no need to block the response)
     if (toActivate.length > 0) {
       await Promise.all(
         toActivate.map((pid) =>
@@ -167,7 +160,6 @@ router.get('/projects', async (req, res) => {
       success: true,
       projects: result,
       totalProjects: result.length,
-      // ✅ Add summary stats
       summary: {
         active: result.filter(p => p.status === 'Active').length,
         completed: result.filter(p => p.status === 'Completed').length,
@@ -176,7 +168,6 @@ router.get('/projects', async (req, res) => {
       }
     };
 
-    // ✅ Store in cache
     cache.data = responseData;
     cache.timestamp = Date.now();
 
@@ -193,9 +184,9 @@ router.get('/projects', async (req, res) => {
 
 /**
  * GET /api/rm/projects/:id (NEW - For project detail with avatars)
- * Use this endpoint when you need actual avatars
  */
-router.get('/projects/:id', async (req, res) => {
+// ✅ CHANGE: Remove '/projects' from path - use '/:id'
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -218,7 +209,7 @@ router.get('/projects/:id', async (req, res) => {
             id,
             first_name,
             last_name,
-            avatar_url  // ✅ Only include avatar in detail view
+            avatar_url
           )
         )
       `)
@@ -238,7 +229,7 @@ router.get('/projects/:id', async (req, res) => {
           employeeId: a.profile_id,
           employeeName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : 'Unknown',
           role: a.assigned_role,
-          avatar: a.profiles?.avatar_url || null,  // ✅ Return actual avatar for detail
+          avatar: a.profiles?.avatar_url || null,
         }))
       }
     });
@@ -250,9 +241,9 @@ router.get('/projects/:id', async (req, res) => {
 
 /**
  * POST /api/rm/projects/:id/assign
- * Assign an employee to a project
  */
-router.post('/projects/:id/assign', async (req, res) => {
+// ✅ CHANGE: Remove '/projects' from path - use '/:id/assign'
+router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
   const { employeeId, role } = req.body;
 
@@ -261,7 +252,6 @@ router.post('/projects/:id/assign', async (req, res) => {
   }
 
   try {
-    // ✅ Check if already assigned
     const { data: existing, error: existErr } = await supabase
       .from('project_assignments')
       .select('id')
@@ -278,7 +268,6 @@ router.post('/projects/:id/assign', async (req, res) => {
       });
     }
 
-    // ✅ Create assignment
     const { data, error } = await supabase
       .from('project_assignments')
       .insert({
@@ -294,8 +283,6 @@ router.post('/projects/:id/assign', async (req, res) => {
     
     if (error) throw error;
 
-    // ✅ A project with at least one assigned member is considered active.
-    // Flip a not-yet-started project to 'Active' on first assignment.
     const { data: projectRow } = await supabase
       .from('projects')
       .select('status')
@@ -309,7 +296,6 @@ router.post('/projects/:id/assign', async (req, res) => {
         .eq('id', id);
     }
 
-    // ✅ Clear cache since data changed
     clearProjectsCache();
 
     res.json({ 
@@ -325,9 +311,9 @@ router.post('/projects/:id/assign', async (req, res) => {
 
 /**
  * DELETE /api/rm/projects/:id/assign/:employeeId
- * Removes a team member from a project
  */
-router.delete('/projects/:id/assign/:employeeId', async (req, res) => {
+// ✅ CHANGE: Remove '/projects' from path - use '/:id/assign/:employeeId'
+router.delete('/:id/assign/:employeeId', async (req, res) => {
   const { id, employeeId } = req.params;
 
   try {
@@ -339,7 +325,6 @@ router.delete('/projects/:id/assign/:employeeId', async (req, res) => {
     
     if (error) throw error;
 
-    // ✅ Clear cache since data changed
     clearProjectsCache();
 
     res.json({ 
@@ -352,13 +337,11 @@ router.delete('/projects/:id/assign/:employeeId', async (req, res) => {
   }
 });
 
-// ✅ Function to clear the cache
 const clearProjectsCache = () => {
   cache.data = null;
   cache.timestamp = 0;
   console.log('🗑️ Projects cache cleared');
 };
 
-// ✅ Export both the router and the cache clearer
 module.exports = router;
 module.exports.clearProjectsCache = clearProjectsCache;

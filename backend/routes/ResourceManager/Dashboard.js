@@ -1,3 +1,4 @@
+// backend/routes/ResourceManager/Dashboard.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
@@ -21,7 +22,8 @@ const toTitleCase = (str) =>
  * GET /api/rm/dashboard
  * Powers RMDashboardTab.jsx - OPTIMIZED VERSION
  */
-router.get('/dashboard', async (req, res) => {
+// ✅ CHANGE: Remove '/dashboard' from the path - just use '/'
+router.get('/', async (req, res) => {
   try {
     // ✅ Check cache first
     const now = Date.now();
