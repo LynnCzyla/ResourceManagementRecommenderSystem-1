@@ -265,8 +265,13 @@ class NLPProcessor:
                 print("[NLP] Supabase client not available — skills/feedback start empty")
                 return None
 
-            # 1. Skills + categories
-            skills_resp = client.table('skills').select('id, skill_name, category').execute()
+            # 1. Skills
+            # NOTE: the live `skills` table has NO `category` column (confirmed
+            # via a live 42703 "column does not exist" Postgrest error) — do
+            # NOT select/upsert 'category' against Supabase anywhere. Category
+            # is tracked in-memory only (self.skill_dictionary), never synced
+            # to the `skills` table itself.
+            skills_resp = client.table('skills').select('id, skill_name').execute()
             id_to_name = {row['id']: row['skill_name'].lower() for row in skills_resp.data}
 
             # 2. Aliases (single query — see note above)
@@ -278,7 +283,7 @@ class NLPProcessor:
             facts = {
                 'fetched_at': datetime.now().isoformat(),
                 'skills': [
-                    {'name': row['skill_name'], 'category': row.get('category') or 'Other'}
+                    {'name': row['skill_name'], 'category': 'Other'}
                     for row in skills_resp.data
                 ],
                 'aliases': [
@@ -471,15 +476,23 @@ class NLPProcessor:
     # ============ NEW: DB WRITE HELPERS ============
 
     def _get_or_create_skill_id(self, skill_name, category='Other'):
-        """Upsert a skill into Supabase and return its id."""
+        """Upsert a skill into Supabase and return its id.
+        NOTE: the live `skills` table has no `category` column (confirmed via
+        a live Postgrest 42703 error), so `category` is NOT sent to Supabase
+        here — it's accepted as a param only so callers don't need to change,
+        and is tracked purely in-memory (self.skill_dictionary) instead."""
         client = supabase.get_client()
         if not client:
             return None
-        result = client.table('skills').upsert(
-            {'skill_name': skill_name, 'category': category},
-            on_conflict='skill_name'
-        ).execute()
-        return result.data[0]['id'] if result.data else None
+        try:
+            result = client.table('skills').upsert(
+                {'skill_name': skill_name},
+                on_conflict='skill_name'
+            ).execute()
+            return result.data[0]['id'] if result.data else None
+        except Exception as e:
+            print(f"[NLP] Error upserting skill '{skill_name}': {e}")
+            return None
 
     def _save_skill_to_db(self, skill_name, category='Other'):
         """Persist a single skill fact to Supabase."""
@@ -507,6 +520,108 @@ class NLPProcessor:
                 self._invalidate_facts_cache()
         except Exception as e:
             print(f"[NLP] Error saving alias '{alias_name}' -> '{master_name}': {e}")
+
+    def _split_into_atomic_skills(self, compound_skill):
+        """
+        Split a compound skill phrase joined by 'and' into atomic components,
+        re-attaching a shared trailing noun to each half when present.
+
+        Examples:
+          "Manufacturing And Quality Systems Support"
+            -> ["Manufacturing Support", "Quality Systems Support"]
+          "UPS Service And Maintenance Coordination"
+            -> ["UPS Service Coordination", "Maintenance Coordination"]
+          "Technical Sales And Engineering Support"
+            -> ["Technical Sales Support", "Engineering Support"]
+
+        Returns an empty list if the phrase doesn't contain " and " (i.e. it's
+        already atomic - nothing to split).
+        """
+        if not compound_skill:
+            return []
+
+        # Only split on a standalone "and" (word-boundary, case-insensitive).
+        # This avoids false positives on words that merely contain "and"
+        # (e.g. "Brand Management", "Standards Compliance").
+        parts = re.split(r'\s+and\s+', compound_skill.strip(), flags=re.IGNORECASE)
+        if len(parts) != 2:
+            # Either no "and" found (already atomic), or more than one "and"
+            # (ambiguous compound) - don't guess, leave it as a single skill.
+            return []
+
+        left, right = parts[0].strip(), parts[1].strip()
+        if not left or not right:
+            return []
+
+        left_words = left.split()
+        right_words = right.split()
+
+        # If the right side ends in a noun that reads like a shared suffix
+        # (e.g. "Quality Systems Support"), and the left side is missing
+        # that same trailing word (e.g. "Manufacturing"), re-attach it so
+        # both halves stand on their own as valid skill phrases.
+        trailing_word = right_words[-1] if right_words else None
+        left_last_word = left_words[-1] if left_words else None
+
+        if trailing_word and left_last_word and left_last_word.lower() != trailing_word.lower():
+            left_component = f"{left} {trailing_word}"
+        else:
+            left_component = left
+
+        right_component = right
+
+        components = [
+            self._clean_candidate_text(left_component),
+            self._clean_candidate_text(right_component),
+        ]
+        # Drop empties/dupes, preserve order
+        seen = set()
+        result = []
+        for c in components:
+            if c and c.lower() not in seen:
+                seen.add(c.lower())
+                result.append(c)
+
+        # ============ SAFETY: bail out on single-word components ============
+        # If either resulting component is a single word (e.g. "coordination",
+        # "management"), the compound actually follows a shared-PREFIX pattern
+        # ("Ups Service Support And Coordination" = "Ups Service Support" +
+        # "[Ups Service] Coordination") rather than the shared-SUFFIX pattern
+        # this splitter targets ("X Support And Y Support" -> "X Support" +
+        # "Y Support"). A lone generic word is too vague to be a useful
+        # standalone skill for matching and just duplicates what's already in
+        # the other half - better to leave the compound unsplit than emit it.
+        if any(len(c.split()) < 2 for c in result):
+            return []
+        # =======================================================================
+
+        return result
+
+    def _save_component_to_db(self, skill_name, components, category='Other'):
+        """
+        Persist a compound skill's atomic components to Supabase.
+        skill_name is the full compound phrase (kept as-is in `skills`);
+        components are the split-out atomic phrases stored in
+        `skill_components`, each linked back to skill_name's skill_id.
+        """
+        if not components:
+            return
+        try:
+            client = supabase.get_client()
+            if not client:
+                return
+            skill_id = self._get_or_create_skill_id(skill_name, category)
+            if not skill_id:
+                return
+            for component_name in components:
+                client.table('skill_components').upsert(
+                    {'skill_id': skill_id, 'component_name': component_name},
+                    on_conflict='skill_id,component_name'
+                ).execute()
+            self._invalidate_facts_cache()
+            print(f"[NLP] Saved {len(components)} atomic components for '{skill_name}': {components}")
+        except Exception as e:
+            print(f"[NLP] Error saving components for '{skill_name}': {e}")
 
     def _save_feedback_to_db(self, phrase, label, document_id=None, employee_id=None, reviewed_by=None):
         """Insert one approve/reject decision into feedback_training."""
@@ -2039,6 +2154,16 @@ class NLPProcessor:
                     if skill_key not in self.skill_dictionary:
                         self.skill_dictionary[skill_key] = 'Other'
                     print(f"[NLP] Skill already exists: {skill_key} (keeping category: {self.skill_dictionary.get(skill_key, 'Other')})")
+
+                # ============ SPLIT COMPOUND SKILL INTO ATOMIC COMPONENTS ============
+                # Runs on every approval (new or already-known skill) so
+                # skill_components stays populated even for skills approved
+                # before this feature existed. The original (non-lowercased)
+                # skill text is used so components keep their display casing.
+                components = self._split_into_atomic_skills(skill.strip())
+                if components:
+                    self._save_component_to_db(skill_key, components, self.skill_dictionary.get(skill_key, 'Other'))
+                # ========================================================================
                     
         # Re-run merge (this will create aliases, not delete)
         if len(self.learned_skills) > 5:
