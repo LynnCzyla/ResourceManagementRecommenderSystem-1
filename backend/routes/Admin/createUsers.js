@@ -185,10 +185,9 @@ router.post("/create", async (req, res) => {
         role: role || "Employee",
         availability_status: availability_status || "Available",
         total_available_hours: total_available_hours || 40,
-        location: location || null,
+        // location and years_experience removed — no such columns on public.profiles
         join_date: join_date || new Date().toISOString().split("T")[0],
         status: "Active",
-        years_experience: years_experience || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
