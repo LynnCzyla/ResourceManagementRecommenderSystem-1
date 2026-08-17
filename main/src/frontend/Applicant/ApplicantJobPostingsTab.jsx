@@ -1,6 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 
+const API = 'http://localhost:5000/api/applicant';
+
+// Maps a job_postings row (with joined departments/positions) coming back
+// from the API into the flat shape this component's UI was built around.
+const mapPosting = (row) => ({
+  id: row.id,
+  title: row.title,
+  department: row.departments?.department_name || '',
+  department_id: row.department_id,
+  position_id: row.position_id,
+  location: row.location || '',
+  employmentType: row.employment_type || 'Full-time',
+  salaryMin: row.salary_min ?? '',
+  salaryMax: row.salary_max ?? '',
+  status: row.status,
+  postedDate: row.posted_date ? new Date(row.posted_date).toISOString().split('T')[0] : '',
+  description: row.description || '',
+  requirements: row.requirements || '',
+  responsibilities: row.responsibilities || '',
+  benefits: row.benefits || '',
+});
+
 export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [jobPostings, setJobPostings] = useState([]);
   const [myApplications, setMyApplications] = useState([]);
@@ -12,95 +34,77 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [selectedPosting, setSelectedPosting] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Applicant's own contact info, used both to submit applications and to
+  // look up "My Applications" by email. Ideally this would come from a
+  // logged-in applicant account instead of being retyped — tell me if you
+  // have applicant auth and I'll wire this to the session user instead.
+  const [applicantEmail, setApplicantEmail] = useState('');
+
+  const [applyForm, setApplyForm] = useState({
+    firstName: '',
+    middleName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    experience: '',
+    education: '',
+    skills: '',
+    coverLetter: '',
+    resume: null,
+  });
 
   useEffect(() => {
-    loadJobPostings();
-  }, []);
+    if (showMyApplications) {
+      loadMyApplications();
+    } else {
+      loadJobPostings();
+    }
+  }, [showMyApplications]);
 
   const loadJobPostings = async () => {
     try {
       setLoading(true);
-      // Mock data for now - these are the job postings from HR
-      setJobPostings([
-        {
-          id: 1,
-          title: 'Senior Software Engineer',
-          department: 'Engineering',
-          location: 'Manila',
-          employmentType: 'Full-time',
-          salaryMin: '80000',
-          salaryMax: '120000',
-          status: 'Active',
-          postedDate: '2025-08-05',
-          description: 'We are looking for an experienced Senior Software Engineer to join our team and lead development of our core products.',
-          requirements: '5+ years experience in software development, proficiency in React, Node.js, and Python',
-          responsibilities: 'Lead development team, architect solutions, mentor junior developers',
-          benefits: 'Health insurance, flexible work hours, professional development budget',
-        },
-        {
-          id: 2,
-          title: 'Data Analyst',
-          department: 'Analytics',
-          location: 'Cebu',
-          employmentType: 'Full-time',
-          salaryMin: '50000',
-          salaryMax: '70000',
-          status: 'Active',
-          postedDate: '2025-08-03',
-          description: 'Join our analytics team to help drive data-driven decisions across the organization.',
-          requirements: '3+ years experience in data analysis, proficiency in Python, SQL, and Tableau',
-          responsibilities: 'Analyze business data, create reports, provide insights',
-          benefits: 'Health insurance, performance bonuses, training programs',
-        },
-        {
-          id: 3,
-          title: 'UI/UX Designer',
-          department: 'Design',
-          location: 'Remote',
-          employmentType: 'Full-time',
-          salaryMin: '60000',
-          salaryMax: '90000',
-          status: 'Active',
-          postedDate: '2025-08-01',
-          description: 'We are seeking a talented UI/UX Designer to create beautiful and intuitive user experiences.',
-          requirements: '3+ years experience in UI/UX design, proficiency in Figma, Adobe XD, and Sketch',
-          responsibilities: 'Design user interfaces, conduct user research, create prototypes',
-          benefits: 'Remote work, flexible schedule, creative freedom',
-        },
-        {
-          id: 4,
-          title: 'Project Manager',
-          department: 'Operations',
-          location: 'Manila',
-          employmentType: 'Full-time',
-          salaryMin: '70000',
-          salaryMax: '100000',
-          status: 'Active',
-          postedDate: '2025-07-28',
-          description: 'We need an experienced Project Manager to lead our cross-functional teams and deliver projects on time.',
-          requirements: '5+ years experience in project management, PMP certification preferred',
-          responsibilities: 'Manage project timelines, coordinate teams, communicate with stakeholders',
-          benefits: 'Leadership opportunities, competitive salary, career growth',
-        },
-        {
-          id: 5,
-          title: 'Backend Developer',
-          department: 'Engineering',
-          location: 'Manila',
-          employmentType: 'Full-time',
-          salaryMin: '65000',
-          salaryMax: '95000',
-          status: 'Active',
-          postedDate: '2025-07-25',
-          description: 'Join our backend team to build robust and scalable server-side applications.',
-          requirements: '3+ years experience in backend development, proficiency in Java, Spring Boot',
-          responsibilities: 'Develop REST APIs, optimize database performance, ensure security',
-          benefits: 'Technical challenges, learning opportunities, team collaboration',
-        },
-      ]);
+      setError(null);
+      const res = await fetch(`${API}/job-postings`);
+      const data = await res.json();
+      if (data.success) {
+        setJobPostings(data.data.map(mapPosting));
+      } else {
+        setError(data.error || 'Failed to load job postings');
+      }
     } catch (err) {
-      setError('Failed to load job postings');
+      setError('Could not connect to the server.');
       console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMyApplications = async () => {
+    if (!applicantEmail) {
+      setMyApplications([]);
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await fetch(`${API}/my-applications?email=${encodeURIComponent(applicantEmail)}`);
+      const data = await res.json();
+      if (data.success) {
+        setMyApplications(
+          data.data.map((app) => ({
+            id: app.id,
+            jobTitle: app.job_postings?.title || app.position_applied,
+            department: app.job_postings?.departments?.department_name || app.department || '—',
+            appliedDate: app.applied_date ? new Date(app.applied_date).toISOString().split('T')[0] : '',
+            status: app.status,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Failed to load applications:', err);
     } finally {
       setLoading(false);
     }
@@ -120,6 +124,20 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     });
   };
 
+  const showErrorAlert = (message, title = 'Error!') => {
+    Swal.fire({
+      title,
+      text: message,
+      icon: 'error',
+      confirmButtonColor: 'var(--color-danger)',
+      confirmButtonText: 'OK',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      iconColor: 'var(--color-danger)',
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+    });
+  };
+
   const openDetailsModal = (posting) => {
     setSelectedPosting(posting);
     setShowDetailsModal(true);
@@ -128,29 +146,64 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const handleApply = (posting) => {
     setShowDetailsModal(false);
     setSelectedPosting(posting);
+    setApplyForm({
+      firstName: '',
+      middleName: '',
+      lastName: '',
+      email: applicantEmail || '',
+      phone: '',
+      experience: '',
+      education: '',
+      skills: '',
+      coverLetter: '',
+      resume: null,
+    });
     setShowApplicationModal(true);
   };
 
-  const loadMyApplications = () => {
-    // Mock data for user's applications
-    setMyApplications([
-      {
-        id: 1,
-        jobId: 1,
-        jobTitle: 'Senior Software Engineer',
-        department: 'Engineering',
-        appliedDate: '2025-08-09',
-        status: 'Pending',
-      },
-      {
-        id: 2,
-        jobId: 3,
-        jobTitle: 'UI/UX Designer',
-        department: 'Design',
-        appliedDate: '2025-08-07',
-        status: 'Scheduled for Interview',
-      },
-    ]);
+  const handleApplyFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) setApplyForm({ ...applyForm, resume: file });
+  };
+
+  const handleApplicationSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.append('job_posting_id', selectedPosting.id);
+      fd.append('first_name', applyForm.firstName);
+      fd.append('middle_name', applyForm.middleName);
+      fd.append('last_name', applyForm.lastName);
+      fd.append('email', applyForm.email);
+      fd.append('phone', applyForm.phone);
+      fd.append('position_applied', selectedPosting.title);
+      fd.append('department', selectedPosting.department);
+      fd.append('experience', applyForm.experience);
+      fd.append('education', applyForm.education);
+      fd.append('skills', applyForm.skills);
+      fd.append('cover_letter', applyForm.coverLetter);
+      if (applyForm.resume) fd.append('resume', applyForm.resume);
+
+      const res = await fetch(`${API}/applications`, {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setApplicantEmail(applyForm.email);
+        setShowApplicationModal(false);
+        showSuccessAlert('Application submitted successfully!');
+      } else {
+        showErrorAlert(data.error || 'Failed to submit application.');
+      }
+    } catch (err) {
+      showErrorAlert('Could not connect to the server.');
+      console.error(err);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const filteredPostings = jobPostings.filter(posting => {
@@ -164,11 +217,11 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     return matchesSearch && matchesDepartment && matchesLocation && isActive;
   });
 
-  const departments = [...new Set(jobPostings.map(p => p.department))];
-  const locations = [...new Set(jobPostings.map(p => p.location))];
+  const departments = [...new Set(jobPostings.map(p => p.department).filter(Boolean))];
+  const locations = [...new Set(jobPostings.map(p => p.location).filter(Boolean))];
 
   if (loading) {
-    return <div style={styles.loading}>Loading job postings...</div>;
+    return <div style={styles.loading}>Loading...</div>;
   }
 
   // Show My Applications view
@@ -180,6 +233,22 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
           <p style={styles.subtitle}>Track your job application status</p>
         </div>
 
+        <div className="glass-card" style={{ ...styles.card, marginBottom: 24 }}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Enter the email you applied with</label>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <input
+                type="email"
+                value={applicantEmail}
+                onChange={(e) => setApplicantEmail(e.target.value)}
+                placeholder="your@email.com"
+                style={{ ...styles.input, flex: 1 }}
+              />
+              <button onClick={loadMyApplications} style={styles.applyBtn}>Search</button>
+            </div>
+          </div>
+        </div>
+
         <div className="glass-card" style={styles.card}>
           {myApplications.length === 0 ? (
             <div style={styles.emptyState}>
@@ -189,7 +258,11 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                 <line x1="16" y1="13" x2="8" y2="13"></line>
                 <line x1="16" y1="17" x2="8" y2="17"></line>
               </svg>
-              <p style={styles.emptyText}>You haven't applied to any positions yet.</p>
+              <p style={styles.emptyText}>
+                {applicantEmail
+                  ? "No applications found for this email."
+                  : "Enter your email above to view your applications."}
+              </p>
             </div>
           ) : (
             <div style={styles.applicationsList}>
@@ -199,10 +272,10 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                     <h3 style={styles.applicationTitle}>{app.jobTitle}</h3>
                     <span style={{
                       ...styles.statusBadge,
-                      backgroundColor: app.status === 'Scheduled for Interview' ? 'var(--color-accent-light)' : 
+                      backgroundColor: app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' : 
                                      app.status === 'Hired' ? 'var(--color-primary-light)' :
                                      app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                      color: app.status === 'Scheduled for Interview' ? 'var(--color-accent)' : 
+                      color: app.status === 'Interview Scheduled' ? 'var(--color-accent)' : 
                              app.status === 'Hired' ? 'var(--color-primary)' :
                              app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
                     }}>
@@ -239,6 +312,8 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   // Show Job Postings view
   return (
     <div style={styles.container}>
+      {error && <div style={styles.errorBanner}>{error}</div>}
+
       <div style={styles.searchSection}>
         <div style={styles.searchBar}>
           <svg style={styles.searchIcon} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -305,7 +380,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                   </div>
                 </div>
                 <div style={styles.jobCardRight}>
-                  <span style={styles.salary}>₱{parseInt(posting.salaryMin).toLocaleString()} - ₱{parseInt(posting.salaryMax).toLocaleString()}/mo</span>
+                  <span style={styles.salary}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}/mo</span>
                   <span style={styles.postedDate}>Posted {posting.postedDate}</span>
                 </div>
               </div>
@@ -349,7 +424,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                   </div>
                   <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Salary Range:</span>
-                    <span style={styles.detailValue}>₱{parseInt(selectedPosting.salaryMin).toLocaleString()} - ₱{parseInt(selectedPosting.salaryMax).toLocaleString()}/mo</span>
+                    <span style={styles.detailValue}>₱{parseInt(selectedPosting.salaryMin || 0).toLocaleString()} - ₱{parseInt(selectedPosting.salaryMax || 0).toLocaleString()}/mo</span>
                   </div>
                 </div>
               </div>
@@ -392,25 +467,60 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
               <button onClick={() => setShowApplicationModal(false)} style={styles.closeBtn}>×</button>
             </div>
             <div style={styles.modalBody}>
-              <form onSubmit={(e) => { e.preventDefault(); setShowApplicationModal(false); showSuccessAlert('Application submitted successfully!'); }} style={styles.form}>
+              <form onSubmit={handleApplicationSubmit} style={styles.form}>
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Personal Information</h4>
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
-                      <label style={styles.label}>Full Name *</label>
-                      <input type="text" required style={styles.input} placeholder="Enter your full name" />
+                      <label style={styles.label}>First Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={applyForm.firstName}
+                        onChange={(e) => setApplyForm({ ...applyForm, firstName: e.target.value })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Middle Name</label>
+                      <input
+                        type="text"
+                        value={applyForm.middleName}
+                        onChange={(e) => setApplyForm({ ...applyForm, middleName: e.target.value })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Last Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={applyForm.lastName}
+                        onChange={(e) => setApplyForm({ ...applyForm, lastName: e.target.value })}
+                        style={styles.input}
+                      />
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Email *</label>
-                      <input type="email" required style={styles.input} placeholder="your@email.com" />
+                      <input
+                        type="email"
+                        required
+                        value={applyForm.email}
+                        onChange={(e) => setApplyForm({ ...applyForm, email: e.target.value })}
+                        style={styles.input}
+                        placeholder="your@email.com"
+                      />
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Phone *</label>
-                      <input type="tel" required style={styles.input} placeholder="+63 XXX XXX XXXX" />
-                    </div>
-                    <div style={styles.formGroup}>
-                      <label style={styles.label}>Location</label>
-                      <input type="text" style={styles.input} placeholder="City, Country" />
+                      <input
+                        type="tel"
+                        required
+                        value={applyForm.phone}
+                        onChange={(e) => setApplyForm({ ...applyForm, phone: e.target.value })}
+                        style={styles.input}
+                        placeholder="+63 XXX XXX XXXX"
+                      />
                     </div>
                   </div>
                 </div>
@@ -420,46 +530,74 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Years of Experience *</label>
-                      <input type="number" required style={styles.input} placeholder="e.g., 5" />
+                      <input
+                        type="text"
+                        required
+                        value={applyForm.experience}
+                        onChange={(e) => setApplyForm({ ...applyForm, experience: e.target.value })}
+                        style={styles.input}
+                        placeholder="e.g., 3 years"
+                      />
                     </div>
                     <div style={styles.formGroup}>
-                      <label style={styles.label}>Education Level *</label>
-                      <select required style={styles.input}>
-                        <option value="">Select education level</option>
-                        <option value="high-school">High School</option>
-                        <option value="associate">Associate Degree</option>
-                        <option value="bachelor">Bachelor's Degree</option>
-                        <option value="master">Master's Degree</option>
-                        <option value="phd">PhD</option>
-                      </select>
+                      <label style={styles.label}>Education *</label>
+                      <input
+                        type="text"
+                        required
+                        value={applyForm.education}
+                        onChange={(e) => setApplyForm({ ...applyForm, education: e.target.value })}
+                        style={styles.input}
+                        placeholder="e.g., BS Computer Science"
+                      />
                     </div>
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Skills *</label>
-                    <input type="text" required style={styles.input} placeholder="e.g., React, Node.js, Python" />
+                    <input
+                      type="text"
+                      required
+                      value={applyForm.skills}
+                      onChange={(e) => setApplyForm({ ...applyForm, skills: e.target.value })}
+                      style={styles.input}
+                      placeholder="e.g., React, Node.js, Python"
+                    />
                   </div>
                 </div>
 
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Cover Letter</h4>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>Tell us why you're interested in this position *</label>
-                    <textarea required style={styles.textarea} rows="5" placeholder="Write your cover letter here..." />
+                    <label style={styles.label}>Tell us why you're interested in this position</label>
+                    <textarea
+                      value={applyForm.coverLetter}
+                      onChange={(e) => setApplyForm({ ...applyForm, coverLetter: e.target.value })}
+                      style={styles.textarea}
+                      rows="5"
+                      placeholder="Write your cover letter here..."
+                    />
                   </div>
                 </div>
 
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Resume</h4>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>Upload Resume (PDF) *</label>
-                    <input type="file" accept=".pdf" required style={styles.fileInput} />
-                    <p style={styles.fileHelp}>Accepted formats: PDF only. Max size: 5MB</p>
+                    <label style={styles.label}>Upload Resume (PDF, DOC, DOCX) *</label>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx"
+                      required
+                      onChange={handleApplyFileChange}
+                      style={styles.fileInput}
+                    />
+                    <p style={styles.fileHelp}>Accepted formats: PDF, DOC, DOCX. Max size: 5MB</p>
                   </div>
                 </div>
 
                 <div style={styles.modalFooter}>
                   <button type="button" onClick={() => setShowApplicationModal(false)} style={styles.closeModalBtn}>Cancel</button>
-                  <button type="submit" style={styles.submitBtn}>Submit Application</button>
+                  <button type="submit" disabled={submitting} style={styles.submitBtn}>
+                    {submitting ? 'Submitting...' : 'Submit Application'}
+                  </button>
                 </div>
               </form>
             </div>
@@ -481,6 +619,14 @@ const styles = {
     height: '400px',
     fontSize: '16px',
     color: 'var(--color-text-secondary)',
+  },
+  errorBanner: {
+    padding: '12px 16px',
+    backgroundColor: 'var(--color-danger-light)',
+    color: 'var(--color-danger)',
+    borderRadius: '8px',
+    fontSize: '14px',
+    marginBottom: '20px',
   },
   header: {
     marginBottom: '24px',
