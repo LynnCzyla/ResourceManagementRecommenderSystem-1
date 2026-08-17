@@ -1,5 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import hrClient from './Hrclient';
+
+
+const mapApplication = (row) => ({
+  id: row.id,
+  name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+  email: row.email,
+  phone: row.phone || '',
+  position: row.position_applied,
+  department: row.department || '',
+  status: row.status,
+  appliedDate: row.applied_date,
+  experience: row.experience || '',
+  skills: row.skills || '',
+  education: row.education || '',
+  coverLetter: row.cover_letter || '',
+  resume: row.resume_path || '',
+});
 
 export default function HRApplicationsTab() {
   const [applications, setApplications] = useState([]);
@@ -11,6 +29,7 @@ export default function HRApplicationsTab() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [positionFilter, setPositionFilter] = useState('All');
+  const [scheduling, setScheduling] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
     time: '',
@@ -27,84 +46,10 @@ export default function HRApplicationsTab() {
   const loadApplications = async () => {
     try {
       setLoading(true);
-      // Mock data for now
-      setApplications([
-        {
-          id: 1,
-          name: 'John Doe',
-          email: 'john.doe@email.com',
-          phone: '+63 912 345 6789',
-          position: 'Senior Software Engineer',
-          department: 'Engineering',
-          status: 'Pending',
-          appliedDate: '2025-08-09',
-          experience: '5 years',
-          skills: 'React, Node.js, Python',
-          education: 'BS Computer Science',
-          coverLetter: 'I am excited to apply for this position...',
-          resume: 'resume_john_doe.pdf',
-        },
-        {
-          id: 2,
-          name: 'Jane Smith',
-          email: 'jane.smith@email.com',
-          phone: '+63 923 456 7890',
-          position: 'Data Analyst',
-          department: 'Analytics',
-          status: 'Pending',
-          appliedDate: '2025-08-08',
-          experience: '3 years',
-          skills: 'Python, SQL, Tableau',
-          education: 'MS Data Science',
-          coverLetter: 'With my background in data analysis...',
-          resume: 'resume_jane_smith.pdf',
-        },
-        {
-          id: 3,
-          name: 'Mike Johnson',
-          email: 'mike.johnson@email.com',
-          phone: '+63 934 567 8901',
-          position: 'Project Manager',
-          department: 'Operations',
-          status: 'Recommended',
-          appliedDate: '2025-08-07',
-          experience: '7 years',
-          skills: 'Agile, Scrum, Leadership',
-          education: 'MBA',
-          coverLetter: 'I have successfully managed multiple projects...',
-          resume: 'resume_mike_johnson.pdf',
-        },
-        {
-          id: 4,
-          name: 'Sarah Williams',
-          email: 'sarah.williams@email.com',
-          phone: '+63 945 678 9012',
-          position: 'UI/UX Designer',
-          department: 'Design',
-          status: 'Pending',
-          appliedDate: '2025-08-06',
-          experience: '4 years',
-          skills: 'Figma, Adobe XD, Sketch',
-          education: 'BS Design',
-          coverLetter: 'My design philosophy focuses on user experience...',
-          resume: 'resume_sarah_williams.pdf',
-        },
-        {
-          id: 5,
-          name: 'David Brown',
-          email: 'david.brown@email.com',
-          phone: '+63 956 789 0123',
-          position: 'Senior Software Engineer',
-          department: 'Engineering',
-          status: 'Rejected',
-          appliedDate: '2025-08-05',
-          experience: '2 years',
-          skills: 'Java, Spring Boot',
-          education: 'BS Computer Science',
-          coverLetter: 'I am eager to contribute to your team...',
-          resume: 'resume_david_brown.pdf',
-        },
-      ]);
+      setError(null);
+      const res = await hrClient.get(`/applications`);
+      const rows = res.data?.data || [];
+      setApplications(rows.map(mapApplication));
     } catch (err) {
       setError('Failed to load applications');
       console.error(err);
@@ -171,12 +116,11 @@ export default function HRApplicationsTab() {
     if (!result.isConfirmed) return;
 
     try {
-      setApplications(applications.map(app => 
-        app.id === id ? { ...app, status: 'Recommended' } : app
-      ));
+      await hrClient.put(`/applications/${id}/status`, { status: 'Recommended' });
+      await loadApplications();
       showSuccessAlert('Applicant recommended for employment!');
     } catch (err) {
-      showErrorAlert('Failed to recommend applicant');
+      showErrorAlert(err.response?.data?.error || 'Failed to recommend applicant');
       console.error(err);
     }
   };
@@ -194,20 +138,32 @@ export default function HRApplicationsTab() {
     setShowScheduleModal(true);
   };
 
-  const handleScheduleSubmit = (e) => {
+  const handleScheduleSubmit = async (e) => {
     e.preventDefault();
-    // Update application status
-    setApplications(applications.map(app => 
-      app.id === selectedApplication.id ? { ...app, status: 'Scheduled for Interview' } : app
-    ));
-    setShowScheduleModal(false);
-    showSuccessAlert('Interview scheduled successfully!');
-    
-    // Open Gmail directly with pre-filled email
-    const subject = `Interview Invitation - ${selectedApplication.position} at WEA`;
-    const body = `Dear ${selectedApplication.name},\n\nWe are pleased to invite you for an interview for the ${selectedApplication.position} position.\n\nInterview Details:\nDate: ${scheduleForm.date}\nTime: ${scheduleForm.time}\nInterviewer: ${scheduleForm.interviewer}\nType: ${scheduleForm.interviewType}\nLocation: ${scheduleForm.location}\n\n${scheduleForm.notes ? `Additional Notes: ${scheduleForm.notes}\n\n` : ''}Please confirm your attendance by replying to this email.\n\nBest regards,\nWEA HR Team`;
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(selectedApplication.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(gmailUrl, '_blank');
+    setScheduling(true);
+    try {
+      // Scheduling the interview on the backend also flips the application's
+      // status to "Interview Scheduled" AND sends the invitation email
+      // automatically via nodemailer (see backend/utils/mailer.js) — no
+      // manual "click send" step needed on this end anymore.
+      await hrClient.post(`/interviews`, {
+        application_id: selectedApplication.id,
+        interview_date: scheduleForm.date,
+        interview_time: scheduleForm.time,
+        interviewer: scheduleForm.interviewer,
+        interview_type: scheduleForm.interviewType,
+        location: scheduleForm.location,
+        notes: scheduleForm.notes,
+      });
+      await loadApplications();
+      setShowScheduleModal(false);
+      showSuccessAlert('Interview scheduled and invitation email sent!');
+    } catch (err) {
+      showErrorAlert(err.response?.data?.error || 'Failed to schedule interview');
+      console.error(err);
+    } finally {
+      setScheduling(false);
+    }
   };
 
   const handleReject = async (id) => {
@@ -219,12 +175,11 @@ export default function HRApplicationsTab() {
     if (!result.isConfirmed) return;
 
     try {
-      setApplications(applications.map(app => 
-        app.id === id ? { ...app, status: 'Rejected' } : app
-      ));
+      await hrClient.put(`/applications/${id}/status`, { status: 'Rejected' });
+      await loadApplications();
       showSuccessAlert('Application rejected successfully!');
     } catch (err) {
-      showErrorAlert('Failed to reject application');
+      showErrorAlert(err.response?.data?.error || 'Failed to reject application');
       console.error(err);
     }
   };
@@ -241,7 +196,7 @@ export default function HRApplicationsTab() {
       app.position?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'All' || app.status === statusFilter;
     const matchesPosition = positionFilter === 'All' || app.position === positionFilter;
-    // Show Pending, Recommended, and Rejected (not Scheduled for Interview or Hired)
+    // Show Pending, Recommended, and Rejected (not Interview Scheduled or Hired)
     const isAllowedStatus = app.status === 'Pending' || app.status === 'Recommended' || app.status === 'Rejected';
     return matchesSearch && matchesStatus && matchesPosition && isAllowedStatus;
   });
@@ -333,10 +288,10 @@ export default function HRApplicationsTab() {
                       <span style={{
                         ...styles.statusBadge,
                         backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' : 
-                                       app.status === 'Scheduled for Interview' ? 'var(--color-accent-light)' :
+                                       app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' :
                                        app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
                         color: app.status === 'Recommended' ? 'var(--color-primary)' : 
-                               app.status === 'Scheduled for Interview' ? 'var(--color-accent)' :
+                               app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
                                app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
                       }}>
                         {app.status}
@@ -614,13 +569,16 @@ export default function HRApplicationsTab() {
                   </div>
                 </div>
 
+                {/* Email preview — read-only, shown so HR can see what will be
+                    sent. The actual send happens automatically on the backend
+                    when this form is submitted; there is no separate "open
+                    Gmail" step anymore. */}
                 <div style={styles.formSection}>
-                  <h4 style={styles.formSectionTitle}>Email Invitation</h4>
+                  <h4 style={styles.formSectionTitle}>Email Preview (sent automatically on submit)</h4>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>To</label>
                     <input 
                       type="email" 
-                      required 
                       style={styles.input} 
                       value={selectedApplication.email}
                       readOnly
@@ -630,7 +588,6 @@ export default function HRApplicationsTab() {
                     <label style={styles.label}>Subject</label>
                     <input 
                       type="text" 
-                      required 
                       style={styles.input} 
                       value={`Interview Invitation - ${selectedApplication.position} at WEA`}
                       readOnly
@@ -639,7 +596,6 @@ export default function HRApplicationsTab() {
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Message</label>
                     <textarea 
-                      required 
                       style={styles.textarea} 
                       rows="8" 
                       value={`Dear ${selectedApplication.name},\n\nWe are pleased to invite you for an interview for the ${selectedApplication.position} position.\n\nInterview Details:\nDate: ${scheduleForm.date || '[Select date]'}\nTime: ${scheduleForm.time || '[Select time]'}\nInterviewer: ${scheduleForm.interviewer || '[Enter interviewer]'}\nType: ${scheduleForm.interviewType || '[Select type]'}\nLocation: ${scheduleForm.location || '[Enter location]'}\n\n${scheduleForm.notes ? `Additional Notes: ${scheduleForm.notes}\n\n` : ''}Please confirm your attendance by replying to this email.\n\nBest regards,\nWEA HR Team`}
@@ -650,7 +606,9 @@ export default function HRApplicationsTab() {
 
                 <div style={styles.modalFooter}>
                   <button type="button" onClick={() => setShowScheduleModal(false)} style={styles.closeModalBtn}>Cancel</button>
-                  <button type="submit" style={styles.submitBtn}>Schedule & Send Email</button>
+                  <button type="submit" disabled={scheduling} style={styles.submitBtn}>
+                    {scheduling ? 'Sending...' : 'Schedule & Send Email'}
+                  </button>
                 </div>
               </form>
             </div>
