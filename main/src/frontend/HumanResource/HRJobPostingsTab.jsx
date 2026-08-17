@@ -1,8 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import hrClient from './Hrclient';
+
+const ADMIN_API = 'http://localhost:5000/api/admin';
+
+// Maps a job_postings row (with joined departments/positions) coming back from the
+// API into the flat shape this component's UI was built around.
+const mapPosting = (row) => ({
+  id: row.id,
+  title: row.title,
+  description: row.description || '',
+  department: row.departments?.department_name || row.department || '',
+  department_id: row.department_id || null,
+  position_id: row.position_id || null,
+  location: row.location || '',
+  employmentType: row.employment_type || 'Full-time',
+  salaryMin: row.salary_min ?? '',
+  salaryMax: row.salary_max ?? '',
+  status: row.status || 'Active',
+  applications: row.applications || 0,
+  postedDate: row.posted_date,
+  requirements: row.requirements || '',
+  responsibilities: row.responsibilities || '',
+  benefits: row.benefits || '',
+});
 
 export default function HRJobPostingsTab() {
   const [jobPostings, setJobPostings] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -14,7 +39,7 @@ export default function HRJobPostingsTab() {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    department: '',
+    department_id: '',
     location: '',
     employmentType: 'Full-time',
     salaryMin: '',
@@ -27,75 +52,31 @@ export default function HRJobPostingsTab() {
 
   useEffect(() => {
     loadJobPostings();
+    loadDepartments();
   }, []);
 
   const loadJobPostings = async () => {
     try {
       setLoading(true);
-      // Mock data for now
-      setJobPostings([
-        {
-          id: 1,
-          title: 'Senior Software Engineer',
-          department: 'Engineering',
-          location: 'Manila',
-          employmentType: 'Full-time',
-          salaryMin: '80000',
-          salaryMax: '120000',
-          status: 'Active',
-          applications: 12,
-          postedDate: '2025-08-05',
-          requirements: '5+ years experience in software development',
-          responsibilities: 'Lead development team',
-        },
-        {
-          id: 2,
-          title: 'Data Analyst',
-          department: 'Analytics',
-          location: 'Cebu',
-          employmentType: 'Full-time',
-          salaryMin: '50000',
-          salaryMax: '70000',
-          status: 'Active',
-          applications: 8,
-          postedDate: '2025-08-03',
-          requirements: '3+ years experience in data analysis',
-          responsibilities: 'Analyze business data',
-        },
-        {
-          id: 3,
-          title: 'UI/UX Designer',
-          department: 'Design',
-          location: 'Remote',
-          employmentType: 'Full-time',
-          salaryMin: '60000',
-          salaryMax: '90000',
-          status: 'Active',
-          applications: 5,
-          postedDate: '2025-08-01',
-          requirements: '3+ years experience in UI/UX design',
-          responsibilities: 'Design user interfaces',
-        },
-        {
-          id: 4,
-          title: 'Project Manager',
-          department: 'Operations',
-          location: 'Manila',
-          employmentType: 'Full-time',
-          salaryMin: '70000',
-          salaryMax: '100000',
-          status: 'Closed',
-          applications: 15,
-          postedDate: '2025-07-25',
-          requirements: '5+ years experience in project management',
-          responsibilities: 'Manage project timelines',
-        },
-      ]);
+      setError(null);
+      const res = await hrClient.get(`/job-postings`);
+      const rows = res.data?.data || [];
+      setJobPostings(rows.map(mapPosting));
     } catch (err) {
       setError('Failed to load job postings');
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadDepartments = async () => {
+    try {
+      const res = await fetch(`${ADMIN_API}/departments`);
+      const data = await res.json();
+      if (data.success) setDepartments(data.data);
+    } catch (err) {
+      console.error('Failed to load departments', err);
     }
   };
 
@@ -148,22 +129,35 @@ export default function HRJobPostingsTab() {
     });
   };
 
+  // department_id now comes from formData (bound to a real <select> populated
+  // from /api/admin/departments), not from selectedPosting. position_id is still
+  // not collected by this form — send me the positions dropdown requirement if
+  // job postings need to be tied to a specific position too.
+  const buildPayload = () => ({
+    title: formData.title,
+    description: formData.description,
+    department_id: formData.department_id || null,
+    position_id: selectedPosting?.position_id || null,
+    location: formData.location,
+    employment_type: formData.employmentType,
+    salary_min: formData.salaryMin || null,
+    salary_max: formData.salaryMax || null,
+    requirements: formData.requirements,
+    responsibilities: formData.responsibilities,
+    benefits: formData.benefits,
+    status: formData.status,
+  });
+
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     try {
-      // Mock creation
-      const newPosting = {
-        id: jobPostings.length + 1,
-        ...formData,
-        applications: 0,
-        postedDate: new Date().toISOString().split('T')[0],
-      };
-      setJobPostings([...jobPostings, newPosting]);
+      await hrClient.post(`/job-postings`, buildPayload());
+      await loadJobPostings();
       setShowCreateModal(false);
       resetForm();
       showSuccessAlert('Job posting created successfully!');
     } catch (err) {
-      showErrorAlert('Failed to create job posting');
+      showErrorAlert(err.response?.data?.error || 'Failed to create job posting');
       console.error(err);
     }
   };
@@ -178,14 +172,13 @@ export default function HRJobPostingsTab() {
       );
       if (!result.isConfirmed) return;
 
-      setJobPostings(jobPostings.map(p => 
-        p.id === selectedPosting.id ? { ...formData, id: p.id, applications: p.applications, postedDate: p.postedDate } : p
-      ));
+      await hrClient.put(`/job-postings/${selectedPosting.id}`, buildPayload());
+      await loadJobPostings();
       setShowEditModal(false);
       resetForm();
       showSuccessAlert('Job posting updated successfully!');
     } catch (err) {
-      showErrorAlert('Failed to update job posting');
+      showErrorAlert(err.response?.data?.error || 'Failed to update job posting');
       console.error(err);
     }
   };
@@ -199,10 +192,12 @@ export default function HRJobPostingsTab() {
     if (!result.isConfirmed) return;
 
     try {
+      await hrClient.delete(`/job-postings/${id}`);
       setJobPostings(jobPostings.filter(p => p.id !== id));
       showSuccessAlert('Job posting deleted successfully!');
     } catch (err) {
-      showErrorAlert('Failed to delete job posting');
+      // Backend refuses to delete postings that already have applications on file.
+      showErrorAlert(err.response?.data?.error || 'Failed to delete job posting');
       console.error(err);
     }
   };
@@ -212,7 +207,7 @@ export default function HRJobPostingsTab() {
     setFormData({
       title: posting.title,
       description: posting.description || '',
-      department: posting.department,
+      department_id: posting.department_id || '',
       location: posting.location,
       employmentType: posting.employmentType,
       salaryMin: posting.salaryMin,
@@ -229,7 +224,7 @@ export default function HRJobPostingsTab() {
     setFormData({
       title: '',
       description: '',
-      department: '',
+      department_id: '',
       location: '',
       employmentType: 'Full-time',
       salaryMin: '',
@@ -386,13 +381,17 @@ export default function HRJobPostingsTab() {
               <div style={styles.formRow}>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Department *</label>
-                  <input
-                    type="text"
+                  <select
                     required
-                    value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                    value={formData.department_id}
+                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
                     style={styles.formInput}
-                  />
+                  >
+                    <option value="">Select Department</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.department_name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Location *</label>
@@ -519,13 +518,17 @@ export default function HRJobPostingsTab() {
               <div style={styles.formRow}>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Department *</label>
-                  <input
-                    type="text"
+                  <select
                     required
-                    value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                    value={formData.department_id}
+                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
                     style={styles.formInput}
-                  />
+                  >
+                    <option value="">Select Department</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.department_name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Location *</label>
