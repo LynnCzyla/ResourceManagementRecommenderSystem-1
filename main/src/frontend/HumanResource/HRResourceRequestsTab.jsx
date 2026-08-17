@@ -5,6 +5,7 @@ export default function HRResourceRequestsTab() {
   const [resourceRequests, setResourceRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [notConnected, setNotConnected] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -15,70 +16,16 @@ export default function HRResourceRequestsTab() {
   }, []);
 
   const loadResourceRequests = async () => {
-    try {
-      setLoading(true);
-      // Mock data for now - these are requests from Resource Manager
-      setResourceRequests([
-        {
-          id: 1,
-          requestId: 'RM-REQ-001',
-          project: 'E-Commerce Platform',
-          requestedBy: 'John Smith (Resource Manager)',
-          requestDate: '2025-08-09',
-          status: 'Pending',
-          priority: 'High',
-          requiredResources: [
-            { role: 'Senior Software Engineer', quantity: 2, experience: '5+ years', skills: 'React, Node.js' },
-            { role: 'UI/UX Designer', quantity: 1, experience: '3+ years', skills: 'Figma, Adobe XD' },
-          ],
-          justification: 'Need additional resources for Phase 2 development',
-        },
-        {
-          id: 2,
-          requestId: 'RM-REQ-002',
-          project: 'Mobile Banking App',
-          requestedBy: 'Jane Doe (Resource Manager)',
-          requestDate: '2025-08-08',
-          status: 'Approved',
-          priority: 'Medium',
-          requiredResources: [
-            { role: 'Mobile Developer', quantity: 2, experience: '3+ years', skills: 'React Native, Flutter' },
-          ],
-          justification: 'Scaling up mobile development team',
-        },
-        {
-          id: 3,
-          requestId: 'RM-REQ-003',
-          project: 'Data Analytics Dashboard',
-          requestedBy: 'Mike Johnson (Resource Manager)',
-          requestDate: '2025-08-07',
-          status: 'Pending',
-          priority: 'Low',
-          requiredResources: [
-            { role: 'Data Analyst', quantity: 1, experience: '2+ years', skills: 'Python, SQL, Tableau' },
-          ],
-          justification: 'Need analytics support for reporting',
-        },
-        {
-          id: 4,
-          requestId: 'RM-REQ-004',
-          project: 'CRM System',
-          requestedBy: 'Sarah Williams (Resource Manager)',
-          requestDate: '2025-08-06',
-          status: 'Rejected',
-          priority: 'High',
-          requiredResources: [
-            { role: 'Backend Developer', quantity: 3, experience: '4+ years', skills: 'Java, Spring Boot' },
-          ],
-          justification: 'Backend development for CRM module',
-        },
-      ]);
-    } catch (err) {
-      setError('Failed to load resource requests');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    // There is no backend route for Resource Manager requests in either upload —
+    // server.js references ./routes/ResourceManager/Index but that file (and
+    // whatever it requires, e.g. a resourceRequests.js) was never sent.
+    // Rather than show fake numbers, this tab now loads empty and says so.
+    // Once you send that route file, replace this function with a real
+    // axios.get(`${API_BASE}/resource-requests`) — same pattern as the other tabs.
+    setLoading(true);
+    setResourceRequests([]);
+    setNotConnected(true);
+    setLoading(false);
   };
 
   const showSuccessAlert = (message, title = 'Success!') => {
@@ -131,41 +78,25 @@ export default function HRResourceRequestsTab() {
   };
 
   const handleApprove = async (id) => {
-    const result = await showConfirmationAlert(
-      'Approve Resource Request',
-      'Are you sure you want to approve this resource request? This will notify the Resource Manager.',
-      'Yes, Approve'
-    );
-    if (!result.isConfirmed) return;
-
-    try {
-      setResourceRequests(requests.map(req => 
-        req.id === id ? { ...req, status: 'Approved' } : req
-      ));
-      showSuccessAlert('Resource request approved successfully!');
-    } catch (err) {
-      showErrorAlert('Failed to approve request');
-      console.error(err);
-    }
+    Swal.fire({
+      title: 'Not Connected Yet',
+      text: 'This tab has no backend endpoint to approve against yet — send the ResourceManager route file and this button will work.',
+      icon: 'info',
+      confirmButtonColor: 'var(--color-primary)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+    });
   };
 
   const handleReject = async (id) => {
-    const result = await showConfirmationAlert(
-      'Reject Resource Request',
-      'Are you sure you want to reject this resource request? This action cannot be undone.',
-      'Yes, Reject'
-    );
-    if (!result.isConfirmed) return;
-
-    try {
-      setResourceRequests(requests.map(req => 
-        req.id === id ? { ...req, status: 'Rejected' } : req
-      ));
-      showSuccessAlert('Resource request rejected successfully!');
-    } catch (err) {
-      showErrorAlert('Failed to reject request');
-      console.error(err);
-    }
+    Swal.fire({
+      title: 'Not Connected Yet',
+      text: 'This tab has no backend endpoint to reject against yet — send the ResourceManager route file and this button will work.',
+      icon: 'info',
+      confirmButtonColor: 'var(--color-primary)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+    });
   };
 
   const openDetailsModal = (request) => {
@@ -192,6 +123,20 @@ export default function HRResourceRequestsTab() {
         <h1 style={styles.title}>Resource Requests</h1>
         <p style={styles.subtitle}>Review resource requests from Resource Managers</p>
       </div>
+
+      {notConnected && (
+        <div className="glass-card" style={{
+          padding: '16px 20px',
+          marginBottom: '20px',
+          border: '1px solid var(--color-warning)',
+          color: 'var(--color-warning)',
+          fontSize: '14px',
+          fontWeight: '600',
+        }}>
+          ⚠ Not connected to a backend yet — there's no ResourceManager route file to call.
+          This tab is empty (not mock data) until that endpoint is provided.
+        </div>
+      )}
 
       <div className="glass-card" style={styles.card}>
         <div style={styles.toolbar}>
