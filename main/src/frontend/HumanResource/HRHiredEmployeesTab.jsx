@@ -1,5 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import hrClient from './Hrclient';
+
+
+const mapHire = (row) => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  phone: row.phone || '',
+  position: row.positions?.position_name || '',
+  department: row.departments?.department_name || '',
+  hireDate: row.hire_date,
+  salary: row.salary || 0,
+  status: row.status,
+  // The hired_employees table doesn't store interviewer/interview date directly —
+  // check the linked interview record (interview_id) on the Interviews tab for that.
+  interviewer: '',
+  interviewDate: '',
+});
 
 export default function HRHiredEmployeesTab() {
   const [hiredEmployees, setHiredEmployees] = useState([]);
@@ -17,48 +35,10 @@ export default function HRHiredEmployeesTab() {
   const loadHiredEmployees = async () => {
     try {
       setLoading(true);
-      // Mock data for now - these are applicants who were hired
-      setHiredEmployees([
-        {
-          id: 1,
-          name: 'Emily Davis',
-          email: 'emily.davis@email.com',
-          phone: '+63 967 890 1234',
-          position: 'Senior Software Engineer',
-          department: 'Engineering',
-          hireDate: '2025-08-10',
-          salary: '95000',
-          status: 'Active',
-          interviewer: 'Tech Lead',
-          interviewDate: '2025-08-16',
-        },
-        {
-          id: 2,
-          name: 'John Smith',
-          email: 'john.smith@email.com',
-          phone: '+63 912 345 6789',
-          position: 'Data Analyst',
-          department: 'Analytics',
-          hireDate: '2025-08-05',
-          salary: '65000',
-          status: 'Active',
-          interviewer: 'Data Manager',
-          interviewDate: '2025-08-01',
-        },
-        {
-          id: 3,
-          name: 'Lisa Wong',
-          email: 'lisa.wong@email.com',
-          phone: '+63 923 456 7890',
-          position: 'UI/UX Designer',
-          department: 'Design',
-          hireDate: '2025-07-28',
-          salary: '75000',
-          status: 'Onboarding',
-          interviewer: 'Design Lead',
-          interviewDate: '2025-07-25',
-        },
-      ]);
+      setError(null);
+      const res = await hrClient.get(`/hired-employees`);
+      const rows = res.data?.data || [];
+      setHiredEmployees(rows.map(mapHire));
     } catch (err) {
       setError('Failed to load hired employees');
       console.error(err);
