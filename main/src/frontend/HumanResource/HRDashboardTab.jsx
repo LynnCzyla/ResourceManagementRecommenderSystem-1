@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import hrClient from './Hrclient';
+
 
 export default function HRDashboardTab() {
   const [stats, setStats] = useState({
@@ -22,25 +23,48 @@ export default function HRDashboardTab() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      // Mock data for now - will be replaced with actual API calls
+      setError(null);
+
+      const [summaryRes, postingsRes, applicationsRes] = await Promise.all([
+        hrClient.get(`/dashboard/summary`),
+        hrClient.get(`/job-postings`),
+        hrClient.get(`/applications`),
+      ]);
+
+      const summary = summaryRes.data?.data || {};
+      const postings = postingsRes.data?.data || [];
+      const applications = applicationsRes.data?.data || [];
+
       setStats({
-        totalJobPostings: 12,
-        activeJobPostings: 8,
-        totalApplications: 45,
-        pendingApplications: 15,
-        recommendedForEmployment: 8,
-        pendingResourceRequests: 5,
+        totalJobPostings: postings.length,
+        activeJobPostings: summary.activeJobPostings || 0,
+        totalApplications: applications.length,
+        pendingApplications: summary.pendingApplications || 0,
+        recommendedForEmployment: applications.filter(a => a.status === 'Recommended').length,
+        // NOTE: no Resource Requests backend route was included in the uploaded backend,
+        // so this stays at 0 until that endpoint exists. See HRResourceRequestsTab.jsx.
+        pendingResourceRequests: 0,
       });
-      setRecentApplications([
-        { id: 1, name: 'John Doe', position: 'Software Engineer', status: 'Pending', date: '2025-08-09' },
-        { id: 2, name: 'Jane Smith', position: 'Data Analyst', status: 'Under Review', date: '2025-08-08' },
-        { id: 3, name: 'Mike Johnson', position: 'Project Manager', status: 'Recommended', date: '2025-08-07' },
-      ]);
-      setRecentPostings([
-        { id: 1, title: 'Senior Software Engineer', applications: 12, status: 'Active', date: '2025-08-05' },
-        { id: 2, title: 'Data Analyst', applications: 8, status: 'Active', date: '2025-08-03' },
-        { id: 3, title: 'UI/UX Designer', applications: 5, status: 'Active', date: '2025-08-01' },
-      ]);
+
+      setRecentApplications(
+        applications.slice(0, 3).map(app => ({
+          id: app.id,
+          name: `${app.first_name} ${app.last_name}`,
+          position: app.position_applied,
+          status: app.status,
+          date: app.applied_date,
+        }))
+      );
+
+      setRecentPostings(
+        postings.slice(0, 3).map(p => ({
+          id: p.id,
+          title: p.title,
+          applications: p.applications || 0,
+          status: p.status,
+          date: p.posted_date,
+        }))
+      );
     } catch (err) {
       setError('Failed to load dashboard data');
       console.error(err);
