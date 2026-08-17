@@ -1,5 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import hrClient from './Hrclient';
+
+
+const mapInterview = (row) => ({
+  id: row.id,
+  applicationId: row.application_id,
+  applicantId: row.application_id,
+  applicantName: `${row.job_applications?.first_name || ''} ${row.job_applications?.last_name || ''}`.trim(),
+  applicantEmail: row.job_applications?.email || '',
+  applicantPhone: row.job_applications?.phone || '',
+  position: row.job_applications?.position_applied || '',
+  department: row.job_applications?.department || '',
+  interviewDate: row.interview_date,
+  interviewTime: row.interview_time,
+  interviewer: row.interviewer,
+  interviewType: row.interview_type,
+  location: row.location || '',
+  status: row.status,
+  notes: row.notes || '',
+});
 
 export default function HRInterviewsTab() {
   const [interviews, setInterviews] = useState([]);
@@ -33,57 +53,10 @@ export default function HRInterviewsTab() {
   const loadInterviews = async () => {
     try {
       setLoading(true);
-      // Mock data for now - these are applicants scheduled for interview
-      setInterviews([
-        {
-          id: 1,
-          applicantId: 3,
-          applicantName: 'Mike Johnson',
-          applicantEmail: 'mike.johnson@email.com',
-          applicantPhone: '+63 934 567 8901',
-          position: 'Project Manager',
-          department: 'Operations',
-          interviewDate: '2025-08-15',
-          interviewTime: '10:00 AM',
-          interviewer: 'HR Manager',
-          interviewType: 'Technical Interview',
-          location: 'Conference Room A',
-          status: 'Scheduled',
-          notes: '',
-        },
-        {
-          id: 2,
-          applicantId: 6,
-          applicantName: 'Emily Davis',
-          applicantEmail: 'emily.davis@email.com',
-          applicantPhone: '+63 967 890 1234',
-          position: 'Senior Software Engineer',
-          department: 'Engineering',
-          interviewDate: '2025-08-16',
-          interviewTime: '2:00 PM',
-          interviewer: 'Tech Lead',
-          interviewType: 'Initial Screening',
-          location: 'Video Call',
-          status: 'Completed',
-          notes: 'Strong technical skills, good communication',
-        },
-        {
-          id: 3,
-          applicantId: 7,
-          applicantName: 'Robert Chen',
-          applicantEmail: 'robert.chen@email.com',
-          applicantPhone: '+63 978 901 2345',
-          position: 'Data Analyst',
-          department: 'Analytics',
-          interviewDate: '2025-08-17',
-          interviewTime: '11:00 AM',
-          interviewer: 'Data Manager',
-          interviewType: 'Technical Interview',
-          location: 'Conference Room B',
-          status: 'Scheduled',
-          notes: '',
-        },
-      ]);
+      setError(null);
+      const res = await hrClient.get(`/interviews`);
+      const rows = res.data?.data || [];
+      setInterviews(rows.map(mapInterview));
     } catch (err) {
       setError('Failed to load interviews');
       console.error(err);
@@ -150,12 +123,11 @@ export default function HRInterviewsTab() {
     if (!result.isConfirmed) return;
 
     try {
-      setInterviews(interviews.map(int => 
-        int.id === id ? { ...int, status: 'Completed' } : int
-      ));
+      await hrClient.put(`/interviews/${id}/status`, { status: 'Completed' });
+      await loadInterviews();
       showSuccessAlert('Interview marked as completed!');
     } catch (err) {
-      showErrorAlert('Failed to complete interview');
+      showErrorAlert(err.response?.data?.error || 'Failed to complete interview');
       console.error(err);
     }
   };
@@ -169,12 +141,26 @@ export default function HRInterviewsTab() {
     if (!result.isConfirmed) return;
 
     try {
-      setInterviews(interviews.map(int => 
-        int.id === id ? { ...int, status: 'Hired' } : int
-      ));
+      const interview = interviews.find(int => int.id === id);
+
+      // Marking the interview as Hired also flips the linked application to Hired on the backend.
+      await hrClient.put(`/interviews/${id}/status`, { status: 'Hired' });
+
+      // Create the actual hired-employee record so it shows up in Hired Employees.
+      if (interview) {
+        await hrClient.post(`/hired-employees`, {
+          application_id: interview.applicationId,
+          interview_id: id,
+          name: interview.applicantName,
+          email: interview.applicantEmail,
+          phone: interview.applicantPhone,
+        });
+      }
+
+      await loadInterviews();
       showSuccessAlert('Applicant hired successfully!');
     } catch (err) {
-      showErrorAlert('Failed to hire applicant');
+      showErrorAlert(err.response?.data?.error || 'Failed to hire applicant');
       console.error(err);
     }
   };
@@ -188,12 +174,11 @@ export default function HRInterviewsTab() {
     if (!result.isConfirmed) return;
 
     try {
-      setInterviews(interviews.map(int => 
-        int.id === id ? { ...int, status: 'Rejected' } : int
-      ));
+      await hrClient.put(`/interviews/${id}/status`, { status: 'Rejected' });
+      await loadInterviews();
       showSuccessAlert('Applicant rejected successfully!');
     } catch (err) {
-      showErrorAlert('Failed to reject applicant');
+      showErrorAlert(err.response?.data?.error || 'Failed to reject applicant');
       console.error(err);
     }
   };
@@ -216,36 +201,32 @@ export default function HRInterviewsTab() {
     setShowScheduleModal(true);
   };
 
-  const handleScheduleSubmit = (e) => {
+  const handleScheduleSubmit = async (e) => {
     e.preventDefault();
-    // Create new interview
-    const newInterview = {
-      id: interviews.length + 1,
-      applicantId: selectedApplicant.id,
-      applicantName: selectedApplicant.name,
-      applicantEmail: selectedApplicant.email,
-      applicantPhone: selectedApplicant.phone,
-      position: selectedApplicant.position,
-      department: selectedApplicant.department,
-      interviewDate: scheduleForm.date,
-      interviewTime: scheduleForm.time,
-      interviewer: scheduleForm.interviewer,
-      interviewType: scheduleForm.interviewType,
-      location: scheduleForm.location,
-      status: 'Scheduled',
-      notes: scheduleForm.notes,
-    };
-    setInterviews([...interviews, newInterview]);
-    setShowScheduleModal(false);
-    showSuccessAlert('Interview scheduled successfully!');
-    
-    // Open email modal to send Gmail
-    setEmailForm({
-      to: selectedApplicant.email,
-      subject: `Interview Invitation - ${selectedApplicant.position} at WEA`,
-      body: `Dear ${selectedApplicant.name},\n\nWe are pleased to invite you for an interview for the ${selectedApplicant.position} position.\n\nInterview Details:\nDate: ${scheduleForm.date}\nTime: ${scheduleForm.time}\nInterviewer: ${scheduleForm.interviewer}\nType: ${scheduleForm.interviewType}\nLocation: ${scheduleForm.location}\n\nPlease confirm your attendance by replying to this email.\n\nBest regards,\nWEA HR Team`,
-    });
-    setShowEmailModal(true);
+    try {
+      await hrClient.post(`/interviews`, {
+        application_id: selectedApplicant.id,
+        interview_date: scheduleForm.date,
+        interview_time: scheduleForm.time,
+        interviewer: scheduleForm.interviewer,
+        interview_type: scheduleForm.interviewType,
+        location: scheduleForm.location,
+      });
+      await loadInterviews();
+      setShowScheduleModal(false);
+      showSuccessAlert('Interview scheduled successfully!');
+
+      // Open email modal to send Gmail
+      setEmailForm({
+        to: selectedApplicant.email,
+        subject: `Interview Invitation - ${selectedApplicant.position} at WEA`,
+        body: `Dear ${selectedApplicant.name},\n\nWe are pleased to invite you for an interview for the ${selectedApplicant.position} position.\n\nInterview Details:\nDate: ${scheduleForm.date}\nTime: ${scheduleForm.time}\nInterviewer: ${scheduleForm.interviewer}\nType: ${scheduleForm.interviewType}\nLocation: ${scheduleForm.location}\n\nPlease confirm your attendance by replying to this email.\n\nBest regards,\nWEA HR Team`,
+      });
+      setShowEmailModal(true);
+    } catch (err) {
+      showErrorAlert(err.response?.data?.error || 'Failed to schedule interview');
+      console.error(err);
+    }
   };
 
   const handleSendEmail = (e) => {
