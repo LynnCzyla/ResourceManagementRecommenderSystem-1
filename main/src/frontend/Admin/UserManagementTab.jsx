@@ -667,7 +667,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                       <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{u.name}</td>
                       <td style={styles.td}>{u.email}</td>
                       <td style={styles.td}>
-                        <span style={{ ...styles.roleBadge, backgroundColor: u.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : u.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(2, 132, 199, 0.1)', color: u.role === 'Admin' ? 'var(--color-danger)' : u.role === 'Resource Manager' ? 'var(--color-primary)' : 'var(--color-accent)' }}>
+                        <span style={{ ...styles.roleBadge, backgroundColor: u.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : u.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : u.role === 'HR' ? 'rgba(139, 92, 246, 0.1)' : 'rgba(2, 132, 199, 0.1)', color: u.role === 'Admin' ? 'var(--color-danger)' : u.role === 'Resource Manager' ? 'var(--color-primary)' : u.role === 'HR' ? '#8b5cf6' : 'var(--color-accent)' }}>
                           {u.role}
                         </span>
                       </td>
@@ -859,7 +859,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                       </td>
                       <td style={styles.td}><a href={`mailto:${acc.email}`} style={{ color: 'var(--color-text-secondary)', textDecoration: 'none' }}>{acc.email}</a></td>
                       <td style={styles.td}>
-                        <span style={{ ...styles.roleBadge, backgroundColor: acc.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : acc.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : acc.role === 'Project Manager' ? 'rgba(2, 132, 199, 0.1)' : 'rgba(107, 114, 128, 0.1)', color: acc.role === 'Admin' ? 'var(--color-danger)' : acc.role === 'Resource Manager' ? 'var(--color-primary)' : acc.role === 'Project Manager' ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
+                        <span style={{ ...styles.roleBadge, backgroundColor: acc.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : acc.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.1)' : acc.role === 'Project Manager' ? 'rgba(2, 132, 199, 0.1)' : acc.role === 'HR' ? 'rgba(139, 92, 246, 0.1)' : 'rgba(107, 114, 128, 0.1)', color: acc.role === 'Admin' ? 'var(--color-danger)' : acc.role === 'Resource Manager' ? 'var(--color-primary)' : acc.role === 'Project Manager' ? 'var(--color-accent)' : acc.role === 'HR' ? '#8b5cf6' : 'var(--color-text-secondary)' }}>
                           {acc.role}
                         </span>
                       </td>
@@ -929,6 +929,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
+                  <option value="Human Resources">Human Resources</option>
+
                 </select>
               </div>
               <div style={styles.modalActions}>
