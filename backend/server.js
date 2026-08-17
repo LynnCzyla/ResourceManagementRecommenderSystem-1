@@ -23,10 +23,13 @@ const notificationsRouter = require('./routes/notifications');
 const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
+const applicantRoutes = require('./routes/applicant/applicantRoutes');
 
 app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
+app.use('/api/hr', require('./routes/HumanResource/Index'));
 
+app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/admin', departmentsPositionsRoutes);
 app.use('/api/admin', contactAdminRoutes);
