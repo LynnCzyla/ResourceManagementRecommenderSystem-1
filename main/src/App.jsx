@@ -1,4 +1,4 @@
-// src/App.jsx - FIXED version
+// src/App.jsx - FIXED version (+ key={currentUser.id} fix for stale-data-after-relogin bug)
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './frontend/Login';
 import ResetPassword from './frontend/ResetPassword';
@@ -28,18 +28,18 @@ const ACTIVE_TAB_STORAGE_KEYS = [
 const sanitizeUserForStorage = (userObj) => {
   if (!userObj) return null;
   const sanitized = { ...userObj };
-  
+
   if (sanitized.avatar && sanitized.avatar.startsWith('data:image')) {
     sanitized.avatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
   }
-  
+
   if (sanitized.profile) {
     sanitized.profile = { ...sanitized.profile };
     if (sanitized.profile.avatar_url && sanitized.profile.avatar_url.startsWith('data:image')) {
       sanitized.profile.avatar_url = null;
     }
   }
-  
+
   return sanitized;
 };
 
@@ -402,43 +402,43 @@ function App() {
 
   const toggleTheme = () => setIsDark(!isDark);
 
-      const handleLogin = async (userProfile) => {
-      console.log('🔍 User logged in:', userProfile);
+  const handleLogin = async (userProfile) => {
+    console.log('🔍 User logged in:', userProfile);
 
-      ACTIVE_TAB_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+    ACTIVE_TAB_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
 
-      try {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('role, first_name, middle_name, last_name, avatar_url, employee_id')
-          .eq('id', userProfile.id)
-          .single();
+    try {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('role, first_name, middle_name, last_name, avatar_url, employee_id')
+        .eq('id', userProfile.id)
+        .single();
 
-        if (profileData) {
-          userProfile = {
-            ...userProfile,
-            name: `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}`,
-            avatar: profileData.avatar_url ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
-            employee_id: profileData.employee_id,
-            profile: profileData,
-            first_name: profileData.first_name,
-            last_name: profileData.last_name,
-            middle_name: profileData.middle_name,
-            role: profileData.role || userProfile.role,
-          };
-        }
-      } catch (err) {
-        console.error('Could not fetch fresh profile on login:', err);
+      if (profileData) {
+        userProfile = {
+          ...userProfile,
+          name: `${profileData.first_name} ${profileData.middle_name ? profileData.middle_name + ' ' : ''}${profileData.last_name}`,
+          avatar: profileData.avatar_url ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
+          employee_id: profileData.employee_id,
+          profile: profileData,
+          first_name: profileData.first_name,
+          last_name: profileData.last_name,
+          middle_name: profileData.middle_name,
+          role: profileData.role || userProfile.role,
+        };
       }
+    } catch (err) {
+      console.error('Could not fetch fresh profile on login:', err);
+    }
 
-      console.log('🔍 User role:', userProfile.role);
-      localStorage.setItem('user', JSON.stringify(sanitizeUserForStorage(userProfile)));
-      localStorage.setItem('loginTime', Date.now().toString());
-      userActivityRef.current = Date.now();
-      setCurrentUser(userProfile);
-      setIsLoggedIn(true);
-    };
+    console.log('🔍 User role:', userProfile.role);
+    localStorage.setItem('user', JSON.stringify(sanitizeUserForStorage(userProfile)));
+    localStorage.setItem('loginTime', Date.now().toString());
+    userActivityRef.current = Date.now();
+    setCurrentUser(userProfile);
+    setIsLoggedIn(true);
+  };
 
   const handleLogout = async () => {
     const result = await showConfirmationAlert(
@@ -483,21 +483,30 @@ function App() {
     );
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // FIX: key={currentUser.id} on every layout below forces React to
+  // fully destroy and recreate the layout tree (and every tab's
+  // useEffect fetch) whenever the logged-in user's identity changes,
+  // instead of silently reusing a stale mounted instance across a
+  // logout/login cycle that doesn't trigger a true hard page reload.
+  // This is what was causing Applications/Onboarding/Archived to show
+  // stale/empty data after logging back in without a full reload.
+  // ────────────────────────────────────────────────────────────────
   const renderLayout = () => {
     if (!currentUser) return null;
     const role = currentUser.role;
     console.log('🎯 Rendering layout for role:', role);
     switch (role) {
       case 'Admin':
-        return <AdminLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <AdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       case 'Project Manager':
-        return <PMLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <PMLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       case 'Resource Manager':
-        return <RMLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <RMLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       case 'Human Resources':
-        return <HRLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <HRLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       default:
-        return <EmployeeLayout user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <EmployeeLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
     }
   };
 
