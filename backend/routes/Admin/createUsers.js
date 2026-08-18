@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
+const path = require("path");
 const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Generate a random password
@@ -72,6 +73,9 @@ const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporar
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8fafc; border-radius: 12px;">
         <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+          <div style="margin-bottom: 12px;">
+            <img src="cid:wealogo" alt="WEA Logo" style="height: 60px; object-fit: contain;" />
+          </div>
           <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to WEA!</h1>
           <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">Resource Management System</p>
         </div>
@@ -106,7 +110,12 @@ const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporar
           </p>
         </div>
       </div>
-    `
+    `,
+    attachments: [{
+      filename: 'WEA_logo_bgremoved.png',
+      path: path.join(__dirname, '../../../main/src/assets/WEA_logo_bgremoved.png'),
+      cid: 'wealogo'
+    }]
   };
 
   try {
