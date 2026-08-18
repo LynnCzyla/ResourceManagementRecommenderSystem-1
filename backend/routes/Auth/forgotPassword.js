@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
+const path = require("path");
 const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Self-contained transporter (mirrors createUsers.js's setup)
@@ -30,8 +31,8 @@ const sendResetEmail = async (email, resetLink) => {
 
           <!-- Header -->
           <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
-            <div style="display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 14px; background: rgba(16, 185, 129, 0.15); margin-bottom: 16px;">
-              <span style="font-size: 26px; line-height: 56px;">🔒</span>
+            <div style="margin-bottom: 16px;">
+              <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
             </div>
             <h1 style="font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
               Reset Your Password
@@ -76,7 +77,12 @@ const sendResetEmail = async (email, resetLink) => {
           © WEA Resource Management System
         </p>
       </div>
-    `
+    `,
+    attachments: [{
+      filename: 'WEA_logo_bgremoved.png',
+      path: path.join(__dirname, '../../main/src/assets/WEA_logo_bgremoved.png'),
+      cid: 'wealogo'
+    }]
   };
 
   await transporter.sendMail(mailOptions);
