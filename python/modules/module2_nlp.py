@@ -597,9 +597,14 @@ class NLPProcessor:
 
         return result
 
-    def _save_component_to_db(self, skill_name, components, category='Other'):
+    def _save_component_to_db(self, skill_name, components, category='Other',
+                               document_id=None, employee_id=None, reviewed_by=None):
         """
-        Persist a compound skill's atomic components to Supabase.
+        Persist a compound skill's atomic components to Supabase, AND
+        auto-feed each component into feedback_training labeled 'Skill' so
+        it's usable as a training example immediately - no separate backfill
+        script needed going forward (see fix_existing_data.py STEP 3, which
+        was a one-time catch-up for components saved before this existed).
         skill_name is the full compound phrase (kept as-is in `skills`);
         components are the split-out atomic phrases stored in
         `skill_components`, each linked back to skill_name's skill_id.
@@ -620,8 +625,54 @@ class NLPProcessor:
                 ).execute()
             self._invalidate_facts_cache()
             print(f"[NLP] Saved {len(components)} atomic components for '{skill_name}': {components}")
+
+            # ============ NEW: auto-feed components into feedback_training ============
+            self._sync_components_to_feedback(components, document_id, employee_id, reviewed_by)
+            # ================================================================================
         except Exception as e:
             print(f"[NLP] Error saving components for '{skill_name}': {e}")
+
+    def _sync_components_to_feedback(self, components, document_id=None,
+                                      employee_id=None, reviewed_by=None):
+        """
+        Insert each atomic component into feedback_training with
+        label='Skill', skipping any phrase already present there
+        (case-insensitive) so re-processing the same compound skill never
+        creates duplicate feedback rows. Mirrors fix_existing_data.py's
+        STEP 3 logic, but runs live at split-time instead of as a one-time
+        batch job.
+        """
+        if not components:
+            return
+        try:
+            client = supabase.get_client()
+            if not client:
+                return
+
+            existing_resp = client.table('feedback_training').select('phrase').execute()
+            existing_lower = {row['phrase'].strip().lower() for row in (existing_resp.data or [])}
+            existing_lower.update(p.strip().lower() for p in self.feedback_log.get('approved', []))
+
+            for component_name in components:
+                component_lower = component_name.strip().lower()
+                if component_lower in existing_lower:
+                    continue
+
+                self._save_feedback_to_db(component_name, 'Skill', document_id, employee_id, reviewed_by)
+                existing_lower.add(component_lower)
+
+                self.feedback_log.setdefault('approved', [])
+                if component_name not in self.feedback_log['approved']:
+                    self.feedback_log['approved'].append(component_name)
+                self.learned_skills.add(component_lower)
+                self.skill_dictionary.setdefault(component_lower, 'Other')
+                for w in component_lower.split():
+                    if len(w) > 3:
+                        self.learned_skill_keywords.add(w)
+
+                print(f"[NLP] Auto-fed component into feedback_training: '{component_name}' (label=Skill)")
+        except Exception as e:
+            print(f"[NLP] Error syncing components to feedback_training: {e}")
 
     def _save_feedback_to_db(self, phrase, label, document_id=None, employee_id=None, reviewed_by=None):
         """Insert one approve/reject decision into feedback_training."""
@@ -1150,7 +1201,18 @@ class NLPProcessor:
                 except Exception as e:
                     print(f"[MERGE] Error loading: {e}")
         # =====================================================
-        
+
+        # ============ WORD OVERLAP (moved up so category check can use it) ============
+        # Stopwords ("and", "of", "for"...) inflate overlap without being real
+        # semantic evidence — "Technical Sales And Engineering Support" and
+        # "Document Control And Management" share only "and", which made them
+        # look like 1-word-overlap instead of true zero-overlap.
+        STOPWORDS_FOR_OVERLAP = set(LEADING_CONNECTORS)  # and, of, for, with, to, in, on, at
+        words1 = set(skill1.lower().split()) - STOPWORDS_FOR_OVERLAP
+        words2 = set(skill2.lower().split()) - STOPWORDS_FOR_OVERLAP
+        overlap = len(words1 & words2)
+        # ===================================================
+
         # ============ CATEGORY PROTECTION ============
         cat1 = self.skill_dictionary.get(skill1, 'Other')
         cat2 = self.skill_dictionary.get(skill2, 'Other')
@@ -1159,12 +1221,14 @@ class NLPProcessor:
         if cat1 != cat2 and cat1 != 'Other' and cat2 != 'Other':
             print(f"[SMART] Different categories: '{skill1}' ({cat1}) vs '{skill2}' ({cat2})")
             return False
+
+        # NEW: when either side is still uncategorized ('Other'), the check
+        # above can't protect us. Require real lexical overlap instead of
+        # trusting vector similarity alone.
+        if (cat1 == 'Other' or cat2 == 'Other') and overlap == 0:
+            print(f"[SMART] Uncategorized + zero overlap: '{skill1}' <-> '{skill2}' — blocking, insufficient evidence")
+            return False
         # ===================================================
-        
-        # ============ WORD OVERLAP PROTECTION ============
-        words1 = set(skill1.lower().split())
-        words2 = set(skill2.lower().split())
-        overlap = len(words1 & words2)
         
         # Calculate similarity
         similarity = self._calculate_similarity(skill1, skill2)
@@ -1172,6 +1236,14 @@ class NLPProcessor:
         # If they only share 1 word, require higher similarity
         if overlap == 1 and similarity < 0.85:
             print(f"[SMART] Only 1 word overlap: '{skill1}' <-> '{skill2}' (sim: {similarity:.2f})")
+            return False
+
+        # NEW: zero shared words = require near-certain similarity. Vector
+        # similarity alone is easy to fool with generic vocabulary overlap
+        # ("management", "support", "technical") when the phrases share no
+        # actual words.
+        if overlap == 0 and similarity < 0.92:
+            print(f"[SMART] Zero word overlap: '{skill1}' <-> '{skill2}' (sim: {similarity:.2f})")
             return False
         # ===================================================
         
@@ -2162,7 +2234,10 @@ class NLPProcessor:
                 # skill text is used so components keep their display casing.
                 components = self._split_into_atomic_skills(skill.strip())
                 if components:
-                    self._save_component_to_db(skill_key, components, self.skill_dictionary.get(skill_key, 'Other'))
+                    self._save_component_to_db(
+                        skill_key, components, self.skill_dictionary.get(skill_key, 'Other'),
+                        document_id=document_id, employee_id=employee_id, reviewed_by=reviewed_by
+                    )
                 # ========================================================================
                     
         # Re-run merge (this will create aliases, not delete)
