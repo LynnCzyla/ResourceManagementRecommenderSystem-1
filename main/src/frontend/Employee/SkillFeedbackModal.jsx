@@ -43,6 +43,8 @@ export default function SkillFeedbackModal({
         return skills.map(s => getSkillName(s));
     };
 
+    const skillKey = (skill) => getSkillName(skill).toLowerCase().replace(/\s+/g, ' ').trim();
+
     // ============ FIX: Only reset/refetch when the modal opens for a NEW document ============
     // The old version watched `needsReview` (an array prop). Arrays are recreated on every
     // parent re-render even when their contents haven't changed, so React saw a "new" array
@@ -83,20 +85,29 @@ export default function SkillFeedbackModal({
 
     const handleApprove = (skill) => {
         const skillName = getSkillName(skill);
-        setApproved(prev => [...prev, skillName]);
-        setRejected(prev => prev.filter(s => getSkillName(s) !== skillName));
+        const key = skillKey(skillName);
+        setApproved(prev => {
+            if (prev.some(s => skillKey(s) === key)) return prev;
+            return [...prev, skillName];
+        });
+        setRejected(prev => prev.filter(s => skillKey(s) !== key));
     };
 
     const handleReject = (skill) => {
         const skillName = getSkillName(skill);
-        setRejected(prev => [...prev, skillName]);
-        setApproved(prev => prev.filter(s => getSkillName(s) !== skillName));
+        const key = skillKey(skillName);
+        setRejected(prev => {
+            if (prev.some(s => skillKey(s) === key)) return prev;
+            return [...prev, skillName];
+        });
+        setApproved(prev => prev.filter(s => skillKey(s) !== key));
     };
 
     const handleUndo = (skill) => {
         const skillName = getSkillName(skill);
-        setApproved(prev => prev.filter(s => s !== skillName));
-        setRejected(prev => prev.filter(s => s !== skillName));
+        const key = skillKey(skillName);
+        setApproved(prev => prev.filter(s => skillKey(s) !== key));
+        setRejected(prev => prev.filter(s => skillKey(s) !== key));
     };
 
     const handleSubmit = async () => {
@@ -151,16 +162,17 @@ export default function SkillFeedbackModal({
     // needs-review list (same name, different casing/whitespace). If a skill was
     // already auto-approved, it should never also sit in the pending list.
     const autoApprovedKeySet = new Set(
-        rawNormalizedAutoApproved.map(s => s.toLowerCase().trim())
+        rawNormalizedAutoApproved.map(s => skillKey(s))
     );
     const normalizedAutoApproved = rawNormalizedAutoApproved;
     const normalizedNeedsReview = rawNormalizedNeedsReview.filter(
-        s => !autoApprovedKeySet.has(s.toLowerCase().trim())
+        s => !autoApprovedKeySet.has(skillKey(s))
     );
 
     // Get pending skills (not yet approved or rejected)
     const pendingSkills = normalizedNeedsReview.filter(s => 
-        !approved.includes(s) && !rejected.includes(s)
+        !approved.some(a => skillKey(a) === skillKey(s)) &&
+        !rejected.some(r => skillKey(r) === skillKey(s))
     );
     const canSave = !!documentId && !submitting;
 
@@ -349,9 +361,6 @@ export default function SkillFeedbackModal({
                 )}
 
                 <div style={modalStyles.footer}>
-                    <button onClick={handleSkip} style={modalStyles.skipBtn}>
-                        Skip for now
-                    </button>
                     <div style={modalStyles.footerRight}>
                         <button onClick={onClose} style={modalStyles.cancelBtn}>
                             Cancel
@@ -365,7 +374,7 @@ export default function SkillFeedbackModal({
                             }}
                             disabled={!canSave}
                         >
-                            {submitting ? 'Saving...' : 'Save Feedback'}
+                            {submitting ? 'Saving...' : 'Save'}
                         </button>
                     </div>
                 </div>
