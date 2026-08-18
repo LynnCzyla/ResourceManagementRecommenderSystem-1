@@ -90,6 +90,47 @@ const normalizeSkill = (skill) => {
 // Case-insensitive, whitespace-collapsed. Never used for display — only for matching.
 const skillKey = (skill) => normalizeSkill(skill).toLowerCase().replace(/\s+/g, ' ').trim();
 
+// Secondary key for looser matching in auto-approve fallback.
+// Helps match variants like "Power Point" vs "PowerPoint".
+const compactSkillKey = (skill) => normalizeSkill(skill).toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const singularizeToken = (token) => {
+    if (!token || token.length < 4) return token;
+    if (token.endsWith('ies') && token.length > 4) return `${token.slice(0, -3)}y`;
+    if (token.endsWith('ses') || token.endsWith('xes') || token.endsWith('zes')) return token.slice(0, -2);
+    if (token.endsWith('s') && !token.endsWith('ss')) return token.slice(0, -1);
+    return token;
+};
+
+const singularSkillKey = (skill) => {
+    const tokens = skillKey(skill).split(' ').map(singularizeToken).filter(Boolean);
+    return tokens.join(' ').trim();
+};
+
+const singularCompactSkillKey = (skill) => {
+    const tokens = skillKey(skill).split(' ').map(singularizeToken).filter(Boolean);
+    return tokens.join('').replace(/[^a-z0-9]+/g, '');
+};
+
+const buildComparisonKeys = (skill) => {
+    const strict = skillKey(skill);
+    const compact = compactSkillKey(skill);
+    const singular = singularSkillKey(skill);
+    const singularCompact = singularCompactSkillKey(skill);
+
+    return [strict, compact, singular, singularCompact].filter(Boolean);
+};
+
+const addComparisonKeys = (set, skill) => {
+    for (const key of buildComparisonKeys(skill)) {
+        set.add(key);
+    }
+};
+
+const hasComparisonKey = (set, skill) => {
+    return buildComparisonKeys(skill).some(key => set.has(key));
+};
+
 // ============ NEW: load this employee's full feedback history ============
 // Pulls every skill this employee has ever approved or rejected from the
 // feedback_training table (across ALL documents, not just the current one),
@@ -111,10 +152,8 @@ async function getEmployeeFeedbackHistory(employeeId) {
         }
 
         for (const row of feedbackRows || []) {
-            const key = skillKey(row.phrase);
-            if (!key) continue;
-            if (row.label === 'Skill') approvedKeys.add(key);
-            if (row.label === 'Not Skill') rejectedKeys.add(key);
+            if (row.label === 'Skill') addComparisonKeys(approvedKeys, row.phrase);
+            if (row.label === 'Not Skill') addComparisonKeys(rejectedKeys, row.phrase);
         }
 
         console.log(`📊 Feedback history for ${employeeId}: ${approvedKeys.size} approved, ${rejectedKeys.size} rejected`);
@@ -123,6 +162,35 @@ async function getEmployeeFeedbackHistory(employeeId) {
     }
 
     return { approvedKeys, rejectedKeys };
+}
+
+// ============ NEW: global rejected-noise history ============
+// Any phrase repeatedly marked as Not Skill by other employees should be
+// treated as learned noise and should not be shown again for manual review.
+async function getGlobalRejectedNoiseKeys() {
+    const rejectedKeys = new Set();
+
+    try {
+        const { data: feedbackRows, error } = await supabase
+            .from('feedback_training')
+            .select('phrase')
+            .eq('label', 'Not Skill');
+
+        if (error) {
+            console.error('⚠️ Could not load global rejected-noise history:', error.message);
+            return rejectedKeys;
+        }
+
+        for (const row of feedbackRows || []) {
+            addComparisonKeys(rejectedKeys, row.phrase);
+        }
+
+        console.log(`📊 Global rejected-noise keys: ${rejectedKeys.size}`);
+    } catch (e) {
+        console.error('⚠️ Error loading global rejected-noise history:', e.message);
+    }
+
+    return rejectedKeys;
 }
 
 exports.processDocument = async (req, res) => {
@@ -270,12 +338,33 @@ exports.processDocument = async (req, res) => {
             console.log('⚠️ Could not load knowledge base skills for auto-approve fallback:', kbError.message);
         }
 
-        const knowledgeBaseSet = new Set(knowledgeBaseSkills.map(s => skillKey(s)));
-        const fallbackAutoApproved = extractedSkills.filter(skill => knowledgeBaseSet.has(skillKey(skill)));
+        const knowledgeBaseSet = new Set();
+        const knowledgeBaseCompactSet = new Set();
+        for (const kbSkill of knowledgeBaseSkills) {
+            addComparisonKeys(knowledgeBaseSet, kbSkill);
+            const compact = compactSkillKey(kbSkill);
+            const singularCompact = singularCompactSkillKey(kbSkill);
+            if (compact) knowledgeBaseCompactSet.add(compact);
+            if (singularCompact) knowledgeBaseCompactSet.add(singularCompact);
+        }
+        const fallbackAutoApproved = extractedSkills.filter(skill => {
+            if (hasComparisonKey(knowledgeBaseSet, skill)) return true;
+
+            const compactKey = compactSkillKey(skill);
+            const singularCompact = singularCompactSkillKey(skill);
+
+            return (
+                compactKey.length >= 4 && knowledgeBaseCompactSet.has(compactKey)
+            ) || (
+                singularCompact.length >= 4 && knowledgeBaseCompactSet.has(singularCompact)
+            );
+        });
 
         let autoApprovedNormalized = pythonAutoApproved.length > 0 ? pythonAutoApproved : fallbackAutoApproved;
+        const autoApprovedComparisonSet = new Set();
+        autoApprovedNormalized.forEach(skill => addComparisonKeys(autoApprovedComparisonSet, skill));
         let finalNeedsReview = (needsReviewNormalized.length > 0 ? needsReviewNormalized : extractedSkills).filter(skill =>
-            !new Set(autoApprovedNormalized.map(s => skillKey(s))).has(skillKey(skill)) && skill.length > 0
+            !hasComparisonKey(autoApprovedComparisonSet, skill) && skill.length > 0
         );
 
         // ============ NEW: FILTER OUT SKILLS THIS EMPLOYEE HAS ALREADY REVIEWED ============
@@ -287,6 +376,7 @@ exports.processDocument = async (req, res) => {
         // "Basic Use") would still show up as "Pending" on Document B, C, etc.
         const { approvedKeys: historyApprovedKeys, rejectedKeys: historyRejectedKeys } =
             await getEmployeeFeedbackHistory(employeeId);
+        const globalRejectedNoiseKeys = await getGlobalRejectedNoiseKeys();
 
         let previouslyRejected = [...historyRejectedKeys];
 
@@ -294,12 +384,11 @@ exports.processDocument = async (req, res) => {
             const beforeCount = finalNeedsReview.length;
 
             finalNeedsReview = finalNeedsReview.filter(skill => {
-                const key = skillKey(skill);
-                if (historyRejectedKeys.has(key)) {
+                if (hasComparisonKey(historyRejectedKeys, skill)) {
                     console.log(`   ⏭️  Skipping "${skill}" (already REJECTED by this employee before) ❌`);
                     return false;
                 }
-                if (historyApprovedKeys.has(key)) {
+                if (hasComparisonKey(historyApprovedKeys, skill)) {
                     console.log(`   ⏭️  Skipping "${skill}" (already approved by this employee before)`);
                     return false;
                 }
@@ -308,9 +397,20 @@ exports.processDocument = async (req, res) => {
 
             // A knowledge-base skill that this employee specifically rejected before
             // should not silently auto-approve again either.
-            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !historyRejectedKeys.has(skillKey(skill)));
+            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !hasComparisonKey(historyRejectedKeys, skill));
 
             console.log(`📊 History filter: ${beforeCount} → ${finalNeedsReview.length} skills left to review`);
+        }
+
+        // ============ FILTER GLOBAL LEARNED NOISE ============
+        // Even for a different employee, previously learned global noise should
+        // not trigger "Review Extracted Skills" again.
+        if (globalRejectedNoiseKeys.size > 0) {
+            const beforeNoiseFilter = finalNeedsReview.length;
+            finalNeedsReview = finalNeedsReview.filter(skill => !hasComparisonKey(globalRejectedNoiseKeys, skill));
+            if (beforeNoiseFilter !== finalNeedsReview.length) {
+                console.log(`📊 Global noise filter: ${beforeNoiseFilter} → ${finalNeedsReview.length}`);
+            }
         }
 
         // ============ CHECK FOR EXISTING DOCUMENT (SAME FILE RESCANNED) ============
@@ -346,12 +446,14 @@ exports.processDocument = async (req, res) => {
             console.log(`🔄 Rescanning existing document - MERGING skills`);
 
             const existingSkills = (existingDoc.extracted_skills || []).map(normalizeSkill);
-            const existingApproved = new Set((existingDoc.approved_skills || []).map(s => skillKey(s)));
-            const existingRejected = new Set((existingDoc.rejected_skills || []).map(s => skillKey(s)));
+            const existingApproved = new Set();
+            const existingRejected = new Set();
+            (existingDoc.approved_skills || []).forEach(s => addComparisonKeys(existingApproved, s));
+            (existingDoc.rejected_skills || []).forEach(s => addComparisonKeys(existingRejected, s));
 
             // Combine this document's own history with the employee's global
             // feedback_training history so nothing rejected anywhere slips back in.
-            const combinedRejected = new Set([...existingRejected, ...historyRejectedKeys]);
+            const combinedRejected = new Set([...existingRejected, ...historyRejectedKeys, ...globalRejectedNoiseKeys]);
             const combinedApproved = new Set([...existingApproved, ...historyApprovedKeys]);
             previouslyRejected = [...combinedRejected];
 
@@ -401,12 +503,11 @@ exports.processDocument = async (req, res) => {
             // against BOTH this document's history AND the employee's global
             // feedback_training history, with original casing preserved for display.
             finalNeedsReview = allSkills.filter(skill => {
-                const key = skillKey(skill);
-                return !combinedApproved.has(key) && !combinedRejected.has(key);
+                return !hasComparisonKey(combinedApproved, skill) && !hasComparisonKey(combinedRejected, skill);
             });
 
             // Same global-rejection guard applied to auto-approved skills on rescan.
-            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !combinedRejected.has(skillKey(skill)));
+            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !hasComparisonKey(combinedRejected, skill));
 
             console.log(`📊 Rescan complete: ${finalNeedsReview.length} new skills to review`);
 
