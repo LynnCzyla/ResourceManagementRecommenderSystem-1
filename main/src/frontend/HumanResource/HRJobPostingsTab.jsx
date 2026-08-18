@@ -63,7 +63,7 @@ export default function HRJobPostingsTab() {
       const rows = res.data?.data || [];
       setJobPostings(rows.map(mapPosting));
     } catch (err) {
-      setError('Failed to load job postings');
+      setError(err.response?.data?.error || 'Failed to load job postings. Please check your connection and try again.');
       console.error(err);
     } finally {
       setLoading(false);
@@ -256,6 +256,13 @@ export default function HRJobPostingsTab() {
         <h1 style={styles.title}>Job Postings</h1>
         <p style={styles.subtitle}>Manage job postings and track applications</p>
       </div>
+
+      {error && (
+        <div style={styles.errorBanner}>
+          <span>{error}</span>
+          <button onClick={loadJobPostings} style={styles.retryBtn}>Retry</button>
+        </div>
+      )}
 
       <div className="glass-card" style={styles.card}>
         <div style={styles.toolbar}>
@@ -639,6 +646,28 @@ export default function HRJobPostingsTab() {
 const styles = {
   container: {
     padding: '0',
+  },
+  errorBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
+    marginBottom: '16px',
+    borderRadius: '8px',
+    background: 'var(--color-danger-light)',
+    color: 'var(--color-danger)',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  retryBtn: {
+    padding: '6px 14px',
+    background: 'var(--color-danger)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
   },
   loading: {
     display: 'flex',
