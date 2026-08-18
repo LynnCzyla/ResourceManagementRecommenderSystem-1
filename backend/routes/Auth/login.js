@@ -5,35 +5,50 @@ const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 const jwt = require('jsonwebtoken');
 
-// ✅ FIXED: Import from utils instead of duplicating
 const { getMaxLoginAttempts } = require('../../utils/loginAttempts');
 
-// Get user ID from email
+// Get user ID from email — paginates through ALL users instead of only the
+// first 50. supabase.auth.admin.listUsers() with no page/perPage params
+// defaults to page 1 / 50 per page, so any user created after the first 50
+// would silently fail to be found, causing a false "Invalid credentials".
 const getUserIdByEmail = async (email) => {
   try {
-    const { data, error } = await supabase.auth.admin.listUsers();
+    const perPage = 1000; // Supabase admin API max page size
+    let page = 1;
 
-    if (error) {
-      console.error(error);
-      return null;
+    while (true) {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+
+      if (error) {
+        console.error(error);
+        return null;
+      }
+
+      const user = data.users.find(
+        u => u.email?.toLowerCase() === email.toLowerCase()
+      );
+
+      if (user) {
+        console.log("Searching:", email);
+        console.log("Found:", user.email);
+        console.log("Found ID:", user.id);
+        return user.id;
+      }
+
+      if (data.users.length < perPage) {
+        console.log("Searching:", email);
+        console.log("Found: (no match across all pages)");
+        return null;
+      }
+
+      page++;
     }
-
-    const user = data.users.find(
-      u => u.email?.toLowerCase() === email.toLowerCase()
-    );
-
-    console.log("Searching:", email);
-    console.log("Found:", user?.email);
-    console.log("Found ID:", user?.id);
-
-    return user?.id || null;
   } catch (error) {
     console.error(error);
     return null;
   }
 };
 
-// Check if user is Admin
 const isUserAdmin = async (userId) => {
   try {
     const { data, error } = await supabase
@@ -41,12 +56,12 @@ const isUserAdmin = async (userId) => {
       .select('role')
       .eq('id', userId)
       .single();
-    
+
     if (error) {
       console.error('Error checking user role:', error);
       return false;
     }
-    
+
     return data?.role === 'Admin';
   } catch (error) {
     console.error('Error checking user role:', error);
@@ -54,7 +69,6 @@ const isUserAdmin = async (userId) => {
   }
 };
 
-// Get user login attempts
 const getUserLoginAttempts = async (userId) => {
   try {
     const { data, error } = await supabase
@@ -62,7 +76,7 @@ const getUserLoginAttempts = async (userId) => {
       .select('failed_attempts, locked')
       .eq('user_id', userId)
       .single();
-    
+
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching user login attempts:', error);
       return null;
@@ -74,7 +88,6 @@ const getUserLoginAttempts = async (userId) => {
   }
 };
 
-// Lock user account (ONLY for non-admin)
 const lockUserAccount = async (userId) => {
   try {
     const { data, error } = await supabase
@@ -86,11 +99,10 @@ const lockUserAccount = async (userId) => {
       .eq('user_id', userId)
       .select()
       .single();
-    
+
     if (error) throw error;
     console.log(`🔒 Account locked for user: ${userId}`);
 
-    // Get the locked user's name
     const { data: lockedUser } = await supabase
       .from('profiles')
       .select('first_name, last_name')
@@ -101,7 +113,6 @@ const lockUserAccount = async (userId) => {
       ? `${lockedUser.first_name} ${lockedUser.last_name}`
       : 'A user';
 
-    // Notify the locked user
     await supabase.from('notifications').insert({
       recipient_id: userId,
       type: 'alert',
@@ -109,7 +120,6 @@ const lockUserAccount = async (userId) => {
       read: false
     });
 
-    // Notify all admins
     const { data: admins } = await supabase
       .from('profiles')
       .select('id')
@@ -141,15 +151,14 @@ const lockUserAccount = async (userId) => {
   }
 };
 
-// Record failed attempt (ONLY for non-admin)
 const recordFailedAttempt = async (userId) => {
   try {
-    const maxAttempts = await getMaxLoginAttempts(); // ✅ Now using cached version
+    const maxAttempts = await getMaxLoginAttempts();
     const existing = await getUserLoginAttempts(userId);
-    
+
     if (existing) {
       const newCount = existing.failed_attempts + 1;
-      
+
       const { data, error } = await supabase
         .from('user_login_attempts')
         .update({
@@ -159,13 +168,13 @@ const recordFailedAttempt = async (userId) => {
         .eq('user_id', userId)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       if (newCount >= maxAttempts) {
         await lockUserAccount(userId);
       }
-      
+
       return {
         success: true,
         attemptCount: newCount,
@@ -183,12 +192,12 @@ const recordFailedAttempt = async (userId) => {
         })
         .select()
         .single();
-      
+
       if (error) {
         console.error('Error creating login attempts record:', error);
         return { success: false, error: error.message };
       }
-      
+
       return {
         success: true,
         attemptCount: 1,
@@ -203,7 +212,6 @@ const recordFailedAttempt = async (userId) => {
   }
 };
 
-// Reset login attempts (ONLY for non-admin)
 const resetLoginAttempts = async (userId) => {
   try {
     const { error } = await supabase
@@ -213,7 +221,7 @@ const resetLoginAttempts = async (userId) => {
         last_failed_at: null
       })
       .eq('user_id', userId);
-    
+
     if (error && error.code !== 'PGRST116') {
       console.error('Error resetting login attempts:', error);
     }
@@ -229,7 +237,6 @@ const resetLoginAttempts = async (userId) => {
   }
 };
 
-// 👇 ROUTE HANDLER
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -243,7 +250,6 @@ router.post('/login', async (req, res) => {
 
     console.log(`🔐 Login attempt for: ${email}`);
 
-    // Step 1: Get user ID from email
     let userId = await getUserIdByEmail(email);
 
     console.log("================================");
@@ -263,14 +269,12 @@ router.post('/login', async (req, res) => {
     console.log("Attempts Record:", attempts);
     console.log("================================");
 
-    // Step 2: Check if user is Admin
     const isAdmin = await isUserAdmin(userId);
     console.log(`👑 Is Admin: ${isAdmin} for ${email}`);
 
-    // Step 3: ONLY check lock for NON-ADMIN users
     if (!isAdmin) {
       const attempts = await getUserLoginAttempts(userId);
-      
+
       if (attempts && attempts.locked === true) {
         console.log(`🔒 Account locked for: ${email}`);
         return res.status(403).json({
@@ -283,7 +287,6 @@ router.post('/login', async (req, res) => {
       console.log(`👑 Admin login - skipping lock check for: ${email}`);
     }
 
-    // Step 4: Attempt login with Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password
@@ -291,12 +294,11 @@ router.post('/login', async (req, res) => {
 
     if (authError) {
       console.log(`❌ Auth failed for ${email}:`, authError.message);
-      
-      // Step 5: ONLY track failed attempts for NON-ADMIN users
+
       if (!isAdmin) {
         await recordFailedAttempt(userId);
         const updatedAttempts = await getUserLoginAttempts(userId);
-        
+
         if (updatedAttempts && updatedAttempts.locked === true) {
           return res.status(403).json({
             success: false,
@@ -314,7 +316,7 @@ router.post('/login', async (req, res) => {
         systemCategory: 'Auth',
         logDescription: `Failed login attempt for ${email}`,
       });
-      
+
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -331,12 +333,10 @@ router.post('/login', async (req, res) => {
     const authUserId = authData.user.id;
     console.log(`✅ Auth successful for: ${email}, User ID: ${authUserId}`);
 
-    // Step 6: ONLY reset attempts for NON-ADMIN users
     if (!isAdmin) {
       await resetLoginAttempts(authUserId);
     }
 
-    // Step 7: Get user profile
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
       .select('role, first_name, middle_name, last_name, employee_id')
@@ -349,7 +349,6 @@ router.post('/login', async (req, res) => {
 
     const userRole = profileData?.role || 'Employee';
 
-    // Step 8: Create user object
     const user = {
       id: authData.user.id,
       name: profileData ?
@@ -374,9 +373,12 @@ router.post('/login', async (req, res) => {
       logDescription: `User signed in successfully: ${email}`,
     });
 
-    // 👇 CREATE CUSTOM JWT TOKEN WITH ROLE
+    // Custom JWT with role embedded — signed HS256 with SUPABASE_JWT_SECRET.
+    // verifyToken (auth.js) reads the token's alg header and verifies HS256
+    // tokens against this same secret, so this stays in sync with the
+    // middleware.
     const token = jwt.sign(
-      { 
+      {
         sub: authData.user.id,
         email: authData.user.email,
         role: userRole
