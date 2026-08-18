@@ -31,6 +31,7 @@ export default function HRInterviewsTab() {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
   const [selectedApplicant, setSelectedApplicant] = useState(null);
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
@@ -58,7 +59,7 @@ export default function HRInterviewsTab() {
       const rows = res.data?.data || [];
       setInterviews(rows.map(mapInterview));
     } catch (err) {
-      setError('Failed to load interviews');
+      setError(err.response?.data?.error || 'Failed to load interviews. Please check your connection and try again.');
       console.error(err);
     } finally {
       setLoading(false);
@@ -135,30 +136,16 @@ export default function HRInterviewsTab() {
   const handleHire = async (id) => {
     const result = await showConfirmationAlert(
       'Hire Applicant',
-      'Are you sure you want to hire this applicant? They will be moved to the hired employees list.',
-      'Yes, Hire'
+      'Are you sure you want to hire this applicant? They will be added to the Hired list under Hired Employees where you can send their formal Job Offer email.',
+      'Yes, Hire Candidate'
     );
     if (!result.isConfirmed) return;
 
     try {
-      const interview = interviews.find(int => int.id === id);
-
-      // Marking the interview as Hired also flips the linked application to Hired on the backend.
+      // Flips interview and application status to Hired and inserts into hired_employees
       await hrClient.put(`/interviews/${id}/status`, { status: 'Hired' });
-
-      // Create the actual hired-employee record so it shows up in Hired Employees.
-      if (interview) {
-        await hrClient.post(`/hired-employees`, {
-          application_id: interview.applicationId,
-          interview_id: id,
-          name: interview.applicantName,
-          email: interview.applicantEmail,
-          phone: interview.applicantPhone,
-        });
-      }
-
       await loadInterviews();
-      showSuccessAlert('Applicant hired successfully!');
+      showSuccessAlert('Applicant hired successfully! Moved to the Hired tab under Hired Employees.');
     } catch (err) {
       showErrorAlert(err.response?.data?.error || 'Failed to hire applicant');
       console.error(err);
@@ -166,17 +153,31 @@ export default function HRInterviewsTab() {
   };
 
   const handleReject = async (id) => {
-    const result = await showConfirmationAlert(
-      'Reject Applicant',
-      'Are you sure you want to reject this applicant after the interview? This action cannot be undone.',
-      'Yes, Reject'
-    );
-    if (!result.isConfirmed) return;
+    const { value: reason, isDismissed } = await Swal.fire({
+      title: 'Reject Applicant',
+      input: 'textarea',
+      inputLabel: 'Reason for rejection (will be emailed to the applicant)',
+      inputPlaceholder: 'Please type the reason for rejection...',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Reject',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: 'var(--color-danger)',
+      cancelButtonColor: 'var(--color-border)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      inputValidator: (value) => {
+        if (!value) {
+          return 'You need to write a reason!';
+        }
+      }
+    });
+
+    if (isDismissed) return;
 
     try {
-      await hrClient.put(`/interviews/${id}/status`, { status: 'Rejected' });
+      await hrClient.put(`/interviews/${id}/status`, { status: 'Rejected', notes: reason });
       await loadInterviews();
-      showSuccessAlert('Applicant rejected successfully!');
+      showSuccessAlert('Applicant rejected and notification email sent successfully!');
     } catch (err) {
       showErrorAlert(err.response?.data?.error || 'Failed to reject applicant');
       console.error(err);
@@ -238,15 +239,21 @@ export default function HRInterviewsTab() {
     showSuccessAlert('Gmail opened with interview invitation!');
   };
 
+  const isHistoryStatus = (status) => status === 'Hired' || status === 'Rejected';
+
+  const activeCount = interviews.filter(int => !isHistoryStatus(int.status)).length;
+  const historyCount = interviews.filter(int => isHistoryStatus(int.status)).length;
+
   const filteredInterviews = interviews.filter(int => {
-    const matchesSearch = 
+    const matchesSearch =
       int.applicantName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       int.position?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       int.interviewer?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'All' || int.status === statusFilter;
-    // Only show Scheduled and Completed interviews (not Hired or Rejected)
-    const isAllowedStatus = int.status === 'Scheduled' || int.status === 'Completed';
-    return matchesSearch && matchesStatus && isAllowedStatus;
+    const matchesTab = activeTab === 'History'
+      ? isHistoryStatus(int.status)
+      : !isHistoryStatus(int.status);
+    return matchesSearch && matchesStatus && matchesTab;
   });
 
   if (loading) {
@@ -259,6 +266,38 @@ export default function HRInterviewsTab() {
         <h1 style={styles.title}>Interviews</h1>
         <p style={styles.subtitle}>Manage scheduled interviews and hiring decisions</p>
       </div>
+
+      <div style={styles.subTabsContainer}>
+        <button
+          onClick={() => setActiveTab('Active')}
+          style={{
+            ...styles.subTabButton,
+            borderBottomColor: activeTab === 'Active' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'Active' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: activeTab === 'Active' ? '700' : '500'
+          }}
+        >
+          Active ({activeCount})
+        </button>
+        <button
+          onClick={() => setActiveTab('History')}
+          style={{
+            ...styles.subTabButton,
+            borderBottomColor: activeTab === 'History' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'History' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: activeTab === 'History' ? '700' : '500'
+          }}
+        >
+          History ({historyCount})
+        </button>
+      </div>
+
+      {error && (
+        <div style={styles.errorBanner}>
+          <span>{error}</span>
+          <button onClick={loadInterviews} style={styles.retryBtn}>Retry</button>
+        </div>
+      )}
 
       <div className="glass-card" style={styles.card}>
         <div style={styles.toolbar}>
@@ -283,6 +322,7 @@ export default function HRInterviewsTab() {
             <option value="All">All Status</option>
             <option value="Scheduled">Scheduled</option>
             <option value="Completed">Completed</option>
+            <option value="Rejected">Rejected</option>
           </select>
         </div>
 
@@ -322,12 +362,12 @@ export default function HRInterviewsTab() {
                     <td style={styles.td}>
                       <span style={{
                         ...styles.statusBadge,
-                        backgroundColor: int.status === 'Hired' ? 'var(--color-primary-light)' : 
-                                       int.status === 'Rejected' ? 'var(--color-danger-light)' : 
-                                       int.status === 'Completed' ? 'var(--color-accent-light)' : 'var(--color-warning-light)',
-                        color: int.status === 'Hired' ? 'var(--color-primary)' : 
-                               int.status === 'Rejected' ? 'var(--color-danger)' : 
-                               int.status === 'Completed' ? 'var(--color-accent)' : 'var(--color-warning)'
+                        backgroundColor: int.status === 'Hired' ? 'var(--color-primary-light)' :
+                          int.status === 'Rejected' ? 'var(--color-danger-light)' :
+                            int.status === 'Completed' ? 'var(--color-accent-light)' : 'var(--color-warning-light)',
+                        color: int.status === 'Hired' ? 'var(--color-primary)' :
+                          int.status === 'Rejected' ? 'var(--color-danger)' :
+                            int.status === 'Completed' ? 'var(--color-accent)' : 'var(--color-warning)'
                       }}>
                         {int.status}
                       </span>
@@ -340,29 +380,35 @@ export default function HRInterviewsTab() {
                             <circle cx="12" cy="12" r="3"></circle>
                           </svg>
                         </button>
-                        {int.status === 'Scheduled' && (
-                          <button onClick={() => handleCompleteInterview(int.id)} style={styles.completeBtn} title="Complete Interview">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                          </button>
-                        )}
-                        {int.status === 'Completed' && (
+                        {activeTab === 'Active' ? (
                           <>
-                            <button onClick={() => handleHire(int.id)} style={styles.hireBtn} title="Hire">
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                                <circle cx="12" cy="7" r="4"></circle>
-                              </svg>
-                            </button>
-                            <button onClick={() => handleReject(int.id)} style={styles.rejectBtn} title="Reject">
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <line x1="15" y1="9" x2="9" y2="15"></line>
-                                <line x1="9" y1="9" x2="15" y2="15"></line>
-                              </svg>
-                            </button>
+                            {int.status === 'Scheduled' && (
+                              <button onClick={() => handleCompleteInterview(int.id)} style={styles.completeBtn} title="Complete Interview">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                              </button>
+                            )}
+                            {int.status === 'Completed' && (
+                              <>
+                                <button onClick={() => handleHire(int.id)} style={styles.hireBtn} title="Hire">
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                    <circle cx="12" cy="7" r="4"></circle>
+                                  </svg>
+                                </button>
+                                <button onClick={() => handleReject(int.id)} style={styles.rejectBtn} title="Reject">
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                                  </svg>
+                                </button>
+                              </>
+                            )}
                           </>
+                        ) : (
+                          <span style={styles.viewOnlyText}>View Only</span>
                         )}
                       </div>
                     </td>
@@ -433,12 +479,12 @@ export default function HRInterviewsTab() {
                     <span style={{
                       ...styles.detailValue,
                       ...styles.statusBadge,
-                      backgroundColor: selectedInterview.status === 'Hired' ? 'var(--color-primary-light)' : 
-                                     selectedInterview.status === 'Rejected' ? 'var(--color-danger-light)' : 
-                                     selectedInterview.status === 'Completed' ? 'var(--color-accent-light)' : 'var(--color-warning-light)',
-                      color: selectedInterview.status === 'Hired' ? 'var(--color-primary)' : 
-                             selectedInterview.status === 'Rejected' ? 'var(--color-danger)' : 
-                             selectedInterview.status === 'Completed' ? 'var(--color-accent)' : 'var(--color-warning)'
+                      backgroundColor: selectedInterview.status === 'Hired' ? 'var(--color-primary-light)' :
+                        selectedInterview.status === 'Rejected' ? 'var(--color-danger-light)' :
+                          selectedInterview.status === 'Completed' ? 'var(--color-accent-light)' : 'var(--color-warning-light)',
+                      color: selectedInterview.status === 'Hired' ? 'var(--color-primary)' :
+                        selectedInterview.status === 'Rejected' ? 'var(--color-danger)' :
+                          selectedInterview.status === 'Completed' ? 'var(--color-accent)' : 'var(--color-warning)'
                     }}>
                       {selectedInterview.status}
                     </span>
@@ -511,44 +557,44 @@ export default function HRInterviewsTab() {
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Date *</label>
-                      <input 
-                        type="date" 
-                        required 
-                        style={styles.input} 
+                      <input
+                        type="date"
+                        required
+                        style={styles.input}
                         value={scheduleForm.date}
-                        onChange={(e) => setScheduleForm({...scheduleForm, date: e.target.value})}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })}
                       />
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Time *</label>
-                      <input 
-                        type="time" 
-                        required 
-                        style={styles.input} 
+                      <input
+                        type="time"
+                        required
+                        style={styles.input}
                         value={scheduleForm.time}
-                        onChange={(e) => setScheduleForm({...scheduleForm, time: e.target.value})}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })}
                       />
                     </div>
                   </div>
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Interviewer *</label>
-                      <input 
-                        type="text" 
-                        required 
-                        style={styles.input} 
+                      <input
+                        type="text"
+                        required
+                        style={styles.input}
                         placeholder="e.g., HR Manager"
                         value={scheduleForm.interviewer}
-                        onChange={(e) => setScheduleForm({...scheduleForm, interviewer: e.target.value})}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, interviewer: e.target.value })}
                       />
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Interview Type *</label>
-                      <select 
-                        required 
+                      <select
+                        required
                         style={styles.input}
                         value={scheduleForm.interviewType}
-                        onChange={(e) => setScheduleForm({...scheduleForm, interviewType: e.target.value})}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, interviewType: e.target.value })}
                       >
                         <option value="Initial Screening">Initial Screening</option>
                         <option value="Technical Interview">Technical Interview</option>
@@ -559,13 +605,13 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input 
-                      type="text" 
-                      required 
-                      style={styles.input} 
+                    <input
+                      type="text"
+                      required
+                      style={styles.input}
                       placeholder="e.g., Conference Room A or Video Call"
                       value={scheduleForm.location}
-                      onChange={(e) => setScheduleForm({...scheduleForm, location: e.target.value})}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })}
                     />
                   </div>
                 </div>
@@ -574,12 +620,12 @@ export default function HRInterviewsTab() {
                   <h4 style={styles.formSectionTitle}>Additional Notes</h4>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Notes</label>
-                    <textarea 
-                      style={styles.textarea} 
-                      rows="3" 
+                    <textarea
+                      style={styles.textarea}
+                      rows="3"
                       placeholder="Any additional notes for the interviewer..."
                       value={scheduleForm.notes}
-                      onChange={(e) => setScheduleForm({...scheduleForm, notes: e.target.value})}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })}
                     />
                   </div>
                 </div>
@@ -635,6 +681,28 @@ const styles = {
   container: {
     padding: '0',
   },
+  errorBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
+    marginBottom: '16px',
+    borderRadius: '8px',
+    background: 'var(--color-danger-light)',
+    color: 'var(--color-danger)',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  retryBtn: {
+    padding: '6px 14px',
+    background: 'var(--color-danger)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
   loading: {
     display: 'flex',
     justifyContent: 'center',
@@ -656,6 +724,26 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  subTabsContainer: {
+    display: 'flex',
+    gap: '28px',
+    borderBottom: '1px solid var(--color-border)',
+    marginBottom: '24px',
+  },
+  subTabButton: {
+    background: 'none',
+    border: 'none',
+    borderBottom: '3px solid transparent',
+    padding: '12px 6px',
+    fontSize: '15px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  viewOnlyText: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
   },
   card: {
     padding: '24px',
