@@ -117,6 +117,19 @@ export default function ApplicantApplicationFormTab() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.type !== 'application/pdf') {
+        showErrorAlert('Only PDF files are accepted.', 'Invalid File Type');
+        e.target.value = null;
+        setFormData({ ...formData, resume: null });
+        return;
+      }
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        showErrorAlert('File size exceeds the 5MB limit.', 'File Too Large');
+        e.target.value = null;
+        setFormData({ ...formData, resume: null });
+        return;
+      }
       setFormData({ ...formData, resume: file });
     }
   };
@@ -366,7 +379,7 @@ export default function ApplicantApplicationFormTab() {
                   <input
                     type="file"
                     required
-                    accept=".pdf,.doc,.docx"
+                    accept="application/pdf"
                     onChange={handleFileChange}
                     style={styles.fileInput}
                     id="resume-upload"
@@ -380,7 +393,7 @@ export default function ApplicantApplicationFormTab() {
                     <span style={styles.fileText}>
                       {formData.resume ? formData.resume.name : 'Click to upload your resume'}
                     </span>
-                    <span style={styles.fileHint}>Accepted formats: PDF, DOC, DOCX (Max 5MB)</span>
+                    <span style={styles.fileHint}>Accepted formats: PDF only (Max 5MB)</span>
                   </label>
                 </div>
               </div>

@@ -10,7 +10,7 @@ const mapApplication = (row) => ({
   phone: row.phone || '',
   position: row.position_applied,
   department: row.department || '',
-  status: row.status,
+  status: row.status || 'Pending',
   appliedDate: row.applied_date,
   experience: row.experience || '',
   skills: row.skills || '',
@@ -18,6 +18,11 @@ const mapApplication = (row) => ({
   coverLetter: row.cover_letter || '',
   resume: row.resume_path || '',
 });
+
+// An application is considered "History" once it's reached a terminal
+// outcome (Hired or Rejected). Everything else (Pending, Recommended,
+// Interview Scheduled, etc.) stays in the Active tab.
+const isHistoryStatus = (status) => status === 'Hired' || status === 'Rejected';
 
 export default function HRApplicationsTab() {
   const [applications, setApplications] = useState([]);
@@ -30,6 +35,10 @@ export default function HRApplicationsTab() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [positionFilter, setPositionFilter] = useState('All');
   const [scheduling, setScheduling] = useState(false);
+
+  // Active / History tab
+  const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
+
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
     time: '',
@@ -51,7 +60,7 @@ export default function HRApplicationsTab() {
       const rows = res.data?.data || [];
       setApplications(rows.map(mapApplication));
     } catch (err) {
-      setError('Failed to load applications');
+      setError(err.response?.data?.error || 'Failed to load applications. Please check your connection and try again.');
       console.error(err);
     } finally {
       setLoading(false);
@@ -167,17 +176,31 @@ export default function HRApplicationsTab() {
   };
 
   const handleReject = async (id) => {
-    const result = await showConfirmationAlert(
-      'Reject Application',
-      'Are you sure you want to reject this application? This action cannot be undone.',
-      'Yes, Reject'
-    );
-    if (!result.isConfirmed) return;
+    const { value: reason, isDismissed } = await Swal.fire({
+      title: 'Reject Application',
+      input: 'textarea',
+      inputLabel: 'Reason for rejection (will be emailed to the applicant)',
+      inputPlaceholder: 'Please type the reason for rejection...',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Reject',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: 'var(--color-danger)',
+      cancelButtonColor: 'var(--color-border)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      inputValidator: (value) => {
+        if (!value) {
+          return 'You need to write a reason!';
+        }
+      }
+    });
+
+    if (isDismissed) return;
 
     try {
-      await hrClient.put(`/applications/${id}/status`, { status: 'Rejected' });
+      await hrClient.put(`/applications/${id}/status`, { status: 'Rejected', notes: reason });
       await loadApplications();
-      showSuccessAlert('Application rejected successfully!');
+      showSuccessAlert('Application rejected and notification email sent successfully!');
     } catch (err) {
       showErrorAlert(err.response?.data?.error || 'Failed to reject application');
       console.error(err);
@@ -189,6 +212,10 @@ export default function HRApplicationsTab() {
     setShowDetailsModal(true);
   };
 
+  // Tab counts
+  const activeCount = applications.filter(app => !isHistoryStatus(app.status)).length;
+  const historyCount = applications.filter(app => isHistoryStatus(app.status)).length;
+
   const filteredApplications = applications.filter(app => {
     const matchesSearch = 
       app.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -196,9 +223,10 @@ export default function HRApplicationsTab() {
       app.position?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'All' || app.status === statusFilter;
     const matchesPosition = positionFilter === 'All' || app.position === positionFilter;
-    // Show Pending, Recommended, and Rejected (not Interview Scheduled or Hired)
-    const isAllowedStatus = app.status === 'Pending' || app.status === 'Recommended' || app.status === 'Rejected';
-    return matchesSearch && matchesStatus && matchesPosition && isAllowedStatus;
+    const matchesTab = activeTab === 'History'
+      ? isHistoryStatus(app.status)
+      : !isHistoryStatus(app.status);
+    return matchesSearch && matchesStatus && matchesPosition && matchesTab;
   });
 
   const positions = [...new Set(applications.map(app => app.position))];
@@ -214,6 +242,39 @@ export default function HRApplicationsTab() {
         <p style={styles.subtitle}>Review and manage job applications</p>
       </div>
 
+      {/* Active / History Tabs */}
+      <div style={styles.subTabsContainer}>
+        <button
+          onClick={() => setActiveTab('Active')}
+          style={{
+            ...styles.subTabButton,
+            borderBottomColor: activeTab === 'Active' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'Active' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: activeTab === 'Active' ? '700' : '500'
+          }}
+        >
+          Active ({activeCount})
+        </button>
+        <button
+          onClick={() => setActiveTab('History')}
+          style={{
+            ...styles.subTabButton,
+            borderBottomColor: activeTab === 'History' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'History' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: activeTab === 'History' ? '700' : '500'
+          }}
+        >
+          History ({historyCount})
+        </button>
+      </div>
+
+      {error && (
+        <div style={styles.errorBanner}>
+          <span>{error}</span>
+          <button onClick={loadApplications} style={styles.retryBtn}>Retry</button>
+        </div>
+      )}
+
       <div className="glass-card" style={styles.card}>
         <div style={styles.toolbar}>
           <div style={styles.searchWrapper}>
@@ -223,7 +284,7 @@ export default function HRApplicationsTab() {
             </svg>
             <input
               type="text"
-              placeholder="Search applications..."
+              placeholder={`Search ${activeTab === 'History' ? 'history' : 'applications'}...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={styles.searchInput}
@@ -235,9 +296,18 @@ export default function HRApplicationsTab() {
             style={styles.filterSelect}
           >
             <option value="All">All Status</option>
-            <option value="Pending">Pending</option>
-            <option value="Recommended">Recommended</option>
-            <option value="Rejected">Rejected</option>
+            {activeTab === 'Active' ? (
+              <>
+                <option value="Pending">Pending</option>
+                <option value="Recommended">Recommended</option>
+                <option value="Interview Scheduled">Interview Scheduled</option>
+              </>
+            ) : (
+              <>
+                <option value="Hired">Hired</option>
+                <option value="Rejected">Rejected</option>
+              </>
+            )}
           </select>
           <select
             value={positionFilter}
@@ -267,7 +337,9 @@ export default function HRApplicationsTab() {
             </thead>
             <tbody>
               {filteredApplications.length === 0 ? (
-                <tr><td colSpan="8" style={styles.emptyRow}>No applications found.</td></tr>
+                <tr><td colSpan="8" style={styles.emptyRow}>
+                  {activeTab === 'History' ? 'No history records found.' : 'No applications found.'}
+                </td></tr>
               ) : (
                 filteredApplications.map(app => (
                   <tr key={app.id} style={styles.tableRow}>
@@ -289,9 +361,11 @@ export default function HRApplicationsTab() {
                         ...styles.statusBadge,
                         backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' : 
                                        app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' :
+                                       app.status === 'Hired' ? 'var(--color-success-light)' :
                                        app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
                         color: app.status === 'Recommended' ? 'var(--color-primary)' : 
                                app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
+                               app.status === 'Hired' ? 'var(--color-success)' :
                                app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
                       }}>
                         {app.status}
@@ -305,34 +379,29 @@ export default function HRApplicationsTab() {
                             <circle cx="12" cy="12" r="3"></circle>
                           </svg>
                         </button>
-                        {app.status === 'Pending' && (
-                          <button onClick={() => handleRecommendForEmployment(app.id)} style={styles.recommendBtn} title="Recommend for Employment">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                              <circle cx="9" cy="7" r="4"></circle>
-                              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                            </svg>
-                          </button>
-                        )}
-                        {(app.status === 'Pending' || app.status === 'Recommended') && (
-                          <button onClick={() => openScheduleModal(app)} style={styles.scheduleBtn} title="Schedule Interview">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                              <line x1="16" y1="2" x2="16" y2="6"></line>
-                              <line x1="8" y1="2" x2="8" y2="6"></line>
-                              <line x1="3" y1="10" x2="21" y2="10"></line>
-                            </svg>
-                          </button>
-                        )}
-                        {app.status === 'Pending' && (
-                          <button onClick={() => handleReject(app.id)} style={styles.rejectBtn} title="Reject">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <circle cx="12" cy="12" r="10"></circle>
-                              <line x1="15" y1="9" x2="9" y2="15"></line>
-                              <line x1="9" y1="9" x2="15" y2="15"></line>
-                            </svg>
-                          </button>
+
+                        {activeTab === 'Active' ? (
+                          <>
+                            <button
+                              onClick={() => openScheduleModal(app)}
+                              disabled={app.status !== 'Recommended'}
+                              style={{
+                                ...styles.scheduleBtn,
+                                opacity: app.status === 'Recommended' ? 1 : 0.4,
+                                cursor: app.status === 'Recommended' ? 'pointer' : 'not-allowed'
+                              }}
+                              title={app.status === 'Recommended' ? "Schedule Interview" : "Must be Recommended first"}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                              </svg>
+                            </button>
+                          </>
+                        ) : (
+                          <span style={styles.viewOnlyText}>View Only</span>
                         )}
                       </div>
                     </td>
@@ -345,103 +414,182 @@ export default function HRApplicationsTab() {
       </div>
 
       {/* Details Modal */}
-      {showDetailsModal && selectedApplication && (
-        <div style={styles.modalOverlay}>
-          <div className="glass-card" style={styles.modal}>
-            <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>Application Details</h3>
-              <button onClick={() => setShowDetailsModal(false)} style={styles.closeBtn}>×</button>
-            </div>
-            <div style={styles.modalBody}>
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Personal Information</h4>
-                <div style={styles.detailsGrid}>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Name:</span>
-                    <span style={styles.detailValue}>{selectedApplication.name}</span>
-                  </div>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Email:</span>
-                    <span style={styles.detailValue}>{selectedApplication.email}</span>
-                  </div>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Phone:</span>
-                    <span style={styles.detailValue}>{selectedApplication.phone}</span>
-                  </div>
-                </div>
-              </div>
+      {showDetailsModal && selectedApplication && (() => {
+        const getResumeUrl = (resumePath) => {
+          if (!resumePath) return '';
+          if (resumePath.startsWith('http')) return resumePath;
+          return `http://localhost:5000/${resumePath}`;
+        };
+        const resumeUrl = getResumeUrl(selectedApplication.resume);
+        const resumeFileName = selectedApplication.resume ? (selectedApplication.resume.includes('/') ? selectedApplication.resume.split('/').pop() : selectedApplication.resume) : '';
 
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Application Details</h4>
-                <div style={styles.detailsGrid}>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Position:</span>
-                    <span style={styles.detailValue}>{selectedApplication.position}</span>
+        return (
+          <div style={styles.modalOverlay}>
+            <div className="glass-card" style={styles.modalLarge}>
+              <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>Application Details</h3>
+                <button onClick={() => setShowDetailsModal(false)} style={styles.closeBtn}>×</button>
+              </div>
+              
+              <div style={styles.modalSplitBody}>
+                {/* Left Column: Resume Viewer */}
+                <div style={styles.leftColumn}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h4 style={styles.detailsSectionTitle}>Resume / CV</h4>
+                    {resumeUrl ? (
+                      <a
+                        href={resumeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: 'var(--color-primary)',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          textDecoration: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        Open in New Tab ↗
+                      </a>
+                    ) : null}
                   </div>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Department:</span>
-                    <span style={styles.detailValue}>{selectedApplication.department}</span>
-                  </div>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Applied Date:</span>
-                    <span style={styles.detailValue}>{selectedApplication.appliedDate}</span>
-                  </div>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Status:</span>
-                    <span style={{
-                      ...styles.detailValue,
-                      ...styles.statusBadge,
-                      backgroundColor: selectedApplication.status === 'Recommended' ? 'var(--color-primary-light)' : 
-                                     selectedApplication.status === 'Under Review' ? 'var(--color-accent-light)' :
-                                     selectedApplication.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                      color: selectedApplication.status === 'Recommended' ? 'var(--color-primary)' : 
-                             selectedApplication.status === 'Under Review' ? 'var(--color-accent)' :
-                             selectedApplication.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                  {resumeUrl ? (
+                    <iframe
+                      src={resumeUrl}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: '8px',
+                        border: '1px solid var(--color-border)',
+                        backgroundColor: 'rgba(255,255,255,0.02)'
+                      }}
+                      title="Resume PDF"
+                    />
+                  ) : (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flex: 1,
+                      border: '1px dashed var(--color-border)',
+                      borderRadius: '8px',
+                      color: 'var(--color-text-muted)',
+                      fontSize: '14px',
+                      background: 'rgba(0,0,0,0.05)'
                     }}>
-                      {selectedApplication.status}
-                    </span>
-                  </div>
+                      No resume uploaded for this applicant.
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Qualifications</h4>
-                <div style={styles.detailsGrid}>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Experience:</span>
-                    <span style={styles.detailValue}>{selectedApplication.experience}</span>
+                {/* Right Column: Application Details */}
+                <div style={styles.rightColumn}>
+                  <div style={styles.detailsSection}>
+                    <h4 style={styles.detailsSectionTitle}>Personal Information</h4>
+                    <div style={styles.detailsGrid}>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Name:</span>
+                        <span style={styles.detailValue}>{selectedApplication.name}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Email:</span>
+                        <span style={styles.detailValue}>{selectedApplication.email}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Phone:</span>
+                        <span style={styles.detailValue}>{selectedApplication.phone}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Education:</span>
-                    <span style={styles.detailValue}>{selectedApplication.education}</span>
-                  </div>
-                  <div style={styles.detailItemFull}>
-                    <span style={styles.detailLabel}>Skills:</span>
-                    <span style={styles.detailValue}>{selectedApplication.skills}</span>
-                  </div>
-                </div>
-              </div>
 
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Cover Letter</h4>
-                <div style={styles.coverLetter}>
-                  {selectedApplication.coverLetter}
-                </div>
-              </div>
+                  <div style={styles.detailsSection}>
+                    <h4 style={styles.detailsSectionTitle}>Application Details</h4>
+                    <div style={styles.detailsGrid}>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Position:</span>
+                        <span style={styles.detailValue}>{selectedApplication.position}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Department:</span>
+                        <span style={styles.detailValue}>{selectedApplication.department}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Applied Date:</span>
+                        <span style={styles.detailValue}>{selectedApplication.appliedDate}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Status:</span>
+                        <span style={{
+                          ...styles.detailValue,
+                          ...styles.statusBadge,
+                          backgroundColor: selectedApplication.status === 'Recommended' ? 'var(--color-primary-light)' : 
+                                         selectedApplication.status === 'Under Review' ? 'var(--color-accent-light)' :
+                                         selectedApplication.status === 'Hired' ? 'var(--color-success-light)' :
+                                         selectedApplication.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                          color: selectedApplication.status === 'Recommended' ? 'var(--color-primary)' : 
+                                 selectedApplication.status === 'Under Review' ? 'var(--color-accent)' :
+                                 selectedApplication.status === 'Hired' ? 'var(--color-success)' :
+                                 selectedApplication.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                        }}>
+                          {selectedApplication.status}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Resume</h4>
-                <div style={styles.resumeLink}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                  </svg>
-                  {selectedApplication.resume}
+                  <div style={styles.detailsSection}>
+                    <h4 style={styles.detailsSectionTitle}>Qualifications</h4>
+                    <div style={styles.detailsGrid}>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Experience:</span>
+                        <span style={styles.detailValue}>{selectedApplication.experience}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Education:</span>
+                        <span style={styles.detailValue}>{selectedApplication.education}</span>
+                      </div>
+                      <div style={styles.detailItemFull}>
+                        <span style={styles.detailLabel}>Skills:</span>
+                        <span style={styles.detailValue}>{selectedApplication.skills}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={styles.detailsSection}>
+                    <h4 style={styles.detailsSectionTitle}>Cover Letter</h4>
+                    <div style={styles.coverLetter}>
+                      {selectedApplication.coverLetter}
+                    </div>
+                  </div>
+
+                  <div style={styles.detailsSection}>
+                    <h4 style={styles.detailsSectionTitle}>Resume File</h4>
+                    {resumeUrl ? (
+                      <a
+                        href={resumeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ ...styles.resumeLink, textDecoration: 'none' }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        {resumeFileName} (Click to open)
+                      </a>
+                    ) : (
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>No resume uploaded</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <div style={styles.modalFooter}>
-                {selectedApplication.status === 'Pending' ? (
+                {activeTab === 'History' ? (
+                  <button onClick={() => setShowDetailsModal(false)} style={styles.closeModalBtn}>Close</button>
+                ) : selectedApplication.status === 'Pending' ? (
                   <>
                     <button onClick={() => { setShowDetailsModal(false); handleRecommendForEmployment(selectedApplication.id); }} style={styles.actionBtnPrimary}>
                       Recommend for Employment
@@ -460,8 +608,8 @@ export default function HRApplicationsTab() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Schedule Interview Modal */}
       {showScheduleModal && selectedApplication && (
@@ -623,6 +771,28 @@ const styles = {
   container: {
     padding: '0',
   },
+  errorBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
+    marginBottom: '16px',
+    borderRadius: '8px',
+    background: 'var(--color-danger-light)',
+    color: 'var(--color-danger)',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  retryBtn: {
+    padding: '6px 14px',
+    background: 'var(--color-danger)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
   loading: {
     display: 'flex',
     justifyContent: 'center',
@@ -632,7 +802,7 @@ const styles = {
     color: 'var(--color-text-secondary)',
   },
   header: {
-    marginBottom: '24px',
+    marginBottom: '20px',
   },
   title: {
     fontSize: '28px',
@@ -644,6 +814,22 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  // Active / History tabs
+  subTabsContainer: {
+    display: 'flex',
+    gap: '28px',
+    borderBottom: '1px solid var(--color-border)',
+    marginBottom: '24px',
+  },
+  subTabButton: {
+    background: 'none',
+    border: 'none',
+    borderBottom: '3px solid transparent',
+    padding: '12px 6px',
+    fontSize: '15px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   },
   card: {
     padding: '24px',
@@ -745,6 +931,12 @@ const styles = {
   actionCell: {
     display: 'flex',
     gap: '8px',
+    alignItems: 'center',
+  },
+  viewOnlyText: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
   },
   viewBtn: {
     background: 'var(--color-accent-light)',
@@ -906,6 +1098,39 @@ const styles = {
     maxHeight: '90vh',
     overflow: 'auto',
     padding: '28px',
+  },
+  modalLarge: {
+    width: '95%',
+    maxWidth: '1300px',
+    maxHeight: '92vh',
+    overflow: 'hidden',
+    padding: '28px',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  modalSplitBody: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: '28px',
+    flex: 1,
+    overflow: 'hidden',
+    marginTop: '12px',
+    marginBottom: '12px',
+  },
+  leftColumn: {
+    flex: 1.3,
+    display: 'flex',
+    flexDirection: 'column',
+    height: '65vh',
+  },
+  rightColumn: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '24px',
+    overflowY: 'auto',
+    height: '65vh',
+    paddingRight: '8px',
   },
   modalHeader: {
     display: 'flex',

@@ -353,8 +353,9 @@ export default function EmployeeProfileTab() {
             const previouslyRejected = Array.isArray(nlp.previously_rejected_skills) ? nlp.previously_rejected_skills : [];
             const categorizedSkills = nlp.categorized_skills || {};
             
-            // FIX: If needsReview is empty but we have skills, use all skills
-            const finalNeedsReview = needsReview.length > 0 ? needsReview : allSkills;
+            // Keep backend separation as-is; if needs_review is empty, do not
+            // force all extracted skills into pending.
+            const finalNeedsReview = needsReview;
             const finalAutoApproved = autoApproved.length > 0 ? autoApproved : [];
             
             console.log('📊 Skill Data:', {
@@ -410,13 +411,15 @@ export default function EmployeeProfileTab() {
                         autoApproved: finalAutoApproved.length
                     });
                 } else if (finalAutoApproved.length > 0) {
-                    // ✅ NO skills to review BUT have auto-approved skills → auto-add without modal
-                    console.log('✅ Auto-submitting auto-approved skills (no review needed)');
-                    await autoSubmitFeedback(data.documentId, finalAutoApproved, 'Resume');
-                    await fetchEmployeeData();
-                    setProcessingStatus('Done! Skills added automatically.');
-                    setProcessingStep('complete');
-                    setTimeout(() => setShowProgressDetails(false), 3000);
+                  // No new pending/noise to review. Open the simple Extracted Skills
+                  // view so users can confirm and save once.
+                  setPendingDocumentId(data.documentId);
+                  setPendingDocumentType('Resume');
+                  setShowFeedbackModal(true);
+                  console.log('📄 Opening simple Extracted Skills modal (no review needed):', {
+                    needsReview: finalNeedsReview.length,
+                    autoApproved: finalAutoApproved.length
+                  });
                 } else {
                     // No skills at all (all filtered out or none found) → just finish silently
                     console.log('ℹ️  No skills to process (all filtered or none found)');
@@ -466,12 +469,6 @@ const handleCertUpload = async (e) => {
           let needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
           const previouslyRejected = Array.isArray(nlp.previously_rejected_skills) ? nlp.previously_rejected_skills : [];
           
-          // 🔥 FIX: If needsReview is empty but we have skills, use allSkills
-          if (needsReview.length === 0 && allSkills.length > 0) {
-              console.log('🔧 FIX (cert): needsReview was empty, using allSkills instead');
-              needsReview = allSkills;
-          }
-          
           console.log('📊 Certificate skills:', {
               allSkills: allSkills.length,
               autoApproved: autoApproved.length,
@@ -479,7 +476,7 @@ const handleCertUpload = async (e) => {
               sample: needsReview.slice(0, 3)
           });
           
-          if (needsReview.length > 0) {
+            if (needsReview.length > 0) {
               // ✅ Skills need review — show modal
               setCertOcrResult({
                   fileName: file.name,
@@ -506,10 +503,20 @@ const handleCertUpload = async (e) => {
                   autoApproved: autoApproved.length
               });
           } else if (autoApproved.length > 0) {
-              // ✅ NO review needed BUT have auto-approved skills → auto-add
-              console.log('✅ Auto-submitting certificate auto-approved skills');
-              await autoSubmitFeedback(data.documentId, autoApproved, 'Certificate');
-              await fetchEmployeeData();
+                // No new pending/noise to review. Open the simple Extracted Skills
+                // view so users can confirm and save once.
+                setPendingDocumentId(data.documentId);
+                setNeedsReviewSkills([]);
+                setPendingSkills([]);
+                setAutoApprovedSkills(autoApproved);
+                setPreviouslyRejectedSkills(previouslyRejected);
+                setPendingDocumentType('Certificate');
+                setShowFeedbackModal(true);
+
+                console.log('📄 Opening simple certificate Extracted Skills modal (no review needed):', {
+                  needsReview: 0,
+                  autoApproved: autoApproved.length
+                });
           } else {
               // No skills at all
               setCertOcrResult(null);

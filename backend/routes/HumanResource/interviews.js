@@ -180,11 +180,81 @@ router.put('/:id/status', async (req, res) => {
       .from('interviews')
       .update({ status, notes: notes ?? undefined })
       .eq('id', id)
-      .select()
+      .select(`
+        *,
+        job_applications (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone,
+          position_applied,
+          department
+        )
+      `)
       .single();
 
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, error: 'Interview not found.' });
+
+    // When marked as Hired, update job_applications and sync with hired_employees table
+    if (status === 'Hired') {
+      if (data.application_id) {
+        await supabase
+          .from('job_applications')
+          .update({ status: 'Hired' })
+          .eq('id', data.application_id);
+      }
+
+      // Check if employee is already inserted into hired_employees
+      let filterStr = `interview_id.eq.${id}`;
+      if (data.application_id) {
+        filterStr += `,application_id.eq.${data.application_id}`;
+      }
+      const { data: existingHire } = await supabase
+        .from('hired_employees')
+        .select('id')
+        .or(filterStr)
+        .maybeSingle();
+
+      if (!existingHire) {
+        const app = data.job_applications || {};
+        const fullName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Hired Candidate';
+        await supabase
+          .from('hired_employees')
+          .insert({
+            application_id: data.application_id || null,
+            interview_id: data.id,
+            name: fullName,
+            email: app.email || '',
+            phone: app.phone || null,
+            hire_date: new Date().toISOString().slice(0, 10),
+            status: 'Onboarding',
+          });
+      }
+    } else if (status === 'Rejected') {
+      if (data.application_id) {
+        await supabase
+          .from('job_applications')
+          .update({ status: 'Rejected', notes: notes ?? null })
+          .eq('id', data.application_id);
+      }
+
+      const app = data.job_applications || {};
+      if (app.email) {
+        const { sendRejectionEmail } = require('../../utils/mailer');
+        try {
+          await sendRejectionEmail({
+            to: app.email,
+            applicantName: `${app.first_name || ''} ${app.last_name || ''}`.trim(),
+            position: app.position_applied || 'the position',
+            reason: notes
+          });
+        } catch (mailErr) {
+          console.error('Failed to send interview rejection email:', mailErr);
+        }
+      }
+    }
 
     await logAuditEvent({
       req,

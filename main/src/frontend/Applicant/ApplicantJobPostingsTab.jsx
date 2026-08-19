@@ -163,7 +163,22 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
 
   const handleApplyFileChange = (e) => {
     const file = e.target.files[0];
-    if (file) setApplyForm({ ...applyForm, resume: file });
+    if (file) {
+      if (file.type !== 'application/pdf') {
+        showErrorAlert('Only PDF files are accepted.', 'Invalid File Type');
+        e.target.value = null;
+        setApplyForm({ ...applyForm, resume: null });
+        return;
+      }
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        showErrorAlert('File size exceeds the 5MB limit.', 'File Too Large');
+        e.target.value = null;
+        setApplyForm({ ...applyForm, resume: null });
+        return;
+      }
+      setApplyForm({ ...applyForm, resume: file });
+    }
   };
 
   const handleApplicationSubmit = async (e) => {
@@ -581,15 +596,15 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Resume</h4>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>Upload Resume (PDF, DOC, DOCX) *</label>
+                    <label style={styles.label}>Upload Resume (PDF only) *</label>
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx"
+                      accept="application/pdf"
                       required
                       onChange={handleApplyFileChange}
                       style={styles.fileInput}
                     />
-                    <p style={styles.fileHelp}>Accepted formats: PDF, DOC, DOCX. Max size: 5MB</p>
+                    <p style={styles.fileHelp}>Accepted formats: PDF only. Max size: 5MB</p>
                   </div>
                 </div>
 
