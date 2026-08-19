@@ -5,9 +5,6 @@ const supabase = require('../supabase');
 /**
  * Get recommendations for a project
  */
-/**
- * Get recommendations for a project
- */
 exports.getRecommendations = async (req, res) => {
     try {
         const { projectId } = req.params;
@@ -354,7 +351,10 @@ exports.assignEmployee = async (req, res) => {
 exports.getRecommendationsByRequirement = async (req, res) => {
     try {
         const { requirementId } = req.params;
-        console.log(`🔍 Getting recommendations for requirement: ${requirementId}`);
+        console.log(`🔍 ===== GET RECOMMENDATIONS BY REQUIREMENT =====`);
+        console.log(`📋 Requirement ID from params: ${requirementId}`);
+        console.log(`📋 Type of requirementId: ${typeof requirementId}`);
+        console.log(`📋 Raw requirementId: ${JSON.stringify(requirementId)}`);
         
         // Get the requirement to find project_id
         const { data: requirement, error: reqError } = await supabase
@@ -388,13 +388,19 @@ exports.getRecommendationsByRequirement = async (req, res) => {
             });
         }
         
+        // Parse the requirement ID to a number
+        const parsedRequirementId = parseInt(requirementId);
+        console.log(`📋 Parsed requirementId: ${parsedRequirementId} (type: ${typeof parsedRequirementId})`);
+        
         // ✅ Get recommendations using BOTH project_id AND requirement_id
+        console.log(`📋 Calling getCandidatesForProject with requirementId: ${parsedRequirementId}`);
+        
         const result = await recommendationEngine.getCandidatesForProject(
             requirement.project_id,
             {
                 minMatchingScore: parseFloat(req.query.minMatchingScore) || 0,
                 maxCandidates: parseInt(req.query.maxCandidates) || 20,
-                requirementId: parseInt(requirementId)  // ✅ Pass requirement ID
+                requirementId: parsedRequirementId  // ✅ Pass the parsed requirement ID
             }
         );
         
@@ -435,7 +441,7 @@ exports.getRecommendationsByRequirement = async (req, res) => {
                 recommended: transformedCandidates,
                 all: transformedCandidates,
                 projectId: requirement.project_id,
-                requirementId: parseInt(requirementId),
+                requirementId: parsedRequirementId,
                 projectName: projectName,
                 requiredSkills: result.data.requiredSkills || [],
                 totalCandidates: result.data.totalCandidates || 0

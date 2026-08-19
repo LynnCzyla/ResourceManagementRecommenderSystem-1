@@ -1,10 +1,13 @@
-//D:\ResourceManagementRecommenderSystem\backend\server.js
+// D:\ResourceManagementRecommenderSystem\backend\server.js
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// ============ RECOMMENDATION ENGINE ============
+const recommendationEngine = require("./services/recommendationService");
 
 // Middleware
 app.use(cors());
@@ -58,6 +61,61 @@ app.get("/", (req, res) => {
     res.json({ message: "Backend API is running" });
 });
 
+// ============ CLEAR CACHE ENDPOINT ============
+// Call this when aliases are updated
+app.post('/api/admin/clear-alias-cache', (req, res) => {
+    try {
+        recommendationEngine.clearAliasCache();
+        res.json({ 
+            success: true, 
+            message: 'Alias cache cleared. Will refresh on next request.' 
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+// ============ FORCE REFRESH ALIASES ============
+app.post('/api/admin/refresh-aliases', async (req, res) => {
+    try {
+        await recommendationEngine.refreshAliases();
+        res.json({ 
+            success: true, 
+            message: 'Aliases refreshed from database' 
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+// ============ GET CACHE STATUS ============
+app.get('/api/admin/cache-status', (req, res) => {
+    const hasCache = recommendationEngine._aliasMap !== null;
+    const cacheAge = hasCache && recommendationEngine._aliasCacheTime 
+        ? Math.round((Date.now() - recommendationEngine._aliasCacheTime) / 1000) 
+        : null;
+    const cacheSize = hasCache && recommendationEngine._aliasMap 
+        ? Object.keys(recommendationEngine._aliasMap).length 
+        : 0;
+    
+    res.json({
+        success: true,
+        data: {
+            hasCache: hasCache,
+            cacheAgeSeconds: cacheAge,
+            cacheSize: cacheSize,
+            ttlSeconds: Math.round(recommendationEngine._aliasCacheTTL / 1000),
+            isExpired: hasCache && cacheAge !== null && cacheAge > recommendationEngine._aliasCacheTTL / 1000
+        }
+    });
+});
+
 app.use((err, req, res, next) => {
     console.error('Error:', err);
     res.status(500).json({ 
@@ -66,6 +124,17 @@ app.use((err, req, res, next) => {
     });
 });
 
-app.listen(PORT, () => {
+// ============ START SERVER ============
+app.listen(PORT, async () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    
+    // ============ PRELOAD ALIASES ============
+    console.log('🔄 Preloading skill aliases...');
+    try {
+        await recommendationEngine.preloadAliases();
+        console.log('✅ Recommendation engine ready');
+    } catch (error) {
+        console.error('❌ Failed to preload aliases:', error.message);
+        console.log('⚠️ Aliases will load on first recommendation request');
+    }
 });
