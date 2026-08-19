@@ -28,33 +28,22 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const supabase = require('../../supabase');
 
 // ------------------------------------------------------------
-// Resume upload storage (local disk)
+// Resume upload storage (Supabase memory storage)
 // ------------------------------------------------------------
-const uploadDir = path.join(__dirname, '../../uploads/resumes');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${unique}${path.extname(file.originalname)}`);
-  },
-});
-
+const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.doc', '.docx'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error('Only PDF, DOC, and DOCX files are allowed'));
+    if (ext === '.pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'));
+    }
   },
 });
 
@@ -140,7 +129,48 @@ router.post('/applications', upload.single('resume'), async (req, res) => {
       });
     }
 
-    const resume_path = req.file ? `uploads/resumes/${req.file.filename}` : null;
+    let resume_path = null;
+    if (req.file) {
+      const file = req.file;
+      const fileExt = path.extname(file.originalname).toLowerCase();
+      const uniqueFileName = `resume-${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
+
+      // Automatically check/create the 'resumes' bucket to prevent failure
+      try {
+        const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+        if (!listError) {
+          const bucketExists = buckets.find(b => b.name === 'resumes');
+          if (!bucketExists) {
+            await supabase.storage.createBucket('resumes', { public: true });
+          }
+        }
+      } catch (bucketErr) {
+        console.warn('Bucket verification warning:', bucketErr);
+      }
+
+      // Upload file buffer to Supabase Storage bucket 'resumes'
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('resumes')
+        .upload(uniqueFileName, file.buffer, {
+          contentType: file.mimetype,
+          dupe: false
+        });
+
+      if (uploadError) {
+        console.error('Supabase Storage upload error:', uploadError);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to upload resume to storage: ' + uploadError.message
+        });
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('resumes')
+        .getPublicUrl(uniqueFileName);
+
+      resume_path = urlData.publicUrl;
+    }
 
     const { data, error } = await supabase
       .from('job_applications')

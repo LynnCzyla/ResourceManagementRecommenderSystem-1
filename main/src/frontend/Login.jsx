@@ -156,19 +156,20 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
         body: JSON.stringify({ email, password }),
       });
 
-      if (!response.ok) {
-        throw new Error('backend-unavailable');
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        data = { success: false, message: 'Invalid response from server' };
       }
 
-      const data = await response.json();
-
-      if (data.success) {
+      if (response.ok && data.success) {
         // Login successful
-        const { user, session, token } = data;  // ← ADD 'token' here
-        
+        const { user, session, token } = data;
+
         const loginTime = Date.now();
         localStorage.setItem('user', JSON.stringify(user));
-        
+
         // 👇 USE THE CUSTOM TOKEN FROM YOUR BACKEND
         if (token) {
           localStorage.setItem('token', token);  // ← Use the custom token
@@ -176,9 +177,9 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
           // Fallback to Supabase token if custom token isn't available
           localStorage.setItem('token', session.access_token);
         }
-        
+
         localStorage.setItem('loginTime', loginTime.toString());
-      
+
         // Keep Supabase session for other features
         if (session?.access_token && session?.refresh_token) {
           await supabase.auth.setSession({
@@ -186,7 +187,7 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
             refresh_token: session.refresh_token
           });
         }
-      
+
         window.history.replaceState(null, '', '/dashboard');
         onLogin(user);
       } else {
@@ -194,18 +195,13 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
         if (data.locked) {
           setIsLocked(true);
           setLockMessage(data.message || 'Account locked. Please contact an administrator.');
-          setError('Account locked. Please contact an administrator.');
+          setError(data.message || 'Account locked. Please contact an administrator.');
         } else {
-          // Just show "Invalid credentials" for any other error
-          setError('Invalid credentials');
+          setError(data.message || 'Invalid credentials');
         }
       }
     } catch (error) {
-      if (error.message === 'backend-unavailable') {
-        setError('Cannot reach the admin server right now. Please start the backend and try again.');
-      } else {
-        setError('Invalid credentials');
-      }
+      setError('Cannot reach the admin server right now. Please start the backend and try again.');
     } finally {
       setIsLoading(false);
     }

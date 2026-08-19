@@ -122,6 +122,20 @@ router.put('/:id/status', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, error: 'Application not found.' });
 
+    if (status === 'Rejected' && data.email) {
+      const { sendRejectionEmail } = require('../../utils/mailer');
+      try {
+        await sendRejectionEmail({
+          to: data.email,
+          applicantName: `${data.first_name || ''} ${data.last_name || ''}`.trim(),
+          position: data.position_applied || 'the position',
+          reason: notes
+        });
+      } catch (mailErr) {
+        console.error('Failed to send rejection email:', mailErr);
+      }
+    }
+
     await logAuditEvent({
       req,
       action: 'Updated',
