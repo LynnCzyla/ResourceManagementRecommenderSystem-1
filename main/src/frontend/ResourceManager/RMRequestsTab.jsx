@@ -230,6 +230,9 @@ export default function RMRequestsTab() {
 
   const handleViewRecommendations = async (req) => {
     console.log('🔍 Viewing recommendations for:', req.role_title);
+    console.log('📋 Requirement ID from frontend:', req.id);  // Should be 1
+    console.log('📋 Skills from frontend:', req.skills);      // Should be UPS skills
+    console.log('📋 Project ID:', req.project_id);            // Should be 2
     setActiveRequestDetails(req);
     setRecommendationTab('Recommended');
     setSelectedCandidateId(null);
