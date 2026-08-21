@@ -12,6 +12,8 @@ function transformTask(row) {
     projectName: row.projects?.project_name || '',
     employeeId: row.profile_id,
     employeeName: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unassigned',
+    employeeRole: profile.positions?.position_name || '',
+    employeeAvatar: profile.avatar_url || null,
     title: row.title,
     description: row.description,
     priority: row.priority,
@@ -24,6 +26,8 @@ function transformTask(row) {
 // project_tasks has TWO foreign keys to profiles (profile_id = assignee,
 // created_by = creator), so the embed must specify which FK to follow —
 // otherwise PostgREST throws an ambiguous-relationship error (PGRST201).
+// The nested `positions` embed gives us the assignee's job title, and
+// `avatar_url` lets the dashboard show a real avatar instead of "?".
 const TASK_SELECT = `
   id,
   project_id,
@@ -37,7 +41,7 @@ const TASK_SELECT = `
   created_by,
   created_at,
   projects ( id, project_name ),
-  profiles!project_tasks_profile_id_fkey ( id, first_name, last_name )
+  profiles!project_tasks_profile_id_fkey ( id, first_name, last_name, avatar_url, positions ( position_name ) )
 `;
 
 // Simple in-memory cache for the list endpoint — same rationale as
