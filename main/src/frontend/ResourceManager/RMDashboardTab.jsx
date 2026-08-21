@@ -2,15 +2,44 @@ import React, { useState, useEffect } from 'react';
 import { fetchDashboard } from './rmApi';
 import RMAvatar from './RMAvatar';
 
+const BAR_COLORS = [
+  'var(--color-primary)',
+  'var(--color-accent)',
+  'var(--color-success)',
+  'var(--color-warning)',
+  'var(--color-danger)',
+];
+
+const HIRING_COLOR = {
+  high: 'var(--color-danger)',
+  medium: 'var(--color-warning)',
+  low: 'var(--color-success)',
+};
+
+const HIRING_BG = {
+  high: 'rgba(239, 68, 68, 0.1)',
+  medium: 'rgba(245, 158, 11, 0.1)',
+  low: 'var(--color-primary-light)',
+};
+
 export default function RMDashboardTab() {
   const [employees, setEmployees] = useState([]);
   const [totalEmployees, setTotalEmployees] = useState(0);
   const [activeProjectsCount, setActiveProjectsCount] = useState(0);
   const [workloadCounts, setWorkloadCounts] = useState({ available: 0, limited: 0, fullyLoaded: 0 });
+
+  // ✅ Real Resource Analytics data (previously hardcoded)
+  const [departmentUtilization, setDepartmentUtilization] = useState([]);
+  const [workloadDistributionPct, setWorkloadDistributionPct] = useState({ available: 0, limited: 0, fullyLoaded: 0 });
+  const [monthlyTrend, setMonthlyTrend] = useState([]);
+  const [demandVsAvailableCapacity, setDemandVsAvailableCapacity] = useState([]);
+  const [hiringNeed, setHiringNeed] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [workloadFilter, setWorkloadFilter] = useState('All');
+  const [hoveredIndex, setHoveredIndex] = useState(null);
 
   useEffect(() => {
     loadDashboard();
@@ -25,6 +54,13 @@ export default function RMDashboardTab() {
       setTotalEmployees(data.totalEmployees || 0);
       setActiveProjectsCount(data.activeProjectsCount || 0);
       setWorkloadCounts(data.workloadCounts || { available: 0, limited: 0, fullyLoaded: 0 });
+
+      // ✅ Wire in real analytics data returned by /api/rm/dashboard
+      setDepartmentUtilization(data.departmentUtilization || []);
+      setWorkloadDistributionPct(data.workloadDistributionPct || { available: 0, limited: 0, fullyLoaded: 0 });
+      setMonthlyTrend(data.monthlyTrend || []);
+      setDemandVsAvailableCapacity(data.demandVsAvailableCapacity || []);
+      setHiringNeed(data.hiringNeed || null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -44,6 +80,63 @@ export default function RMDashboardTab() {
   }, {});
 
   const handleGenerateReport = () => setShowReport(true);
+
+  // Calculations for Resource Analytics Statistics
+  const employeesOnly = employees.filter(
+    (e) => (e.rawRole || '').trim().toLowerCase() === 'employee' || (e.role || '').trim().toLowerCase() === 'employee'
+  );
+  const hasEmployeesData = employeesOnly.length > 0;
+  const activeEmployeesCount = employeesOnly.filter((e) => e.workloadStatus !== 'Available').length;
+  
+  // Workforce Utilization % based on workloadStatus weighting or average utilization rates
+  const avgUtilization = hasEmployeesData
+    ? Math.round(employeesOnly.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / employeesOnly.length)
+    : 0;
+
+  const availablePoolCount = employeesOnly.filter((e) => e.workloadStatus === 'Available').length;
+  const fullyUtilizedCount = employeesOnly.filter((e) => e.workloadStatus === 'Fully Utilized').length;
+
+  const getUtilizationStatus = (val) => {
+    if (val < 60) return { label: 'Underutilized', color: 'var(--color-warning)', bg: 'rgba(245, 158, 11, 0.1)' };
+    if (val < 80) return { label: 'Normal', color: 'var(--color-success)', bg: 'var(--color-primary-light)' };
+    if (val < 95) return { label: 'High', color: 'var(--color-danger)', bg: 'rgba(239, 68, 68, 0.1)' };
+    return { label: 'Fully Utilized', color: 'var(--color-danger)', bg: 'rgba(239, 68, 68, 0.2)' };
+  };
+
+  const utilizationStatus = getUtilizationStatus(avgUtilization);
+
+  // Workload Demand vs. Workforce Capacity line chart data
+  const allValues = demandVsAvailableCapacity.flatMap(d => [d.openDemand || 0, d.availableCapacity || 0]);
+  const maxVal = allValues.length > 0 ? Math.max(...allValues) : 0;
+  const minVal = allValues.length > 0 ? Math.min(...allValues) : 0;
+  const yMin = 0;
+  const yMax = Math.max(10, Math.ceil((maxVal + 2) / 5) * 5);
+
+  const svgWidth = 500;
+  const svgHeight = 220;
+  const paddingLeft = 40;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 40;
+  
+  const chartWidth = svgWidth - paddingLeft - paddingRight;
+  const chartHeight = svgHeight - paddingTop - paddingBottom;
+  
+  const getX = (index) => paddingLeft + (index * chartWidth) / Math.max(1, demandVsAvailableCapacity.length - 1);
+  const getY = (val) => {
+    const range = yMax - yMin;
+    const pct = range > 0 ? (val - yMin) / range : 0.5;
+    return paddingTop + chartHeight - (pct * chartHeight);
+  };
+
+  const isNearRightEdge = (index) => {
+    const pointX = getX(index);
+    const tooltipWidth = 190; // matches minWidth: '180px' + margin
+    return (svgWidth - pointX) < tooltipWidth;
+  };
+
+  const capacityPoints = demandVsAvailableCapacity.map((d, i) => `${getX(i)},${getY(d.availableCapacity)}`).join(' ');
+  const demandPoints = demandVsAvailableCapacity.map((d, i) => `${getX(i)},${getY(d.openDemand)}`).join(' ');
 
   if (loading) {
     return <div style={styles.container}><p>Loading dashboard…</p></div>;
@@ -217,103 +310,270 @@ export default function RMDashboardTab() {
             <h2 style={styles.panelTitle}>Resource Analytics</h2>
           </div>
 
-          {/* Resource Utilization Chart */}
+          {/* 1. Workforce Utilization Card */}
+          <div style={styles.analyticsSection}>
+            <h3 style={styles.analyticsTitle}>Workforce Utilization</h3>
+            {!hasEmployeesData ? (
+              <div style={styles.insufficientDataCard}>
+                <span style={styles.insufficientDataText}>Insufficient data</span>
+                <span style={styles.insufficientDataSubtext}>Add active employees to view utilization metrics.</span>
+              </div>
+            ) : (
+              <div style={styles.metricCard}>
+                <div style={styles.metricHeader}>
+                  <span style={styles.metricVal}>{avgUtilization}%</span>
+                  <span style={{
+                    ...styles.metricBadge,
+                    color: utilizationStatus.color,
+                    backgroundColor: utilizationStatus.bg
+                  }}>
+                    {utilizationStatus.label}
+                  </span>
+                </div>
+                <div style={styles.progressContainer}>
+                  <div style={{
+                    ...styles.progressBar,
+                    width: `${avgUtilization}%`,
+                    backgroundColor: utilizationStatus.color
+                  }}></div>
+                </div>
+                <div style={styles.metricBreakdown}>
+                  <div style={styles.breakdownItem}>
+                    <span style={styles.breakdownLabel}>Assigned Employees</span>
+                    <span style={styles.breakdownVal}>{activeEmployeesCount}</span>
+                  </div>
+                  <div style={styles.breakdownItem}>
+                    <span style={styles.breakdownLabel}>Available Pool</span>
+                    <span style={styles.breakdownVal}>{availablePoolCount}</span>
+                  </div>
+                  <div style={styles.breakdownItem}>
+                    <span style={styles.breakdownLabel}>Fully Utilized</span>
+                    <span style={styles.breakdownVal}>{fullyUtilizedCount}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Workload Demand vs. Capacity Card (Line Chart) */}
+          <div style={styles.analyticsSection}>
+            <h3 style={styles.analyticsTitle}>Workload Demand vs. Capacity</h3>
+            {demandVsAvailableCapacity.length === 0 ? (
+              <div style={styles.insufficientDataCard}>
+                <span style={styles.insufficientDataText}>Insufficient data</span>
+                <span style={styles.insufficientDataSubtext}>No historical demand/capacity data available.</span>
+              </div>
+            ) : (
+              <div style={styles.metricCard}>
+                <div style={styles.chartTitleRow}>
+                  <span style={styles.chartTitle}>Open Demand vs. Available Capacity</span>
+                  <span style={styles.chartSubtitle}>Comparison of cumulative unfulfilled requests vs. currently available employees over time.</span>
+                </div>
+                
+                 <div style={styles.chartWrapper}>
+                  <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} width="100%" height="auto" style={{ display: 'block' }}>
+                    {/* Horizontal gridlines */}
+                    {[0, 0.25, 0.5, 0.75, 1.0].map((ratio, index) => {
+                      const val = yMin + ratio * (yMax - yMin);
+                      const y = getY(val);
+                      return (
+                        <g key={index}>
+                          <line
+                            x1={paddingLeft}
+                            y1={y}
+                            x2={paddingLeft + chartWidth}
+                            y2={y}
+                            stroke="rgba(255, 255, 255, 0.08)"
+                            strokeWidth="1"
+                            strokeDasharray="4 4"
+                          />
+                          <text
+                            x={paddingLeft - 10}
+                            y={y + 3}
+                            fill="var(--color-text-muted)"
+                            fontSize="10"
+                            textAnchor="end"
+                            fontFamily="inherit"
+                          >
+                            {Math.round(val)}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Vertical guideline on hover */}
+                    {hoveredIndex !== null && (
+                      <line
+                        x1={getX(hoveredIndex)}
+                        y1={paddingTop}
+                        x2={getX(hoveredIndex)}
+                        y2={paddingTop + chartHeight}
+                        stroke="rgba(255, 255, 255, 0.15)"
+                        strokeWidth="1.5"
+                      />
+                    )}
+
+                    {/* Capacity Line (Green) */}
+                    <polyline
+                      fill="none"
+                      stroke="#22c55e"
+                      strokeWidth="2"
+                      points={capacityPoints}
+                    />
+                    {/* Capacity Markers (Green dots) */}
+                    {demandVsAvailableCapacity.map((d, i) => (
+                      <circle
+                        key={`cap-${i}`}
+                        cx={getX(i)}
+                        cy={getY(d.availableCapacity)}
+                        r={hoveredIndex === i ? "6" : "4"}
+                        fill="#22c55e"
+                        stroke="var(--color-bg-card)"
+                        strokeWidth="1.5"
+                      />
+                    ))}
+
+                    {/* Demand Line (Blue) */}
+                    <polyline
+                      fill="none"
+                      stroke="#3b82f6"
+                      strokeWidth="2"
+                      points={demandPoints}
+                    />
+                    {/* Demand Markers (Blue dots) */}
+                    {demandVsAvailableCapacity.map((d, i) => (
+                      <circle
+                        key={`dem-${i}`}
+                        cx={getX(i)}
+                        cy={getY(d.openDemand)}
+                        r={hoveredIndex === i ? "6" : "4"}
+                        fill="#3b82f6"
+                        stroke="var(--color-bg-card)"
+                        strokeWidth="1.5"
+                      />
+                    ))}
+
+                    {/* X-axis Month Labels */}
+                    {demandVsAvailableCapacity.map((d, i) => (
+                      <text
+                        key={`month-${i}`}
+                        x={getX(i)}
+                        y={svgHeight - 15}
+                        fill="var(--color-text-muted)"
+                        fontSize="10"
+                        textAnchor="middle"
+                        fontFamily="inherit"
+                      >
+                        {d.month}
+                      </text>
+                    ))}
+
+                    {/* Invisible Vertical rectangles for month hover slices */}
+                    {demandVsAvailableCapacity.map((d, i) => {
+                      const x = getX(i);
+                      const colWidth = chartWidth / Math.max(1, demandVsAvailableCapacity.length - 1);
+                      return (
+                        <rect
+                          key={`hover-rect-${i}`}
+                          x={x - colWidth / 2}
+                          y={paddingTop}
+                          width={colWidth}
+                          height={chartHeight}
+                          fill="transparent"
+                          style={{ cursor: 'pointer' }}
+                          onMouseEnter={() => setHoveredIndex(i)}
+                          onMouseLeave={() => setHoveredIndex(null)}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  {/* Hover Tooltip Card */}
+                  {hoveredIndex !== null && (() => {
+                    const hoveredData = demandVsAvailableCapacity[hoveredIndex];
+                    return (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: `${(getX(hoveredIndex) / svgWidth) * 100}%`,
+                          top: `${(getY((hoveredData.openDemand + hoveredData.availableCapacity) / 2) / svgHeight) * 100}%`,
+                          transform: isNearRightEdge(hoveredIndex) 
+                            ? 'translate(calc(-100% - 12px), -30%)' 
+                            : 'translate(12px, -30%)',
+                          pointerEvents: 'none',
+                          backgroundColor: '#ffffff',
+                          color: '#1f2937',
+                          borderRadius: '8px',
+                          padding: '12px 16px',
+                          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                          border: '1px solid rgba(0, 0, 0, 0.08)',
+                          zIndex: 10,
+                          minWidth: '180px',
+                        }}
+                      >
+                        <div style={styles.tooltipHeader}>{hoveredData.month}</div>
+                        <div style={styles.tooltipRow}>
+                          <div style={styles.tooltipLabelCol}>
+                            <span style={{ ...styles.tooltipDot, backgroundColor: '#3b82f6' }}></span>
+                            <span>Open demand</span>
+                          </div>
+                          <span style={styles.tooltipVal}>{hoveredData.openDemand}</span>
+                        </div>
+                        <div style={styles.tooltipRow}>
+                          <div style={styles.tooltipLabelCol}>
+                            <span style={{ ...styles.tooltipDot, backgroundColor: '#22c55e' }}></span>
+                            <span>Available capacity</span>
+                          </div>
+                          <span style={styles.tooltipVal}>{hoveredData.availableCapacity}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div style={styles.chartLegend}>
+                  <div style={styles.legendItem}>
+                    <span style={{ ...styles.legendDot, backgroundColor: '#3b82f6' }}></span>
+                    <span style={styles.legendLabel}>Open demand</span>
+                  </div>
+                  <div style={styles.legendItem}>
+                    <span style={{ ...styles.legendDot, backgroundColor: '#22c55e' }}></span>
+                    <span style={styles.legendLabel}>Available capacity</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Resource Utilization by Department Card */}
           <div style={styles.analyticsSection}>
             <h3 style={styles.analyticsTitle}>Resource Utilization by Department</h3>
-            <div style={styles.barChart}>
-              <div style={styles.barContainer}>
-                <span style={styles.barLabel}>Engineering</span>
-                <div style={styles.barWrapper}>
-                  <div style={{ ...styles.bar, width: '85%', backgroundColor: 'var(--color-primary)' }}></div>
-                  <span style={styles.barValue}>85%</span>
+            {departmentUtilization.length === 0 ? (
+              <div style={styles.insufficientDataCard}>
+                <span style={styles.insufficientDataText}>Insufficient data</span>
+                <span style={styles.insufficientDataSubtext}>No department utilization data available.</span>
+              </div>
+            ) : (
+              <div style={styles.metricCard}>
+                <div style={styles.deptList}>
+                  {departmentUtilization.map((dept, i) => (
+                    <div key={dept.department} style={styles.deptRow}>
+                      <div style={styles.deptHeader}>
+                        <span style={styles.deptName}>{dept.department} ({dept.employeeCount} staff)</span>
+                        <span style={styles.deptVal}>{dept.utilization}%</span>
+                      </div>
+                      <div style={styles.progressContainer}>
+                        <div style={{
+                          ...styles.progressBar,
+                          width: `${dept.utilization}%`,
+                          backgroundColor: dept.utilization >= 85 ? 'var(--color-danger)' : dept.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-success)'
+                        }}></div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div style={styles.barContainer}>
-                <span style={styles.barLabel}>Design</span>
-                <div style={styles.barWrapper}>
-                  <div style={{ ...styles.bar, width: '72%', backgroundColor: 'var(--color-accent)' }}></div>
-                  <span style={styles.barValue}>72%</span>
-                </div>
-              </div>
-              <div style={styles.barContainer}>
-                <span style={styles.barLabel}>Analytics</span>
-                <div style={styles.barWrapper}>
-                  <div style={{ ...styles.bar, width: '68%', backgroundColor: 'var(--color-success)' }}></div>
-                  <span style={styles.barValue}>68%</span>
-                </div>
-              </div>
-              <div style={styles.barContainer}>
-                <span style={styles.barLabel}>Operations</span>
-                <div style={styles.barWrapper}>
-                  <div style={{ ...styles.bar, width: '91%', backgroundColor: 'var(--color-warning)' }}></div>
-                  <span style={styles.barValue}>91%</span>
-                </div>
-              </div>
-              <div style={styles.barContainer}>
-                <span style={styles.barLabel}>Marketing</span>
-                <div style={styles.barWrapper}>
-                  <div style={{ ...styles.bar, width: '54%', backgroundColor: 'var(--color-danger)' }}></div>
-                  <span style={styles.barValue}>54%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Workload Distribution */}
-          <div style={styles.analyticsSection}>
-            <h3 style={styles.analyticsTitle}>Workload Distribution</h3>
-            <div style={styles.pieChartContainer}>
-              <div style={styles.pieChart}>
-                <div style={{ ...styles.pieSegment, background: 'conic-gradient(var(--color-success) 0deg 144deg, var(--color-warning) 144deg 252deg, var(--color-danger) 252deg 360deg)' }}></div>
-              </div>
-              <div style={styles.pieLegend}>
-                <div style={styles.legendItem}>
-                  <span style={{ ...styles.legendColor, backgroundColor: 'var(--color-success)' }}></span>
-                  <span style={styles.legendLabel}>Available (40%)</span>
-                </div>
-                <div style={styles.legendItem}>
-                  <span style={{ ...styles.legendColor, backgroundColor: 'var(--color-warning)' }}></span>
-                  <span style={styles.legendLabel}>Limited (30%)</span>
-                </div>
-                <div style={styles.legendItem}>
-                  <span style={{ ...styles.legendColor, backgroundColor: 'var(--color-danger)' }}></span>
-                  <span style={styles.legendLabel}>Fully Loaded (30%)</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Monthly Trend */}
-          <div style={styles.analyticsSection}>
-            <h3 style={styles.analyticsTitle}>Monthly Resource Requests Trend</h3>
-            <div style={styles.lineChart}>
-              <div style={styles.lineChartBars}>
-                <div style={styles.lineBar}>
-                  <div style={{ ...styles.lineBarFill, height: '40%' }}></div>
-                  <span style={styles.lineBarLabel}>Jan</span>
-                </div>
-                <div style={styles.lineBar}>
-                  <div style={{ ...styles.lineBarFill, height: '65%' }}></div>
-                  <span style={styles.lineBarLabel}>Feb</span>
-                </div>
-                <div style={styles.lineBar}>
-                  <div style={{ ...styles.lineBarFill, height: '55%' }}></div>
-                  <span style={styles.lineBarLabel}>Mar</span>
-                </div>
-                <div style={styles.lineBar}>
-                  <div style={{ ...styles.lineBarFill, height: '80%' }}></div>
-                  <span style={styles.lineBarLabel}>Apr</span>
-                </div>
-                <div style={styles.lineBar}>
-                  <div style={{ ...styles.lineBarFill, height: '70%' }}></div>
-                  <span style={styles.lineBarLabel}>May</span>
-                </div>
-                <div style={styles.lineBar}>
-                  <div style={{ ...styles.lineBarFill, height: '90%' }}></div>
-                  <span style={styles.lineBarLabel}>Jun</span>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -453,101 +713,190 @@ const styles = {
     color: 'var(--color-text-secondary)',
     marginBottom: '12px',
   },
-  barChart: {
+  metricCard: {
+    border: '1px solid var(--color-border)',
+    borderRadius: '12px',
+    padding: '20px',
+    backgroundColor: 'rgba(255, 255, 255, 0.015)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '16px',
+    marginTop: '8px',
   },
-  barContainer: {
+  metricHeader: {
     display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: '12px',
   },
-  barLabel: {
-    width: '100px',
-    fontSize: '13px',
-    color: 'var(--color-text-secondary)',
-    fontWeight: '500',
+  metricVal: {
+    fontSize: '28px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
   },
-  barWrapper: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
+  metricBadge: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '4px 10px',
+    borderRadius: '30px',
+    textTransform: 'uppercase',
   },
-  bar: {
-    height: '24px',
+  progressContainer: {
+    width: '100%',
+    height: '8px',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: '4px',
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
     borderRadius: '4px',
     transition: 'width 0.3s ease',
   },
-  barValue: {
-    fontSize: '12px',
-    fontWeight: '600',
-    color: 'var(--color-text-primary)',
-    minWidth: '35px',
+  metricBreakdown: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '12px',
+    borderTop: '1px solid var(--color-border)',
+    paddingTop: '14px',
   },
-  pieChartContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '24px',
-  },
-  pieChart: {
-    width: '120px',
-    height: '120px',
-    borderRadius: '50%',
-  },
-  pieSegment: {
-    width: '100%',
-    height: '100%',
-    borderRadius: '50%',
-  },
-  pieLegend: {
+  breakdownItem: {
     display: 'flex',
     flexDirection: 'column',
+    gap: '4px',
+  },
+  breakdownLabel: {
+    fontSize: '10px',
+    fontWeight: '600',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+  },
+  breakdownVal: {
+    fontSize: '16px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  chartTitleRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    marginBottom: '16px',
+    textAlign: 'left',
+  },
+  chartTitle: {
+    fontSize: '15px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  chartSubtitle: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    lineHeight: '1.4',
+  },
+  chartWrapper: {
+    width: '100%',
+    margin: '10px 0',
+    position: 'relative',
+  },
+  tooltipHeader: {
+    fontWeight: '700',
+    fontSize: '13px',
+    marginBottom: '8px',
+    color: '#1f2937',
+    textAlign: 'left',
+  },
+  tooltipRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '24px',
+    fontSize: '12px',
+    marginTop: '6px',
+    color: '#4b5563',
+  },
+  tooltipLabelCol: {
+    display: 'flex',
+    alignItems: 'center',
     gap: '8px',
+  },
+  tooltipDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    display: 'inline-block',
+  },
+  tooltipVal: {
+    fontWeight: '700',
+    color: '#111827',
+  },
+  chartLegend: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '24px',
+    marginTop: '12px',
+    paddingTop: '12px',
+    borderTop: '1px solid var(--color-border)',
   },
   legendItem: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    fontSize: '13px',
-    color: 'var(--color-text-secondary)',
   },
-  legendColor: {
-    width: '12px',
-    height: '12px',
-    borderRadius: '2px',
+  legendDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    display: 'inline-block',
   },
   legendLabel: {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
     fontWeight: '500',
   },
-  lineChart: {
-    marginTop: '8px',
+  deptList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
   },
-  lineChartBars: {
+  deptRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  deptHeader: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    height: '120px',
-    gap: '8px',
+    alignItems: 'center',
   },
-  lineBar: {
-    flex: 1,
+  deptName: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+  },
+  deptVal: {
+    fontSize: '12px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  insufficientDataCard: {
+    border: '1px dashed var(--color-border)',
+    borderRadius: '10px',
+    padding: '24px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '4px',
+    justifyContent: 'center',
+    gap: '6px',
+    backgroundColor: 'rgba(255, 255, 255, 0.01)',
   },
-  lineBarFill: {
-    width: '100%',
-    backgroundColor: 'var(--color-primary)',
-    borderRadius: '4px 4px 0 0',
-    transition: 'height 0.3s ease',
+  insufficientDataText: {
+    fontSize: '13px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
   },
-  lineBarLabel: {
+  insufficientDataSubtext: {
     fontSize: '11px',
     color: 'var(--color-text-muted)',
-    fontWeight: '500',
+    textAlign: 'center',
   },
   filterRow: {
     display: 'flex',
