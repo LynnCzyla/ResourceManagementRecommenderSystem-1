@@ -1,62 +1,147 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import { getProjects } from './pmApi';
 
-export default function PMFeedbackFormTab() {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const HISTORY_KEY_PREFIX = 'pmFeedbackRequests:';
+
+export default function PMFeedbackFormTab({ user }) {
   const [formData, setFormData] = useState({
     clientName: '',
     clientEmail: '',
+    projectId: '',
     projectName: '',
     projectPhase: 'Planning',
     feedbackLink: '',
   });
 
-  const [sentRequests, setSentRequests] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [loadError, setLoadError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [isSending, setIsSending] = useState(false);
+
+  const historyKey = `${HISTORY_KEY_PREFIX}${user?.id || 'anon'}`;
+  const [sentRequests, setSentRequests] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(historyKey) || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  // Load this PM's real projects for the dropdown
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await getProjects(user?.id);
+        if (!cancelled) setProjects(data || []);
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+        if (!cancelled) setLoadError(err.message || 'Failed to load projects');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Persist sent-request history per user so it survives tab switches/reloads
+  useEffect(() => {
+    try {
+      localStorage.setItem(historyKey, JSON.stringify(sentRequests));
+    } catch {
+      // ignore storage errors (e.g. private browsing quota)
+    }
+  }, [sentRequests, historyKey]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFieldErrors(prev => ({ ...prev, [name]: undefined }));
+
+    if (name === 'projectId') {
+      const project = projects.find(p => p.id === value);
+      setFormData(prev => ({
+        ...prev,
+        projectId: value,
+        projectName: project ? project.name : '',
+      }));
+      return;
+    }
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const validate = () => {
+    const errors = {};
+    if (!formData.clientName.trim()) errors.clientName = 'Client name is required';
+    if (!formData.clientEmail.trim()) errors.clientEmail = 'Client email is required';
+    else if (!EMAIL_RE.test(formData.clientEmail.trim())) errors.clientEmail = 'Enter a valid email address';
+    if (!formData.projectId) errors.projectId = 'Select a project';
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    // Generate a unique feedback link (mock)
-    const feedbackLink = `https://wea.com/feedback/${Date.now()}`;
-    
-    // Add to sent requests (mock data)
-    const newRequest = {
-      id: Date.now(),
-      ...formData,
-      feedbackLink,
-      sentDate: new Date().toISOString().split('T')[0],
-      status: 'Sent',
-    };
-    
-    setSentRequests([...sentRequests, newRequest]);
-    
-    // Open Gmail with pre-filled email
-    const subject = `Feedback Request - ${formData.projectName} at WEA`;
-    const body = `Dear ${formData.clientName},\n\nWe hope you are satisfied with the progress of ${formData.projectName} (${formData.projectPhase} phase).\n\nWe value your feedback and would appreciate it if you could take a moment to share your experience with us. Please use the link below to submit your feedback:\n\n${feedbackLink}\n\nYour feedback helps us improve our services and serve you better.\n\nIf you have any questions or concerns, please don't hesitate to reach out.\n\nBest regards,\nWEA Project Management Team`;
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(formData.clientEmail)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(gmailUrl, '_blank');
-    
-    // Reset form
-    setFormData({
-      clientName: '',
-      clientEmail: '',
-      projectName: '',
-      projectPhase: 'Planning',
-      feedbackLink: '',
-    });
+    if (isSending) return;
+    if (!validate()) return;
 
-    Swal.fire({
-      title: 'Success!',
-      text: 'Feedback request email opened in Gmail.',
-      icon: 'success',
-      confirmButtonColor: 'var(--color-primary)',
-      confirmButtonText: 'OK',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-    });
+    setIsSending(true);
+    try {
+      // Generate a unique feedback link (mock)
+      const feedbackLink = `https://wea.com/feedback/${Date.now()}`;
+
+      // Open Gmail with pre-filled email
+      const subject = `Feedback Request - ${formData.projectName} at WEA`;
+      const body = `Dear ${formData.clientName},\n\nWe hope you are satisfied with the progress of ${formData.projectName} (${formData.projectPhase} phase).\n\nWe value your feedback and would appreciate it if you could take a moment to share your experience with us. Please use the link below to submit your feedback:\n\n${feedbackLink}\n\nYour feedback helps us improve our services and serve you better.\n\nIf you have any questions or concerns, please don't hesitate to reach out.\n\nBest regards,\nWEA Project Management Team`;
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(formData.clientEmail)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      const mailWindow = window.open(gmailUrl, '_blank');
+
+      if (!mailWindow) {
+        Swal.fire({
+          title: 'Pop-up blocked',
+          text: 'Please allow pop-ups for this site so Gmail can open, then try again.',
+          icon: 'warning',
+          confirmButtonColor: 'var(--color-primary)',
+          background: 'var(--color-bg-card)',
+          color: 'var(--color-text-primary)',
+        });
+        return;
+      }
+
+      // Add to sent requests history
+      const newRequest = {
+        id: Date.now(),
+        clientName: formData.clientName.trim(),
+        clientEmail: formData.clientEmail.trim(),
+        projectName: formData.projectName,
+        projectPhase: formData.projectPhase,
+        feedbackLink,
+        sentDate: new Date().toISOString().split('T')[0],
+        status: 'Sent',
+      };
+      setSentRequests(prev => [newRequest, ...prev]);
+
+      // Reset form (keep project list loaded)
+      setFormData({
+        clientName: '',
+        clientEmail: '',
+        projectId: '',
+        projectName: '',
+        projectPhase: 'Planning',
+        feedbackLink: '',
+      });
+
+      Swal.fire({
+        title: 'Success!',
+        text: 'Feedback request email opened in Gmail.',
+        icon: 'success',
+        confirmButtonColor: 'var(--color-primary)',
+        confirmButtonText: 'OK',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+      });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const styles = {
@@ -129,6 +214,20 @@ export default function PMFeedbackFormTab() {
       cursor: 'pointer',
       alignSelf: 'flex-start',
     },
+    buttonDisabled: {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    },
+    fieldError: {
+      fontSize: '12px',
+      color: 'var(--color-danger, #ef4444)',
+      marginTop: '-2px',
+    },
+    loadError: {
+      fontSize: '13px',
+      color: 'var(--color-danger, #ef4444)',
+      marginBottom: '12px',
+    },
     historySection: {
       marginTop: '32px',
     },
@@ -179,52 +278,58 @@ export default function PMFeedbackFormTab() {
       </div>
 
       <div className="glass-card" style={styles.card}>
-        <form onSubmit={handleSubmit} style={styles.form}>
+        {loadError && <div style={styles.loadError}>{loadError}</div>}
+        <form onSubmit={handleSubmit} style={styles.form} noValidate>
           <div style={styles.formRow}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Client Name *</label>
               <input
                 type="text"
                 name="clientName"
-                required
                 style={styles.input}
                 placeholder="Enter client name"
                 value={formData.clientName}
                 onChange={handleChange}
               />
+              {fieldErrors.clientName && <span style={styles.fieldError}>{fieldErrors.clientName}</span>}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Client Email *</label>
               <input
                 type="email"
                 name="clientEmail"
-                required
                 style={styles.input}
                 placeholder="client@company.com"
                 value={formData.clientEmail}
                 onChange={handleChange}
               />
+              {fieldErrors.clientEmail && <span style={styles.fieldError}>{fieldErrors.clientEmail}</span>}
             </div>
           </div>
 
           <div style={styles.formRow}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Project Name *</label>
-              <input
-                type="text"
-                name="projectName"
-                required
-                style={styles.input}
-                placeholder="Enter project name"
-                value={formData.projectName}
+              <select
+                name="projectId"
+                style={styles.select}
+                value={formData.projectId}
                 onChange={handleChange}
-              />
+              >
+                <option value="">-- Select a project --</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              {fieldErrors.projectId && <span style={styles.fieldError}>{fieldErrors.projectId}</span>}
+              {projects.length === 0 && !loadError && (
+                <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>No projects found for your account yet.</span>
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Project Phase *</label>
               <select
                 name="projectPhase"
-                required
                 style={styles.select}
                 value={formData.projectPhase}
                 onChange={handleChange}
@@ -238,8 +343,12 @@ export default function PMFeedbackFormTab() {
             </div>
           </div>
 
-          <button type="submit" style={styles.button}>
-            Send Feedback Request Email
+          <button
+            type="submit"
+            style={{ ...styles.button, ...(isSending ? styles.buttonDisabled : {}) }}
+            disabled={isSending}
+          >
+            {isSending ? 'Sending...' : 'Send Feedback Request Email'}
           </button>
         </form>
       </div>
