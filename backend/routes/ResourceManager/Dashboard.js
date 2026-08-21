@@ -46,6 +46,8 @@ router.get('/', async (req, res) => {
           last_name,
           status,
           role,
+          created_at,
+          avatar_url,
           positions ( position_name ),
           departments ( department_name )
         `)
@@ -133,34 +135,205 @@ router.get('/', async (req, res) => {
       const rawRole = (emp.role || '').trim();
       const roleLower = rawRole.toLowerCase();
 
+      // ✅ CHANGE: Drop the "Employee / " prefix — just show the position/role itself
+      // (e.g. "Human Resources" instead of "Employee / Human Resources").
       let displayRole;
       if (roleLower === 'project manager') {
         displayRole = 'Project Manager';
       } else if (roleLower === 'resource manager') {
         displayRole = 'Resource Manager';
       } else if (rawPosition && rawPosition.toLowerCase() !== 'employee') {
-        displayRole = `Employee / ${toTitleCase(rawPosition)}`;
+        displayRole = toTitleCase(rawPosition);
       } else if (rawRole && roleLower !== 'employee') {
-        displayRole = `Employee / ${toTitleCase(rawRole)}`;
+        displayRole = toTitleCase(rawRole);
       } else {
         displayRole = 'Employee';
       }
 
       const hasTask = (taskCounts[emp.id] || 0) > 0;
+      const utilizationRate = Math.min(taskCount * 50, 100);
 
       employeeRows.push({
         id: emp.id,
         employeeId: emp.employee_id,
         name: `${emp.first_name} ${emp.last_name}`,
-        avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(`${emp.first_name} ${emp.last_name}`)}`,
+        avatar: emp.avatar_url || null,
         role: displayRole,
+        rawRole: emp.role,
         department: emp.departments?.department_name || 'Unassigned',
         workloadStatus,
-        utilizationRate: Math.min(taskCount * 50, 100),
+        utilizationRate,
         assignmentCount: count,
         taskStatus: hasTask ? 'Assigned' : 'Unassigned',
+        createdAt: emp.created_at || null,
       });
     }
+
+    // ✅ Resource Utilization by Department — computed from real per-employee
+    // utilization rates instead of hardcoded numbers.
+    const deptStats = {};
+    for (const row of employeeRows) {
+      const dept = row.department;
+      if (!deptStats[dept]) deptStats[dept] = { total: 0, count: 0 };
+      deptStats[dept].total += row.utilizationRate;
+      deptStats[dept].count += 1;
+    }
+    const departmentUtilization = Object.entries(deptStats)
+      .map(([department, stat]) => ({
+        department,
+        utilization: Math.round(stat.total / stat.count),
+        employeeCount: stat.count,
+      }))
+      .sort((a, b) => b.utilization - a.utilization);
+
+    // ✅ Workload Distribution — real percentages instead of hardcoded 40/30/30.
+    const totalForPct = employeeRows.length || 1;
+    const workloadDistributionPct = {
+      available: Math.round((availableCount / totalForPct) * 100),
+      limited: Math.round((limitedCount / totalForPct) * 100),
+      fullyLoaded: Math.round((fullyLoadedCount / totalForPct) * 100),
+    };
+
+    // ✅ Build the last 6 calendar months once, shared by the "Monthly Resource
+    // Requests Trend" chart and the new "Workload vs. Employee Growth" chart
+    // so both use the exact same buckets.
+    const monthMeta = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+      monthMeta.push({ key, label: d.toLocaleString('en-US', { month: 'short' }), endOfMonth });
+    }
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+    sixMonthsAgo.setDate(1);
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+
+    // ✅ Monthly Resource Requests Trend — pulled from a `project_resource_requirements`
+    // table (created_at), last 6 months. Degrades gracefully (empty array)
+    // if that table doesn't exist yet or the query fails, instead of
+    // showing fabricated numbers.
+    let monthlyTrend = [];
+    let requestMonthBuckets = {};
+    try {
+      const { data: requestsData, error: requestsError } = await supabase
+        .from('project_resource_requirements')
+        .select('created_at, quantity_needed, role_title')
+        .gte('created_at', sixMonthsAgo.toISOString());
+
+      if (requestsError) throw requestsError;
+
+      // Filter out resource requests for project managers, resource managers, admins, and HR
+      const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
+      const filteredReqs = (requestsData || []).filter((r) => {
+        const title = (r.role_title || '').trim().toLowerCase();
+        return !excludedKeywords.some((kw) => title.includes(kw));
+      });
+
+      requestMonthBuckets = monthMeta.reduce((acc, m) => ({ ...acc, [m.key]: 0 }), {});
+      for (const r of filteredReqs) {
+        const d = new Date(r.created_at);
+        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        if (key in requestMonthBuckets) {
+          requestMonthBuckets[key] += r.quantity_needed || r.quantity || 1;
+        }
+      }
+
+      monthlyTrend = monthMeta.map(({ key, label }) => ({
+        month: label,
+        count: requestMonthBuckets[key],
+      }));
+    } catch (trendErr) {
+      console.warn('⚠️ Could not compute monthly resource request trend:', trendErr.message);
+      monthlyTrend = [];
+      requestMonthBuckets = monthMeta.reduce((acc, m) => ({ ...acc, [m.key]: 0 }), {});
+    }
+
+    // ✅ Demand vs. Available Capacity — cumulative open demand (Pending resource-request
+    // quantity_needed created on or before the end of the month) mapped against cumulative
+    // available capacity (active Employees with workloadStatus of 'Available' or 'Limited Availability'
+    // hired on or before the end of the month).
+    // Note: workloadStatus is computed from current task counts, not historical per-month task counts.
+    // If historical workload status isn't tracked, we use current workloadStatus for all months
+    // as an approximation (this limitation will be flagged in the capstone writeup).
+    let demandVsAvailableCapacity = [];
+    try {
+      const { data: pendingReqs, error: reqsError } = await supabase
+        .from('project_resource_requirements')
+        .select('created_at, quantity_needed, role_title')
+        .eq('status', 'Pending')
+        .gte('created_at', sixMonthsAgo.toISOString());
+
+      if (reqsError) throw reqsError;
+
+      // Filter out role_title keywords for managers/admins/HR
+      const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
+      const filteredPending = (pendingReqs || []).filter((r) => {
+        const title = (r.role_title || '').trim().toLowerCase();
+        return !excludedKeywords.some((kw) => title.includes(kw));
+      });
+
+      // Filter capacity: active Employees (database role is 'Employee')
+      // who are currently 'Available' or 'Limited Availability'.
+      const availableCapacityEmployees = employeeRows.filter((e) => {
+        const roleMatch = (e.rawRole || '').trim().toLowerCase() === 'employee';
+        const isAvailable = e.workloadStatus === 'Available' || e.workloadStatus === 'Limited Availability';
+        return roleMatch && isAvailable;
+      });
+
+      demandVsAvailableCapacity = monthMeta.map(({ key, label, endOfMonth }) => {
+        // Calculate cumulative pending demand: sum of quantity_needed for all pending requests created on or before endOfMonth
+        const openDemand = filteredPending
+          .filter((r) => new Date(r.created_at) <= endOfMonth)
+          .reduce((sum, r) => sum + (r.quantity_needed || r.quantity || 1), 0);
+
+        // Calculate available capacity: count of active Employees with workload status 'Available' or 'Limited Availability' created on or before endOfMonth
+        const availableCapacity = availableCapacityEmployees
+          .filter((e) => e.createdAt ? new Date(e.createdAt) <= endOfMonth : true)
+          .length;
+
+        return {
+          month: label,
+          openDemand,
+          availableCapacity
+        };
+      });
+    } catch (growthErr) {
+      console.warn('⚠️ Could not compute demand vs available capacity:', growthErr.message);
+      demandVsAvailableCapacity = [];
+    }
+
+    // ✅ Hiring Outlook — flags whether the current headcount looks like it
+    // needs reinforcement, based on average utilization and how many
+    // departments are running hot (>=85% utilization).
+    const overallUtilizationRate = employeeRows.length
+      ? Math.round(employeeRows.reduce((sum, e) => sum + e.utilizationRate, 0) / employeeRows.length)
+      : 0;
+
+    const overloadedDepartments = departmentUtilization.filter((d) => d.utilization >= 85);
+
+    let recommendation;
+    let level; // 'high' | 'medium' | 'low'
+    if (overallUtilizationRate >= 80 || overloadedDepartments.length >= 2) {
+      recommendation = 'Hiring Recommended';
+      level = 'high';
+    } else if (overallUtilizationRate >= 60 || overloadedDepartments.length >= 1) {
+      recommendation = 'Monitor Closely';
+      level = 'medium';
+    } else {
+      recommendation = 'Adequately Staffed';
+      level = 'low';
+    }
+
+    const hiringNeed = {
+      overallUtilizationRate,
+      recommendation,
+      level,
+      overloadedDepartments: overloadedDepartments.map((d) => d.department),
+      availableCount,
+      fullyLoadedCount,
+    };
 
     const responseData = {
       success: true,
@@ -172,6 +345,11 @@ router.get('/', async (req, res) => {
         fullyLoaded: fullyLoadedCount,
       },
       employees: employeeRows,
+      departmentUtilization,
+      workloadDistributionPct,
+      monthlyTrend,
+      demandVsAvailableCapacity,
+      hiringNeed,
     };
 
     // ✅ Store in cache
