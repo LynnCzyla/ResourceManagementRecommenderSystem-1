@@ -144,10 +144,37 @@ export default function PMDashboardTab({ user }) {
 
     // REMOVED: Separate loadProjectEmployees useEffect - we filter client-side now
 
+    // The `/employees` endpoint only returns people with a formal
+    // `project_assignments` row for one of this PM's projects. Tasks,
+    // however, are assigned directly via `profile_id` and don't always
+    // have a matching assignment row — so a task can have a real assignee
+    // that's missing from `employees`. Rather than let those tasks fall
+    // through to a generic "Unassigned" row, build a merged employee list
+    // that also includes anyone we can identify from the tasks themselves
+    // (their name/role/avatar now come embedded on each task from the API).
+    const allEmployees = useMemo(() => {
+      const map = new Map();
+      employees.forEach(emp => map.set(emp.id, emp));
+
+      tasks.forEach(task => {
+        if (!task.employeeId || map.has(task.employeeId)) return;
+        const name = task.employeeName || 'Unnamed Employee';
+        map.set(task.employeeId, {
+          id: task.employeeId,
+          name,
+          role: task.employeeRole || '',
+          department: '',
+          avatar: task.employeeAvatar || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
+        });
+      });
+
+      return Array.from(map.values());
+    }, [employees, tasks]);
+
     // Client-side filtering of employees by project (no API call needed)
     const filteredByProjectEmployees = useMemo(() => {
       if (selectedProjectId === 'all') {
-        return employees;
+        return allEmployees;
       }
       
       // Filter employees who have tasks in the selected project
@@ -158,8 +185,8 @@ export default function PMDashboardTab({ user }) {
         }
       });
       
-      return employees.filter(emp => employeesWithTasksInProject.has(emp.id));
-    }, [employees, tasks, selectedProjectId]);
+      return allEmployees.filter(emp => employeesWithTasksInProject.has(emp.id));
+    }, [allEmployees, tasks, selectedProjectId]);
 
   // Pre-group tasks by employee once so per-row / per-employee lookups are
   // O(1) instead of re-scanning the entire task list on every render.
@@ -265,10 +292,14 @@ export default function PMDashboardTab({ user }) {
     Completed: projectTasks.filter(t => t.status === 'Completed').length,
   }), [projectTasks]);
 
-  // Compute unassigned tasks
+  // Compute unassigned tasks — a task is genuinely unassigned only when it
+  // has no employeeId at all. (allEmployees already covers every employeeId
+  // that appears on any task, so this no longer misclassifies assigned
+  // tasks as unassigned just because they're missing from the narrower,
+  // project-assignment-scoped `employees` list.)
   const unassignedTasks = useMemo(() => 
-    projectTasks.filter(task => !task.employeeId || !employees.some(emp => emp.id === task.employeeId)),
-    [projectTasks, employees]
+    projectTasks.filter(task => !task.employeeId),
+    [projectTasks]
   );
 
   // Loading state
@@ -395,16 +426,13 @@ export default function PMDashboardTab({ user }) {
 
                   const taskStatus = assignedTasks.length ? assignedTasks[0].status : 'Idle';
 
-                  const assignedProjects = [...new Set(allAssigned.map(t => t.projectName).filter(Boolean))];
-                  const projectSubtitle = assignedProjects.length ? 'Assigned' : 'Unassigned';
-
                   return (
                     <tr key={emp.id} style={styles.trRow}>
                       <td style={styles.tdEmployee}>
                         <img src={emp.avatar} alt={emp.name} style={styles.empAvatar} />
                         <div>
                           <div style={styles.empName}>{emp.name}</div>
-                          <div style={styles.empRole}>{projectSubtitle}</div>
+                          <div style={styles.empRole}>{emp.role || 'No position set'}</div>
                         </div>
                       </td>
                       <td style={styles.tdVal}>
