@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 
 function getInitials(name) {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean);
-  const initials = parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-  return initials || 'U';
+  if (parts.length === 0) return 'U';
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 export default function RMAvatar({ name, src, size = 36, style = {} }) {
