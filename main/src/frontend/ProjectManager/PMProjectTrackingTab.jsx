@@ -1,6 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { getEmployees, getTasks, createTask, updateTask, getProjects, updateProject, assignEmployeeToProject } from './pmApi';
 
+// Employees are only guaranteed a formal `project_assignments` row when
+// they were added to a project through the assignment flow. Tasks are
+// assigned directly via `profile_id` and don't always have a matching
+// assignment row, so a real assignee can be completely missing from an
+// `employees` fetch even though they clearly have work on the project.
+// This merges in anyone we can identify from their tasks (name/role/avatar
+// come embedded on each task from the API) so they're never dropped from
+// team lists or "assign to" dropdowns.
+function mergeEmployeesFromTasks(employeesList, tasksList) {
+  const map = new Map();
+  (employeesList || []).forEach(emp => map.set(emp.id, emp));
+  (tasksList || []).forEach(t => {
+    if (!t.employeeId || map.has(t.employeeId)) return;
+    const name = t.employeeName || 'Unnamed Employee';
+    map.set(t.employeeId, {
+      id: t.employeeId,
+      name,
+      role: t.employeeRole || '',
+      avatar: t.employeeAvatar || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
+      assignments: [],
+    });
+  });
+  return Array.from(map.values());
+}
+
 export default function PMProjectTrackingTab({ user }) {
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -15,6 +40,11 @@ export default function PMProjectTrackingTab({ user }) {
   const [showEditTaskModal, setShowEditTaskModal] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState(null);
   const [isRedoMode, setIsRedoMode] = useState(false);
+  // Employees assigned to the SPECIFIC project a task belongs to — used only
+  // for the Edit/Redo Assignment modal, so the dropdown is correct even when
+  // the header filter is set to "All Projects" (where `employees` is scoped
+  // differently, or empty).
+  const [taskModalEmployees, setTaskModalEmployees] = useState([]);
   const [newTaskData, setNewTaskData] = useState({
     title: '',
     description: '',
@@ -122,6 +152,23 @@ export default function PMProjectTrackingTab({ user }) {
     }
   };
 
+  // Load the employees assigned to a task's own project, regardless of what
+  // the header "All Projects"/project filter is currently set to. This is
+  // what actually populates the Assign/Reassign To dropdown.
+  const loadTaskModalEmployees = async (task) => {
+    if (!task?.projectId) {
+      setTaskModalEmployees([]);
+      return;
+    }
+    try {
+      const data = await getEmployees(user?.id, undefined, task.projectId);
+      setTaskModalEmployees(data || []);
+    } catch (err) {
+      console.error('Failed to load employees for task project:', err);
+      setTaskModalEmployees([]);
+    }
+  };
+
   const handleOpenEditTask = (task) => {
     setTaskToEdit(task);
     setEditTaskData({
@@ -134,6 +181,7 @@ export default function PMProjectTrackingTab({ user }) {
     });
     setIsRedoMode(false);
     setShowEditTaskModal(true);
+    loadTaskModalEmployees(task);
   };
 
   const handleOpenRedoTask = (task) => {
@@ -148,12 +196,14 @@ export default function PMProjectTrackingTab({ user }) {
     });
     setIsRedoMode(true);
     setShowEditTaskModal(true);
+    loadTaskModalEmployees(task);
   };
 
   const handleCloseEditModal = () => {
     setShowEditTaskModal(false);
     setTaskToEdit(null);
     setIsRedoMode(false);
+    setTaskModalEmployees([]);
   };
 
   const handleSaveTaskEdit = async (e) => {
@@ -201,11 +251,39 @@ export default function PMProjectTrackingTab({ user }) {
 
   const getTaskCount = (id) => tasks.filter(t => t.employeeId === id).length;
 
+  // Employees on the task's own project — merges the fetched list with
+  // anyone identifiable only from that project's tasks (see
+  // mergeEmployeesFromTasks above), so reassignment options aren't
+  // silently dropped just because they're missing a project_assignments row.
+  const getModalProjectEmployees = () => {
+    if (!taskToEdit) return [];
+    const projectTasksForModal = tasks.filter(t => t.projectId === taskToEdit.projectId);
+    return mergeEmployeesFromTasks(taskModalEmployees, projectTasksForModal);
+  };
+
   const getReplacementCandidates = (excludedEmployeeId) => {
-    return employees
+    // Scoped to the task's own project, not the header filter, so
+    // suggestions are always people actually on this project.
+    return getModalProjectEmployees()
       .filter(emp => emp.id !== excludedEmployeeId && getDailyStatus(emp.id) === 'Present')
       .sort((a, b) => getTaskCount(a.id) - getTaskCount(b.id))
       .slice(0, 3);
+  };
+
+  // The dropdown should list employees assigned to the task's project, and
+  // must always include whoever is currently assigned to the task itself
+  // (even if, for some reason, they're missing from that project fetch) so
+  // the PM can see/keep the current assignee and not just replacements.
+  const getModalAssignableEmployees = () => {
+    const list = getModalProjectEmployees();
+    if (taskToEdit && taskToEdit.employeeId && !list.some(e => e.id === taskToEdit.employeeId)) {
+      list.unshift({
+        id: taskToEdit.employeeId,
+        name: taskToEdit.employeeName || 'Currently assigned',
+        role: '',
+      });
+    }
+    return list;
   };
 
   // Format an ISO / date-like value into a short, readable label (e.g. "Aug 15, 2026")
@@ -227,11 +305,19 @@ export default function PMProjectTrackingTab({ user }) {
     return 'neutral';
   };
 
+  // NOTE: status is checked FIRST. If a PM manually sets a task's status to
+  // "Completed" via the edit form, that should always read as 100% — even
+  // if the logged progress entries happen to sum to less than 100 (or
+  // there simply aren't any logs yet). Previously this checked
+  // progressLogs first, so a task with partial logs that got manually
+  // marked Completed would land in the Completed column (grouped by
+  // `status`) but never cross the >=100 threshold that shows the
+  // Done/Redo button — leaving it stuck with no action available.
   const getTaskProgress = (task) => {
+    if (task.status === 'Completed' || task.status === 'Completed-Hidden') return 100;
     if (task.progressLogs && task.progressLogs.length) {
       return Math.min(100, task.progressLogs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0));
     }
-    if (task.status === 'Completed' || task.status === 'Completed-Hidden') return 100;
     if (task.status === 'In Progress') return 50;
     return 0;
   };
@@ -250,12 +336,17 @@ export default function PMProjectTrackingTab({ user }) {
   const currentProjectTasks = selectedProjectId === 'all'
     ? tasks.filter(t => projects.some(p => p.id === t.projectId))
     : tasks.filter(t => t.projectId === selectedProjectId);
-  const currentProjectEmployees = employees; // employees is already scoped to selectedProjectId (see loadEmployees)
+  // `employees` only contains people with a formal project_assignments row.
+  // Merge in anyone we can identify from their tasks too, so a real
+  // assignee never disappears from "All Team Members" just because that
+  // row doesn't exist (see mergeEmployeesFromTasks above).
+  const currentProjectEmployees = mergeEmployeesFromTasks(employees, currentProjectTasks);
   const selectedProject = projects.find(p => p.id === selectedProjectId);
   // When viewing "All Projects" the dropdown has no single selected project,
   // but each task still belongs to a real project — use that for the deadline.
   const taskProject = taskToEdit ? projects.find(p => p.id === taskToEdit.projectId) : null;
   const modalProject = selectedProject || taskProject;
+  const modalAssignableEmployees = showEditTaskModal && taskToEdit ? getModalAssignableEmployees() : [];
 
   const filteredProjects = projects.filter(p => 
     p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
@@ -369,7 +460,8 @@ export default function PMProjectTrackingTab({ user }) {
           
           <div style={styles.teamList}>
            {currentProjectEmployees.map(emp => {
-            const isAssigned = !!(emp.assignments && emp.assignments.length > 0);
+            const isAssigned = !!(emp.assignments && emp.assignments.length > 0) ||
+              currentProjectTasks.some(t => t.employeeId === emp.id);
             return (
               <div key={emp.id} style={styles.teamItem}>
                 <img src={emp.avatar} alt={emp.name} style={styles.teamAvatar} />
@@ -636,10 +728,15 @@ export default function PMProjectTrackingTab({ user }) {
                   required
                 >
                   <option value="">-- Choose replacement --</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
+                  {modalAssignableEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name}{emp.role ? ` (${emp.role})` : ''}</option>
                   ))}
                 </select>
+                {modalAssignableEmployees.length <= 1 && (
+                  <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>
+                    No other employees are assigned to this project yet — assign them from Project Tracking first.
+                  </p>
+                )}
               </div>
 
               {!isRedoMode && (
