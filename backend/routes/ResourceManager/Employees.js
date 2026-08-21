@@ -33,6 +33,8 @@ router.get('/', async (req, res) => {
         first_name,
         last_name,
         status,
+        role,
+        avatar_url,
         positions ( position_name ),
         departments ( department_name ),
         employee_skills ( skills ( skill_name ) )
@@ -59,17 +61,25 @@ router.get('/', async (req, res) => {
           date: d.created_at ? d.created_at.split('T')[0] : '',
         }));
 
+      // Determine assignability - exclude admins, project/resource managers, and HR/human resources positions
+      const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
+      const roleValue = (p.role || '').trim().toLowerCase();
+      const positionValue = (p.positions?.position_name || '').trim().toLowerCase();
+      const isAssignable = !excludedKeywords.includes(roleValue) &&
+                           !excludedKeywords.some((kw) => positionValue.includes(kw));
+
       return {
         id: p.id,
         employeeId: p.employee_id,
         name,
-        // ✅ Use generated avatar URL instead of stored base64
-        avatar: fallbackAvatar,  // Always use generated avatar in list views
-        role: p.positions?.position_name || null,
+        // ✅ Use generated avatar URL instead of stored base64 if no avatar_url uploaded
+        avatar: p.avatar_url || fallbackAvatar,
+        role: p.positions?.position_name || p.role || null,
         department: p.departments?.department_name || 'Unassigned',
         skills: (p.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
         certifications,
         isVerified: p.is_verified || false,
+        isAssignable,
       };
     });
 
@@ -126,7 +136,7 @@ router.get('/:id', async (req, res) => {
         employeeId: profile.employee_id,
         name,
         avatar: profile.avatar_url || fallbackAvatar,  // ✅ Return actual avatar for detail
-        role: profile.positions?.position_name || null,
+        role: profile.positions?.position_name || profile.role || null,
         department: profile.departments?.department_name || 'Unassigned',
         skills: (profile.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
         isVerified: profile.is_verified || false,
