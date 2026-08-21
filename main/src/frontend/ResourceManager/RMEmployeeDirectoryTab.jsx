@@ -50,6 +50,7 @@ export default function RMEmployeeDirectoryTab() {
   };
 
   const handleOpenAssignModal = (emp) => {
+    if (!emp.isAssignable) return;
     setSelectedEmployee(emp);
     setAssignForm({
       projectId: '',
@@ -84,17 +85,35 @@ export default function RMEmployeeDirectoryTab() {
     }
   };
 
+  // Normalize roles to Title Case helper
+  const toTitleCase = (str) => {
+    if (!str) return '';
+    return str
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch =
       emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      emp.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (emp.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.skills.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const matchesRole = selectedRole === 'All' || emp.role === selectedRole;
+    const matchesRole = selectedRole === 'All' || toTitleCase(emp.role) === selectedRole;
     return matchesSearch && matchesRole;
   });
 
-  const uniqueRoles = ['All', ...new Set(employees.map(emp => emp.role))];
+  const normalizedRoles = employees
+    .map((emp) => toTitleCase(emp.role))
+    .filter(Boolean);
+  const uniqueRoles = ['All', ...new Set(normalizedRoles)].sort((a, b) => {
+    if (a === 'All') return -1;
+    if (b === 'All') return 1;
+    return a.localeCompare(b);
+  });
 
   const toggleSkillsExpand = (empId) => {
     setExpandedSkills(prev => ({
@@ -206,12 +225,18 @@ export default function RMEmployeeDirectoryTab() {
 
               {/* Footer / Actions */}
               <div style={styles.cardFooter}>
-                <button
-                  onClick={() => handleOpenAssignModal(emp)}
-                  style={styles.assignBtn}
-                >
-                  Assign to Project
-                </button>
+                {emp.isAssignable ? (
+                  <button
+                    onClick={() => handleOpenAssignModal(emp)}
+                    style={styles.assignBtn}
+                  >
+                    Assign to Project
+                  </button>
+                ) : (
+                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontStyle: 'italic', display: 'block', width: '100%', textAlign: 'center', alignSelf: 'center' }}>
+                    Not assignable — Resource/Project Manager or Admin/HR role
+                  </span>
+                )}
               </div>
             </div>
           ))
