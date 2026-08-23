@@ -4,6 +4,7 @@ import Login from './frontend/Login';
 import ResetPassword from './frontend/ResetPassword';
 import ApplicantPortal from './frontend/ApplicantPortal';
 import AdminLayout from './frontend/Admin/AdminLayout';
+import SuperAdminLayout from './frontend/SuperAdmin/SuperAdminLayout';
 import PMLayout from './frontend/ProjectManager/PMLayout';
 import RMLayout from './frontend/ResourceManager/RMLayout';
 import HRLayout from './frontend/HumanResource/HRLayout';
@@ -497,6 +498,8 @@ function App() {
     const role = currentUser.role;
     console.log('🎯 Rendering layout for role:', role);
     switch (role) {
+      case 'Super Admin':
+        return <SuperAdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       case 'Admin':
         return <AdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
       case 'Project Manager':
