@@ -1,7 +1,8 @@
 // main/src/frontend/ResourceManager/RMRequestsTab.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Swal from 'sweetalert2';
 import RMAvatar from './RMAvatar';
+import EmployeeProfileModal from './EmployeeProfileModal';
 import {
   fetchRequirements,
   fetchEmployees,
@@ -12,6 +13,9 @@ import {
 } from './Rmapi';
 
 export default function RMRequestsTab() {
+  // ============================================
+  // 1. ALL useState hooks
+  // ============================================
   const [requests, setRequests] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -20,17 +24,210 @@ export default function RMRequestsTab() {
   const [recommendationTab, setRecommendationTab] = useState('Recommended');
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
   const [loading, setLoading] = useState(true);
-  // ✅ Start with all projects expanded - use a Set
   const [expandedProjects, setExpandedProjects] = useState(new Set());
-
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(true);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  const [sortBy, setSortBy] = useState('score');
+  const [sortOrder, setSortOrder] = useState('desc');
 
+  const hasAutoExpanded = useRef(false);
+
+  // ============================================
+  // 2. ALL Helper Functions
+  // ============================================
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'TBD';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return 'TBD';
+    }
+  };
+
+  const getStatusInfo = (status) => {
+    const statusMap = {
+      'Strongly Recommended': { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)', label: 'Strongly Recommended' },
+      'Recommended': { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)', label: 'Recommended' },
+      'Consider': { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', label: 'Consider' },
+      'Not Recommended': { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', label: 'Not Recommended' }
+    };
+    return statusMap[status] || { color: '#6b7280', bg: 'rgba(107, 114, 128, 0.15)', label: status || 'Unknown' };
+  };
+
+  const renderStars = (rating) => {
+    const fullStars = Math.floor(rating);
+    const halfStar = rating % 1 >= 0.5 ? 1 : 0;
+    const emptyStars = 5 - fullStars - halfStar;
+    
+    return (
+      <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+        {[...Array(fullStars)].map((_, i) => (
+          <span key={`full-${i}`} style={{ color: '#f59e0b' }}>★</span>
+        ))}
+        {halfStar === 1 && <span style={{ color: '#f59e0b' }}>☆</span>}
+        {[...Array(emptyStars)].map((_, i) => (
+          <span key={`empty-${i}`} style={{ color: '#d1d5db' }}>☆</span>
+        ))}
+        <span style={{ fontSize: '12px', marginLeft: '4px', color: 'var(--color-text-muted)' }}>
+          ({rating.toFixed(1)})
+        </span>
+      </span>
+    );
+  };
+
+  const getAssignmentCount = (requestId) => {
+    if (!assignments || !Array.isArray(assignments)) {
+      return 0;
+    }
+    return assignments.filter(a => a.requirement_id === requestId).length;
+  };
+
+  const getAssignedEmployees = (requestId) => {
+    if (!employees || !Array.isArray(employees)) {
+      return [];
+    }
+    if (!assignments || !Array.isArray(assignments)) {
+      return [];
+    }
+    return assignments
+      .filter(a => a.requirement_id === requestId)
+      .map(a => {
+        const employee = employees.find(e => e.id === a.profile_id);
+        return employee || { name: 'Unknown', id: a.profile_id };
+      });
+  };
+
+  const groupRequestsByProject = (requestsList) => {
+    const groups = new Map();
+    requestsList.forEach(req => {
+      const key = req.project_id || 'unknown';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          projectId: key,
+          projectName: req.projectName || 'Unnamed Project',
+          requirements: [],
+          totalNeeded: 0,
+          totalFilled: 0,
+          isFullyAssigned: true
+        });
+      }
+      const group = groups.get(key);
+      const assignedCount = getAssignmentCount(req.id);
+      const reqWithCount = { ...req, assignedCount };
+      group.requirements.push(reqWithCount);
+      group.totalNeeded += req.quantity || 1;
+      group.totalFilled += assignedCount;
+      group.isFullyAssigned = group.totalFilled >= group.totalNeeded;
+    });
+    return Array.from(groups.values());
+  };
+
+  const sortCandidates = (candidates, sortBy, sortOrder) => {
+    if (!candidates || candidates.length === 0) return candidates;
+    const sorted = [...candidates];
+    switch (sortBy) {
+      case 'score':
+        sorted.sort((a, b) => (a.score || 0) - (b.score || 0));
+        break;
+      case 'skills':
+        sorted.sort((a, b) => {
+          const aMatch = a.matchedSkills?.length || 0;
+          const bMatch = b.matchedSkills?.length || 0;
+          return aMatch - bMatch;
+        });
+        break;
+      case 'availability':
+        sorted.sort((a, b) => (a.availabilityFactor || 0) - (b.availabilityFactor || 0));
+        break;
+      case 'performance':
+        sorted.sort((a, b) => (a.historicalPerformance || 0) - (b.historicalPerformance || 0));
+        break;
+      case 'name':
+        sorted.sort((a, b) => a.employee?.name?.localeCompare(b.employee?.name) || 0);
+        break;
+      default:
+        break;
+    }
+    return sortOrder === 'desc' ? sorted.reverse() : sorted;
+  };
+
+  const toggleProjectExpansion = (projectId) => {
+    setExpandedProjects(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(projectId)) {
+        newSet.delete(projectId);
+      } else {
+        newSet.add(projectId);
+      }
+      return newSet;
+    });
+  };
+
+  // ============================================
+  // 3. ALL useMemo hooks
+  // ============================================
+  
+  const filteredRequests = useMemo(() => {
+    return requests.filter(req => {
+      const matchesSearch =
+        req.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.role_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.skills?.some(skill => skill?.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
+      const assignedCount = getAssignmentCount(req.id);
+      const quantity = req.quantity || 1;
+      const isFullyAssigned = assignedCount >= quantity;
+      const matchesUnassigned = showUnassignedOnly ? !isFullyAssigned : true;
+      return matchesSearch && matchesStatus && matchesUnassigned;
+    });
+  }, [requests, searchQuery, statusFilter, showUnassignedOnly]);
+
+  const groupedProjects = useMemo(
+    () => groupRequestsByProject(filteredRequests),
+    [filteredRequests]
+  );
+
+  const displayedRecommendations = useMemo(() => {
+    let candidates = recommendationTab === 'View all' 
+      ? recommendations.all 
+      : recommendations.recommended;
+    if (!candidates || candidates.length === 0) return [];
+    if (recommendationTab === 'Recommended') {
+      candidates = candidates.filter(c => c.score >= 40);
+    }
+    return sortCandidates(candidates, sortBy, sortOrder);
+  }, [recommendations, recommendationTab, sortBy, sortOrder]);
+
+  // ============================================
+  // 4. ALL useEffect hooks
+  // ============================================
+  
   useEffect(() => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (groupedProjects.length > 0 && !hasAutoExpanded.current) {
+      const newExpanded = new Set();
+      groupedProjects.forEach(project => {
+        newExpanded.add(project.projectId);
+      });
+      setExpandedProjects(newExpanded);
+      hasAutoExpanded.current = true;
+      console.log('✅ Projects expanded:', newExpanded.size);
+    }
+  }, [groupedProjects]);
+
+  // ============================================
+  // 5. Event Handlers and other functions
+  // ============================================
+  
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -39,7 +236,6 @@ export default function RMRequestsTab() {
         fetchEmployees(),
         fetchAssignments()
       ]);
-
       setRequests(requestsData.data || requestsData || []);
       setEmployees(employeesData.data || employeesData || []);
       setAssignments(assignmentsData.data || assignmentsData || []);
@@ -54,80 +250,9 @@ export default function RMRequestsTab() {
       });
     } finally {
       setLoading(false);
+      hasAutoExpanded.current = false;
     }
   };
-
-  const getAssignmentCount = (requestId) => {
-    return assignments.filter(a => a.requirement_id === requestId).length;
-  };
-
-  const getAssignedEmployees = (requestId) => {
-    return assignments
-      .filter(a => a.requirement_id === requestId)
-      .map(a => employees.find(e => e.id === a.profile_id) || { name: 'Unknown' });
-  };
-
-  const groupRequestsByProject = (requestsList) => {
-    const groups = new Map();
-
-    requestsList.forEach(req => {
-      const key = req.project_id || 'unknown';
-      if (!groups.has(key)) {
-        groups.set(key, {
-          projectId: key,
-          projectName: req.projectName || 'Unnamed Project',
-          requirements: [],
-          totalNeeded: 0,
-          totalFilled: 0,
-          isFullyAssigned: true
-        });
-      }
-
-      const group = groups.get(key);
-      const assignedCount = getAssignmentCount(req.id);
-      const reqWithCount = { ...req, assignedCount };
-      group.requirements.push(reqWithCount);
-      group.totalNeeded += req.quantity || 1;
-      group.totalFilled += assignedCount;
-      group.isFullyAssigned = group.totalFilled >= group.totalNeeded;
-    });
-
-    return Array.from(groups.values());
-  };
-
-  const filteredRequests = useMemo(() => {
-    return requests.filter(req => {
-      const matchesSearch =
-        req.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        req.role_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        req.skills?.some(skill => skill?.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
-
-      const assignedCount = getAssignmentCount(req.id);
-      const hasAssignments = assignedCount > 0;
-      const matchesUnassigned = showUnassignedOnly ? !hasAssignments : true;
-
-      return matchesSearch && matchesStatus && matchesUnassigned;
-    });
-  }, [requests, searchQuery, statusFilter, showUnassignedOnly]);
-
-  const groupedProjects = useMemo(
-    () => groupRequestsByProject(filteredRequests),
-    [filteredRequests]
-  );
-
-  // ✅ Auto-expand ALL projects when data loads
-  useEffect(() => {
-    if (groupedProjects.length > 0) {
-      const newExpanded = new Set();
-      groupedProjects.forEach(project => {
-        newExpanded.add(project.projectId);
-      });
-      setExpandedProjects(newExpanded);
-      console.log('✅ Projects expanded:', newExpanded.size);
-    }
-  }, [groupedProjects]);
 
   const handleAllocateCandidate = async (request, candidate) => {
     try {
@@ -140,15 +265,31 @@ export default function RMRequestsTab() {
         end_date: request.end_date,
         status: 'Assigned'
       });
-
       await fetchData();
       setActiveRequestDetails(null);
-
       showSuccessAlert(`Allocated ${candidate.name} to ${request.projectName}`);
     } catch (error) {
       console.error('Error allocating:', error);
       showErrorAlert(error.message || 'Failed to allocate candidate. Please try again.');
     }
+  };
+
+  const handleViewProfile = (employee) => {
+    const recData = displayedRecommendations.find(r => r.employee.id === employee.id);
+    let performanceRating = 0;
+    if (recData?.historicalPerformance) {
+      performanceRating = recData.historicalPerformance * 5;
+    }
+    setSelectedEmployee({
+      ...employee,
+      matchedSkills: recData?.matchedSkills || [],
+      missingSkills: recData?.missingSkills || [],
+      performanceRating: performanceRating,
+      hasPerformanceData: performanceRating > 0,
+      status: recData?.status || 'Not Recommended',
+      requirementId: activeRequestDetails?.id
+    });
+    setShowProfileModal(true);
   };
 
   const showConfirmationAlert = (title, text, confirmText = 'Yes, proceed!') => {
@@ -207,7 +348,6 @@ export default function RMRequestsTab() {
       'Yes, Reject'
     );
     if (!result.isConfirmed) return;
-
     try {
       await updateRequirementStatus(reqId, 'Rejected');
       await fetchData();
@@ -230,38 +370,27 @@ export default function RMRequestsTab() {
 
   const handleViewRecommendations = async (req) => {
     console.log('🔍 Viewing recommendations for:', req.role_title);
-    console.log('📋 Requirement ID from frontend:', req.id);  // Should be 1
-    console.log('📋 Skills from frontend:', req.skills);      // Should be UPS skills
-    console.log('📋 Project ID:', req.project_id);            // Should be 2
+    console.log('📋 Requirement ID from frontend:', req.id);
+    console.log('📋 Skills from frontend:', req.skills);
+    console.log('📋 Project ID:', req.project_id);
+    
+    setLoadingRecommendations(true);
     setActiveRequestDetails(req);
     setRecommendationTab('Recommended');
     setSelectedCandidateId(null);
-    await fetchRecommendationsData(req.id);
-  };
-
-  const toggleProjectExpansion = (projectId) => {
-    setExpandedProjects(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(projectId)) {
-        newSet.delete(projectId);
-      } else {
-        newSet.add(projectId);
-      }
-      console.log('📂 Toggled project:', projectId, 'Expanded:', newSet.has(projectId));
-      return newSet;
-    });
-  };
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return 'TBD';
+    
     try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch {
-      return 'TBD';
+      await fetchRecommendationsData(req.id);
+    } catch (error) {
+      console.error('Error fetching recommendations:', error);
+    } finally {
+      setLoadingRecommendations(false);
     }
   };
 
+  // ============================================
+  // 6. Conditional return (LAST)
+  // ============================================
   if (loading) {
     return (
       <div style={styles.container}>
@@ -276,10 +405,9 @@ export default function RMRequestsTab() {
     );
   }
 
-  const displayedRecommendations = recommendationTab === 'View all'
-    ? recommendations.all
-    : recommendations.recommended;
-
+  // ============================================
+  // 7. Main return with JSX
+  // ============================================
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -316,16 +444,6 @@ export default function RMRequestsTab() {
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
               </select>
-              <button
-                onClick={() => setShowUnassignedOnly(!showUnassignedOnly)}
-                style={{
-                  ...styles.unassignedBtn,
-                  backgroundColor: showUnassignedOnly ? 'var(--color-primary)' : 'transparent',
-                  color: showUnassignedOnly ? '#ffffff' : 'var(--color-text-secondary)',
-                }}
-              >
-                {showUnassignedOnly ? 'Unassigned Only' : 'Show All'}
-              </button>
             </div>
           </div>
 
@@ -340,7 +458,6 @@ export default function RMRequestsTab() {
 
                 return (
                   <div key={project.projectId} style={styles.projectCard}>
-                    {/* Project Header */}
                     <div
                       style={styles.projectHeader}
                       onClick={() => toggleProjectExpansion(project.projectId)}
@@ -414,7 +531,6 @@ export default function RMRequestsTab() {
                       </div>
                     </div>
 
-                    {/* Requirements - ALWAYS SHOW when expanded */}
                     {isExpanded ? (
                       <div style={styles.requirementsContainer}>
                         {project.requirements.length === 0 ? (
@@ -426,7 +542,6 @@ export default function RMRequestsTab() {
                             const assignedCount = req.assignedCount;
                             const assignedEmployees = getAssignedEmployees(req.id);
                             const isFullyAssigned = assignedCount >= (req.quantity || 1);
-                            const hasTimeline = req.start_date || req.end_date;
 
                             return (
                               <div key={req.id} style={styles.requirementCard}>
@@ -437,6 +552,11 @@ export default function RMRequestsTab() {
                                     </span>
                                     <span style={styles.requirementFillStatus}>
                                       {assignedCount}/{req.quantity || 1} filled
+                                      {assignedCount > 0 && assignedCount < (req.quantity || 1) && (
+                                        <span style={{ color: '#f59e0b', marginLeft: '4px' }}>
+                                          (Partial)
+                                        </span>
+                                      )}
                                     </span>
                                   </div>
                                   <div style={styles.requirementActions}>
@@ -455,7 +575,6 @@ export default function RMRequestsTab() {
                                   </div>
                                 </div>
 
-                                {/* Timeline - Always show dates */}
                                 <div style={styles.requirementTimeline}>
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.timelineIcon}>
                                     <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
@@ -468,7 +587,6 @@ export default function RMRequestsTab() {
                                   </span>
                                 </div>
 
-                                {/* Assigned Employees */}
                                 {assignedCount > 0 && (
                                   <div style={styles.assignedContainer}>
                                     <span style={styles.assignedLabel}>Assigned:</span>
@@ -479,10 +597,14 @@ export default function RMRequestsTab() {
                                         </span>
                                       ))}
                                     </div>
+                                    {assignedCount < (req.quantity || 1) && (
+                                      <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                        ({req.quantity - assignedCount} more needed)
+                                      </span>
+                                    )}
                                   </div>
                                 )}
 
-                                {/* Skills */}
                                 {req.skills && req.skills.length > 0 && (
                                   <div style={styles.skillsContainer}>
                                     {req.skills.map((skill, i) => (
@@ -491,7 +613,6 @@ export default function RMRequestsTab() {
                                   </div>
                                 )}
 
-                                {/* ✅ ACTIONS - Always visible */}
                                 <div style={styles.requirementFooter}>
                                   <button
                                     onClick={() => handleViewRecommendations(req)}
@@ -547,6 +668,11 @@ export default function RMRequestsTab() {
               <p>Select a role to see candidates</p>
               <span style={styles.emptySubtext}>Click "View Candidates" on any request</span>
             </div>
+          ): loadingRecommendations ? (
+            <div style={styles.loadingRecommendationsContainer}>
+              <div style={styles.loadingSpinner}></div>
+              <p style={styles.loadingText}>Finding the best candidates...</p>
+            </div>
           ) : (
             <div>
               <div style={styles.requestInfoBar}>
@@ -591,6 +717,8 @@ export default function RMRequestsTab() {
                     const isAlreadyAssigned = assignments.some(
                       a => a.requirement_id === activeRequestDetails.id && a.profile_id === rec.employee.id
                     );
+                    const statusInfo = getStatusInfo(rec.status);
+                    const performanceRating = rec.historicalPerformance * 5 || 0;
 
                     return (
                       <div key={rec.employee.id} style={styles.recCard}>
@@ -599,21 +727,26 @@ export default function RMRequestsTab() {
                           <div style={styles.recInfo}>
                             <div style={styles.recName}>{rec.employee.name}</div>
                             <div style={styles.recRole}>{rec.employee.role || 'Employee'}</div>
+                            <div style={styles.recDepartment}>{rec.employee.department || ''}</div>
                           </div>
-                          <div style={styles.recScore}>
+                          <div style={styles.recStatus}>
                             <span style={{
-                              ...styles.scoreValue,
-                              color: rec.score > 75 ? '#22c55e' : rec.score > 40 ? '#f59e0b' : '#ef4444'
+                              ...styles.statusBadge,
+                              color: statusInfo.color,
+                              backgroundColor: statusInfo.bg,
                             }}>
-                              {rec.score}%
+                              {statusInfo.label}
                             </span>
-                            <span style={styles.scoreLabel}>match</span>
+                            <div style={styles.recStars}>
+                              {renderStars(performanceRating)}
+                            </div>
                           </div>
                         </div>
 
                         {rec.matchedSkills && rec.matchedSkills.length > 0 && (
                           <div style={styles.recSkills}>
-                            {rec.matchedSkills.slice(0, 3).map((skill, i) => (
+                            <span style={styles.skillsLabel}>Matched Skills:</span>
+                            {rec.matchedSkills.slice(0, 4).map((skill, i) => (
                               <span key={i} style={styles.matchingSkill}>
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
                                   <polyline points="20 6 9 17 4 12"></polyline>
@@ -621,32 +754,62 @@ export default function RMRequestsTab() {
                                 {skill}
                               </span>
                             ))}
-                            {rec.matchedSkills.length > 3 && (
-                              <span style={styles.moreSkills}>+{rec.matchedSkills.length - 3} more</span>
+                            {rec.matchedSkills.length > 4 && (
+                              <span style={styles.moreSkills}>+{rec.matchedSkills.length - 4} more</span>
                             )}
                           </div>
                         )}
 
-                        <button
-                          onClick={() => handleAllocateCandidate(activeRequestDetails, rec.employee)}
-                          style={{
-                            ...styles.allocateBtn,
-                            opacity: isAlreadyAssigned ? 0.5 : 1,
-                            cursor: isAlreadyAssigned ? 'not-allowed' : 'pointer',
-                            backgroundColor: isAlreadyAssigned ? 'var(--color-text-muted)' : 'var(--color-primary)',
-                          }}
-                          disabled={isAlreadyAssigned}
-                        >
-                          {isAlreadyAssigned ? (
-                            <>
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                              </svg>
-                              Already Assigned
-                            </>
-                          ) : 'Allocate Resource'}
-                        </button>
+                        {rec.missingSkills && rec.missingSkills.length > 0 && (
+                          <div style={styles.missingSkillsContainer}>
+                            <span style={styles.skillsLabel}>Missing Skills:</span>
+                            {rec.missingSkills.slice(0, 3).map((skill, i) => (
+                              <span key={i} style={styles.missingSkill}>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
+                                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                                {skill}
+                              </span>
+                            ))}
+                            {rec.missingSkills.length > 3 && (
+                              <span style={styles.moreSkills}>+{rec.missingSkills.length - 3} more</span>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={styles.recActions}>
+                          <button
+                            onClick={() => handleViewProfile(rec.employee)}
+                            style={styles.viewProfileBtn}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '4px' }}>
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                              <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                            View Profile
+                          </button>
+                          <button
+                            onClick={() => handleAllocateCandidate(activeRequestDetails, rec.employee)}
+                            style={{
+                              ...styles.allocateBtn,
+                              opacity: isAlreadyAssigned ? 0.5 : 1,
+                              cursor: isAlreadyAssigned ? 'not-allowed' : 'pointer',
+                              backgroundColor: isAlreadyAssigned ? 'var(--color-text-muted)' : 'var(--color-primary)',
+                            }}
+                            disabled={isAlreadyAssigned}
+                          >
+                            {isAlreadyAssigned ? (
+                              <>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
+                                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                                Already Assigned
+                              </>
+                            ) : 'Allocate Resource'}
+                          </button>
+                        </div>
                       </div>
                     );
                   })
@@ -656,6 +819,18 @@ export default function RMRequestsTab() {
           )}
         </div>
       </div>
+
+      {/* Employee Profile Modal */}
+      {showProfileModal && selectedEmployee && (
+        <EmployeeProfileModal
+          employee={selectedEmployee}
+          onClose={() => setShowProfileModal(false)}
+          matchedSkills={activeRequestDetails ? recommendations.recommended.find(r => r.employee.id === selectedEmployee.id)?.matchedSkills || [] : []}
+          missingSkills={activeRequestDetails ? recommendations.recommended.find(r => r.employee.id === selectedEmployee.id)?.missingSkills || [] : []}
+          performanceRating={activeRequestDetails ? recommendations.recommended.find(r => r.employee.id === selectedEmployee.id)?.historicalPerformance * 5 || 0 : 0}
+          status={activeRequestDetails ? recommendations.recommended.find(r => r.employee.id === selectedEmployee.id)?.status || 'Not Recommended' : 'Not Recommended'}
+        />
+      )}
     </div>
   );
 }
@@ -960,13 +1135,6 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 0.2s',
     minWidth: '120px',
-    '&:hover': {
-      opacity: 0.9,
-    },
-    '&:disabled': {
-      opacity: 0.5,
-      cursor: 'not-allowed',
-    },
   },
   rejectBtn: {
     backgroundColor: 'transparent',
@@ -979,9 +1147,6 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 0.2s',
     whiteSpace: 'nowrap',
-    '&:hover': {
-      backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    },
   },
   emptyState: {
     padding: '40px 20px',
@@ -1065,8 +1230,7 @@ const styles = {
     border: '1px solid var(--color-border)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '10px',
-    transition: 'all 0.2s',
+    gap: '8px',
   },
   recHeader: {
     display: 'flex',
@@ -1081,63 +1245,102 @@ const styles = {
     fontSize: '14px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
-    wordBreak: 'break-word',
   },
   recRole: {
     fontSize: '12px',
     color: 'var(--color-text-muted)',
-    wordBreak: 'break-word',
   },
-  recScore: {
+  recDepartment: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    opacity: 0.7,
+  },
+  recStatus: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    gap: '4px',
     flexShrink: 0,
   },
-  scoreValue: {
-    fontSize: '18px',
-    fontWeight: '800',
+  statusBadge: {
+    fontSize: '11px',
+    fontWeight: '600',
+    padding: '4px 10px',
+    borderRadius: '12px',
+    whiteSpace: 'nowrap',
   },
-  scoreLabel: {
-    fontSize: '9px',
-    color: 'var(--color-text-muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
+  recStars: {
+    fontSize: '12px',
   },
   recSkills: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: '6px',
+    gap: '4px',
+    alignItems: 'center',
+  },
+  missingSkillsContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px',
+    alignItems: 'center',
+  },
+  skillsLabel: {
+    fontSize: '11px',
+    fontWeight: '500',
+    color: 'var(--color-text-muted)',
+    marginRight: '4px',
   },
   matchingSkill: {
-    fontSize: '11px',
-    color: 'var(--color-success)',
+    fontSize: '10px',
+    color: '#22c55e',
     backgroundColor: 'rgba(34, 197, 94, 0.1)',
-    padding: '2px 10px',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    fontWeight: '500',
+  },
+  missingSkill: {
+    fontSize: '10px',
+    color: '#ef4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    padding: '2px 8px',
     borderRadius: '4px',
     fontWeight: '500',
   },
   moreSkills: {
-    fontSize: '11px',
+    fontSize: '10px',
     color: 'var(--color-text-muted)',
     padding: '2px 4px',
   },
+  recActions: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '4px',
+  },
+  viewProfileBtn: {
+    flex: 1,
+    backgroundColor: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-primary)',
+    border: '1px solid var(--color-border)',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    fontWeight: '500',
+    fontSize: '12px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+  },
   allocateBtn: {
-    padding: '8px',
+    flex: 2,
+    padding: '6px 12px',
     borderRadius: '6px',
     fontWeight: '600',
-    fontSize: '13px',
+    fontSize: '12px',
     cursor: 'pointer',
     transition: 'all 0.2s',
     color: '#ffffff',
     border: 'none',
-    '&:hover': {
-      opacity: 0.9,
-    },
-    '&:disabled': {
-      opacity: 0.5,
-      cursor: 'not-allowed',
-    },
   },
   emptyRecommendation: {
     padding: '40px 20px',
@@ -1157,5 +1360,19 @@ const styles = {
     borderTop: '4px solid var(--color-primary)',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
+  },
+  loadingRecommendationsContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '400px',
+    gap: '16px',
+  },
+  loadingText: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    margin: '0',
   },
 };

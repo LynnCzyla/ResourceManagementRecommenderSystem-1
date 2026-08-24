@@ -12,7 +12,6 @@ router.use(verifyToken);
 // ============================================
 // GET /api/rm/recommendations/:requirementId
 // Get recommendations by requirement ID
-// ✅ Call the controller function directly!
 // ============================================
 router.get('/:requirementId', recommendationController.getRecommendationsByRequirement);
 
@@ -21,6 +20,12 @@ router.get('/:requirementId', recommendationController.getRecommendationsByRequi
 // Get recommendations for a project
 // ============================================
 router.get('/project/:projectId', recommendationController.getRecommendations);
+
+// ============================================
+// GET /api/rm/employee/:profileId/performance
+// Get employee performance details
+// ============================================
+router.get('/employee/:profileId/performance', recommendationController.getEmployeePerformance);
 
 // Get employee workload
 router.get('/employee/:profileId/workload', recommendationController.getEmployeeWorkload);

@@ -30,21 +30,21 @@ class RecommendationEngine {
             includeAll = false,
             requirementId = null
         } = options;
-
+    
         console.log(`🔍 [Recommendation] Getting candidates for project ${projectId}`);
         if (requirementId) {
             console.log(`📋 Using specific requirement: ${requirementId}`);
         }
-
+    
         // 1. Get project
         const project = await this._getProject(projectId);
         if (!project) throw new Error('Project not found');
-
+    
         // 2. Get required skills
         const requiredSkills = requirementId 
             ? await this._getRequiredSkills(requirementId)
             : await this._getRequiredSkillsForProject(projectId);
-
+    
         if (requiredSkills.length === 0) {
             return {
                 success: true,
@@ -57,12 +57,21 @@ class RecommendationEngine {
                 }
             };
         }
-
-        // 3. Get all available employees
-        const employees = await this._getAvailableEmployees(excludeProfileIds);
-        console.log(`👥 Found ${employees.length} employees`);
-
-        // 4. Calculate scores for each employee
+    
+        // 3. 🆕 Get already assigned employees for THIS requirement
+        const assignedProfileIds = await this._getAssignedEmployeesForRequirement(requirementId);
+        if (assignedProfileIds.length > 0) {
+            console.log(`👥 ${assignedProfileIds.length} employees already assigned to requirement ${requirementId}, excluding them`);
+        }
+    
+        // 4. Combine with excludeProfileIds
+        const allExcludeIds = [...new Set([...excludeProfileIds, ...assignedProfileIds])];
+    
+        // 5. Get all available employees (excluding assigned ones)
+        const employees = await this._getAvailableEmployees(allExcludeIds);
+        console.log(`👥 Found ${employees.length} available employees (${assignedProfileIds.length} excluded for this requirement)`);
+    
+        // 6. Calculate scores for each employee
         const candidates = [];
         for (const employee of employees) {
             const score = await this._calculateScore(employee, requiredSkills);
@@ -70,16 +79,16 @@ class RecommendationEngine {
                 candidates.push(score);
             }
         }
-
-        // 5. Sort by recommendation score (descending)
+    
+        // 7. Sort by recommendation score (descending)
         candidates.sort((a, b) => b.recommendationScore - a.recommendationScore);
-
-        // 6. Return top candidates
+    
+        // 8. Return top candidates
         const topCandidates = candidates.slice(0, maxCandidates);
         
         console.log(`✅ Found ${candidates.length} candidates`);
         console.log(`🏆 Top ${topCandidates.length} candidates returned`);
-
+    
         return {
             success: true,
             data: {
@@ -88,9 +97,35 @@ class RecommendationEngine {
                 requiredSkills,
                 candidates: topCandidates,
                 totalCandidates: candidates.length,
-                requirementId: requirementId
+                requirementId: requirementId,
+                assignedCount: assignedProfileIds.length
             }
         };
+    }
+    
+    /**
+     * 🆕 Get employees already assigned to a SPECIFIC requirement
+     */
+    async _getAssignedEmployeesForRequirement(requirementId) {
+        if (!requirementId) return [];
+        
+        try {
+            const { data, error } = await supabase
+                .from('project_assignments')
+                .select('profile_id')
+                .eq('requirement_id', requirementId)
+                .in('status', ['Assigned', 'Active']);
+    
+            if (error) {
+                console.error('❌ Error fetching assigned employees:', error);
+                return [];
+            }
+    
+            return (data || []).map(item => item.profile_id).filter(Boolean);
+        } catch (error) {
+            console.error('❌ Error in _getAssignedEmployeesForRequirement:', error);
+            return [];
+        }
     }
 
     /**
@@ -640,17 +675,152 @@ class RecommendationEngine {
     }
 
     async _getHistoricalPerformance(profileId) {
-        const { data, error } = await supabase
-            .from('performance_records')
-            .select('rating')
-            .eq('profile_id', profileId);
+        try {
+            // Get all performance records for this employee from client feedback
+            const { data, error } = await supabase
+                .from('performance_records')
+                .select('rating')
+                .eq('profile_id', profileId)
+                .eq('feedback_source', 'client')
+                .eq('feedback_status', 'submitted');
 
-        if (error || !data || data.length === 0) {
-            return this.DEFAULT_HP;
+            if (error) {
+                console.error('❌ Error fetching performance records:', error);
+                return this.DEFAULT_HP;  // ← Return 0.70 on error
+            }
+
+            // If no records found, return DEFAULT_HP (0.70)
+            if (!data || data.length === 0) {
+                console.log(`📋 No performance records found for employee ${profileId}, using default`);
+                return this.DEFAULT_HP;  // ← Return 0.70, not 0!
+            }
+
+            // Calculate average rating
+            const totalRating = data.reduce((sum, record) => sum + Number(record.rating), 0);
+            const avgRating = totalRating / data.length;
+
+            // Convert to HP factor (0-1 range)
+            const hp = Math.min(avgRating / 5, 1.0);
+            
+            console.log(`📊 Employee ${profileId}: ${data.length} records, avg rating: ${avgRating.toFixed(2)}, HP: ${hp.toFixed(3)}`);
+            
+            return hp;
+        } catch (error) {
+            console.error('❌ Error in _getHistoricalPerformance:', error);
+            return this.DEFAULT_HP;  // ← Return 0.70 on error
         }
+    }
 
-        const avgRating = data.reduce((sum, record) => sum + record.rating, 0) / data.length;
-        return avgRating / 5;
+    /**
+     * 🆕 Get detailed performance data for an employee
+     * Returns rating and all sub-ratings for the profile modal
+     */
+    async _getPerformanceDetails(profileId) {
+        try {
+            // Get performance records with all details from the database
+            const { data, error } = await supabase
+                .from('performance_records')
+                .select(`
+                    rating,
+                    technical_skills_rating,
+                    communication_rating,
+                    timeliness_rating,
+                    quality_of_work_rating,
+                    teamwork_rating,
+                    problem_solving_rating,
+                    deliverables_feedback,
+                    strengths,
+                    areas_for_improvement,
+                    client_name,
+                    client_feedback,
+                    project_id,
+                    rated_at,
+                    projects:project_id (
+                        project_name
+                    )
+                `)
+                .eq('profile_id', profileId)
+                .eq('feedback_source', 'client')
+                .eq('feedback_status', 'submitted')
+                .order('rated_at', { ascending: false });
+    
+            if (error) {
+                console.error('❌ Error fetching performance details:', error);
+                return this._getDefaultPerformanceDetails();
+            }
+    
+            // If no records found, return default (no data)
+            if (!data || data.length === 0) {
+                console.log(`📋 No performance details found for employee ${profileId}`);
+                return this._getDefaultPerformanceDetails();
+            }
+    
+            // Calculate averages from actual data
+            const count = data.length;
+            const avgRating = data.reduce((sum, r) => sum + Number(r.rating), 0) / count;
+            
+            const avgTechnical = data.reduce((sum, r) => sum + (Number(r.technical_skills_rating) || 0), 0) / count;
+            const avgCommunication = data.reduce((sum, r) => sum + (Number(r.communication_rating) || 0), 0) / count;
+            const avgTimeliness = data.reduce((sum, r) => sum + (Number(r.timeliness_rating) || 0), 0) / count;
+            const avgQuality = data.reduce((sum, r) => sum + (Number(r.quality_of_work_rating) || 0), 0) / count;
+            const avgTeamwork = data.reduce((sum, r) => sum + (Number(r.teamwork_rating) || 0), 0) / count;
+            const avgProblemSolving = data.reduce((sum, r) => sum + (Number(r.problem_solving_rating) || 0), 0) / count;
+    
+            // Get the most recent feedback
+            const latest = data[0];
+    
+            return {
+                averageRating: avgRating,
+                ratingCount: count,
+                hasData: true,  // ← Flag indicating data exists
+                ratings: data.map(r => ({
+                    rating: Number(r.rating),
+                    ratedAt: r.rated_at,
+                    clientName: r.client_name,
+                    projectName: r.projects?.project_name || null,
+                    feedback: r.deliverables_feedback || r.client_feedback || null
+                })),
+                technicalSkills: avgTechnical,
+                communication: avgCommunication,
+                timeliness: avgTimeliness,
+                qualityOfWork: avgQuality,
+                teamwork: avgTeamwork,
+                problemSolving: avgProblemSolving,
+                strengths: latest?.strengths || null,
+                areasForImprovement: latest?.areas_for_improvement || null,
+                recentFeedback: data.slice(0, 3).map(r => ({
+                    clientName: r.client_name,
+                    rating: Number(r.rating),
+                    feedback: r.deliverables_feedback || r.client_feedback || null,
+                    projectName: r.projects?.project_name || null,
+                    date: r.rated_at
+                }))
+            };
+        } catch (error) {
+            console.error('❌ Error in _getPerformanceDetails:', error);
+            return this._getDefaultPerformanceDetails();
+        }
+    }
+
+    /**
+     * Get default performance details when no records exist
+     */
+    _getDefaultPerformanceDetails() {
+        return {
+            averageRating: 0,
+            ratingCount: 0,
+            hasData: false,  // ← Flag indicating no data
+            ratings: [],
+            technicalSkills: 0,
+            communication: 0,
+            timeliness: 0,
+            qualityOfWork: 0,
+            teamwork: 0,
+            problemSolving: 0,
+            strengths: null,
+            areasForImprovement: null,
+            recentFeedback: []
+        };
     }
 
     _getRecommendationStatus(score) {

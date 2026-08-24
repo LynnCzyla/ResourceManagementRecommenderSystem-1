@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchDashboard } from './rmApi';
+import { fetchDashboard } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
 const BAR_COLORS = [
