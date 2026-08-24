@@ -202,4 +202,83 @@ const sendRejectionEmail = async ({ to, applicantName, position, reason }) => {
   await transporter.sendMail(mailOptions);
 };
 
-module.exports = { transporter, sendInterviewEmail, sendOnboardingOfferEmail, sendRejectionEmail };
+// Sent to the CLIENT when a PM sends out a project feedback request.
+// Mirrors the look of sendInterviewEmail/sendOnboardingOfferEmail (same
+// dark card, logo via cid, WEA branding) so all outbound mail looks
+// consistent, but the CTA is a button linking to the public,
+// no-login feedback form at APP_URL/feedback/:token.
+const sendFeedbackRequestEmail = async ({
+  to,
+  clientName,
+  projectName,
+  employeeNames = [],
+  introMessage,
+  feedbackLink,
+  expiresAt,
+}) => {
+  const expiryText = expiresAt
+    ? new Date(expiresAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    : null;
+
+  const defaultIntro = `We hope you've been satisfied with the progress of <strong>${projectName}</strong>. We'd love to hear your feedback on the team members who worked on it.`;
+
+  const mailOptions = {
+    from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
+    to,
+    subject: `We'd love your feedback - ${projectName} at WEA`,
+    html: `
+      <div style="font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 16px; background-color: #0f172a;">
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 20px; overflow: hidden;">
+          <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
+            <div style="margin-bottom: 16px;">
+              <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
+            </div>
+            <h1 style="font-family: 'Outfit', sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
+              We'd Love Your Feedback
+            </h1>
+            <p style="color: #94a3b8; font-size: 13px; font-weight: 500; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">
+              WEA Resource Management System
+            </p>
+          </div>
+          <div style="padding: 32px;">
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">
+              Dear ${clientName},<br/><br/>
+              ${introMessage ? introMessage.replace(/\n/g, '<br/>') : defaultIntro}
+            </p>
+
+            ${employeeNames.length ? `
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+              <p style="margin: 0 0 8px 0; color: #94a3b8; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Team members on this project</p>
+              <p style="margin: 0; color: #f8fafc; font-size: 14px;">${employeeNames.join(', ')}</p>
+            </div>
+            ` : ''}
+
+            <div style="text-align: center; margin: 28px 0;">
+              <a href="${feedbackLink}" style="display: inline-block; background: var(--wea-accent, #3b82f6); background-color: #3b82f6; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 14px 32px; border-radius: 10px;">
+                Share Your Feedback
+              </a>
+            </div>
+
+            <p style="color: #64748b; font-size: 12px; line-height: 1.6; margin: 0 0 20px 0; text-align: center;">
+              Or copy this link into your browser:<br/>
+              <a href="${feedbackLink}" style="color: #3b82f6; word-break: break-all;">${feedbackLink}</a>
+            </p>
+
+            ${expiryText ? `<p style="color: #64748b; font-size: 12px; margin: 0 0 20px 0; text-align: center;">This link expires on ${expiryText}.</p>` : ''}
+
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
+              Your feedback helps us improve our services and helps the team grow.<br/><br/>
+              Best regards,<br/>
+              WEA Project Management Team
+            </p>
+          </div>
+        </div>
+      </div>
+    `,
+    attachments: [getLogoAttachment()]
+  };
+
+  await transporter.sendMail(mailOptions);
+};
+
+module.exports = { transporter, sendInterviewEmail, sendOnboardingOfferEmail, sendRejectionEmail, sendFeedbackRequestEmail };
