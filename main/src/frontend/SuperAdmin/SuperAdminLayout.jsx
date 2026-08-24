@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 
 // Tab components from same directory
+import DashboardTab from './DashboardTab';
 import AdminManagementTab from './AdminManagementTab';
 import BranchManagementTab from './BranchManagementTab';
 import AccountManagementTab from './AccountManagementTab';
@@ -10,7 +11,7 @@ import ProfileSettings from '../ProfileSettings';
 
 export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const [activeTab, setActiveTab] = useState(() => {
-    return localStorage.getItem('superAdminActiveTab') || 'admin-management';
+    return localStorage.getItem('superAdminActiveTab') || 'dashboard';
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
@@ -50,6 +51,8 @@ export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'dashboard':
+        return <DashboardTab setActiveTab={setActiveTab} />;
       case 'admin-management':
         return <AdminManagementTab />;
       case 'branch-management':
@@ -59,7 +62,7 @@ export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }
       case 'audit-logs':
         return <AuditLogsTab />;
       default:
-        return <AdminManagementTab />;
+        return <DashboardTab setActiveTab={setActiveTab} />;
     }
   };
 
@@ -93,6 +96,26 @@ export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }
         </button>
 
         <nav style={styles.nav}>
+          {/* Dashboard */}
+          <div 
+            onClick={() => handleNavClick('dashboard')} 
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'dashboard' ? 'var(--color-primary-light)' : 'transparent',
+              borderLeftColor: activeTab === 'dashboard' ? 'var(--color-primary)' : 'transparent',
+            }}
+            title="Dashboard"
+            className="hover-sidebar-item"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
+              <rect x="3" y="3" width="7" height="9"></rect>
+              <rect x="14" y="3" width="7" height="5"></rect>
+              <rect x="14" y="12" width="7" height="9"></rect>
+              <rect x="3" y="16" width="7" height="5"></rect>
+            </svg>
+            {!sidebarCollapsed && <span style={styles.navText}>Dashboard</span>}
+          </div>
+
           {/* Admin Management */}
           <div 
             onClick={() => handleNavClick('admin-management')} 
