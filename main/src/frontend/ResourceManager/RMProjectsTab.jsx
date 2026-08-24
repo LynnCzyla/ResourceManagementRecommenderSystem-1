@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
-import { fetchProjects, fetchEmployees, assignEmployeeToProject, removeEmployeeFromProject } from './rmApi';
+import { fetchProjects, fetchEmployees, assignEmployeeToProject, removeEmployeeFromProject } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
 export default function RMProjectsTab() {

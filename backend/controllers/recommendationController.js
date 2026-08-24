@@ -457,3 +457,28 @@ exports.getRecommendationsByRequirement = async (req, res) => {
         });
     }
 };
+
+
+/**
+ * Get employee performance details for profile modal
+ */
+exports.getEmployeePerformance = async (req, res) => {
+    try {
+        const { profileId } = req.params;
+        
+        console.log(`📊 Getting performance details for employee: ${profileId}`);
+        
+        const performance = await recommendationEngine._getPerformanceDetails(profileId);
+        
+        res.json({
+            success: true,
+            data: performance
+        });
+    } catch (error) {
+        console.error('❌ Error getting performance:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};

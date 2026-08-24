@@ -288,6 +288,18 @@ async function fetchRecommendationsAlternative(requirementId, headers) {
   }
 }
 
+export async function fetchEmployeePerformance(profileId) {
+  console.log(`📊 Fetching performance for employee ${profileId}...`);
+  try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API_BASE}/employee/${profileId}/performance`, { headers });
+      return handle(res);
+  } catch (error) {
+      console.error('❌ Performance fetch error:', error);
+      throw error;
+  }
+}
+
 // ---- Create Assignment ----
 export async function createAssignment(data) {
   console.log('📋 Creating assignment...', data);

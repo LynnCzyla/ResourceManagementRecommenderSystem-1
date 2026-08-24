@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects } from './rmApi';
+import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
 export default function RMEmployeeDirectoryTab() {
