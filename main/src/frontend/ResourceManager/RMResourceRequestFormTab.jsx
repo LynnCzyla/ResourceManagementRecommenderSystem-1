@@ -1,64 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import { fetchResourceRequests, createResourceRequest } from './Rmapi';
+
+const emptyForm = {
+  requestTitle: '',
+  department: '',
+  position: '',
+  quantity: 1,
+  requiredSkills: '',
+  experienceLevel: 'Junior',
+  startDate: '',
+  endDate: '',
+  reason: '',
+  urgency: 'Normal',
+};
 
 export default function RMResourceRequestFormTab() {
-  const [formData, setFormData] = useState({
-    requestTitle: '',
-    department: '',
-    position: '',
-    quantity: 1,
-    requiredSkills: '',
-    experienceLevel: 'Junior',
-    startDate: '',
-    endDate: '',
-    reason: '',
-    urgency: 'Normal',
-    budget: '',
-  });
-
+  const [formData, setFormData] = useState(emptyForm);
   const [submittedRequests, setSubmittedRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    loadRequests();
+  }, []);
+
+  const loadRequests = async () => {
+    setLoading(true);
+    try {
+      const res = await fetchResourceRequests();
+      setSubmittedRequests(res.data || []);
+    } catch (error) {
+      console.error('Failed to load resource requests:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Add to submitted requests (mock data)
-    const newRequest = {
-      id: Date.now(),
-      ...formData,
-      status: 'Pending',
-      submittedDate: new Date().toISOString().split('T')[0],
-    };
-    
-    setSubmittedRequests([...submittedRequests, newRequest]);
-    
-    // Reset form
-    setFormData({
-      requestTitle: '',
-      department: '',
-      position: '',
-      quantity: 1,
-      requiredSkills: '',
-      experienceLevel: 'Junior',
-      startDate: '',
-      endDate: '',
-      reason: '',
-      urgency: 'Normal',
-      budget: '',
-    });
+    setSubmitting(true);
+    try {
+      await createResourceRequest(formData);
 
-    Swal.fire({
-      title: 'Success!',
-      text: 'Resource request submitted to HR for review.',
-      icon: 'success',
-      confirmButtonColor: 'var(--color-primary)',
-      confirmButtonText: 'OK',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-    });
+      setFormData(emptyForm);
+      await loadRequests();
+
+      Swal.fire({
+        title: 'Success!',
+        text: 'Resource request submitted to HR for review.',
+        icon: 'success',
+        confirmButtonColor: 'var(--color-primary)',
+        confirmButtonText: 'OK',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+      });
+    } catch (error) {
+      Swal.fire({
+        title: 'Submission Failed',
+        text: error.message || 'Could not submit the request. Please try again.',
+        icon: 'error',
+        confirmButtonColor: 'var(--color-danger)',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const styles = {
@@ -142,6 +154,7 @@ export default function RMResourceRequestFormTab() {
       fontWeight: '600',
       cursor: 'pointer',
       alignSelf: 'flex-start',
+      opacity: submitting ? 0.7 : 1,
     },
     historySection: {
       marginTop: '32px',
@@ -175,6 +188,12 @@ export default function RMResourceRequestFormTab() {
       borderRadius: '12px',
       fontSize: '12px',
       fontWeight: '600',
+    },
+    emptyState: {
+      padding: '24px',
+      textAlign: 'center',
+      color: 'var(--color-text-muted)',
+      fontSize: '14px',
     },
   };
 
@@ -315,33 +334,21 @@ export default function RMResourceRequestFormTab() {
             </div>
           </div>
 
-          <div style={styles.formRow}>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Urgency *</label>
-              <select
-                name="urgency"
-                required
-                style={styles.select}
-                value={formData.urgency}
-                onChange={handleChange}
-              >
-                <option value="Low">Low</option>
-                <option value="Normal">Normal</option>
-                <option value="High">High</option>
-                <option value="Critical">Critical</option>
-              </select>
-            </div>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Budget (Optional)</label>
-              <input
-                type="text"
-                name="budget"
-                style={styles.input}
-                placeholder="e.g., ₱50,000/month"
-                value={formData.budget}
-                onChange={handleChange}
-              />
-            </div>
+          {/* Budget field removed — Resource Managers have no authority to set salary/budget */}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Urgency *</label>
+            <select
+              name="urgency"
+              required
+              style={styles.select}
+              value={formData.urgency}
+              onChange={handleChange}
+            >
+              <option value="Low">Low</option>
+              <option value="Normal">Normal</option>
+              <option value="High">High</option>
+              <option value="Critical">Critical</option>
+            </select>
           </div>
 
           <div style={styles.formGroup}>
@@ -356,16 +363,20 @@ export default function RMResourceRequestFormTab() {
             />
           </div>
 
-          <button type="submit" style={styles.button}>
-            Submit Request to HR
+          <button type="submit" style={styles.button} disabled={submitting}>
+            {submitting ? 'Submitting...' : 'Submit Request to HR'}
           </button>
         </form>
       </div>
 
-      {submittedRequests.length > 0 && (
-        <div style={styles.historySection}>
-          <h2 style={styles.historyTitle}>Submitted Requests</h2>
-          <div className="glass-card" style={styles.card}>
+      <div style={styles.historySection}>
+        <h2 style={styles.historyTitle}>Submitted Requests</h2>
+        <div className="glass-card" style={styles.card}>
+          {loading ? (
+            <div style={styles.emptyState}>Loading requests...</div>
+          ) : submittedRequests.length === 0 ? (
+            <div style={styles.emptyState}>No requests submitted yet.</div>
+          ) : (
             <table style={styles.table}>
               <thead>
                 <tr>
@@ -381,12 +392,14 @@ export default function RMResourceRequestFormTab() {
               <tbody>
                 {submittedRequests.map((req) => (
                   <tr key={req.id}>
-                    <td style={styles.td}>{req.requestTitle}</td>
-                    <td style={styles.td}>{req.department}</td>
-                    <td style={styles.td}>{req.position}</td>
-                    <td style={styles.td}>{req.quantity}</td>
+                    <td style={styles.td}>{req.request_title}</td>
+                    <td style={styles.td}>{req.department_name}</td>
+                    <td style={styles.td}>{req.position_title}</td>
+                    <td style={styles.td}>{req.quantity_needed}</td>
                     <td style={styles.td}>{req.urgency}</td>
-                    <td style={styles.td}>{req.submittedDate}</td>
+                    <td style={styles.td}>
+                      {req.created_at ? new Date(req.created_at).toLocaleDateString() : '—'}
+                    </td>
                     <td style={styles.td}>
                       <span style={{ ...styles.statusBadge, ...getStatusStyle(req.status) }}>
                         {req.status}
@@ -396,9 +409,9 @@ export default function RMResourceRequestFormTab() {
                 ))}
               </tbody>
             </table>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
