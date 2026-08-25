@@ -80,7 +80,7 @@ const sendResetEmail = async (email, resetLink) => {
     `,
     attachments: [{
       filename: 'WEA_logo_bgremoved.png',
-      path: path.join(__dirname, '../../main/src/assets/WEA_logo_bgremoved.png'),
+      path: path.join(__dirname, '../../../main/src/assets/WEA_logo_bgremoved.png'),
       cid: 'wealogo'
     }]
   };
