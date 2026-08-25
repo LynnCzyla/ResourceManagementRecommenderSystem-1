@@ -34,6 +34,7 @@ const applicantRoutes = require('./routes/applicant/applicantRoutes');
 app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
 app.use('/api/hr', require('./routes/HumanResource/Index'));
+app.use('/api/public', require('./routes/Public/clientFeedback'));
 
 app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
@@ -48,6 +49,7 @@ app.use("/api/users", userManagementRoutes);
 app.use("/api/admin", unlockRoutes);
 app.use("/api/settings", systemSettingsRoutes);
 app.use('/api/employee', documentRoutes);
+
 
 // ⭐ ADDED
 app.use('/api/employee', require('./routes/Employee/Assignments'));
