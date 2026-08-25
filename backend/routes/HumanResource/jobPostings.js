@@ -4,6 +4,45 @@ const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 
+// GET /api/hr/job-postings/resource-requests — Approved RM requests HR can post from.
+// IMPORTANT: this must be declared BEFORE '/:id' or Express will treat
+// "resource-requests" as an :id value.
+router.get('/resource-requests', async (req, res) => {
+  try {
+    const { data: requests, error } = await supabase
+      .from('hr_resource_requests')
+      .select(`
+        *,
+        requester:profiles!hr_resource_requests_requested_by_fkey(first_name,last_name)
+      `)
+      .eq('status', 'Approved')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Flag requests that already have a job posting created from them, so the
+    // frontend can show "(already posted)" without hiding them entirely.
+    const { data: postings, error: postingsError } = await supabase
+      .from('job_postings')
+      .select('source_request_id')
+      .not('source_request_id', 'is', null);
+
+    if (postingsError) throw postingsError;
+
+    const usedIds = new Set((postings || []).map((p) => p.source_request_id));
+
+    const shaped = (requests || []).map((r) => ({
+      ...r,
+      already_posted: usedIds.has(r.id),
+    }));
+
+    res.status(200).json({ success: true, data: shaped });
+  } catch (error) {
+    console.error('Error fetching resource requests for job postings:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch resource requests.' });
+  }
+});
+
 // GET /api/hr/job-postings — list all postings (optional ?status= filter)
 router.get('/', async (req, res) => {
   try {
@@ -63,7 +102,7 @@ router.post('/', async (req, res) => {
     const {
       title, description, department_id, position_id, location,
       employment_type, salary_min, salary_max, requirements,
-      responsibilities, benefits, status, closing_date,
+      responsibilities, benefits, status, closing_date, source_request_id,
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -86,6 +125,7 @@ router.post('/', async (req, res) => {
         benefits: benefits?.trim() || null,
         status: status || 'Active',
         closing_date: closing_date || null,
+        source_request_id: source_request_id || null,
         created_by: req.user?.id || null,
       })
       .select()
@@ -114,7 +154,7 @@ router.put('/:id', async (req, res) => {
     const {
       title, description, department_id, position_id, location,
       employment_type, salary_min, salary_max, requirements,
-      responsibilities, benefits, status, closing_date,
+      responsibilities, benefits, status, closing_date, source_request_id,
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -137,6 +177,7 @@ router.put('/:id', async (req, res) => {
         benefits: benefits?.trim() || null,
         status,
         closing_date: closing_date || null,
+        source_request_id: source_request_id || null,
       })
       .eq('id', id)
       .select()
