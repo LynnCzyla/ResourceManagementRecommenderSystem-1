@@ -44,6 +44,9 @@ console.log('📦 Loading recommendations route...');
 const recommendationsRoutes = require('./recommendations');
 console.log('✅ recommendations route loaded');
 
+const resourceRequestsRoutes = require('./resourceRequests');
+
+
 // Register routes
 console.log('🔗 Registering routes...');
 router.use('/dashboard', dashboardRoutes);
@@ -52,6 +55,7 @@ router.use('/requirements', requirementsRoutes);
 router.use('/assignments', assignmentsRoutes);
 router.use('/employees', employeesRoutes);
 router.use('/recommendations', recommendationsRoutes);
+router.use('/resource-requests', resourceRequestsRoutes);
 console.log('✅ All routes registered');
 
 console.log('✅ RM Routes registered with auth middleware');
