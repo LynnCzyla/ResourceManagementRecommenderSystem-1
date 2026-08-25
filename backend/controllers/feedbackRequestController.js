@@ -14,11 +14,17 @@ const supabase = require('../supabase');
 const { sendFeedbackRequestEmail } = require('../utils/mailer');
 const { logAuditEvent } = require('../utils/auditLogger');
 
-const APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+// Fallback only — the real base URL comes from `redirectOrigin` sent by the
+// frontend on each request (window.location.origin), the same pattern
+// forgotPassword.js uses. This constant only kicks in if the frontend
+// somehow doesn't send one and APP_URL/FRONTEND_URL aren't set in .env.
+const DEFAULT_APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
 const FEEDBACK_LINK_TTL_DAYS = 30;
 
-function buildFeedbackLink(accessToken) {
-  return `${APP_URL.replace(/\/$/, '')}/feedback/${accessToken}`;
+function buildFeedbackLink(accessToken, origin) {
+  const baseUrl = (origin || DEFAULT_APP_URL).toString();
+  const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  return `${cleanBaseUrl}/feedback/${accessToken}`;
 }
 
 function generateAccessToken() {
@@ -64,7 +70,7 @@ async function getEmployeeNameMap(employeeIds) {
 
 // Shape a feedback_requests row (plus a resolved project name / employee
 // names) into what PMFeedbackFormTab.jsx expects in its history table.
-function transformFeedbackRequest(row, projectName, nameMap) {
+function transformFeedbackRequest(row, projectName, nameMap, origin) {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -73,7 +79,7 @@ function transformFeedbackRequest(row, projectName, nameMap) {
     clientEmail: row.client_email,
     employeeIds: row.employee_ids || [],
     employeeNames: (row.employee_ids || []).map(id => nameMap[id] || 'Unknown'),
-    feedbackLink: buildFeedbackLink(row.access_token),
+    feedbackLink: buildFeedbackLink(row.access_token, origin),
     status: row.status,
     emailSentAt: row.email_sent_at,
     viewedAt: row.viewed_at,
@@ -86,7 +92,7 @@ function transformFeedbackRequest(row, projectName, nameMap) {
 // ── POST /api/pm/feedback-requests ───────────────────────────────────────
 const createFeedbackRequest = async (req, res) => {
   try {
-    const { projectId, createdBy, clientName, clientEmail, employeeIds, introMessage } = req.body;
+    const { projectId, createdBy, clientName, clientEmail, employeeIds, introMessage, redirectOrigin } = req.body;
 
     if (!projectId) {
       return res.status(400).json({ success: false, message: 'projectId is required' });
@@ -198,7 +204,7 @@ const createFeedbackRequest = async (req, res) => {
       });
     }
 
-    const feedbackLink = buildFeedbackLink(created.access_token);
+    const feedbackLink = buildFeedbackLink(created.access_token, redirectOrigin);
 
     // Send the email. If this fails, the row stays 'pending' and we do
     // NOT report success — the PM can retry via the Resend button.
@@ -252,7 +258,7 @@ const createFeedbackRequest = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Feedback request sent',
-      data: transformFeedbackRequest(updated, project.project_name, nameMap),
+      data: transformFeedbackRequest(updated, project.project_name, nameMap, redirectOrigin),
     });
   } catch (error) {
     console.error('Error creating feedback request:', error);
@@ -294,6 +300,10 @@ const getFeedbackRequests = async (req, res) => {
     const allEmployeeIds = [...new Set(rows.flatMap(r => r.employee_ids || []))];
     const nameMap = await getEmployeeNameMap(allEmployeeIds);
 
+    // GET has no request body to pull an origin from, so links returned by
+    // this endpoint use the server-side default. This only affects display
+    // in the PM history table — the actual emailed link always uses the
+    // origin captured at send time (see createFeedbackRequest/resend).
     const data = rows.map(row =>
       transformFeedbackRequest(row, projectNameMap[row.project_id], nameMap)
     );
@@ -309,6 +319,7 @@ const getFeedbackRequests = async (req, res) => {
 const resendFeedbackRequest = async (req, res) => {
   try {
     const { id } = req.params;
+    const { redirectOrigin } = req.body || {};
 
     const { data: row, error: fetchError } = await supabase
       .from('feedback_requests')
@@ -333,7 +344,7 @@ const resendFeedbackRequest = async (req, res) => {
 
     const nameMap = await getEmployeeNameMap(row.employee_ids || []);
     const employeeNames = (row.employee_ids || []).map(eid => nameMap[eid] || 'Unknown');
-    const feedbackLink = buildFeedbackLink(row.access_token);
+    const feedbackLink = buildFeedbackLink(row.access_token, redirectOrigin);
 
     try {
       await sendFeedbackRequestEmail({
@@ -382,7 +393,7 @@ const resendFeedbackRequest = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Feedback request resent',
-      data: transformFeedbackRequest(updated, project ? project.project_name : null, nameMap),
+      data: transformFeedbackRequest(updated, project ? project.project_name : null, nameMap, redirectOrigin),
     });
   } catch (error) {
     console.error('Error resending feedback request:', error);
