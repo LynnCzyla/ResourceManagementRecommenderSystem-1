@@ -30,6 +30,19 @@ const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
 const applicantRoutes = require('./routes/applicant/applicantRoutes');
+const superAdminDashboardRoutes = require('./routes/SuperAdmin/dashboard');
+const superAdminAccountsRoutes  = require('./routes/SuperAdmin/accounts');
+const superAdminAdminsRoutes    = require('./routes/SuperAdmin/admins');
+const superAdminBranchesRoutes  = require('./routes/SuperAdmin/branches');
+
+// ...
+
+app.use('/api/superadmin', superAdminDashboardRoutes);
+app.use('/api/superadmin', superAdminAccountsRoutes);
+app.use('/api/superadmin', superAdminAdminsRoutes);
+app.use('/api/superadmin', superAdminBranchesRoutes);
+
+
 
 app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
@@ -49,6 +62,8 @@ app.use("/api/users", userManagementRoutes);
 app.use("/api/admin", unlockRoutes);
 app.use("/api/settings", systemSettingsRoutes);
 app.use('/api/employee', documentRoutes);
+
+app.use('/api/superadmin', superAdminDashboardRoutes);
 
 
 // ⭐ ADDED
