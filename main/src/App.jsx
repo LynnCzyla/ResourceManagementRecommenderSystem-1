@@ -1,5 +1,7 @@
 // src/App.jsx - FIXED version (+ key={currentUser.id} fix for stale-data-after-relogin bug)
+// (+ BrowserRouter/Routes added to support the public /feedback/:token page)
 import React, { useState, useEffect, useRef } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import Login from './frontend/Login';
 import ResetPassword from './frontend/ResetPassword';
 import ApplicantPortal from './frontend/ApplicantPortal';
@@ -8,6 +10,7 @@ import PMLayout from './frontend/ProjectManager/PMLayout';
 import RMLayout from './frontend/ResourceManager/RMLayout';
 import HRLayout from './frontend/HumanResource/HRLayout';
 import EmployeeLayout from './frontend/Employee/EmployeeLayout';
+import ClientFeedbackPage from './frontend/Feedback/ClientFeedbackPage';
 import { supabase, getSession, establishSessionFromUrl } from './lib/supabaseClient';
 import Swal from 'sweetalert2';
 import './App.css';
@@ -510,26 +513,39 @@ function App() {
     }
   };
 
-  if (isPasswordRecovery) {
-    return (
-      <ResetPassword
-        onBackToLogin={handleBackToLoginFromReset}
-        isDark={isDark}
-        toggleTheme={toggleTheme}
-        initialError={recoveryError}
-      />
-    );
-  }
-
-  return (
+  // ────────────────────────────────────────────────────────────────
+  // Everything that used to be the top-level return is now rendered
+  // under the "*" (catch-all) route below, completely unchanged.
+  // The only new route is /feedback/:token, which is public and does
+  // not touch isLoggedIn/currentUser/session logic at all.
+  // ────────────────────────────────────────────────────────────────
+  const mainAppContent = (
     <>
       {isApplicantPortal ? (
         <ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />
       ) : !isLoggedIn ? (
-        <Login onLogin={handleLogin} isDark={isDark} toggleTheme={toggleTheme} onApplicantPortal={() => setIsApplicantPortal(true)} />
+        isPasswordRecovery ? (
+          <ResetPassword
+            onBackToLogin={handleBackToLoginFromReset}
+            isDark={isDark}
+            toggleTheme={toggleTheme}
+            initialError={recoveryError}
+          />
+        ) : (
+          <Login onLogin={handleLogin} isDark={isDark} toggleTheme={toggleTheme} onApplicantPortal={() => setIsApplicantPortal(true)} />
+        )
       ) : (
         renderLayout()
       )}
+    </>
+  );
+
+  return (
+    <>
+      <Routes>
+        <Route path="/feedback/:token" element={<ClientFeedbackPage />} />
+        <Route path="*" element={mainAppContent} />
+      </Routes>
 
       <style>{`
         .swal-custom-popup {
