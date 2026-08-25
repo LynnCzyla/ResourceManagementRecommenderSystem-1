@@ -1,38 +1,66 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/superadmin`;
 
 export default function DashboardTab({ setActiveTab }) {
   const [stats, setStats] = useState({
     totalAdmins: 0,
+    activeAdmins: 0,
     totalBranches: 0,
+    activeBranches: 0,
+    branchesTableAvailable: true,
     totalAccounts: 0,
+    activeAccounts: 0,
+    inactiveAccounts: 0,
+    lockedAccounts: 0,
     totalLogs: 0,
   });
 
   const [recentLogs, setRecentLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const fetchDashboardData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = getAuthHeaders();
+
+      const [statsRes, activityRes] = await Promise.all([
+        fetch(`${API_BASE}/dashboard/stats`, { headers }),
+        fetch(`${API_BASE}/dashboard/activity?limit=5`, { headers }),
+      ]);
+
+      const statsJson = await statsRes.json();
+      const activityJson = await activityRes.json();
+
+      if (statsJson.success) {
+        setStats(statsJson.data);
+      } else {
+        throw new Error(statsJson.error || 'Failed to load dashboard stats');
+      }
+
+      if (activityJson.success) {
+        setRecentLogs(activityJson.data || []);
+      } else {
+        throw new Error(activityJson.error || 'Failed to load recent activity');
+      }
+    } catch (err) {
+      console.error('Error loading super admin dashboard:', err);
+      setError('Unable to reach the server. Showing what is currently cached.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    // 1. Fetch stats based on mock data sources (using same mock values from other tabs)
-    const adminsCount = 2; // John Doe, Jane Smith from AdminManagementTab
-    const branchesCount = 3; // Main, North, South from BranchManagementTab
-    const accountsCount = 6; // John, Jane, Robert, Emily, Michael, Sarah from AccountManagementTab
-    const logsCount = 8; // From AuditLogsTab
-
-    setStats({
-      totalAdmins: adminsCount,
-      totalBranches: branchesCount,
-      totalAccounts: accountsCount,
-      totalLogs: logsCount,
-    });
-
-    // 2. Fetch mock recent logs
-    setRecentLogs([
-      { id: 1, action: 'CREATE_ADMIN', actor: 'Super Admin', details: 'Created new admin account for John Doe at Main Branch', timestamp: '10 mins ago' },
-      { id: 2, action: 'UPDATE_BRANCH', actor: 'Super Admin', details: 'Updated branch manager to Jane Smith', timestamp: '1 hour ago' },
-      { id: 3, action: 'DEACTIVATE_ACCOUNT', actor: 'Super Admin', details: 'Deactivated employee account', timestamp: '3 hours ago' },
-      { id: 4, action: 'CREATE_BRANCH', actor: 'Super Admin', details: 'Created new branch at Makati', timestamp: '5 hours ago' },
-      { id: 5, action: 'DELETE_ADMIN', actor: 'Super Admin', details: 'Deleted admin account for Sarah Brown', timestamp: '1 day ago' },
-    ]);
-  }, []);
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const handleQuickAction = (tab) => {
     setActiveTab(tab);
@@ -40,14 +68,12 @@ export default function DashboardTab({ setActiveTab }) {
   };
 
   const getActionColor = (action) => {
-    const colors = {
-      'CREATE_ADMIN': '#22c55e',
-      'UPDATE_BRANCH': '#3b82f6',
-      'DEACTIVATE_ACCOUNT': '#f59e0b',
-      'CREATE_BRANCH': '#22c55e',
-      'DELETE_ADMIN': '#ef4444',
-    };
-    return colors[action] || '#6b7280';
+    const normalized = (action || '').toLowerCase();
+    if (normalized.includes('delete') || normalized.includes('deactivat')) return '#ef4444';
+    if (normalized.includes('lock')) return '#f59e0b';
+    if (normalized.includes('creat')) return '#22c55e';
+    if (normalized.includes('updat') || normalized.includes('edit')) return '#3b82f6';
+    return '#6b7280';
   };
 
   return (
@@ -56,6 +82,12 @@ export default function DashboardTab({ setActiveTab }) {
         <h1 style={styles.title}>System Overview</h1>
         <p style={styles.subtitle}>Super Admin Control Panel & Diagnostics</p>
       </div>
+
+      {error && (
+        <div style={styles.errorBanner}>
+          {error}
+        </div>
+      )}
 
       {/* Quick Action Cards */}
       <div style={styles.quickActionsGrid}>
@@ -107,7 +139,7 @@ export default function DashboardTab({ setActiveTab }) {
         <div className="glass-card" style={styles.card}>
           <h2 style={styles.chartTitle}>Core Metrics</h2>
           <p style={styles.chartSubtitle}>Consolidated counts of active entities in the system</p>
-          
+
           <div style={styles.statsList}>
             <div style={styles.statItem}>
               <div style={{ ...styles.statIcon, background: 'rgba(34, 197, 94, 0.15)', color: 'var(--color-primary)' }}>
@@ -118,7 +150,7 @@ export default function DashboardTab({ setActiveTab }) {
               </div>
               <div style={styles.statInfo}>
                 <span style={styles.statLabel}>Admins Registered</span>
-                <span style={styles.statValue}>{stats.totalAdmins}</span>
+                <span style={styles.statValue}>{loading ? '—' : stats.totalAdmins}</span>
               </div>
             </div>
 
@@ -130,8 +162,13 @@ export default function DashboardTab({ setActiveTab }) {
                 </svg>
               </div>
               <div style={styles.statInfo}>
-                <span style={styles.statLabel}>Branches Operational</span>
-                <span style={styles.statValue}>{stats.totalBranches}</span>
+                <span style={styles.statLabel}>
+                  Branches Operational
+                  {!loading && !stats.branchesTableAvailable && (
+                    <span style={styles.setupBadge}> · Not set up</span>
+                  )}
+                </span>
+                <span style={styles.statValue}>{loading ? '—' : stats.totalBranches}</span>
               </div>
             </div>
 
@@ -144,7 +181,7 @@ export default function DashboardTab({ setActiveTab }) {
               </div>
               <div style={styles.statInfo}>
                 <span style={styles.statLabel}>Active System Accounts</span>
-                <span style={styles.statValue}>{stats.totalAccounts}</span>
+                <span style={styles.statValue}>{loading ? '—' : stats.activeAccounts}</span>
               </div>
             </div>
 
@@ -157,7 +194,7 @@ export default function DashboardTab({ setActiveTab }) {
               </div>
               <div style={styles.statInfo}>
                 <span style={styles.statLabel}>Audit Log Records</span>
-                <span style={styles.statValue}>{stats.totalLogs}</span>
+                <span style={styles.statValue}>{loading ? '—' : stats.totalLogs}</span>
               </div>
             </div>
           </div>
@@ -171,19 +208,27 @@ export default function DashboardTab({ setActiveTab }) {
           <div style={styles.sessionMonitorWrapper}>
             <div style={styles.sessionRow}>
               <span style={styles.sessionLabel}>Branch Status</span>
-              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>3 Active</span>
+              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
+                {loading ? '—' : `${stats.activeBranches} Active / ${stats.totalBranches} Total`}
+              </span>
             </div>
             <div style={styles.sessionRow}>
               <span style={styles.sessionLabel}>Admin Status</span>
-              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>2 Active</span>
+              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
+                {loading ? '—' : `${stats.activeAdmins} Active / ${stats.totalAdmins} Total`}
+              </span>
             </div>
             <div style={styles.sessionRow}>
               <span style={styles.sessionLabel}>User Account Health</span>
-              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>5 Active / 0 Locked</span>
+              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
+                {loading ? '—' : `${stats.activeAccounts} Active / ${stats.lockedAccounts} Locked`}
+              </span>
             </div>
             <div style={styles.sessionRow}>
-              <span style={styles.sessionLabel}>Pending Review</span>
-              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>1 Account</span>
+              <span style={styles.sessionLabel}>Inactive Accounts</span>
+              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+                {loading ? '—' : `${stats.inactiveAccounts} Account${stats.inactiveAccounts === 1 ? '' : 's'}`}
+              </span>
             </div>
           </div>
         </div>
@@ -195,30 +240,36 @@ export default function DashboardTab({ setActiveTab }) {
         <p style={styles.chartSubtitle}>Audit trail of modifications made by system administrators</p>
 
         <div style={styles.activityList}>
-          {recentLogs.map((log, index) => (
-            <div 
-              key={log.id} 
-              style={{
-                ...styles.activityItem,
-                borderBottom: index === recentLogs.length - 1 ? 'none' : '1px solid var(--color-border)',
-                paddingBottom: index === recentLogs.length - 1 ? 0 : '12px',
-              }}
-            >
-              <div style={styles.actMeta}>
-                <span style={{
-                  ...styles.actBadge,
-                  backgroundColor: `${getActionColor(log.action)}15`,
-                  color: getActionColor(log.action),
-                }}>
-                  {log.action.replace(/_/g, ' ')}
-                </span>
-                <span style={styles.actTime}>{log.timestamp}</span>
+          {loading ? (
+            <p style={styles.emptyText}>Loading recent activity…</p>
+          ) : recentLogs.length === 0 ? (
+            <p style={styles.emptyText}>No audit log activity yet.</p>
+          ) : (
+            recentLogs.map((log, index) => (
+              <div
+                key={log.id}
+                style={{
+                  ...styles.activityItem,
+                  borderBottom: index === recentLogs.length - 1 ? 'none' : '1px solid var(--color-border)',
+                  paddingBottom: index === recentLogs.length - 1 ? 0 : '12px',
+                }}
+              >
+                <div style={styles.actMeta}>
+                  <span style={{
+                    ...styles.actBadge,
+                    backgroundColor: `${getActionColor(log.action)}15`,
+                    color: getActionColor(log.action),
+                  }}>
+                    {(log.action || 'Activity').toString().replace(/_/g, ' ')}
+                  </span>
+                  <span style={styles.actTime}>{log.timestamp}</span>
+                </div>
+                <p style={styles.actText}>
+                  <strong>{log.actor}</strong>: {log.details}
+                </p>
               </div>
-              <p style={styles.actText}>
-                <strong>{log.actor}</strong>: {log.details}
-              </p>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>
@@ -244,6 +295,15 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  errorBanner: {
+    padding: '12px 16px',
+    borderRadius: 'var(--radius-md)',
+    background: 'rgba(239, 68, 68, 0.1)',
+    border: '1px solid rgba(239, 68, 68, 0.3)',
+    color: '#ef4444',
+    fontSize: '13px',
+    fontWeight: '600',
   },
   quickActionsGrid: {
     display: 'grid',
@@ -336,6 +396,10 @@ const styles = {
     color: 'var(--color-text-secondary)',
     fontWeight: '600',
   },
+  setupBadge: {
+    color: '#f59e0b',
+    fontWeight: '700',
+  },
   statValue: {
     fontSize: '18px',
     fontWeight: '700',
@@ -366,12 +430,6 @@ const styles = {
     borderRadius: '4px',
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
     color: '#3b82f6',
-  },
-  sessionValueText: {
-    fontSize: '14px',
-    fontWeight: '700',
-    color: 'var(--color-text-primary)',
-    fontFamily: 'monospace',
   },
   activityList: {
     display: 'flex',
@@ -405,5 +463,11 @@ const styles = {
     color: 'var(--color-text-secondary)',
     margin: 0,
     lineHeight: '1.4',
+  },
+  emptyText: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+    textAlign: 'center',
+    padding: '16px 0',
   },
 };
