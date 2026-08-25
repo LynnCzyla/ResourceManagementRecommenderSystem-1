@@ -126,47 +126,6 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
     setLockMessage('');
 
     try {
-      // Hardcoded Super Admin credentials for frontend testing
-      if (email === 'superadmin@wea.com' && password === 'superadmin123') {
-        const superAdminUser = {
-          id: 'super-admin-001',
-          name: 'Super Administrator',
-          email: 'superadmin@wea.com',
-          role: 'Super Admin',
-          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100',
-        };
-        
-        const loginTime = Date.now();
-        localStorage.setItem('user', JSON.stringify(superAdminUser));
-        localStorage.setItem('token', 'super-admin-token-' + Date.now());
-        localStorage.setItem('loginTime', loginTime.toString());
-        
-        window.history.replaceState(null, '', '/dashboard');
-        onLogin(superAdminUser);
-        setIsLoading(false);
-        return;
-      }
-
-      // Hardcoded HR credentials for frontend testing
-      if (email === 'hr@wea.com' && password === 'hr123') {
-        const hrUser = {
-          id: 'hr-user-001',
-          name: 'HR Administrator',
-          email: 'hr@wea.com',
-          role: 'HR',
-          avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=100',
-        };
-        
-        const loginTime = Date.now();
-        localStorage.setItem('user', JSON.stringify(hrUser));
-        localStorage.setItem('token', 'hr-token-' + Date.now());
-        localStorage.setItem('loginTime', loginTime.toString());
-        
-        window.history.replaceState(null, '', '/dashboard');
-        onLogin(hrUser);
-        setIsLoading(false);
-        return;
-      }
 
       // Call backend API for login with attempts tracking
       const response = await fetch('http://localhost:5000/api/auth/login', {
