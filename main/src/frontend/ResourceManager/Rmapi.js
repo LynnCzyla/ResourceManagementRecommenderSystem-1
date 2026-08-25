@@ -12,7 +12,7 @@ console.log('🔧 RM API Base URL:', API_BASE);
 async function authHeaders() {
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
-    
+
     if (error) {
       console.error('❌ Error getting session:', error);
       return {
@@ -20,12 +20,12 @@ async function authHeaders() {
         Authorization: '',
       };
     }
-    
+
     const headers = {
       'Content-Type': 'application/json',
       Authorization: session ? `Bearer ${session.access_token}` : '',
     };
-    
+
     console.log('🔑 Auth headers:', headers.Authorization ? 'Token present' : 'No token');
     return headers;
   } catch (error) {
@@ -41,7 +41,7 @@ async function handle(res) {
   try {
     const body = await res.json().catch(() => ({}));
     console.log(`📥 Response ${res.status}:`, body);
-    
+
     if (!res.ok || body.success === false) {
       throw new Error(body.error || body.message || `Request failed (${res.status})`);
     }
@@ -180,44 +180,38 @@ export async function fetchAssignments() {
 }
 
 // ---- Recommendations ----
-// ---- Recommendations ----
 export async function fetchRecommendations(requirementId) {
   console.log(`📋 Fetching recommendations for requirement ${requirementId}...`);
   try {
     const headers = await authHeaders();
-    
-    // OPTION 1: Use the direct recommendation endpoint
-    // GET /api/rm/recommendations/:requirementId
+
     console.log(`📋 Calling: ${API_BASE}/recommendations/${requirementId}`);
     const res = await fetch(
       `${API_BASE}/recommendations/${requirementId}`,
       { headers }
     );
-    
+
     if (!res.ok) {
       console.error(`❌ Recommendations fetch failed: ${res.status}`);
-      
-      // If we get a 404, the requirement might not exist or the route is wrong
+
       if (res.status === 404) {
         console.warn('⚠️ Recommendation endpoint returned 404. Trying alternative...');
-        // Try alternative: get requirement first then get project recommendations
         return await fetchRecommendationsAlternative(requirementId, headers);
       }
-      
+
       throw new Error(`Failed to fetch recommendations: ${res.status}`);
     }
-    
+
     const data = await res.json();
     console.log('📋 Recommendations data received:', data);
-    
-    // Extract candidates from the response
-    const candidates = data.data?.candidates || 
-                      data.data?.recommended || 
-                      data.candidates || 
+
+    const candidates = data.data?.candidates ||
+                      data.data?.recommended ||
+                      data.candidates ||
                       [];
-    
+
     console.log(`✅ Found ${candidates.length} candidates`);
-    
+
     return {
       success: true,
       data: {
@@ -238,43 +232,41 @@ export async function fetchRecommendations(requirementId) {
 // Alternative method: Get requirement then project recommendations
 async function fetchRecommendationsAlternative(requirementId, headers) {
   console.log(`📋 Trying alternative: Get requirement ${requirementId} first...`);
-  
+
   try {
-    // Get the requirement
     const reqRes = await fetch(`${API_BASE}/requirements/${requirementId}`, { headers });
-    
+
     if (!reqRes.ok) {
       throw new Error(`Failed to fetch requirement: ${reqRes.status}`);
     }
-    
+
     const requirementData = await reqRes.json();
     console.log('📋 Requirement data:', requirementData);
-    
+
     if (!requirementData || !requirementData.project_id) {
       throw new Error('No project_id found in requirement');
     }
-    
+
     const projectId = requirementData.project_id;
     console.log(`📋 Found project ${projectId} for requirement ${requirementId}`);
-    
-    // Now get project recommendations
+
     const projectRes = await fetch(
       `${API_BASE}/projects/${projectId}/recommendations?minMatchingScore=0&maxCandidates=20`,
       { headers }
     );
-    
+
     if (!projectRes.ok) {
       throw new Error(`Failed to fetch project recommendations: ${projectRes.status}`);
     }
-    
+
     const data = await projectRes.json();
     console.log('📋 Project recommendations received:', data);
-    
-    const candidates = data.data?.candidates || 
-                      data.data?.recommended || 
-                      data.candidates || 
+
+    const candidates = data.data?.candidates ||
+                      data.data?.recommended ||
+                      data.candidates ||
                       [];
-    
+
     return {
       success: true,
       data: {
@@ -334,6 +326,35 @@ export async function updateRequirementStatus(id, status) {
   }
 }
 
+// ---- HR Resource Requests (submitted by this RM) ----
+export async function fetchResourceRequests() {
+  console.log('📋 Fetching HR resource requests...');
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/resource-requests`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Resource requests fetch error:', error);
+    throw error;
+  }
+}
+
+export async function createResourceRequest(payload) {
+  console.log('📋 Creating HR resource request...', payload);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/resource-requests`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Create resource request error:', error);
+    throw error;
+  }
+}
+
 // Default export for easy importing
 export default {
   fetchDashboard,
@@ -348,4 +369,6 @@ export default {
   fetchRecommendations,
   createAssignment,
   updateRequirementStatus,
+  fetchResourceRequests,
+  createResourceRequest,
 };
