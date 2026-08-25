@@ -20,14 +20,48 @@ const mapPosting = (row) => ({
   status: row.status || 'Active',
   applications: row.applications || 0,
   postedDate: row.posted_date,
+  closingDate: row.closing_date || '',
+  sourceRequestId: row.source_request_id || null,
   requirements: row.requirements || '',
   responsibilities: row.responsibilities || '',
   benefits: row.benefits || '',
 });
 
+const mapResourceRequest = (row) => ({
+  id: row.id,
+  requestTitle: row.request_title,
+  departmentName: row.department_name,
+  positionTitle: row.position_title,
+  quantity: row.quantity_needed,
+  requiredSkills: row.required_skills || '',
+  experienceLevel: row.experience_level || '',
+  reason: row.reason || '',
+  requestedBy: row.requester
+    ? `${row.requester.first_name || ''} ${row.requester.last_name || ''}`.trim()
+    : '—',
+  alreadyPosted: !!row.already_posted,
+});
+
+const emptyForm = {
+  title: '',
+  description: '',
+  department_id: '',
+  location: '',
+  employmentType: 'Full-time',
+  salaryMin: '',
+  salaryMax: '',
+  requirements: '',
+  responsibilities: '',
+  benefits: '',
+  status: 'Active',
+  closingDate: '',
+  sourceRequestId: '',
+};
+
 export default function HRJobPostingsTab() {
   const [jobPostings, setJobPostings] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [resourceRequests, setResourceRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -36,23 +70,12 @@ export default function HRJobPostingsTab() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    department_id: '',
-    location: '',
-    employmentType: 'Full-time',
-    salaryMin: '',
-    salaryMax: '',
-    requirements: '',
-    responsibilities: '',
-    benefits: '',
-    status: 'Active',
-  });
+  const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
     loadJobPostings();
     loadDepartments();
+    loadResourceRequests();
   }, []);
 
   const loadJobPostings = async () => {
@@ -77,6 +100,16 @@ export default function HRJobPostingsTab() {
       if (data.success) setDepartments(data.data);
     } catch (err) {
       console.error('Failed to load departments', err);
+    }
+  };
+
+  const loadResourceRequests = async () => {
+    try {
+      const res = await hrClient.get('/job-postings/resource-requests');
+      const rows = res.data?.data || [];
+      setResourceRequests(rows.map(mapResourceRequest));
+    } catch (err) {
+      console.error('Failed to load approved resource requests', err);
     }
   };
 
@@ -129,10 +162,34 @@ export default function HRJobPostingsTab() {
     });
   };
 
-  // department_id now comes from formData (bound to a real <select> populated
-  // from /api/admin/departments), not from selectedPosting. position_id is still
-  // not collected by this form — send me the positions dropdown requirement if
-  // job postings need to be tied to a specific position too.
+  // Prefills the form from a selected RM resource request. Everything stays
+  // editable afterward — this only sets initial values.
+  const handleSelectResourceRequest = (requestId) => {
+    if (!requestId) {
+      setFormData((prev) => ({ ...prev, sourceRequestId: '' }));
+      return;
+    }
+
+    const req = resourceRequests.find((r) => String(r.id) === String(requestId));
+    if (!req) return;
+
+    // Try to match the request's free-text department name to a real department id.
+    const matchedDept = departments.find(
+      (d) => d.department_name?.toLowerCase().trim() === req.departmentName?.toLowerCase().trim()
+    );
+
+    setFormData((prev) => ({
+      ...prev,
+      sourceRequestId: requestId,
+      title: req.positionTitle || prev.title,
+      department_id: matchedDept ? String(matchedDept.id) : prev.department_id,
+      requirements: req.requiredSkills
+        ? `Required skills: ${req.requiredSkills}\nExperience level: ${req.experienceLevel || 'N/A'}`
+        : prev.requirements,
+      description: req.reason ? `${req.requestTitle}\n\n${req.reason}` : prev.description,
+    }));
+  };
+
   const buildPayload = () => ({
     title: formData.title,
     description: formData.description,
@@ -146,6 +203,8 @@ export default function HRJobPostingsTab() {
     responsibilities: formData.responsibilities,
     benefits: formData.benefits,
     status: formData.status,
+    closing_date: formData.closingDate || null,
+    source_request_id: formData.sourceRequestId || null,
   });
 
   const handleCreateSubmit = async (e) => {
@@ -153,6 +212,7 @@ export default function HRJobPostingsTab() {
     try {
       await hrClient.post(`/job-postings`, buildPayload());
       await loadJobPostings();
+      await loadResourceRequests();
       setShowCreateModal(false);
       resetForm();
       showSuccessAlert('Job posting created successfully!');
@@ -174,6 +234,7 @@ export default function HRJobPostingsTab() {
 
       await hrClient.put(`/job-postings/${selectedPosting.id}`, buildPayload());
       await loadJobPostings();
+      await loadResourceRequests();
       setShowEditModal(false);
       resetForm();
       showSuccessAlert('Job posting updated successfully!');
@@ -194,6 +255,7 @@ export default function HRJobPostingsTab() {
     try {
       await hrClient.delete(`/job-postings/${id}`);
       setJobPostings(jobPostings.filter(p => p.id !== id));
+      loadResourceRequests();
       showSuccessAlert('Job posting deleted successfully!');
     } catch (err) {
       // Backend refuses to delete postings that already have applications on file.
@@ -216,24 +278,14 @@ export default function HRJobPostingsTab() {
       responsibilities: posting.responsibilities || '',
       benefits: posting.benefits || '',
       status: posting.status,
+      closingDate: posting.closingDate || '',
+      sourceRequestId: posting.sourceRequestId ? String(posting.sourceRequestId) : '',
     });
     setShowEditModal(true);
   };
 
   const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      department_id: '',
-      location: '',
-      employmentType: 'Full-time',
-      salaryMin: '',
-      salaryMax: '',
-      requirements: '',
-      responsibilities: '',
-      benefits: '',
-      status: 'Active',
-    });
+    setFormData(emptyForm);
     setSelectedPosting(null);
   };
 
@@ -245,6 +297,168 @@ export default function HRJobPostingsTab() {
     const matchesStatus = statusFilter === 'All' || posting.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  // Shared dropdown + end date fields used by both Create and Edit forms.
+  const renderResourceRequestField = () => (
+    <div style={styles.formGroup}>
+      <label style={styles.formLabel}>Create From Resource Request (optional)</label>
+      <select
+        value={formData.sourceRequestId}
+        onChange={(e) => handleSelectResourceRequest(e.target.value)}
+        style={styles.formInput}
+      >
+        <option value="">— None, start blank —</option>
+        {resourceRequests.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.requestTitle} — {r.positionTitle} ({r.departmentName}) · {r.quantity}x · by {r.requestedBy}
+            {r.alreadyPosted ? ' [already posted]' : ''}
+          </option>
+        ))}
+      </select>
+      <span style={styles.fieldHint}>
+        Selecting a request only prefills the fields below — everything stays editable.
+      </span>
+    </div>
+  );
+
+  const renderFormFields = () => (
+    <>
+      {renderResourceRequestField()}
+
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Position Title *</label>
+        <input
+          type="text"
+          required
+          value={formData.title}
+          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          style={styles.formInput}
+        />
+      </div>
+      <div style={styles.formRow}>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Department *</label>
+          <select
+            required
+            value={formData.department_id}
+            onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+            style={styles.formInput}
+          >
+            <option value="">Select Department</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>{d.department_name}</option>
+            ))}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Location *</label>
+          <input
+            type="text"
+            required
+            value={formData.location}
+            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+            style={styles.formInput}
+          />
+        </div>
+      </div>
+      <div style={styles.formRow}>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Employment Type *</label>
+          <select
+            required
+            value={formData.employmentType}
+            onChange={(e) => setFormData({ ...formData, employmentType: e.target.value })}
+            style={styles.formInput}
+          >
+            <option value="Full-time">Full-time</option>
+            <option value="Part-time">Part-time</option>
+            <option value="Contract">Contract</option>
+            <option value="Remote">Remote</option>
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Status</label>
+          <select
+            value={formData.status}
+            onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+            style={styles.formInput}
+          >
+            <option value="Active">Active</option>
+            <option value="Closed">Closed</option>
+          </select>
+        </div>
+      </div>
+      <div style={styles.formRow}>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Min Salary (₱)</label>
+          <input
+            type="number"
+            value={formData.salaryMin}
+            onChange={(e) => setFormData({ ...formData, salaryMin: e.target.value })}
+            style={styles.formInput}
+          />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Max Salary (₱)</label>
+          <input
+            type="number"
+            value={formData.salaryMax}
+            onChange={(e) => setFormData({ ...formData, salaryMax: e.target.value })}
+            style={styles.formInput}
+          />
+        </div>
+      </div>
+      <div style={styles.formRow}>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Posting End Date</label>
+          <input
+            type="date"
+            value={formData.closingDate}
+            onChange={(e) => setFormData({ ...formData, closingDate: e.target.value })}
+            style={styles.formInput}
+          />
+          <span style={styles.fieldHint}>The posting closes automatically after this date.</span>
+        </div>
+        <div style={styles.formGroup} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Description</label>
+        <textarea
+          value={formData.description}
+          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          style={styles.formTextarea}
+          rows={3}
+        />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Requirements</label>
+        <textarea
+          value={formData.requirements}
+          onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
+          style={styles.formTextarea}
+          rows={3}
+        />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Responsibilities</label>
+        <textarea
+          value={formData.responsibilities}
+          onChange={(e) => setFormData({ ...formData, responsibilities: e.target.value })}
+          style={styles.formTextarea}
+          rows={3}
+        />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Benefits</label>
+        <textarea
+          value={formData.benefits}
+          onChange={(e) => setFormData({ ...formData, benefits: e.target.value })}
+          style={styles.formTextarea}
+          rows={3}
+        />
+      </div>
+    </>
+  );
 
   if (loading) {
     return <div style={styles.loading}>Loading job postings...</div>;
@@ -309,12 +523,13 @@ export default function HRJobPostingsTab() {
                 <th style={styles.th}>Applications</th>
                 <th style={styles.th}>Status</th>
                 <th style={styles.th}>Posted Date</th>
+                <th style={styles.th}>End Date</th>
                 <th style={styles.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredPostings.length === 0 ? (
-                <tr><td colSpan="9" style={styles.emptyRow}>No job postings found.</td></tr>
+                <tr><td colSpan="10" style={styles.emptyRow}>No job postings found.</td></tr>
               ) : (
                 filteredPostings.map(posting => (
                   <tr key={posting.id} style={styles.tableRow}>
@@ -322,7 +537,7 @@ export default function HRJobPostingsTab() {
                     <td style={styles.td}>{posting.department}</td>
                     <td style={styles.td}>{posting.location}</td>
                     <td style={styles.td}>{posting.employmentType}</td>
-                    <td style={styles.td}>₱{parseInt(posting.salaryMin).toLocaleString()} - ₱{parseInt(posting.salaryMax).toLocaleString()}</td>
+                    <td style={styles.td}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}</td>
                     <td style={styles.td}>
                       <span style={{
                         ...styles.badge,
@@ -341,7 +556,8 @@ export default function HRJobPostingsTab() {
                         {posting.status}
                       </span>
                     </td>
-                    <td style={styles.td}>{posting.postedDate}</td>
+                    <td style={styles.td}>{posting.postedDate ? new Date(posting.postedDate).toLocaleDateString() : '—'}</td>
+                    <td style={styles.td}>{posting.closingDate ? new Date(posting.closingDate).toLocaleDateString() : '—'}</td>
                     <td style={styles.td}>
                       <div style={styles.actionCell}>
                         <button onClick={() => openEditModal(posting)} style={styles.editBtn} title="Edit">
@@ -375,125 +591,7 @@ export default function HRJobPostingsTab() {
               <button onClick={() => setShowCreateModal(false)} style={styles.closeBtn}>×</button>
             </div>
             <form onSubmit={handleCreateSubmit} style={styles.modalBody}>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Position Title *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  style={styles.formInput}
-                />
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Department *</label>
-                  <select
-                    required
-                    value={formData.department_id}
-                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                    style={styles.formInput}
-                  >
-                    <option value="">Select Department</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>{d.department_name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Location *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.location}
-                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                    style={styles.formInput}
-                  />
-                </div>
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Employment Type *</label>
-                  <select
-                    required
-                    value={formData.employmentType}
-                    onChange={(e) => setFormData({ ...formData, employmentType: e.target.value })}
-                    style={styles.formInput}
-                  >
-                    <option value="Full-time">Full-time</option>
-                    <option value="Part-time">Part-time</option>
-                    <option value="Contract">Contract</option>
-                    <option value="Remote">Remote</option>
-                  </select>
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    style={styles.formInput}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Closed">Closed</option>
-                  </select>
-                </div>
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Min Salary (₱)</label>
-                  <input
-                    type="number"
-                    value={formData.salaryMin}
-                    onChange={(e) => setFormData({ ...formData, salaryMin: e.target.value })}
-                    style={styles.formInput}
-                  />
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Max Salary (₱)</label>
-                  <input
-                    type="number"
-                    value={formData.salaryMax}
-                    onChange={(e) => setFormData({ ...formData, salaryMax: e.target.value })}
-                    style={styles.formInput}
-                  />
-                </div>
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Description</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Requirements</label>
-                <textarea
-                  value={formData.requirements}
-                  onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Responsibilities</label>
-                <textarea
-                  value={formData.responsibilities}
-                  onChange={(e) => setFormData({ ...formData, responsibilities: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Benefits</label>
-                <textarea
-                  value={formData.benefits}
-                  onChange={(e) => setFormData({ ...formData, benefits: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
+              {renderFormFields()}
               <div style={styles.modalFooter}>
                 <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
                 <button type="submit" style={styles.submitBtn}>Create Posting</button>
@@ -512,125 +610,7 @@ export default function HRJobPostingsTab() {
               <button onClick={() => setShowEditModal(false)} style={styles.closeBtn}>×</button>
             </div>
             <form onSubmit={handleEditSubmit} style={styles.modalBody}>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Position Title *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  style={styles.formInput}
-                />
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Department *</label>
-                  <select
-                    required
-                    value={formData.department_id}
-                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                    style={styles.formInput}
-                  >
-                    <option value="">Select Department</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>{d.department_name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Location *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.location}
-                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                    style={styles.formInput}
-                  />
-                </div>
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Employment Type *</label>
-                  <select
-                    required
-                    value={formData.employmentType}
-                    onChange={(e) => setFormData({ ...formData, employmentType: e.target.value })}
-                    style={styles.formInput}
-                  >
-                    <option value="Full-time">Full-time</option>
-                    <option value="Part-time">Part-time</option>
-                    <option value="Contract">Contract</option>
-                    <option value="Remote">Remote</option>
-                  </select>
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    style={styles.formInput}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Closed">Closed</option>
-                  </select>
-                </div>
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Min Salary (₱)</label>
-                  <input
-                    type="number"
-                    value={formData.salaryMin}
-                    onChange={(e) => setFormData({ ...formData, salaryMin: e.target.value })}
-                    style={styles.formInput}
-                  />
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Max Salary (₱)</label>
-                  <input
-                    type="number"
-                    value={formData.salaryMax}
-                    onChange={(e) => setFormData({ ...formData, salaryMax: e.target.value })}
-                    style={styles.formInput}
-                  />
-                </div>
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Description</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Requirements</label>
-                <textarea
-                  value={formData.requirements}
-                  onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Responsibilities</label>
-                <textarea
-                  value={formData.responsibilities}
-                  onChange={(e) => setFormData({ ...formData, responsibilities: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Benefits</label>
-                <textarea
-                  value={formData.benefits}
-                  onChange={(e) => setFormData({ ...formData, benefits: e.target.value })}
-                  style={styles.formTextarea}
-                  rows={3}
-                />
-              </div>
+              {renderFormFields()}
               <div style={styles.modalFooter}>
                 <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>Cancel</button>
                 <button type="submit" style={styles.submitBtn}>Save Changes</button>
@@ -867,6 +847,7 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+    flex: 1,
   },
   formRow: {
     display: 'flex',
@@ -876,6 +857,10 @@ const styles = {
     fontSize: '13px',
     fontWeight: '600',
     color: 'var(--color-text-secondary)',
+  },
+  fieldHint: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
   },
   formInput: {
     padding: '10px 12px',
