@@ -4,6 +4,24 @@ const PDFDocument = require("pdfkit");
 const supabase = require("../../supabase");
 
 /**
+ * Resolves a `role` query param into a list of profile ids.
+ * Returns null when no role filter was requested (i.e. no restriction).
+ * Returns [] when a role was requested but no profiles match it.
+ */
+async function resolveRoleUserIds(role) {
+  if (!role) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("role", role);
+
+  if (error) throw error;
+
+  return (data || []).map((p) => p.id);
+}
+
+/**
  * GET /api/admin/audit-logs
  *
  * Query Params:
@@ -13,6 +31,8 @@ const supabase = require("../../supabase");
  * action
  * startDate
  * endDate
+ * role   -> restrict results to actions performed by users with this profile role
+ *           e.g. role=Admin (used by the Super Admin "Admin Audit Logs" tab)
  */
 
 router.get("/audit-logs", async (req, res) => {
@@ -27,6 +47,18 @@ router.get("/audit-logs", async (req, res) => {
     const action = (req.query.action || "").trim();
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
+    const role = (req.query.role || "").trim();
+
+    const roleUserIds = await resolveRoleUserIds(role);
+
+    // A role was requested but nobody in the system has it -> no logs possible
+    if (roleUserIds !== null && roleUserIds.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      });
+    }
 
     let query = supabase
       .from("audit_logs")
@@ -36,6 +68,10 @@ router.get("/audit-logs", async (req, res) => {
       )
       .order("created_at", { ascending: false })
       .range(from, to);
+
+    if (roleUserIds !== null) {
+      query = query.in("user_id", roleUserIds);
+    }
 
     if (search) {
       query = query.or(
@@ -78,22 +114,30 @@ router.get("/audit-logs", async (req, res) => {
       profileMap = new Map(
         (profiles || []).map((profile) => [
           profile.id,
-          `${profile.first_name || ""} ${profile.middle_name || ""} ${profile.last_name || ""}`
-            .replace(/\s+/g, " ")
-            .trim() || profile.role || "System",
+          {
+            name:
+              `${profile.first_name || ""} ${profile.middle_name || ""} ${profile.last_name || ""}`
+                .replace(/\s+/g, " ")
+                .trim() || profile.role || "System",
+            role: profile.role || "N/A",
+          },
         ])
       );
     }
 
-    const logs = (data || []).map((log) => ({
-      id: log.id,
-      user: profileMap.get(log.user_id) || "System",
-      action: log.action || "",
-      category: log.system_category || "",
-      desc: log.log_description || "",
-      text: `${log.action} - ${log.log_description}`,
-      time: log.created_at,
-    }));
+    const logs = (data || []).map((log) => {
+      const profile = profileMap.get(log.user_id);
+      return {
+        id: log.id,
+        user: profile?.name || "System",
+        user_role: profile?.role || "N/A",
+        action: log.action || "",
+        category: log.system_category || "",
+        desc: log.log_description || "",
+        text: `${log.action} - ${log.log_description}`,
+        time: log.created_at,
+      };
+    });
 
     res.json({
       success: true,
@@ -116,24 +160,31 @@ router.get("/audit-logs", async (req, res) => {
 });
 
 /**
- * GET /api/admin/audit-logs/export
- *
- * Exports filtered logs as PDF
- */
-
-/**
  * GET /api/admin/audit-logs/filters
  *
  * Returns distinct category/action values for the filter dropdowns.
- * Fetched once on mount instead of derived from the paginated page,
- * so the dropdowns stay complete even though the table itself is paginated.
+ * Accepts the same optional `role` param so a role-scoped view (e.g. Super
+ * Admin's Admin-only Audit Logs) only sees filter options relevant to it.
  */
 router.get("/audit-logs/filters", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const role = (req.query.role || "").trim();
+    const roleUserIds = await resolveRoleUserIds(role);
+
+    if (roleUserIds !== null && roleUserIds.length === 0) {
+      return res.json({ success: true, data: { categories: [], actions: [] } });
+    }
+
+    let query = supabase
       .from("audit_logs")
       .select("action,system_category")
       .limit(1000);
+
+    if (roleUserIds !== null) {
+      query = query.in("user_id", roleUserIds);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -147,6 +198,11 @@ router.get("/audit-logs/filters", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/admin/audit-logs/export
+ *
+ * Exports filtered logs as PDF. Accepts the same optional `role` param.
+ */
 router.get("/audit-logs/export", async (req, res) => {
   try {
     const search = (req.query.search || "").trim();
@@ -154,6 +210,21 @@ router.get("/audit-logs/export", async (req, res) => {
     const action = (req.query.action || "").trim();
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
+    const role = (req.query.role || "").trim();
+
+    const roleUserIds = await resolveRoleUserIds(role);
+
+    if (roleUserIds !== null && roleUserIds.length === 0) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'attachment; filename="AuditLogs.pdf"');
+      const doc = new PDFDocument({ size: "A4", margin: 40 });
+      doc.pipe(res);
+      doc.fontSize(20).text("AUDIT LOG REPORT", { align: "center" });
+      doc.moveDown();
+      doc.fontSize(11).text("No matching audit log entries found.");
+      doc.end();
+      return;
+    }
 
     let query = supabase
       .from("audit_logs")
@@ -161,6 +232,10 @@ router.get("/audit-logs/export", async (req, res) => {
         "id,user_id,action,system_category,log_description,created_at"
       )
       .order("created_at", { ascending: false });
+
+    if (roleUserIds !== null) {
+      query = query.in("user_id", roleUserIds);
+    }
 
     if (search) {
       query = query.or(
@@ -223,7 +298,7 @@ router.get("/audit-logs/export", async (req, res) => {
 
     doc.pipe(res);
 
-    doc.fontSize(20).text("AUDIT LOG REPORT", {
+    doc.fontSize(20).text(role ? `${role.toUpperCase()} AUDIT LOG REPORT` : "AUDIT LOG REPORT", {
       align: "center",
     });
 
