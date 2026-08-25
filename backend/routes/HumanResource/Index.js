@@ -21,5 +21,6 @@ router.use('/applications', require('./applications'));
 router.use('/interviews', require('./interviews'));
 router.use('/hired-employees', require('./hiredEmployees'));
 router.use('/dashboard', require('./dashboard'));
+router.use('/resource-requests', require('./resourceRequests'));
 
 module.exports = router;
