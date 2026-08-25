@@ -62,7 +62,7 @@ const isUserAdmin = async (userId) => {
       return false;
     }
 
-    return data?.role === 'Admin';
+    return data?.role === 'Admin' || data?.role === 'Super Admin';
   } catch (error) {
     console.error('Error checking user role:', error);
     return false;
