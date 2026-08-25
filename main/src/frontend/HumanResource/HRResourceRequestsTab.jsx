@@ -1,11 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import hrClient from './Hrclient';
+
+const mapRequest = (row) => ({
+  id: row.id,
+  requestId: `RR-${row.id}`,
+  project: `${row.position_title || ''}${row.department_name ? ` (${row.department_name})` : ''}`,
+  requestedBy: row.requester
+    ? (`${row.requester.first_name || ''} ${row.requester.last_name || ''}`.trim() || row.requester.employee_id)
+    : '—',
+  requestDate: row.created_at ? new Date(row.created_at).toLocaleDateString() : '—',
+  priority: row.urgency || 'Normal',
+  status: row.status || 'Pending',
+  justification: row.reason || '',
+  requiredResources: [
+    {
+      role: row.position_title,
+      quantity: row.quantity_needed,
+      experience: row.experience_level,
+      skills: row.required_skills,
+    },
+  ],
+});
 
 export default function HRResourceRequestsTab() {
   const [resourceRequests, setResourceRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [notConnected, setNotConnected] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -16,16 +36,18 @@ export default function HRResourceRequestsTab() {
   }, []);
 
   const loadResourceRequests = async () => {
-    // There is no backend route for Resource Manager requests in either upload —
-    // server.js references ./routes/ResourceManager/Index but that file (and
-    // whatever it requires, e.g. a resourceRequests.js) was never sent.
-    // Rather than show fake numbers, this tab now loads empty and says so.
-    // Once you send that route file, replace this function with a real
-    // axios.get(`${API_BASE}/resource-requests`) — same pattern as the other tabs.
-    setLoading(true);
-    setResourceRequests([]);
-    setNotConnected(true);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const res = await hrClient.get('/resource-requests');
+      const rows = res.data?.data || [];
+      setResourceRequests(rows.map(mapRequest));
+    } catch (error) {
+      console.error('Failed to load resource requests:', error);
+      showErrorAlert(error.response?.data?.error || 'Could not load resource requests.');
+      setResourceRequests([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const showSuccessAlert = (message, title = 'Success!') => {
@@ -78,25 +100,39 @@ export default function HRResourceRequestsTab() {
   };
 
   const handleApprove = async (id) => {
-    Swal.fire({
-      title: 'Not Connected Yet',
-      text: 'This tab has no backend endpoint to approve against yet — send the ResourceManager route file and this button will work.',
-      icon: 'info',
-      confirmButtonColor: 'var(--color-primary)',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-    });
+    const confirm = await showConfirmationAlert(
+      'Approve Request?',
+      'HR will approve this resource request.',
+      'Yes, approve'
+    );
+    if (!confirm.isConfirmed) return;
+
+    try {
+      await hrClient.patch(`/resource-requests/${id}/approve`, {});
+      showSuccessAlert('Resource request approved.');
+      setShowDetailsModal(false);
+      loadResourceRequests();
+    } catch (error) {
+      showErrorAlert(error.response?.data?.error || 'Failed to approve request.');
+    }
   };
 
   const handleReject = async (id) => {
-    Swal.fire({
-      title: 'Not Connected Yet',
-      text: 'This tab has no backend endpoint to reject against yet — send the ResourceManager route file and this button will work.',
-      icon: 'info',
-      confirmButtonColor: 'var(--color-primary)',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-    });
+    const confirm = await showConfirmationAlert(
+      'Reject Request?',
+      'HR will reject this resource request.',
+      'Yes, reject'
+    );
+    if (!confirm.isConfirmed) return;
+
+    try {
+      await hrClient.patch(`/resource-requests/${id}/reject`, {});
+      showSuccessAlert('Resource request rejected.');
+      setShowDetailsModal(false);
+      loadResourceRequests();
+    } catch (error) {
+      showErrorAlert(error.response?.data?.error || 'Failed to reject request.');
+    }
   };
 
   const openDetailsModal = (request) => {
@@ -104,8 +140,28 @@ export default function HRResourceRequestsTab() {
     setShowDetailsModal(true);
   };
 
+  const getPriorityStyle = (priority) => {
+    if (priority === 'Critical' || priority === 'High') {
+      return { backgroundColor: 'var(--color-danger-light)', color: 'var(--color-danger)' };
+    }
+    if (priority === 'Normal') {
+      return { backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' };
+    }
+    return { backgroundColor: 'var(--color-accent-light)', color: 'var(--color-accent)' };
+  };
+
+  const getStatusColorStyle = (status) => {
+    if (status === 'Approved') {
+      return { backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' };
+    }
+    if (status === 'Rejected') {
+      return { backgroundColor: 'var(--color-danger-light)', color: 'var(--color-danger)' };
+    }
+    return { backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' };
+  };
+
   const filteredRequests = resourceRequests.filter(req => {
-    const matchesSearch = 
+    const matchesSearch =
       req.requestId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       req.project?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       req.requestedBy?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -123,20 +179,6 @@ export default function HRResourceRequestsTab() {
         <h1 style={styles.title}>Resource Requests</h1>
         <p style={styles.subtitle}>Review resource requests from Resource Managers</p>
       </div>
-
-      {notConnected && (
-        <div className="glass-card" style={{
-          padding: '16px 20px',
-          marginBottom: '20px',
-          border: '1px solid var(--color-warning)',
-          color: 'var(--color-warning)',
-          fontSize: '14px',
-          fontWeight: '600',
-        }}>
-          ⚠ Not connected to a backend yet — there's no ResourceManager route file to call.
-          This tab is empty (not mock data) until that endpoint is provided.
-        </div>
-      )}
 
       <div className="glass-card" style={styles.card}>
         <div style={styles.toolbar}>
@@ -170,7 +212,7 @@ export default function HRResourceRequestsTab() {
             <thead>
               <tr style={styles.tableHeader}>
                 <th style={styles.th}>Request ID</th>
-                <th style={styles.th}>Project</th>
+                <th style={styles.th}>Position / Department</th>
                 <th style={styles.th}>Requested By</th>
                 <th style={styles.th}>Request Date</th>
                 <th style={styles.th}>Priority</th>
@@ -190,13 +232,7 @@ export default function HRResourceRequestsTab() {
                     <td style={styles.td}>{req.requestedBy}</td>
                     <td style={styles.td}>{req.requestDate}</td>
                     <td style={styles.td}>
-                      <span style={{
-                        ...styles.priorityBadge,
-                        backgroundColor: req.priority === 'High' ? 'var(--color-danger-light)' : 
-                                       req.priority === 'Medium' ? 'var(--color-warning-light)' : 'var(--color-accent-light)',
-                        color: req.priority === 'High' ? 'var(--color-danger)' : 
-                               req.priority === 'Medium' ? 'var(--color-warning)' : 'var(--color-accent)'
-                      }}>
+                      <span style={{ ...styles.priorityBadge, ...getPriorityStyle(req.priority) }}>
                         {req.priority}
                       </span>
                     </td>
@@ -210,13 +246,7 @@ export default function HRResourceRequestsTab() {
                       </div>
                     </td>
                     <td style={styles.td}>
-                      <span style={{
-                        ...styles.statusBadge,
-                        backgroundColor: req.status === 'Approved' ? 'var(--color-primary-light)' : 
-                                       req.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                        color: req.status === 'Approved' ? 'var(--color-primary)' : 
-                               req.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
-                      }}>
+                      <span style={{ ...styles.statusBadge, ...getStatusColorStyle(req.status) }}>
                         {req.status}
                       </span>
                     </td>
@@ -271,7 +301,7 @@ export default function HRResourceRequestsTab() {
                     <span style={styles.detailValue}>{selectedRequest.requestId}</span>
                   </div>
                   <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Project:</span>
+                    <span style={styles.detailLabel}>Position / Department:</span>
                     <span style={styles.detailValue}>{selectedRequest.project}</span>
                   </div>
                   <div style={styles.detailItem}>
@@ -287,10 +317,7 @@ export default function HRResourceRequestsTab() {
                     <span style={{
                       ...styles.detailValue,
                       ...styles.priorityBadge,
-                      backgroundColor: selectedRequest.priority === 'High' ? 'var(--color-danger-light)' : 
-                                     selectedRequest.priority === 'Medium' ? 'var(--color-warning-light)' : 'var(--color-accent-light)',
-                      color: selectedRequest.priority === 'High' ? 'var(--color-danger)' : 
-                             selectedRequest.priority === 'Medium' ? 'var(--color-warning)' : 'var(--color-accent)'
+                      ...getPriorityStyle(selectedRequest.priority)
                     }}>
                       {selectedRequest.priority}
                     </span>
@@ -300,10 +327,7 @@ export default function HRResourceRequestsTab() {
                     <span style={{
                       ...styles.detailValue,
                       ...styles.statusBadge,
-                      backgroundColor: selectedRequest.status === 'Approved' ? 'var(--color-primary-light)' : 
-                                     selectedRequest.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                      color: selectedRequest.status === 'Approved' ? 'var(--color-primary)' : 
-                             selectedRequest.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                      ...getStatusColorStyle(selectedRequest.status)
                     }}>
                       {selectedRequest.status}
                     </span>
@@ -347,10 +371,10 @@ export default function HRResourceRequestsTab() {
               <div style={styles.modalFooter}>
                 {selectedRequest.status === 'Pending' ? (
                   <>
-                    <button onClick={() => { setShowDetailsModal(false); handleApprove(selectedRequest.id); }} style={styles.actionBtnPrimary}>
+                    <button onClick={() => handleApprove(selectedRequest.id)} style={styles.actionBtnPrimary}>
                       Approve Request
                     </button>
-                    <button onClick={() => { setShowDetailsModal(false); handleReject(selectedRequest.id); }} style={styles.actionBtnDanger}>
+                    <button onClick={() => handleReject(selectedRequest.id)} style={styles.actionBtnDanger}>
                       Reject Request
                     </button>
                   </>
