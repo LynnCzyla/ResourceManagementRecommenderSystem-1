@@ -15,6 +15,17 @@ const STATUS_STYLES = {
   expired: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444', label: 'Expired' },
 };
 
+// Labels used for the "(Status)" suffix next to a project name in the
+// dropdown. Keyed by feedback_requests.status (same values as STATUS_STYLES).
+const DROPDOWN_STATUS_LABELS = {
+  pending: 'Pending',
+  sent: 'Feedback Sent',
+  viewed: 'Viewed by Client',
+  started: 'In Progress',
+  completed: 'Completed',
+  expired: 'Expired',
+};
+
 function defaultIntro(projectName) {
   return `We hope you've been satisfied with the progress of ${projectName || 'your project'}. We'd love to hear your feedback on the team members who worked on it.`;
 }
@@ -161,6 +172,48 @@ export default function PMFeedbackFormTab({ user }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.projectName]);
 
+  // For each project, find its MOST RECENT feedback_requests row (by
+  // createdAt) so the dropdown can show "(Completed)" / "(Feedback Sent)"
+  // etc. next to the project name. A project with no feedback request yet
+  // gets no suffix at all.
+  const projectFeedbackStatusMap = useMemo(() => {
+    const map = {};
+    for (const req of sentRequests) {
+      if (!req.projectId) continue;
+      const existing = map[req.projectId];
+      const reqTime = req.createdAt ? new Date(req.createdAt).getTime() : 0;
+      const existingTime = existing?.createdAt ? new Date(existing.createdAt).getTime() : -1;
+      if (!existing || reqTime > existingTime) {
+        map[req.projectId] = req;
+      }
+    }
+    const statusMap = {};
+    for (const [projectId, req] of Object.entries(map)) {
+      statusMap[projectId] = req.status || 'pending';
+    }
+    return statusMap;
+  }, [sentRequests]);
+
+  // Projects sorted so ones whose latest feedback request is "completed"
+  // sink to the bottom of the dropdown — those don't need action from the
+  // PM right now. Everything else (never requested, or still pending/sent/
+  // viewed/in progress/expired) stays on top, alphabetical within each group.
+  const sortedProjects = useMemo(() => {
+    const withStatus = projects.map(p => {
+      const feedbackStatus = projectFeedbackStatusMap[p.id] || null;
+      return {
+        ...p,
+        feedbackStatus,
+        isDone: feedbackStatus === 'completed',
+      };
+    });
+
+    return [...withStatus].sort((a, b) => {
+      if (a.isDone !== b.isDone) return a.isDone ? 1 : -1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [projects, projectFeedbackStatusMap]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFieldErrors(prev => ({ ...prev, [name]: undefined }));
@@ -215,12 +268,13 @@ export default function PMFeedbackFormTab({ user }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: formData.projectId,
           createdBy: effectiveUserId,
           clientName: formData.clientName.trim(),
           clientEmail: formData.clientEmail.trim(),
+          projectId: formData.projectId,
           employeeIds: selectedEmployeeIds,
           introMessage: formData.introMessage.trim(),
+          redirectOrigin: window.location.origin,
         }),
       });
       const body = await res.json();
@@ -261,10 +315,10 @@ export default function PMFeedbackFormTab({ user }) {
     setResendingId(request.id);
     try {
       const res = await fetch(`${PM_BASE}/feedback-requests/${request.id}/resend`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirectOrigin: window.location.origin }),
+    });
       const body = await res.json();
       if (!res.ok || body.success === false) throw new Error(body.message || 'Failed to resend');
       await loadHistory();
@@ -416,8 +470,11 @@ export default function PMFeedbackFormTab({ user }) {
             <label style={styles.label}>Project *</label>
             <select name="projectId" style={styles.select} value={formData.projectId} onChange={handleChange}>
               <option value="">-- Select a project --</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+              {sortedProjects.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.feedbackStatus ? ` (${DROPDOWN_STATUS_LABELS[p.feedbackStatus] || p.feedbackStatus})` : ''}
+                </option>
               ))}
             </select>
             {fieldErrors.projectId && <span style={styles.fieldError}>{fieldErrors.projectId}</span>}
