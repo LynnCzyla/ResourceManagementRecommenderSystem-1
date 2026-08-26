@@ -8,13 +8,13 @@ const { verifyToken } = require('../Middleware/auth');
 // ✅ Apply verifyToken to ALL routes in this file
 router.use(verifyToken);
 
-// Get all users with email from auth.users (filtered by branch)
+// Get all users with email from auth.users (filtered by branch and role)
 router.get("/", async (req, res) => {
   try {
     console.log(`👤 User Management request by: ${req.user.employee_id} (${req.user.role})`);
     console.log(`🏢 Branch: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
     
-    // ✅ Apply branch filtering based on user role
+    // ✅ Build query with branch filtering
     let query = supabase
       .from("profiles")
       .select("*")
@@ -29,18 +29,27 @@ router.get("/", async (req, res) => {
 
     if (profileError) throw profileError;
 
+    // ✅ Filter out admin accounts for non-super admins
+    let filteredProfiles = profiles || [];
+    
+    if (!req.user.is_super_admin) {
+      filteredProfiles = filteredProfiles.filter(profile => {
+        if (profile.role === 'Super Admin') return false;
+        if (profile.role === 'Admin') return false;
+        return true;
+      });
+      
+      console.log(`🔍 Filtered out admin accounts. Showing ${filteredProfiles.length} users`);
+    }
+
     // Get emails for each user from auth
     const usersWithEmail = await Promise.all(
-      (profiles || []).map(async (profile) => {
+      filteredProfiles.map(async (profile) => {
         try {
           const { data: authData, error: authError } = await supabase.auth.admin.getUserById(profile.id);
           
           if (authError) {
-            console.warn(`Could not fetch email for user ${profile.id}:`, authError.message);
-            return {
-              ...profile,
-              email: ''
-            };
+            return { ...profile, email: '' };
           }
           
           return {
@@ -48,11 +57,7 @@ router.get("/", async (req, res) => {
             email: authData?.user?.email || ''
           };
         } catch (err) {
-          console.warn(`Error fetching auth data for user ${profile.id}:`, err.message);
-          return {
-            ...profile,
-            email: ''
-          };
+          return { ...profile, email: '' };
         }
       })
     );
@@ -62,9 +67,12 @@ router.get("/", async (req, res) => {
       users: usersWithEmail,
       meta: {
         total: usersWithEmail.length,
+        total_before_filter: profiles?.length || 0,
         branch_filter: req.user.is_super_admin ? 'all' : req.user.branch_id,
         user_role: req.user.role,
-        user_branch: req.user.branch_id
+        user_branch: req.user.branch_id,
+        is_super_admin: req.user.is_super_admin,
+        roles_excluded: !req.user.is_super_admin ? ['Admin', 'Super Admin'] : []
       }
     });
   } catch (error) {
@@ -81,7 +89,6 @@ router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Get profile
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("*")
@@ -90,7 +97,6 @@ router.get("/:id", async (req, res) => {
 
     if (profileError) throw profileError;
 
-    // ✅ Check if user has access to this profile's branch
     if (!req.user.is_super_admin && profile.branch_id !== req.user.branch_id) {
       return res.status(403).json({
         success: false,
@@ -98,7 +104,13 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    // Get email from auth
+    if (!req.user.is_super_admin && (profile.role === 'Admin' || profile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to view admin accounts"
+      });
+    }
+
     const { data: authData, error: authError } = await supabase.auth.admin.getUserById(id);
     
     if (authError) throw authError;
@@ -119,7 +131,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// Update user (with branch check)
+// Update user (with branch check and role restrictions)
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -132,16 +144,21 @@ router.put("/:id", async (req, res) => {
       branch_id
     } = req.body;
 
-    // ✅ Check if user has permission to update this profile
     const { data: existingProfile, error: checkError } = await supabase
       .from("profiles")
-      .select("branch_id, employee_id, first_name, last_name")
+      .select("branch_id, employee_id, first_name, last_name, role")
       .eq("id", id)
       .single();
 
     if (checkError) throw checkError;
 
-    // Non-super admins can only update users in their branch
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to update admin accounts"
+      });
+    }
+
     if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
       return res.status(403).json({
         success: false,
@@ -149,7 +166,13 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    // Only Super Admin can change branch
+    if (!req.user.is_super_admin && role && (role === 'Admin' || role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to assign admin roles"
+      });
+    }
+
     if (branch_id && !req.user.is_super_admin) {
       return res.status(403).json({
         success: false,
@@ -157,7 +180,6 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    // Update profile
     const updateData = {
       first_name,
       middle_name: middle_name || null,
@@ -166,7 +188,6 @@ router.put("/:id", async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
-    // Only Super Admin can change branch
     if (branch_id && req.user.is_super_admin) {
       updateData.branch_id = branch_id;
     }
@@ -198,7 +219,6 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    // Get updated user with email
     const { data: authData, error: authError } = await supabase.auth.admin.getUserById(id);
     
     if (authError) throw authError;
@@ -219,12 +239,250 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// Update user status only (with branch check)
+// ✅ FIXED: Lock a user (updates BOTH profiles and user_login_attempts)
+router.patch("/:id/lock", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    console.log(`🔒 Lock user request by: ${req.user.employee_id} for user: ${id}`);
+
+    // Check if user exists
+    const { data: existingProfile, error: checkError } = await supabase
+      .from("profiles")
+      .select("branch_id, employee_id, first_name, last_name, role, status")
+      .eq("id", id)
+      .single();
+
+    if (checkError) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Non-super admins cannot lock Admin or Super Admin accounts
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to lock admin accounts"
+      });
+    }
+
+    // Non-super admins can only lock users in their branch
+    if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to lock this user"
+      });
+    }
+
+    // Prevent locking yourself
+    if (id === req.user.id) {
+      return res.status(400).json({
+        success: false,
+        error: "You cannot lock your own account"
+      });
+    }
+
+    // Prevent locking if already locked
+    if (existingProfile.status === 'Locked') {
+      return res.status(400).json({
+        success: false,
+        error: "User is already locked"
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // ✅ 1. Update profiles table status to Locked
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        status: "Locked",
+        updated_at: now
+      })
+      .eq("id", id);
+
+    if (profileError) throw profileError;
+
+    // ✅ 2. Update or insert into user_login_attempts
+    const { error: attemptsError } = await supabase
+      .from("user_login_attempts")
+      .upsert({
+        user_id: id,
+        locked: true,
+        locked_at: now,
+        locked_by: req.user.id,
+        failed_attempts: 0,
+        last_failed_at: null
+      }, {
+        onConflict: 'user_id'
+      });
+
+    if (attemptsError) throw attemptsError;
+
+    // Create notification for the locked user
+    await supabase.from('notifications').insert({
+      recipient_id: id,
+      type: 'alert',
+      text: `⚠️ Your account has been locked by ${req.user.employee_id}.${reason ? ` Reason: ${reason}` : ''} Please contact support.`,
+      read: false
+    });
+
+    await logAuditEvent({
+      req,
+      userId: id,
+      action: 'Locked',
+      systemCategory: 'User Management',
+      logDescription: `Locked user ${existingProfile.employee_id} (${existingProfile.first_name} ${existingProfile.last_name}) by ${req.user.employee_id}${reason ? ` - Reason: ${reason}` : ''}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
+
+    // Get updated user data
+    const { data: updatedUser, error: fetchError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    res.json({
+      success: true,
+      message: "User locked successfully",
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error("Error locking user:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ FIXED: Unlock a user (updates BOTH profiles and user_login_attempts)
+router.patch("/:id/unlock", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`🔓 Unlock user request by: ${req.user.employee_id} for user: ${id}`);
+
+    // Check if user exists
+    const { data: existingProfile, error: checkError } = await supabase
+      .from("profiles")
+      .select("branch_id, employee_id, first_name, last_name, role, status")
+      .eq("id", id)
+      .single();
+
+    if (checkError) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Non-super admins cannot unlock Admin or Super Admin accounts
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to unlock admin accounts"
+      });
+    }
+
+    // Non-super admins can only unlock users in their branch
+    if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to unlock this user"
+      });
+    }
+
+    // Check if user is actually locked
+    if (existingProfile.status !== 'Locked') {
+      return res.status(400).json({
+        success: false,
+        error: "User is not locked"
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // ✅ 1. Update profiles table status to Active
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        status: "Active",
+        updated_at: now
+      })
+      .eq("id", id);
+
+    if (profileError) throw profileError;
+
+    // ✅ 2. Update user_login_attempts - unlock
+    const { error: attemptsError } = await supabase
+      .from("user_login_attempts")
+      .update({
+        locked: false,
+        locked_at: null,
+        locked_by: null,
+        failed_attempts: 0,
+        last_failed_at: null
+      })
+      .eq("user_id", id);
+
+    if (attemptsError) throw attemptsError;
+
+    // Create notification for the unlocked user
+    await supabase.from('notifications').insert({
+      recipient_id: id,
+      type: 'system',
+      text: `✅ Your account has been unlocked by ${req.user.employee_id}. You can now log in again.`,
+      read: false
+    });
+
+    await logAuditEvent({
+      req,
+      userId: id,
+      action: 'Unlocked',
+      systemCategory: 'User Management',
+      logDescription: `Unlocked user ${existingProfile.employee_id} (${existingProfile.first_name} ${existingProfile.last_name}) by ${req.user.employee_id}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
+
+    // Get updated user data
+    const { data: updatedUser, error: fetchError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    res.json({
+      success: true,
+      message: "User unlocked successfully",
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error("Error unlocking user:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ Keep the old status endpoint for Deactivation only (not Lock)
 router.patch("/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
+    // Only allow Active or Deactivated through this endpoint
     if (!status || !['Active', 'Deactivated'].includes(status)) {
       return res.status(400).json({
         success: false,
@@ -232,21 +490,40 @@ router.patch("/:id/status", async (req, res) => {
       });
     }
 
-    // ✅ Check if user has permission to update this profile
     const { data: existingProfile, error: checkError } = await supabase
       .from("profiles")
-      .select("branch_id, employee_id, first_name, last_name")
+      .select("branch_id, employee_id, first_name, last_name, role")
       .eq("id", id)
       .single();
 
     if (checkError) throw checkError;
 
-    // Non-super admins can only update users in their branch
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to update admin accounts"
+      });
+    }
+
     if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
       return res.status(403).json({
         success: false,
         error: "You don't have permission to update this user"
       });
+    }
+
+    // ✅ If setting to Active, also sync user_login_attempts
+    if (status === 'Active') {
+      await supabase
+        .from("user_login_attempts")
+        .update({
+          locked: false,
+          locked_at: null,
+          locked_by: null,
+          failed_attempts: 0,
+          last_failed_at: null
+        })
+        .eq("user_id", id);
     }
 
     const { data, error } = await supabase
@@ -284,22 +561,27 @@ router.patch("/:id/status", async (req, res) => {
   }
 });
 
-// Delete user (with branch check)
+// Delete user (with branch check and role restrictions)
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { hard_delete } = req.query;
 
-    // ✅ Check if user has permission to delete this profile
     const { data: existingProfile, error: checkError } = await supabase
       .from("profiles")
-      .select("branch_id, employee_id, first_name, last_name")
+      .select("branch_id, employee_id, first_name, last_name, role")
       .eq("id", id)
       .single();
 
     if (checkError) throw checkError;
 
-    // Non-super admins can only delete users in their branch
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to delete admin accounts"
+      });
+    }
+
     if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
       return res.status(403).json({
         success: false,
@@ -307,7 +589,6 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
-    // Prevent deleting yourself
     if (id === req.user.id) {
       return res.status(400).json({
         success: false,
@@ -316,7 +597,6 @@ router.delete("/:id", async (req, res) => {
     }
 
     if (hard_delete === "true") {
-      // Hard delete - remove from auth and profiles
       const { error: authError } = await supabase.auth.admin.deleteUser(id);
       if (authError) throw authError;
       
@@ -335,7 +615,6 @@ router.delete("/:id", async (req, res) => {
         message: "User permanently deleted"
       });
     } else {
-      // Soft delete - just update status
       const { data, error } = await supabase
         .from("profiles")
         .update({
@@ -378,7 +657,6 @@ router.get("/by-branch/:branchId", async (req, res) => {
   try {
     const { branchId } = req.params;
     
-    // Only Super Admin can view users by branch
     if (!req.user.is_super_admin) {
       return res.status(403).json({
         success: false,
@@ -394,7 +672,6 @@ router.get("/by-branch/:branchId", async (req, res) => {
 
     if (error) throw error;
 
-    // Get emails for each user
     const usersWithEmail = await Promise.all(
       (profiles || []).map(async (profile) => {
         try {
@@ -422,6 +699,293 @@ router.get("/by-branch/:branchId", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching users by branch:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get all admins (Super Admin only)
+router.get("/admins/all", async (req, res) => {
+  try {
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        error: "Only Super Admin can view all admins"
+      });
+    }
+
+    const { data: admins, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .in('role', ['Admin', 'Super Admin'])
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const adminsWithEmail = await Promise.all(
+      (admins || []).map(async (admin) => {
+        try {
+          const { data: authData } = await supabase.auth.admin.getUserById(admin.id);
+          return {
+            ...admin,
+            email: authData?.user?.email || ''
+          };
+        } catch {
+          return {
+            ...admin,
+            email: ''
+          };
+        }
+      })
+    );
+
+    res.json({
+      success: true,
+      admins: adminsWithEmail,
+      meta: {
+        total: adminsWithEmail.length
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching admins:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+router.patch("/:id/lock", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    console.log(`🔒 Lock user request by: ${req.user.employee_id} for user: ${id}`);
+
+    // Check if user exists
+    const { data: existingProfile, error: checkError } = await supabase
+      .from("profiles")
+      .select("branch_id, employee_id, first_name, last_name, role, status")
+      .eq("id", id)
+      .single();
+
+    if (checkError) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Non-super admins cannot lock Admin or Super Admin accounts
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to lock admin accounts"
+      });
+    }
+
+    // Non-super admins can only lock users in their branch
+    if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to lock this user"
+      });
+    }
+
+    // Prevent locking yourself
+    if (id === req.user.id) {
+      return res.status(400).json({
+        success: false,
+        error: "You cannot lock your own account"
+      });
+    }
+
+    // Prevent locking if already locked
+    if (existingProfile.status === 'Locked') {
+      return res.status(400).json({
+        success: false,
+        error: "User is already locked"
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // ✅ 1. Update profiles table status to Locked
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        status: "Locked",
+        updated_at: now
+      })
+      .eq("id", id);
+
+    if (profileError) throw profileError;
+
+    // ✅ 2. Update or insert into user_login_attempts
+    const { error: attemptsError } = await supabase
+      .from("user_login_attempts")
+      .upsert({
+        user_id: id,
+        locked: true,
+        locked_at: now,
+        locked_by: req.user.id,
+        failed_attempts: 0,
+        last_failed_at: null
+      }, {
+        onConflict: 'user_id'
+      });
+
+    if (attemptsError) throw attemptsError;
+
+    // Create notification for the locked user
+    await supabase.from('notifications').insert({
+      recipient_id: id,
+      type: 'alert',
+      text: `⚠️ Your account has been locked by ${req.user.employee_id}.${reason ? ` Reason: ${reason}` : ''} Please contact support.`,
+      read: false
+    });
+
+    await logAuditEvent({
+      req,
+      userId: id,
+      action: 'Locked',
+      systemCategory: 'User Management',
+      logDescription: `Locked user ${existingProfile.employee_id} (${existingProfile.first_name} ${existingProfile.last_name}) by ${req.user.employee_id}${reason ? ` - Reason: ${reason}` : ''}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
+
+    // Get updated user data
+    const { data: updatedUser, error: fetchError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    res.json({
+      success: true,
+      message: "User locked successfully",
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error("Error locking user:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ Unlock a user (updates both profiles and user_login_attempts)
+router.patch("/:id/unlock", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`🔓 Unlock user request by: ${req.user.employee_id} for user: ${id}`);
+
+    // Check if user exists
+    const { data: existingProfile, error: checkError } = await supabase
+      .from("profiles")
+      .select("branch_id, employee_id, first_name, last_name, role, status")
+      .eq("id", id)
+      .single();
+
+    if (checkError) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Non-super admins cannot unlock Admin or Super Admin accounts
+    if (!req.user.is_super_admin && (existingProfile.role === 'Admin' || existingProfile.role === 'Super Admin')) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to unlock admin accounts"
+      });
+    }
+
+    // Non-super admins can only unlock users in their branch
+    if (!req.user.is_super_admin && existingProfile.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to unlock this user"
+      });
+    }
+
+    // Check if user is actually locked
+    if (existingProfile.status !== 'Locked') {
+      return res.status(400).json({
+        success: false,
+        error: "User is not locked"
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // ✅ 1. Update profiles table status to Active
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        status: "Active",
+        updated_at: now
+      })
+      .eq("id", id);
+
+    if (profileError) throw profileError;
+
+    // ✅ 2. Update user_login_attempts - unlock
+    const { error: attemptsError } = await supabase
+      .from("user_login_attempts")
+      .update({
+        locked: false,
+        locked_at: null,
+        locked_by: null,
+        failed_attempts: 0,
+        last_failed_at: null
+      })
+      .eq("user_id", id);
+
+    if (attemptsError) throw attemptsError;
+
+    // Create notification for the unlocked user
+    await supabase.from('notifications').insert({
+      recipient_id: id,
+      type: 'system',
+      text: `✅ Your account has been unlocked by ${req.user.employee_id}. You can now log in again.`,
+      read: false
+    });
+
+    await logAuditEvent({
+      req,
+      userId: id,
+      action: 'Unlocked',
+      systemCategory: 'User Management',
+      logDescription: `Unlocked user ${existingProfile.employee_id} (${existingProfile.first_name} ${existingProfile.last_name}) by ${req.user.employee_id}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
+
+    // Get updated user data
+    const { data: updatedUser, error: fetchError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    res.json({
+      success: true,
+      message: "User unlocked successfully",
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error("Error unlocking user:", error);
     res.status(500).json({
       success: false,
       error: error.message

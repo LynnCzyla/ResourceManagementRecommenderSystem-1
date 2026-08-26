@@ -3,22 +3,44 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { verifyToken } = require('../Middleware/auth');
+
+// ✅ Apply auth middleware to ALL routes
+router.use(verifyToken);
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DEPARTMENTS
+// DEPARTMENTS - Filtered by Branch
 // ══════════════════════════════════════════════════════════════════════════════
 
-// GET /api/admin/departments — fetch all departments
+// GET /api/admin/departments — fetch departments for the user's branch
 router.get('/departments', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    console.log(`📊 Departments requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+
+    let query = supabase
       .from('departments')
       .select('*')
       .order('department_name', { ascending: true });
 
+    // ✅ Filter by branch for non-super admins
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      query = query.eq('branch_id', req.user.branch_id);
+    }
+
+    const { data, error } = await query;
+
     if (error) throw error;
 
-    res.status(200).json({ success: true, data: data || [] });
+    res.status(200).json({ 
+      success: true, 
+      data: data || [],
+      meta: {
+        branch_filter: req.user.is_super_admin ? 'all' : req.user.branch_id,
+        user_role: req.user.role,
+        is_super_admin: req.user.is_super_admin,
+      }
+    });
   } catch (error) {
     console.error('Error fetching departments:', error);
     res.status(500).json({
@@ -28,7 +50,7 @@ router.get('/departments', async (req, res) => {
   }
 });
 
-// POST /api/admin/departments — create a new department
+// POST /api/admin/departments — create a new department (branch-aware)
 router.post('/departments', async (req, res) => {
   try {
     const { department_name, description } = req.body;
@@ -40,17 +62,35 @@ router.post('/departments', async (req, res) => {
       });
     }
 
-    // Check for duplicate name
+    // ✅ Get the branch ID from the authenticated user
+    const branchId = req.user.branch_id;
+
+    if (!branchId && !req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account is not assigned to a branch.',
+      });
+    }
+
+    // ✅ Super Admin can create departments for any branch (optional)
+    // If branch_id is passed in body, Super Admin can override
+    let targetBranchId = branchId;
+    if (req.user.is_super_admin && req.body.branch_id) {
+      targetBranchId = req.body.branch_id;
+    }
+
+    // ✅ Check for duplicate name within the same branch
     const { data: existing } = await supabase
       .from('departments')
       .select('id')
       .ilike('department_name', department_name.trim())
+      .eq('branch_id', targetBranchId)
       .limit(1);
 
     if (existing && existing.length > 0) {
       return res.status(400).json({
         success: false,
-        error: `A department named "${department_name.trim()}" already exists.`,
+        error: `A department named "${department_name.trim()}" already exists in this branch.`,
       });
     }
 
@@ -59,6 +99,7 @@ router.post('/departments', async (req, res) => {
       .insert({
         department_name: department_name.trim(),
         description: description?.trim() || null,
+        branch_id: targetBranchId, // ✅ Assign to the user's branch
         created_at: new Date().toISOString(),
       })
       .select()
@@ -68,9 +109,12 @@ router.post('/departments', async (req, res) => {
 
     await logAuditEvent({
       req,
+      userId: req.user.id,
       action: 'Created',
       systemCategory: 'Departments',
-      logDescription: `Created new department: ${department_name.trim()}`,
+      logDescription: `Created new department: ${department_name.trim()} for branch ${targetBranchId}`,
+      branch: targetBranchId,
+      performed_by: req.user.employee_id
     });
 
     res.status(201).json({
@@ -87,7 +131,7 @@ router.post('/departments', async (req, res) => {
   }
 });
 
-// PUT /api/admin/departments/:id — update a department
+// PUT /api/admin/departments/:id — update a department (with branch check)
 router.put('/departments/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -100,18 +144,41 @@ router.put('/departments/:id', async (req, res) => {
       });
     }
 
-    // Check for duplicate name (excluding current record)
-    const { data: existing } = await supabase
+    // ✅ Check if user has permission to update this department
+    const { data: existingDept, error: checkError } = await supabase
+      .from('departments')
+      .select('branch_id')
+      .eq('id', id)
+      .single();
+
+    if (checkError) {
+      return res.status(404).json({
+        success: false,
+        error: 'Department not found.',
+      });
+    }
+
+    // Non-super admins can only update departments in their branch
+    if (!req.user.is_super_admin && existingDept.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to update this department.',
+      });
+    }
+
+    // ✅ Check for duplicate name within the same branch (excluding current record)
+    const { data: duplicate } = await supabase
       .from('departments')
       .select('id')
       .ilike('department_name', department_name.trim())
+      .eq('branch_id', existingDept.branch_id)
       .neq('id', id)
       .limit(1);
 
-    if (existing && existing.length > 0) {
+    if (duplicate && duplicate.length > 0) {
       return res.status(400).json({
         success: false,
-        error: `A department named "${department_name.trim()}" already exists.`,
+        error: `A department named "${department_name.trim()}" already exists in this branch.`,
       });
     }
 
@@ -134,17 +201,20 @@ router.put('/departments/:id', async (req, res) => {
       });
     }
 
+    await logAuditEvent({
+      req,
+      userId: req.user.id,
+      action: 'Updated',
+      systemCategory: 'Departments',
+      logDescription: `Updated department ${department_name.trim()}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
+
     res.status(200).json({
       success: true,
       message: 'Department updated successfully.',
       data,
-    });
-
-    await logAuditEvent({
-      req,
-      action: 'Updated',
-      systemCategory: 'Departments',
-      logDescription: `Updated department ${department_name.trim()}`,
     });
   } catch (error) {
     console.error('Error updating department:', error);
@@ -155,10 +225,32 @@ router.put('/departments/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/admin/departments/:id — delete a department
+// DELETE /api/admin/departments/:id — delete a department (with branch check)
 router.delete('/departments/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // ✅ Check if user has permission to delete this department
+    const { data: existingDept, error: checkError } = await supabase
+      .from('departments')
+      .select('branch_id, department_name')
+      .eq('id', id)
+      .single();
+
+    if (checkError) {
+      return res.status(404).json({
+        success: false,
+        error: 'Department not found.',
+      });
+    }
+
+    // Non-super admins can only delete departments in their branch
+    if (!req.user.is_super_admin && existingDept.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to delete this department.',
+      });
+    }
 
     // Guard: check if any positions are still linked
     const { data: linkedPositions } = await supabase
@@ -183,9 +275,12 @@ router.delete('/departments/:id', async (req, res) => {
 
     await logAuditEvent({
       req,
+      userId: req.user.id,
       action: 'Deleted',
       systemCategory: 'Departments',
-      logDescription: `Removed department ${id}`,
+      logDescription: `Removed department ${existingDept.department_name}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
     });
 
     res.status(200).json({
@@ -202,26 +297,59 @@ router.delete('/departments/:id', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// POSITIONS
+// POSITIONS - Filtered by Branch (via Department)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// GET /api/admin/positions — fetch all positions (optional ?dept_id= filter)
+// GET /api/admin/positions — fetch positions (filtered by branch)
 router.get('/positions', async (req, res) => {
   try {
     const { dept_id } = req.query;
 
+    console.log(`📊 Positions requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+    console.log(`📋 Department filter: ${dept_id || 'ALL'}`);
+
+    // ✅ First, get departments in the user's branch
+    let deptQuery = supabase
+      .from('departments')
+      .select('id');
+
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      deptQuery = deptQuery.eq('branch_id', req.user.branch_id);
+    }
+
+    const { data: branchDepts, error: deptError } = await deptQuery;
+
+    if (deptError) throw deptError;
+
+    const deptIds = branchDepts?.map(d => d.id) || [];
+
+    if (deptIds.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    // ✅ Then get positions only from those departments
     let query = supabase
       .from('positions')
       .select(`
         *,
         departments (
           id,
-          department_name
+          department_name,
+          branch_id
         )
       `)
+      .in('department_id', deptIds)
       .order('position_name', { ascending: true });
 
     if (dept_id) {
+      // ✅ If dept_id is provided, make sure it's in the allowed list
+      if (!deptIds.includes(Number(dept_id))) {
+        return res.status(403).json({
+          success: false,
+          error: 'You do not have permission to view positions in this department.',
+        });
+      }
       query = query.eq('department_id', dept_id);
     }
 
@@ -229,7 +357,16 @@ router.get('/positions', async (req, res) => {
 
     if (error) throw error;
 
-    res.status(200).json({ success: true, data: data || [] });
+    res.status(200).json({ 
+      success: true, 
+      data: data || [],
+      meta: {
+        branch_filter: req.user.is_super_admin ? 'all' : req.user.branch_id,
+        department_filter: dept_id || 'all',
+        user_role: req.user.role,
+        is_super_admin: req.user.is_super_admin,
+      }
+    });
   } catch (error) {
     console.error('Error fetching positions:', error);
     res.status(500).json({
@@ -239,7 +376,7 @@ router.get('/positions', async (req, res) => {
   }
 });
 
-// POST /api/admin/positions — create a new position
+// POST /api/admin/positions — create a new position (branch-aware)
 router.post('/positions', async (req, res) => {
   try {
     const { position_name, department_id, description } = req.body;
@@ -258,21 +395,29 @@ router.post('/positions', async (req, res) => {
       });
     }
 
-    // Verify the department exists
-    const { data: dept } = await supabase
+    // ✅ Verify the department exists and user has access
+    const { data: dept, error: deptError } = await supabase
       .from('departments')
-      .select('id')
+      .select('id, branch_id, department_name')
       .eq('id', department_id)
       .single();
 
-    if (!dept) {
+    if (deptError || !dept) {
       return res.status(400).json({
         success: false,
         error: 'Selected department does not exist.',
       });
     }
 
-    // Check for duplicate position name within the same department
+    // Non-super admins can only create positions in their branch
+    if (!req.user.is_super_admin && dept.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to create positions in this department.',
+      });
+    }
+
+    // ✅ Check for duplicate position name within the same department
     const { data: existing } = await supabase
       .from('positions')
       .select('id')
@@ -302,9 +447,12 @@ router.post('/positions', async (req, res) => {
 
     await logAuditEvent({
       req,
+      userId: req.user.id,
       action: 'Created',
       systemCategory: 'Departments',
-      logDescription: `Created new position: ${position_name.trim()}`,
+      logDescription: `Created new position: ${position_name.trim()} in ${dept.department_name}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
     });
 
     res.status(201).json({
@@ -321,7 +469,7 @@ router.post('/positions', async (req, res) => {
   }
 });
 
-// PUT /api/admin/positions/:id — update a position
+// PUT /api/admin/positions/:id — update a position (with branch check)
 router.put('/positions/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -341,8 +489,63 @@ router.put('/positions/:id', async (req, res) => {
       });
     }
 
-    // Check for duplicate name within the same dept (excluding current record)
-    const { data: existing } = await supabase
+    // ✅ Check if user has permission to update this position
+    const { data: existingPosition, error: checkError } = await supabase
+      .from('positions')
+      .select(`
+        id,
+        position_name,
+        department_id,
+        departments (
+          id,
+          branch_id,
+          department_name
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (checkError || !existingPosition) {
+      return res.status(404).json({
+        success: false,
+        error: 'Position not found.',
+      });
+    }
+
+    const currentBranchId = existingPosition.departments?.branch_id;
+
+    // Non-super admins can only update positions in their branch
+    if (!req.user.is_super_admin && currentBranchId !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to update this position.',
+      });
+    }
+
+    // Verify the new department exists and is in the same branch
+    const { data: newDept, error: deptError } = await supabase
+      .from('departments')
+      .select('id, branch_id, department_name')
+      .eq('id', department_id)
+      .single();
+
+    if (deptError || !newDept) {
+      return res.status(400).json({
+        success: false,
+        error: 'Selected department does not exist.',
+      });
+    }
+
+    // Non-super admins can only move positions within their branch
+    if (!req.user.is_super_admin && newDept.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to move positions to this department.',
+      });
+    }
+
+    // ✅ Check for duplicate name within the same department (excluding current record)
+    const { data: duplicate } = await supabase
       .from('positions')
       .select('id')
       .ilike('position_name', position_name.trim())
@@ -350,7 +553,7 @@ router.put('/positions/:id', async (req, res) => {
       .neq('id', id)
       .limit(1);
 
-    if (existing && existing.length > 0) {
+    if (duplicate && duplicate.length > 0) {
       return res.status(400).json({
         success: false,
         error: `A position named "${position_name.trim()}" already exists in this department.`,
@@ -370,24 +573,20 @@ router.put('/positions/:id', async (req, res) => {
 
     if (error) throw error;
 
-    if (!data) {
-      return res.status(404).json({
-        success: false,
-        error: 'Position not found.',
-      });
-    }
+    await logAuditEvent({
+      req,
+      userId: req.user.id,
+      action: 'Updated',
+      systemCategory: 'Departments',
+      logDescription: `Updated position ${position_name.trim()}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
 
     res.status(200).json({
       success: true,
       message: 'Position updated successfully.',
       data,
-    });
-
-    await logAuditEvent({
-      req,
-      action: 'Updated',
-      systemCategory: 'Departments',
-      logDescription: `Updated position ${position_name.trim()}`,
     });
   } catch (error) {
     console.error('Error updating position:', error);
@@ -398,10 +597,42 @@ router.put('/positions/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/admin/positions/:id — delete a position
+// DELETE /api/admin/positions/:id — delete a position (with branch check)
 router.delete('/positions/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // ✅ Check if user has permission to delete this position
+    const { data: existingPosition, error: checkError } = await supabase
+      .from('positions')
+      .select(`
+        id,
+        position_name,
+        departments (
+          id,
+          branch_id,
+          department_name
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (checkError || !existingPosition) {
+      return res.status(404).json({
+        success: false,
+        error: 'Position not found.',
+      });
+    }
+
+    const branchId = existingPosition.departments?.branch_id;
+
+    // Non-super admins can only delete positions in their branch
+    if (!req.user.is_super_admin && branchId !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to delete this position.',
+      });
+    }
 
     // Guard: check if any employees are still assigned to this position
     const { data: linkedProfiles } = await supabase
@@ -426,9 +657,12 @@ router.delete('/positions/:id', async (req, res) => {
 
     await logAuditEvent({
       req,
+      userId: req.user.id,
       action: 'Deleted',
       systemCategory: 'Departments',
-      logDescription: `Removed position ${id}`,
+      logDescription: `Removed position ${existingPosition.position_name}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
     });
 
     res.status(200).json({

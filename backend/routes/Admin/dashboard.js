@@ -1,15 +1,11 @@
 // routes/Admin/dashboard.js
-//
-// Provides:
-//   GET /api/admin/dashboard/stats
-//   GET /api/admin/dashboard/activity?limit=5
-//
-// Assumes tables: profiles (with a role column), departments, audit_logs
-// (with user_id, action, system_category, log_description, created_at).
-
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { verifyToken } = require('../Middleware/auth');
+
+// ✅ Apply auth middleware to ALL routes
+router.use(verifyToken);
 
 const ROLE_COLORS = {
   Admin: '#10b981',
@@ -17,6 +13,7 @@ const ROLE_COLORS = {
   'Project Manager': '#8b5cf6',
   'Resource Manager': '#0ea5e9',
   HR: '#f59e0b',
+  'Super Admin': '#ef4444',
 };
 
 function formatRelativeTime(isoString) {
@@ -30,37 +27,72 @@ function formatRelativeTime(isoString) {
   return `${days} day${days > 1 ? 's' : ''} ago`;
 }
 
-// GET /api/admin/dashboard/stats
+// GET /api/admin/dashboard/stats - FIXED with branch filtering
 router.get('/dashboard/stats', async (req, res) => {
   try {
-    const { count: totalUsers, error: usersError } = await supabase
+    console.log(`📊 Dashboard stats requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+
+    // ✅ Build queries with branch filtering
+    let usersQuery = supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true });
-    if (usersError) throw usersError;
 
-    const { count: totalDepartments, error: deptError } = await supabase
+    let deptQuery = supabase
       .from('departments')
       .select('*', { count: 'exact', head: true });
-    if (deptError) throw deptError;
 
-    const { data: roleRows, error: roleError } = await supabase
+    let roleQuery = supabase
       .from('profiles')
       .select('role');
-    if (roleError) throw roleError;
 
+    // ✅ Filter by branch for non-super admins
+    if (!req.user.is_super_admin) {
+      usersQuery = usersQuery.eq('branch_id', req.user.branch_id);
+      roleQuery = roleQuery.eq('branch_id', req.user.branch_id);
+    }
+
+    const [usersResult, deptResult, roleResult] = await Promise.all([
+      usersQuery,
+      deptQuery,
+      roleQuery
+    ]);
+
+    if (usersResult.error) throw usersResult.error;
+    if (deptResult.error) throw deptResult.error;
+    if (roleResult.error) throw roleResult.error;
+
+    const totalUsers = usersResult.count || 0;
+    const totalDepartments = deptResult.count || 0;
+
+    // Calculate role breakdown
     const roleCounts = {};
-    roleRows.forEach((r) => {
+    (roleResult.data || []).forEach((r) => {
       const role = r.role || 'Unknown';
       roleCounts[role] = (roleCounts[role] || 0) + 1;
     });
 
-    const total = roleRows.length || 0;
+    const total = roleResult.data?.length || 0;
     const userRolesData = Object.entries(roleCounts).map(([label, count]) => ({
       label,
       count,
       percentage: total > 0 ? Math.round((count / total) * 100) : 0,
       color: ROLE_COLORS[label] || '#64748b',
     }));
+
+    // ✅ Get branch info for the response
+    let branchInfo = null;
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      const { data: branch, error: branchError } = await supabase
+        .from('branches')
+        .select('name')
+        .eq('id', req.user.branch_id)
+        .single();
+      
+      if (!branchError && branch) {
+        branchInfo = branch;
+      }
+    }
 
     res.json({
       success: true,
@@ -69,6 +101,10 @@ router.get('/dashboard/stats', async (req, res) => {
         totalUsers,
         totalDepartments,
         userRolesData,
+        branch: branchInfo,
+        user_role: req.user.role,
+        is_super_admin: req.user.is_super_admin,
+        branch_filter: req.user.is_super_admin ? 'all' : req.user.branch_id,
       },
     });
   } catch (err) {
@@ -77,43 +113,118 @@ router.get('/dashboard/stats', async (req, res) => {
   }
 });
 
-// GET /api/admin/dashboard/activity?limit=5
+// ✅ FIXED: GET /api/admin/dashboard/activity - Using profiles join for branch filtering
 router.get('/dashboard/activity', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit, 10) || 5;
 
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('id, user_id, action, system_category, log_description, created_at')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (error) throw error;
+    console.log(`📊 Activity requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
 
-    const userIds = [...new Set((data || []).map((log) => log.user_id).filter(Boolean))];
-    let profileMap = new Map();
+    // ✅ If Super Admin - show all activity
+    if (req.user.is_super_admin) {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select(`
+          id,
+          user_id,
+          action,
+          system_category,
+          log_description,
+          created_at,
+          profiles:user_id (
+            id,
+            employee_id,
+            first_name,
+            last_name,
+            role,
+            branch_id
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    if (userIds.length > 0) {
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, first_name, middle_name, last_name, role')
-        .in('id', userIds);
+      if (error) throw error;
 
-      if (!profileError && profiles) {
-        profileMap = new Map(
-          profiles.map((profile) => [
-            profile.id,
-            `${profile.first_name || ''}${profile.middle_name ? ` ${profile.middle_name}` : ''}${profile.last_name ? ` ${profile.last_name}` : ''}`.trim() || profile.role || 'System'
-          ])
-        );
-      }
+      const activities = (data || []).map((log) => {
+        const profile = log.profiles || {};
+        const userName = profile.first_name && profile.last_name
+          ? `${profile.first_name} ${profile.last_name}`
+          : profile.employee_id || 'System';
+
+        return {
+          id: log.id,
+          user: userName,
+          user_id: log.user_id,
+          employee_id: profile.employee_id || '',
+          text: [log.action, log.log_description || log.system_category].filter(Boolean).join(' - '),
+          time: formatRelativeTime(log.created_at),
+          created_at: log.created_at,
+        };
+      });
+
+      return res.json({ success: true, data: activities });
     }
 
-    const activities = data.map((log) => ({
-      id: log.id,
-      user: profileMap.get(log.user_id) || 'System',
-      text: [log.action, log.log_description || log.system_category].filter(Boolean).join(' - '),
-      time: formatRelativeTime(log.created_at),
-    }));
+    // ✅ For regular admins: First get users in their branch
+    const { data: usersInBranch, error: userError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('branch_id', req.user.branch_id);
+
+    if (userError) {
+      console.error('Error fetching users in branch:', userError);
+      return res.status(500).json({ success: false, error: userError.message });
+    }
+
+    const userIds = usersInBranch?.map(u => u.id) || [];
+    
+    if (userIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // ✅ Get audit logs only for users in this branch
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select(`
+        id,
+        user_id,
+        action,
+        system_category,
+        log_description,
+        created_at,
+        profiles:user_id (
+          id,
+          employee_id,
+          first_name,
+          last_name,
+          role,
+          branch_id
+        )
+      `)
+      .in('user_id', userIds)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    // Format the activities
+    const activities = (data || []).map((log) => {
+      const profile = log.profiles || {};
+      const userName = profile.first_name && profile.last_name
+        ? `${profile.first_name} ${profile.last_name}`
+        : profile.employee_id || 'System';
+
+      return {
+        id: log.id,
+        user: userName,
+        user_id: log.user_id,
+        employee_id: profile.employee_id || '',
+        text: [log.action, log.log_description || log.system_category].filter(Boolean).join(' - '),
+        time: formatRelativeTime(log.created_at),
+        created_at: log.created_at,
+      };
+    });
 
     res.json({ success: true, data: activities });
   } catch (err) {
@@ -122,16 +233,46 @@ router.get('/dashboard/activity', async (req, res) => {
   }
 });
 
+// ✅ NEW: Get branch-specific stats for Super Admin
+router.get('/dashboard/branch-stats', async (req, res) => {
+  try {
+    // Only Super Admin can access this
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Only Super Admin can view branch stats'
+      });
+    }
+
+    // Get all branches with user counts
+    const { data: branches, error: branchError } = await supabase
+      .from('branches')
+      .select('id, name');
+
+    if (branchError) throw branchError;
+
+    const branchStats = await Promise.all(
+      (branches || []).map(async (branch) => {
+        const { count, error } = await supabase
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('branch_id', branch.id);
+
+        return {
+          ...branch,
+          userCount: count || 0,
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: branchStats,
+    });
+  } catch (err) {
+    console.error('Error fetching branch stats:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
-
-/*
-  In server.js, add:
-
-  const dashboardRoutes = require('./routes/Admin/dashboard');
-  const auditLogsRoutes = require('./routes/Admin/auditLogs');
-
-  app.use('/api/admin', dashboardRoutes);
-  app.use('/api/admin', auditLogsRoutes);
-
-  Place these next to your other app.use('/api/admin', ...) lines.
-*/

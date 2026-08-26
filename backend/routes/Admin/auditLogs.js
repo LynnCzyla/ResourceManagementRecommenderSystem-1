@@ -2,11 +2,29 @@ const express = require("express");
 const router = express.Router();
 const PDFDocument = require("pdfkit");
 const supabase = require("../../supabase");
+const { verifyToken } = require('../Middleware/auth');
+
+// ✅ Apply auth middleware to ALL routes
+router.use(verifyToken);
+
+/**
+ * ✅ NEW: Resolve branch user IDs for branch filtering
+ */
+async function resolveBranchUserIds(branchId) {
+  if (!branchId) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("branch_id", branchId);
+
+  if (error) throw error;
+
+  return (data || []).map((p) => p.id);
+}
 
 /**
  * Resolves a `role` query param into a list of profile ids.
- * Returns null when no role filter was requested (i.e. no restriction).
- * Returns [] when a role was requested but no profiles match it.
  */
 async function resolveRoleUserIds(role) {
   if (!role) return null;
@@ -23,18 +41,10 @@ async function resolveRoleUserIds(role) {
 
 /**
  * GET /api/admin/audit-logs
- *
- * Query Params:
- * limit
- * search
- * category
- * action
- * startDate
- * endDate
- * role   -> restrict results to actions performed by users with this profile role
- *           e.g. role=Admin (used by the Super Admin "Admin Audit Logs" tab)
+ * 
+ * For Admin users: Only shows logs from users in their branch
+ * For Super Admin: Shows all logs
  */
-
 router.get("/audit-logs", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit, 10) || 10;
@@ -49,9 +59,33 @@ router.get("/audit-logs", async (req, res) => {
     const endDate = req.query.endDate;
     const role = (req.query.role || "").trim();
 
+    console.log(`📊 Audit Logs requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+
+    // ✅ For non-super admins, get users in their branch
+    let branchUserIds = null;
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      branchUserIds = await resolveBranchUserIds(req.user.branch_id);
+      console.log(`📊 Found ${branchUserIds?.length || 0} users in branch`);
+      
+      // If no users in branch, return empty
+      if (branchUserIds !== null && branchUserIds.length === 0) {
+        return res.json({
+          success: true,
+          data: [],
+          pagination: { page, limit, total: 0, totalPages: 1 },
+          meta: {
+            branch_filter: req.user.branch_id,
+            user_role: req.user.role,
+            is_super_admin: req.user.is_super_admin,
+          }
+        });
+      }
+    }
+
+    // ✅ Resolve role user IDs if role filter is applied
     const roleUserIds = await resolveRoleUserIds(role);
 
-    // A role was requested but nobody in the system has it -> no logs possible
     if (roleUserIds !== null && roleUserIds.length === 0) {
       return res.json({
         success: true,
@@ -69,6 +103,12 @@ router.get("/audit-logs", async (req, res) => {
       .order("created_at", { ascending: false })
       .range(from, to);
 
+    // ✅ Apply branch filter for non-super admins
+    if (branchUserIds !== null) {
+      query = query.in("user_id", branchUserIds);
+    }
+
+    // ✅ Apply role filter
     if (roleUserIds !== null) {
       query = query.in("user_id", roleUserIds);
     }
@@ -108,7 +148,7 @@ router.get("/audit-logs", async (req, res) => {
     if (userIds.length > 0) {
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id,first_name,middle_name,last_name,role")
+        .select("id,first_name,middle_name,last_name,role,employee_id")
         .in("id", userIds);
 
       profileMap = new Map(
@@ -120,6 +160,7 @@ router.get("/audit-logs", async (req, res) => {
                 .replace(/\s+/g, " ")
                 .trim() || profile.role || "System",
             role: profile.role || "N/A",
+            employee_id: profile.employee_id || "",
           },
         ])
       );
@@ -131,6 +172,7 @@ router.get("/audit-logs", async (req, res) => {
         id: log.id,
         user: profile?.name || "System",
         user_role: profile?.role || "N/A",
+        employee_id: profile?.employee_id || "",
         action: log.action || "",
         category: log.system_category || "",
         desc: log.log_description || "",
@@ -148,10 +190,14 @@ router.get("/audit-logs", async (req, res) => {
         total: count || 0,
         totalPages: Math.max(1, Math.ceil((count || 0) / limit)),
       },
+      meta: {
+        branch_filter: req.user.is_super_admin ? 'all' : req.user.branch_id,
+        user_role: req.user.role,
+        is_super_admin: req.user.is_super_admin,
+      }
     });
   } catch (err) {
     console.error(err);
-
     res.status(500).json({
       success: false,
       error: err.message,
@@ -161,10 +207,6 @@ router.get("/audit-logs", async (req, res) => {
 
 /**
  * GET /api/admin/audit-logs/filters
- *
- * Returns distinct category/action values for the filter dropdowns.
- * Accepts the same optional `role` param so a role-scoped view (e.g. Super
- * Admin's Admin-only Audit Logs) only sees filter options relevant to it.
  */
 router.get("/audit-logs/filters", async (req, res) => {
   try {
@@ -200,8 +242,6 @@ router.get("/audit-logs/filters", async (req, res) => {
 
 /**
  * GET /api/admin/audit-logs/export
- *
- * Exports filtered logs as PDF. Accepts the same optional `role` param.
  */
 router.get("/audit-logs/export", async (req, res) => {
   try {
@@ -211,6 +251,27 @@ router.get("/audit-logs/export", async (req, res) => {
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
     const role = (req.query.role || "").trim();
+
+    console.log(`📊 Audit Logs Export requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+
+    // ✅ For non-super admins, get users in their branch
+    let branchUserIds = null;
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      branchUserIds = await resolveBranchUserIds(req.user.branch_id);
+      if (branchUserIds !== null && branchUserIds.length === 0) {
+        // No users in branch, return empty PDF
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", 'attachment; filename="AuditLogs.pdf"');
+        const doc = new PDFDocument({ size: "A4", margin: 40 });
+        doc.pipe(res);
+        doc.fontSize(20).text("AUDIT LOG REPORT", { align: "center" });
+        doc.moveDown();
+        doc.fontSize(11).text("No matching audit log entries found for your branch.");
+        doc.end();
+        return;
+      }
+    }
 
     const roleUserIds = await resolveRoleUserIds(role);
 
@@ -232,6 +293,11 @@ router.get("/audit-logs/export", async (req, res) => {
         "id,user_id,action,system_category,log_description,created_at"
       )
       .order("created_at", { ascending: false });
+
+    // ✅ Apply branch filter for non-super admins
+    if (branchUserIds !== null) {
+      query = query.in("user_id", branchUserIds);
+    }
 
     if (roleUserIds !== null) {
       query = query.in("user_id", roleUserIds);
@@ -272,7 +338,7 @@ router.get("/audit-logs/export", async (req, res) => {
     if (userIds.length > 0) {
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id,first_name,middle_name,last_name,role")
+        .select("id,first_name,middle_name,last_name,role,employee_id")
         .in("id", userIds);
 
       profileMap = new Map(
@@ -307,6 +373,7 @@ router.get("/audit-logs/export", async (req, res) => {
     doc.fontSize(11);
 
     doc.text(`Generated: ${new Date().toLocaleString()}`);
+    doc.text(`Branch: ${req.user.is_super_admin ? 'All Branches' : req.user.branch_id}`);
 
     if (search)
       doc.text(`Search: ${search}`);
@@ -326,7 +393,6 @@ router.get("/audit-logs/export", async (req, res) => {
     doc.moveDown();
 
     data.forEach((log, index) => {
-
       const user = profileMap.get(log.user_id) || "System";
 
       doc
@@ -357,7 +423,6 @@ router.get("/audit-logs/export", async (req, res) => {
     doc.end();
   } catch (err) {
     console.error(err);
-
     res.status(500).json({
       success: false,
       error: err.message,

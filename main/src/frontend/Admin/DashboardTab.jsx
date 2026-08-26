@@ -16,6 +16,8 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
 
   const [userRolesData, setUserRolesData] = useState([]);
   const [activities, setActivities] = useState([]);
+  const [branchInfo, setBranchInfo] = useState(null);
+  const [userRole, setUserRole] = useState('');
 
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionDuration, setSessionDuration] = useState('00:00');
@@ -49,6 +51,8 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
             totalDepartments: json.data.totalDepartments,
           });
           setUserRolesData(json.data.userRolesData || []);
+          setBranchInfo(json.data.branch || null);
+          setUserRole(json.data.user_role || '');
         } else {
           setStatusInfo((prev) => ({ ...prev, status: 'Offline' }));
         }
@@ -79,8 +83,6 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   }, []);
 
   // Build cumulative stroke-dasharray/dashoffset for each donut segment.
-  // Circle uses r=15.915 so its circumference is ~100 units — this lets us
-  // work directly in percentage units.
   let cumulative = 0;
   const donutSegments = userRolesData.map((role) => {
     const dashoffset = 100 - cumulative;
@@ -88,11 +90,50 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
     return { ...role, dashoffset };
   });
 
+  // Get greeting based on time
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
+  // Get user name from localStorage
+  const getUserName = () => {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        return user.first_name || user.name || 'Admin';
+      }
+    } catch (e) {
+      return 'Admin';
+    }
+    return 'Admin';
+  };
+
   return (
     <div>
       <div style={styles.header}>
-        <h1 style={styles.title}>System Overview</h1>
-        <p style={styles.subtitle}>Resource Management Recommender System for WEA</p>
+        <div>
+          <h1 style={styles.title}>{getGreeting()}, {getUserName()}!</h1>
+          <p style={styles.subtitle}>
+            Resource Management Recommender System for WEA
+            {branchInfo && ` — ${branchInfo.name} (${branchInfo.code})`}
+            {userRole === 'Super Admin' && ' — Super Admin (All Branches)'}
+          </p>
+        </div>
+        {branchInfo && (
+          <div style={styles.branchBadge}>
+            <span style={styles.branchBadgeLabel}>Branch:</span>
+            <span style={styles.branchBadgeValue}>{branchInfo.name}</span>
+          </div>
+        )}
+        {userRole === 'Super Admin' && (
+          <div style={styles.superAdminBadge}>
+            <span>👑 Super Admin</span>
+          </div>
+        )}
       </div>
 
       <div style={styles.quickActionsGrid}>
@@ -126,7 +167,9 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       <div className="dashboard-grid">
         <div className="glass-card">
           <h2 style={styles.chartTitle}>System Status</h2>
-          <p style={styles.chartSubtitle}>Current system health and performance metrics</p>
+          <p style={styles.chartSubtitle}>
+            {branchInfo ? `Current metrics for ${branchInfo.name}` : 'Current system health and performance metrics'}
+          </p>
 
           <div style={styles.statusGrid}>
             <div style={styles.statusItem}>
@@ -189,7 +232,9 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
 
         <div className="glass-card">
           <h2 style={styles.chartTitle}>Active Users by Role</h2>
-          <p style={styles.chartSubtitle}>Breakdown of system accounts assigned</p>
+          <p style={styles.chartSubtitle}>
+            {branchInfo ? `Breakdown of accounts in ${branchInfo.name}` : 'Breakdown of system accounts assigned'}
+          </p>
 
           <div style={styles.donutContainer}>
             <svg width="150" height="150" viewBox="0 0 42 42" style={styles.donutSvg}>
@@ -230,7 +275,9 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       <div className="dashboard-grid" style={{ marginTop: '24px' }}>
         <div className="glass-card">
           <h2 style={styles.chartTitle}>Recent Portal Activity</h2>
-          <p style={styles.chartSubtitle}>Live trail of audit changes on WEA recommender database</p>
+          <p style={styles.chartSubtitle}>
+            {branchInfo ? `Recent activity in ${branchInfo.name}` : 'Live trail of audit changes'}
+          </p>
           <div style={styles.activityList}>
             {activities.length === 0 && (
               <p style={styles.actText}>No recent activity yet.</p>
@@ -291,6 +338,18 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
               <span style={styles.sessionLabel}>Current Time</span>
               <span style={styles.sessionValueText}>{currentTime}</span>
             </div>
+            <div style={styles.sessionRow}>
+              <span style={styles.sessionLabel}>Branch Access</span>
+              <span style={styles.sessionValueBadge}>
+                {branchInfo ? branchInfo.name : (userRole === 'Super Admin' ? 'All Branches' : 'None')}
+              </span>
+            </div>
+            {userRole && (
+              <div style={styles.sessionRow}>
+                <span style={styles.sessionLabel}>User Role</span>
+                <span style={styles.sessionValueBadge}>{userRole}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -301,6 +360,11 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
 const styles = {
   header: {
     marginBottom: '28px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: '16px',
   },
   title: {
     fontSize: '28px',
@@ -312,6 +376,39 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  branchBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 16px',
+    borderRadius: 'var(--radius-md)',
+    background: 'var(--color-primary-light)',
+    border: '1px solid rgba(16, 185, 129, 0.2)',
+  },
+  branchBadgeLabel: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  branchBadgeValue: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-primary)',
+  },
+  superAdminBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 16px',
+    borderRadius: 'var(--radius-md)',
+    background: 'rgba(239, 68, 68, 0.1)',
+    border: '1px solid rgba(239, 68, 68, 0.2)',
+    color: 'var(--color-danger)',
+    fontSize: '14px',
+    fontWeight: '700',
   },
   quickActionsGrid: {
     display: 'grid',
@@ -345,11 +442,6 @@ const styles = {
     color: 'var(--color-text-primary)',
     marginBottom: '2px',
   },
-  actionDesc: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted)',
-    lineHeight: '1.3',
-  },
   chartTitle: {
     fontSize: '18px',
     fontWeight: '700',
@@ -360,11 +452,6 @@ const styles = {
     fontSize: '13px',
     color: 'var(--color-text-muted)',
     marginBottom: '20px',
-  },
-  svgContainer: {
-    position: 'relative',
-    width: '100%',
-    paddingTop: '10px',
   },
   donutContainer: {
     display: 'flex',

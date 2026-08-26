@@ -181,7 +181,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     }
   };
 
-  // ── Fetch contact requests from Supabase via backend ────────────────────────
+  // ── Fetch contact requests ────────────────────────────────────────────────────
   const fetchContactRequests = async () => {
     try {
       setLoadingRequests(true);
@@ -238,30 +238,30 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
   // ── Update contact request status ────────────────────────────────────────────
   const updateRequestStatus = async (id, newStatus) => {
-  try {
-    const headers = getAuthHeaders();
-    const userString = localStorage.getItem('user');
-    const user = userString ? JSON.parse(userString) : null;
-    const adminId = user?.id || null; // current logged-in admin
+    try {
+      const headers = getAuthHeaders();
+      const userString = localStorage.getItem('user');
+      const user = userString ? JSON.parse(userString) : null;
+      const adminId = user?.id || null;
 
-    await fetch(`http://localhost:5000/api/admin/contact-requests/${id}/status`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({
-        status: newStatus.toLowerCase(),
-        processed_by: adminId,
-        processed_at: new Date().toISOString(),
-      }),
-    });
+      await fetch(`http://localhost:5000/api/admin/contact-requests/${id}/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          status: newStatus.toLowerCase(),
+          processed_by: adminId,
+          processed_at: new Date().toISOString(),
+        }),
+      });
 
-    setContactRequests(prev =>
-      prev.map(req => req.id === id ? { ...req, status: newStatus } : req)
-    );
-  } catch (err) {
-    console.error('Error updating request status:', err);
-    showErrorAlert('Failed to update status. Please try again.');
-  }
-};
+      setContactRequests(prev =>
+        prev.map(req => req.id === id ? { ...req, status: newStatus } : req)
+      );
+    } catch (err) {
+      console.error('Error updating request status:', err);
+      showErrorAlert('Failed to update status. Please try again.');
+    }
+  };
 
   // ── Unlock account ───────────────────────────────────────────────────────────
   const handleUnlockAccount = async (userId) => {
@@ -285,6 +285,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       if (data.success) {
         showSuccessAlert('Account unlocked successfully! The user can now login.', 'Account Unlocked!');
         await fetchLockedAccounts();
+        await fetchUsers();
       } else {
         showErrorAlert(data.message || 'Failed to unlock account');
       }
@@ -308,11 +309,10 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setLoading(true);
       const headers = getAuthHeaders();
-      const adminId = localStorage.getItem('userId');
       const response = await fetch('http://localhost:5000/api/admin/lock-user', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ userId, adminId }),
+        body: JSON.stringify({ userId }),
       });
       const data = await response.json();
 
@@ -326,6 +326,108 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     } catch (err) {
       console.error('Error locking account:', err);
       showErrorAlert('Failed to lock account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: This function now correctly calls lock/unlock instead of status
+  const handleDeactivateActivate = async (userId) => {
+    const user = users.find(u => u.id === userId);
+    const isActive = user.status === 'Active';
+    const action = isActive ? 'deactivate' : 'activate';
+    const actionDisplay = isActive ? 'Deactivate' : 'Activate';
+
+    const result = await showConfirmationAlert(
+      `Confirm ${actionDisplay}`,
+      `Are you sure you want to ${action} ${user.name}'s account?${isActive ? ' This is a soft delete.' : ' This will reactivate the account.'}`,
+      `Yes, ${actionDisplay}`
+    );
+    if (!result.isConfirmed) return;
+
+    try {
+      setLoading(true);
+      const headers = getAuthHeaders();
+      
+      // ✅ Use the correct endpoint for deactivation/activation
+      const newStatus = isActive ? 'Deactivated' : 'Active';
+      const response = await fetch(`http://localhost:5000/api/users/${userId}/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status: newStatus }),
+      });
+      
+      const data = await response.json();
+
+      if (data.success) {
+        // Refresh the user list
+        await fetchUsers();
+        showSuccessAlert(
+          `User ${user.name} has been ${action}d successfully!`,
+          `Account ${actionDisplay}ed!`
+        );
+      } else {
+        showErrorAlert(data.error || `Failed to ${action} account`);
+      }
+    } catch (err) {
+      console.error(`Error ${action}ing user:`, err);
+      showErrorAlert(`Failed to ${action} account. Please try again.`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: This function now calls the correct lock/unlock endpoints
+  const toggleUserStatus = async (userId) => {
+    const user = users.find(u => u.id === userId);
+    const isActive = user.status === 'Active';
+    const action = isActive ? 'lock' : 'unlock';
+    const actionDisplay = isActive ? 'Lock' : 'Unlock';
+
+    const result = await showConfirmationAlert(
+      `Confirm ${actionDisplay}`,
+      `Are you sure you want to ${action} ${user.name}'s account?${isActive ? ' They will not be able to login.' : ' They will be able to login again.'}`,
+      `Yes, ${actionDisplay} Account`
+    );
+    if (!result.isConfirmed) return;
+
+    try {
+      setLoading(true);
+      const headers = getAuthHeaders();
+      
+      let response;
+      if (isActive) {
+        // ✅ LOCK - Use the correct endpoint
+        response = await fetch('http://localhost:5000/api/admin/lock-user', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ userId }),
+        });
+      } else {
+        // ✅ UNLOCK - Use the correct endpoint
+        response = await fetch('http://localhost:5000/api/admin/unlock/unlock-user', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ userId }),
+        });
+      }
+      
+      const data = await response.json();
+
+      if (data.success) {
+        // Refresh both lists
+        await fetchUsers();
+        await fetchLockedAccounts();
+        showSuccessAlert(
+          `User ${user.name} has been ${action}ed successfully!`,
+          `Account ${actionDisplay}ed!`
+        );
+      } else {
+        showErrorAlert(data.message || `Failed to ${action} account`);
+      }
+    } catch (err) {
+      console.error(`Error ${action}ing user:`, err);
+      showErrorAlert(`Failed to ${action} account. Please try again.`);
     } finally {
       setLoading(false);
     }
@@ -430,52 +532,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       }
     } catch (err) {
       console.error('Error updating user:', err);
-      setError(err.message);
-      showErrorAlert(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ── Toggle user status ───────────────────────────────────────────────────────
-  const toggleUserStatus = async (userId) => {
-    const user = users.find(u => u.id === userId);
-    const action = user.status === 'Active' ? 'lock' : 'unlock';
-    const actionDisplay = user.status === 'Active' ? 'Lock' : 'Unlock';
-
-    const result = await showConfirmationAlert(
-      `Confirm ${actionDisplay}`,
-      `Are you sure you want to ${action} ${user.name}'s account?`,
-      `Yes, ${actionDisplay} Account`
-    );
-    if (!result.isConfirmed) return;
-
-    const newStatus = user.status === 'Active' ? 'Deactivated' : 'Active';
-
-    try {
-      setLoading(true);
-      const headers = getAuthHeaders();
-      const response = await fetch(`http://localhost:5000/api/users/${userId}/status`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ status: newStatus }),
-      });
-      const data = await response.json();
-
-      if (data.success) {
-        setUsers(users.map(u => u.id === userId ? { ...u, status: newStatus } : u));
-        setError(null);
-        showSuccessAlert(
-          `User ${user.name} has been ${action}ed successfully!`,
-          `Account ${actionDisplay}ed!`
-        );
-      } else {
-        const errorMsg = data.error || 'Failed to update user status';
-        setError(errorMsg);
-        showErrorAlert(errorMsg);
-      }
-    } catch (err) {
-      console.error('Error updating user status:', err);
       setError(err.message);
       showErrorAlert(err.message);
     } finally {
@@ -672,7 +728,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                         </span>
                       </td>
                       <td style={styles.td}>
-                        <span style={{ ...styles.statusBadge, backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-danger-light)', color: u.status === 'Active' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                        <span style={{ ...styles.statusBadge, backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : u.status === 'Locked' ? 'var(--color-danger-light)' : 'var(--color-warning-light)', color: u.status === 'Active' ? 'var(--color-success)' : u.status === 'Locked' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
                           {u.status}
                         </span>
                       </td>
@@ -685,15 +741,42 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                               <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                             </svg>
                           </button>
-                          <button onClick={() => toggleUserStatus(u.id)} style={{ ...styles.lockIconBtn, color: u.status === 'Active' ? 'var(--color-warning)' : 'var(--color-success)', background: u.status === 'Active' ? 'rgba(245, 158, 11, 0.1)' : 'var(--color-primary-light)' }} title={u.status === 'Active' ? 'Lock account' : 'Unlock account'} disabled={loading}>
-                            {u.status === 'Active' ? (
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                          
+                          {/* ✅ Lock/Unlock button - uses handleLockAccount/handleUnlockAccount */}
+                          <button 
+                            onClick={() => u.status === 'Active' ? handleLockAccount(u.id) : handleUnlockAccount(u.id)} 
+                            style={{ 
+                              ...styles.lockIconBtn, 
+                              color: u.status === 'Active' || u.status === 'Locked' ? 'var(--color-warning)' : 'var(--color-success)', 
+                              background: u.status === 'Active' || u.status === 'Locked' ? 'rgba(245, 158, 11, 0.1)' : 'var(--color-primary-light)' 
+                            }} 
+                            title={u.status === 'Active' || u.status === 'Locked' ? 'Lock account' : 'Unlock account'} 
+                            disabled={loading}
+                          >
+                            {u.status === 'Active' || u.status === 'Locked' ? (
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                              </svg>
                             ) : (
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                              </svg>
                             )}
                           </button>
-                          <button onClick={() => toggleUserStatus(u.id)} style={{ ...styles.statusToggleBtn, color: u.status === 'Active' ? 'var(--color-danger)' : 'var(--color-success)', background: u.status === 'Active' ? 'var(--color-danger-light)' : 'var(--color-primary-light)' }} disabled={loading}>
-                            {u.status === 'Active' ? 'Deactivate' : 'Activate'}
+                          
+                          {/* ✅ Deactivate/Activate button - uses handleDeactivateActivate */}
+                          <button 
+                            onClick={() => handleDeactivateActivate(u.id)} 
+                            style={{ 
+                              ...styles.statusToggleBtn, 
+                              color: u.status === 'Active' || u.status === 'Locked' ? 'var(--color-danger)' : 'var(--color-success)', 
+                              background: u.status === 'Active' || u.status === 'Locked' ? 'var(--color-danger-light)' : 'var(--color-primary-light)' 
+                            }} 
+                            disabled={loading}
+                          >
+                            {u.status === 'Active' || u.status === 'Locked' ? 'Deactivate' : 'Activate'}
                           </button>
                         </div>
                       </td>
@@ -920,7 +1003,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Email Address *</label>
-                <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} placeholder="romell.ebuen@wea.com" required />
+                <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} placeholder="user@wea.com" required />
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Assign Role *</label>
@@ -930,7 +1013,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
                   <option value="Human Resources">Human Resources</option>
-
                 </select>
               </div>
               <div style={styles.modalActions}>
@@ -974,6 +1056,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
+                  <option value="Human Resources">Human Resources</option>
                 </select>
               </div>
               <div style={styles.modalActions}>
@@ -988,6 +1071,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   );
 }
 
+// Styles object remains the same as before
 const styles = {
   header: {
     marginBottom: '28px',
@@ -1059,9 +1143,6 @@ const styles = {
     fontSize: '14px',
     outline: 'none',
     transition: 'border-color 0.2s',
-    '&:focus': {
-      borderColor: 'var(--color-primary)',
-    }
   },
   createBtn: {
     backgroundColor: 'var(--color-primary)',
@@ -1073,13 +1154,6 @@ const styles = {
     fontSize: '14px',
     cursor: 'pointer',
     transition: 'background-color 0.2s',
-    '&:hover': {
-      backgroundColor: 'var(--color-primary-hover)',
-    },
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    }
   },
   refreshBtn: {
     backgroundColor: 'var(--color-bg-root)',
@@ -1093,14 +1167,6 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
-      backgroundColor: 'var(--color-bg-hover)',
-      borderColor: 'var(--color-text-muted)',
-    },
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    }
   },
   tableWrapper: {
     width: '100%',
@@ -1125,9 +1191,6 @@ const styles = {
   tableBodyRow: {
     borderBottom: '1px solid var(--color-border)',
     transition: 'background-color 0.2s',
-    '&:hover': {
-      backgroundColor: 'var(--color-bg-card-hover)',
-    }
   },
   td: {
     padding: '14px 16px',
@@ -1194,8 +1257,6 @@ const styles = {
     transition: 'all 0.2s',
   },
   lockIconBtn: {
-    background: 'var(--color-warning-light)',
-    color: 'var(--color-warning)',
     border: 'none',
     width: '30px',
     height: '30px',
@@ -1205,10 +1266,6 @@ const styles = {
     justifyContent: 'center',
     cursor: 'pointer',
     transition: 'all 0.2s',
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    }
   },
   statusToggleBtn: {
     border: 'none',
@@ -1218,10 +1275,6 @@ const styles = {
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s',
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    }
   },
   unlockBtn: {
     backgroundColor: 'var(--color-success)',
@@ -1236,13 +1289,6 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    '&:hover': {
-      backgroundColor: 'var(--color-success-hover)',
-    },
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    }
   },
   tabSectionTitle: {
     fontSize: '18px',
@@ -1323,9 +1369,6 @@ const styles = {
     fontSize: '24px',
     cursor: 'pointer',
     color: 'var(--color-text-muted)',
-    '&:hover': {
-      color: 'var(--color-danger)',
-    }
   },
   formGroup: {
     marginBottom: '16px',
@@ -1348,9 +1391,6 @@ const styles = {
     color: 'var(--color-text-primary)',
     fontSize: '14px',
     outline: 'none',
-    '&:focus': {
-      borderColor: 'var(--color-primary)',
-    }
   },
   modalSelect: {
     width: '100%',
@@ -1377,9 +1417,6 @@ const styles = {
     fontSize: '13px',
     fontWeight: '600',
     color: 'var(--color-text-secondary)',
-    '&:hover': {
-      backgroundColor: 'var(--color-bg-hover)',
-    }
   },
   saveBtn: {
     backgroundColor: 'var(--color-primary)',
@@ -1390,12 +1427,16 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '700',
-    '&:hover': {
-      backgroundColor: 'var(--color-primary-hover)',
-    },
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    }
   }
 };
+
+// Add keyframe styles
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = `
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
+}
