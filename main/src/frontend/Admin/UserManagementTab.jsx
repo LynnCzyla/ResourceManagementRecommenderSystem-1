@@ -56,6 +56,11 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [loadingLocked, setLoadingLocked] = useState(false);
   const [unlockingId, setUnlockingId] = useState(null);
 
+  // ── Pagination states ──────────────────────────────────────────────────────────
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
+  const [jumpPage, setJumpPage] = useState('');
+
   // ── Contact Requests — real data from Supabase ──────────────────────────────
   const [contactRequests, setContactRequests] = useState([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
@@ -132,6 +137,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         }));
         setUsers(transformedUsers);
         setError(null);
+        setCurrentPage(1); // Reset to first page when data changes
       } else {
         setError(data.error || 'Failed to fetch users');
       }
@@ -349,7 +355,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       setLoading(true);
       const headers = getAuthHeaders();
       
-      // ✅ Use the correct endpoint for deactivation/activation
       const newStatus = isActive ? 'Deactivated' : 'Active';
       const response = await fetch(`http://localhost:5000/api/users/${userId}/status`, {
         method: 'PATCH',
@@ -360,7 +365,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const data = await response.json();
 
       if (data.success) {
-        // Refresh the user list
         await fetchUsers();
         showSuccessAlert(
           `User ${user.name} has been ${action}d successfully!`,
@@ -397,14 +401,12 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       
       let response;
       if (isActive) {
-        // ✅ LOCK - Use the correct endpoint
         response = await fetch('http://localhost:5000/api/admin/lock-user', {
           method: 'POST',
           headers,
           body: JSON.stringify({ userId }),
         });
       } else {
-        // ✅ UNLOCK - Use the correct endpoint
         response = await fetch('http://localhost:5000/api/admin/unlock/unlock-user', {
           method: 'POST',
           headers,
@@ -415,7 +417,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const data = await response.json();
 
       if (data.success) {
-        // Refresh both lists
         await fetchUsers();
         await fetchLockedAccounts();
         showSuccessAlert(
@@ -558,11 +559,123 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     setError(null);
   };
 
+  // ── Pagination logic ──────────────────────────────────────────────────────────
   const filteredUsers = users.filter(u =>
     u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.role?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const totalItems = filteredUsers.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredUsers.slice(indexOfFirstItem, indexOfLastItem);
+
+  const goToPage = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
+
+  const handleJumpPage = (e) => {
+    if (e.key === 'Enter') {
+      const page = parseInt(jumpPage, 10);
+      if (!isNaN(page) && page >= 1 && page <= totalPages) {
+        setCurrentPage(page);
+        setJumpPage('');
+      }
+    }
+  };
+
+  // ── Render pagination controls ──────────────────────────────────────────────
+  const renderPagination = () => {
+    if (totalPages <= 1) return null;
+
+    const pages = [];
+    const maxVisible = 5;
+    let start = Math.max(1, currentPage - 2);
+    let end = Math.min(totalPages, start + maxVisible - 1);
+    
+    if (end - start + 1 < maxVisible) {
+      start = Math.max(1, end - maxVisible + 1);
+    }
+
+    return (
+      <div style={styles.paginationContainer}>
+        <span style={styles.paginationInfo}>
+          Showing {indexOfFirstItem + 1}–{Math.min(indexOfLastItem, totalItems)} of {totalItems} users
+        </span>
+        <div style={styles.paginationControls}>
+          <button
+            style={{ ...styles.pageBtn, ...(currentPage === 1 ? styles.pageBtnDisabled : {}) }}
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            ‹
+          </button>
+          
+          {start > 1 && (
+            <>
+              <button style={styles.pageBtn} onClick={() => goToPage(1)}>1</button>
+              {start > 2 && <span style={styles.ellipsis}>…</span>}
+            </>
+          )}
+          
+          {Array.from({ length: end - start + 1 }, (_, i) => start + i).map(page => (
+            <button
+              key={page}
+              style={{ ...styles.pageBtn, ...(page === currentPage ? styles.pageBtnActive : {}) }}
+              onClick={() => goToPage(page)}
+            >
+              {page}
+            </button>
+          ))}
+          
+          {end < totalPages && (
+            <>
+              {end < totalPages - 1 && <span style={styles.ellipsis}>…</span>}
+              <button style={styles.pageBtn} onClick={() => goToPage(totalPages)}>{totalPages}</button>
+            </>
+          )}
+          
+          <button
+            style={{ ...styles.pageBtn, ...(currentPage === totalPages ? styles.pageBtnDisabled : {}) }}
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            ›
+          </button>
+          
+          <div style={styles.jumpContainer}>
+            <span style={styles.jumpLabel}>Go to</span>
+            <input
+              type="number"
+              min="1"
+              max={totalPages}
+              value={jumpPage}
+              onChange={(e) => setJumpPage(e.target.value)}
+              onKeyDown={handleJumpPage}
+              style={styles.jumpInput}
+              placeholder="Page"
+            />
+            <button
+              style={styles.jumpBtn}
+              onClick={() => {
+                const page = parseInt(jumpPage, 10);
+                if (!isNaN(page) && page >= 1 && page <= totalPages) {
+                  setCurrentPage(page);
+                  setJumpPage('');
+                }
+              }}
+            >
+              Go
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -713,12 +826,12 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 </tr>
               </thead>
               <tbody>
-                {loading && filteredUsers.length === 0 ? (
+                {loading && currentItems.length === 0 ? (
                   <tr><td colSpan="6" style={styles.emptyRow}>Loading users...</td></tr>
-                ) : filteredUsers.length === 0 ? (
+                ) : currentItems.length === 0 ? (
                   <tr><td colSpan="6" style={styles.emptyRow}>No user accounts found.</td></tr>
                 ) : (
-                  filteredUsers.map(u => (
+                  currentItems.map(u => (
                     <tr key={u.id} style={styles.tableBodyRow}>
                       <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{u.name}</td>
                       <td style={styles.td}>{u.email}</td>
@@ -742,7 +855,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                             </svg>
                           </button>
                           
-                          {/* ✅ Lock/Unlock button - uses handleLockAccount/handleUnlockAccount */}
+                          {/* Lock/Unlock button */}
                           <button 
                             onClick={() => u.status === 'Active' ? handleLockAccount(u.id) : handleUnlockAccount(u.id)} 
                             style={{ 
@@ -766,7 +879,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                             )}
                           </button>
                           
-                          {/* ✅ Deactivate/Activate button - uses handleDeactivateActivate */}
+                          {/* Deactivate/Activate button */}
                           <button 
                             onClick={() => handleDeactivateActivate(u.id)} 
                             style={{ 
@@ -786,6 +899,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </tbody>
             </table>
           </div>
+
+          {/* ✅ Pagination */}
+          {renderPagination()}
         </div>
       )}
 
@@ -889,6 +1005,13 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         <div className="glass-card">
           <div style={styles.tableToolbar}>
             <h2 style={{ ...styles.tabSectionTitle, marginBottom: 0 }}>Locked Accounts</h2>
+            <button 
+              onClick={() => { fetchLockedAccounts(); fetchUsers(); }} 
+              style={styles.refreshBtn} 
+              disabled={loadingLocked}
+            >
+              🔄 Refresh
+            </button>
           </div>
           <p style={styles.tabSectionSubtitle}>View and manage accounts locked due to failed login attempts or manual admin action.</p>
 
@@ -1071,7 +1194,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   );
 }
 
-// Styles object remains the same as before
+// Styles
 const styles = {
   header: {
     marginBottom: '28px',
@@ -1427,7 +1550,92 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '700',
-  }
+  },
+  // ── Pagination styles ──
+  paginationContainer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '16px 20px',
+    borderTop: '1px solid var(--color-border)',
+    flexWrap: 'wrap',
+    gap: '12px',
+  },
+  paginationInfo: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+  },
+  paginationControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+  },
+  pageBtn: {
+    minWidth: '34px',
+    height: '34px',
+    padding: '0 8px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageBtnActive: {
+    background: 'var(--color-primary)',
+    borderColor: 'var(--color-primary)',
+    color: '#ffffff',
+  },
+  pageBtnDisabled: {
+    opacity: 0.4,
+    cursor: 'not-allowed',
+  },
+  ellipsis: {
+    padding: '0 4px',
+    color: 'var(--color-text-muted)',
+  },
+  jumpContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginLeft: '8px',
+    paddingLeft: '8px',
+    borderLeft: '1px solid var(--color-border)',
+  },
+  jumpLabel: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+  },
+  jumpInput: {
+    width: '56px',
+    height: '34px',
+    padding: '0 6px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    textAlign: 'center',
+    outline: 'none',
+  },
+  jumpBtn: {
+    height: '34px',
+    padding: '0 12px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
 };
 
 // Add keyframe styles
