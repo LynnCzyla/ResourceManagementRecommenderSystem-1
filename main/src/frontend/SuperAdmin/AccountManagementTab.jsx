@@ -9,12 +9,27 @@ export default function AccountManagementTab() {
   const [error, setError] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  // ← UPDATED: Match database values exactly
+  const [roleFilter, setRoleFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [lockedFilter, setLockedFilter] = useState('All');
+  const [branchFilter, setBranchFilter] = useState('All');
 
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+  const [branches, setBranches] = useState([]);
+
+  // ← UPDATED: Match database values exactly
+  const roleOptions = [
+    { value: 'All', label: 'All Roles' },
+    { value: 'Super Admin', label: 'Super Admin' },
+    { value: 'Admin', label: 'Admin' },
+    { value: 'Human Resources', label: 'Human Resources' },
+    { value: 'Project Manager', label: 'Project Manager' },
+    { value: 'Resource Manager', label: 'Resource Manager' },
+    { value: 'Employee', label: 'Employee' },
+  ];
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
@@ -22,7 +37,6 @@ export default function AccountManagementTab() {
   };
 
   const getActingSuperAdminId = () => {
-    // Adjust the key to whatever you actually store on login.
     return localStorage.getItem('userId') || null;
   };
 
@@ -36,7 +50,6 @@ export default function AccountManagementTab() {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-success)',
-      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
     });
   };
 
@@ -50,7 +63,6 @@ export default function AccountManagementTab() {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-danger)',
-      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
     });
   };
 
@@ -67,13 +79,22 @@ export default function AccountManagementTab() {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-warning)',
-      customClass: {
-        popup: 'swal-custom-popup',
-        confirmButton: 'swal-custom-confirm',
-        cancelButton: 'swal-custom-cancel'
-      }
     });
   };
+
+  const loadBranches = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/branches?limit=100`, {
+        headers: getAuthHeaders(),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setBranches(json.data || []);
+      }
+    } catch (err) {
+      console.error('Error loading branches:', err);
+    }
+  }, []);
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -83,13 +104,19 @@ export default function AccountManagementTab() {
       params.set('page', String(page));
       params.set('limit', String(limit));
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      if (roleFilter !== 'All') params.set('role', roleFilter); // ← Now matches database
       if (statusFilter !== 'All') params.set('status', statusFilter);
       if (lockedFilter !== 'All') params.set('locked', lockedFilter === 'Locked' ? 'true' : 'false');
+      if (branchFilter !== 'All') params.set('branch_id', branchFilter);
+
+      console.log('Fetching with params:', params.toString()); // Debug
 
       const res = await fetch(`${API_BASE}/accounts?${params.toString()}`, {
         headers: getAuthHeaders(),
       });
       const json = await res.json();
+
+      console.log('Response:', json); // Debug
 
       if (!json.success) throw new Error(json.error || 'Failed to load accounts');
 
@@ -99,28 +126,34 @@ export default function AccountManagementTab() {
         totalPages: json.pagination?.totalPages || 1,
       });
     } catch (err) {
-      console.error('Error fetching admin accounts:', err);
+      console.error('Error fetching accounts:', err);
       setError('Unable to reach the server. Please try again.');
       setAccounts([]);
     } finally {
       setLoading(false);
     }
-  }, [page, limit, searchQuery, statusFilter, lockedFilter]);
+  }, [page, limit, searchQuery, roleFilter, statusFilter, lockedFilter, branchFilter]);
+
+  useEffect(() => {
+    loadBranches();
+  }, [loadBranches]);
 
   useEffect(() => {
     fetchAccounts();
   }, [fetchAccounts]);
 
-  // Reset to page 1 whenever a filter changes
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, statusFilter, lockedFilter]);
+  }, [searchQuery, roleFilter, statusFilter, lockedFilter, branchFilter]);
 
-  const handleDeactivate = async (accountId) => {
+  const handleToggleStatus = async (accountId, currentStatus) => {
+    const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
+    const action = newStatus === 'Active' ? 'Activate' : 'Deactivate';
+    
     const result = await showConfirmationAlert(
-      'Deactivate Account',
-      'Are you sure you want to deactivate this account? The user will not be able to log in.',
-      'Yes, Deactivate'
+      `${action} Account`,
+      `Are you sure you want to ${action.toLowerCase()} this account?`,
+      `Yes, ${action}`
     );
     if (!result.isConfirmed) return;
 
@@ -128,86 +161,45 @@ export default function AccountManagementTab() {
       const res = await fetch(`${API_BASE}/accounts/${accountId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ status: 'Inactive' }),
+        body: JSON.stringify({ status: newStatus }),
       });
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to deactivate account');
+      if (!json.success) throw new Error(json.error || `Failed to ${action.toLowerCase()} account`);
 
-      showSuccessAlert('Account deactivated successfully!');
+      showSuccessAlert(`Account ${action.toLowerCase()}d successfully!`);
       fetchAccounts();
     } catch (err) {
-      showErrorAlert(err.message || 'Failed to deactivate account');
+      showErrorAlert(err.message || `Failed to ${action.toLowerCase()} account`);
     }
   };
 
-  const handleActivate = async (accountId) => {
+  const handleToggleLock = async (accountId, isLocked) => {
+    const action = isLocked ? 'Unlock' : 'Lock';
+    
     const result = await showConfirmationAlert(
-      'Activate Account',
-      'Are you sure you want to activate this account?',
-      'Yes, Activate'
+      `${action} Account`,
+      `${action === 'Lock' ? 'This will prevent the user from logging in.' : 'This will restore access to the account.'}`,
+      `Yes, ${action}`
     );
     if (!result.isConfirmed) return;
 
     try {
-      const res = await fetch(`${API_BASE}/accounts/${accountId}/status`, {
+      const endpoint = isLocked 
+        ? `${API_BASE}/accounts/${accountId}/unlock`
+        : `${API_BASE}/accounts/${accountId}/lock`;
+
+      const res = await fetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ status: 'Active' }),
+        body: isLocked ? {} : JSON.stringify({ locked_by: getActingSuperAdminId() }),
       });
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to activate account');
+      if (!json.success) throw new Error(json.error || `Failed to ${action.toLowerCase()} account`);
 
-      showSuccessAlert('Account activated successfully!');
+      showSuccessAlert(`Account ${action.toLowerCase()}ed successfully!`);
       fetchAccounts();
     } catch (err) {
-      showErrorAlert(err.message || 'Failed to activate account');
-    }
-  };
-
-  const handleUnlock = async (accountId) => {
-    const result = await showConfirmationAlert(
-      'Unlock Account',
-      'This will reset failed login attempts and unlock the account.',
-      'Yes, Unlock'
-    );
-    if (!result.isConfirmed) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/accounts/${accountId}/unlock`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to unlock account');
-
-      showSuccessAlert('Account unlocked successfully!');
-      fetchAccounts();
-    } catch (err) {
-      showErrorAlert(err.message || 'Failed to unlock account');
-    }
-  };
-
-  const handleLock = async (accountId) => {
-    const result = await showConfirmationAlert(
-      'Lock Account',
-      'This will prevent the user from logging in until unlocked.',
-      'Yes, Lock'
-    );
-    if (!result.isConfirmed) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/accounts/${accountId}/lock`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ locked_by: getActingSuperAdminId() }),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to lock account');
-
-      showSuccessAlert('Account locked successfully!');
-      fetchAccounts();
-    } catch (err) {
-      showErrorAlert(err.message || 'Failed to lock account');
+      showErrorAlert(err.message || `Failed to ${action.toLowerCase()} account`);
     }
   };
 
@@ -217,11 +209,24 @@ export default function AccountManagementTab() {
     return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
+  // ← UPDATED: Match database role values for badges
+  const getRoleBadgeStyle = (role) => {
+    const roleColors = {
+      'Super Admin': { bg: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' },
+      'Admin': { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' },
+      'Human Resources': { bg: 'rgba(236, 72, 153, 0.15)', color: '#ec4899' },
+      'Project Manager': { bg: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' },
+      'Resource Manager': { bg: 'rgba(16, 185, 129, 0.15)', color: '#10b981' },
+      'Employee': { bg: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' },
+    };
+    return roleColors[role] || { bg: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' };
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>Account Management</h1>
-        <p style={styles.subtitle}>Manage Admin account status and login locks</p>
+        <p style={styles.subtitle}>Manage all user accounts across all branches</p>
       </div>
 
       <div style={styles.controls}>
@@ -232,12 +237,23 @@ export default function AccountManagementTab() {
           </svg>
           <input
             type="text"
-            placeholder="Search by name or employee ID..."
+            placeholder="Search by name, employee ID, or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={styles.searchInput}
           />
         </div>
+
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          style={styles.filterSelect}
+        >
+          {roleOptions.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -247,6 +263,7 @@ export default function AccountManagementTab() {
           <option value="Active">Active</option>
           <option value="Inactive">Inactive</option>
         </select>
+
         <select
           value={lockedFilter}
           onChange={(e) => setLockedFilter(e.target.value)}
@@ -256,97 +273,145 @@ export default function AccountManagementTab() {
           <option value="Locked">Locked Only</option>
           <option value="Unlocked">Unlocked Only</option>
         </select>
+
+        <select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          style={styles.filterSelect}
+        >
+          <option value="All">All Branches</option>
+          {branches.map(b => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
       </div>
 
       {error && <div style={styles.errorBanner}>{error}</div>}
 
       <div style={styles.tableContainer}>
+        <div style={styles.tableHeaderInfo}>
+          <span>Showing {accounts.length} of {pagination.total} accounts</span>
+        </div>
+
         <table style={styles.table}>
           <thead>
             <tr style={styles.tableHeader}>
               <th style={styles.tableHeaderCell}>Employee ID</th>
               <th style={styles.tableHeaderCell}>Name</th>
+              <th style={styles.tableHeaderCell}>Email</th>
+              <th style={styles.tableHeaderCell}>Role</th>
+              <th style={styles.tableHeaderCell}>Branch</th>
               <th style={styles.tableHeaderCell}>Status</th>
-              <th style={styles.tableHeaderCell}>Login Attempts</th>
               <th style={styles.tableHeaderCell}>Locked</th>
-              <th style={styles.tableHeaderCell}>Created</th>
               <th style={styles.tableHeaderCell}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" style={styles.emptyCell}>Loading accounts...</td>
+                <td colSpan="8" style={styles.emptyCell}>Loading accounts...</td>
               </tr>
             ) : accounts.length === 0 ? (
               <tr>
-                <td colSpan="7" style={styles.emptyCell}>No accounts found</td>
+                <td colSpan="8" style={styles.emptyCell}>No accounts found</td>
               </tr>
             ) : (
-              accounts.map(account => (
-                <tr key={account.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{account.employee_id || '—'}</td>
-                  <td style={styles.tableCell}>
-                    <span style={styles.fullName}>{account.name}</span>
-                  </td>
-                  <td style={styles.tableCell}>
-                    <span style={{
-                      ...styles.statusBadge,
-                      backgroundColor: account.status === 'Active' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                      color: account.status === 'Active' ? '#22c55e' : '#ef4444',
-                    }}>
-                      {account.status}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>{account.failedAttempts}</td>
-                  <td style={styles.tableCell}>
-                    {account.locked ? (
-                      <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
-                        Locked
+              accounts.map(account => {
+                const roleStyle = getRoleBadgeStyle(account.role);
+                return (
+                  <tr key={account.id} style={styles.tableRow}>
+                    <td style={styles.tableCell}>
+                      <span style={styles.employeeIdBadge}>{account.employee_id || '—'}</span>
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={styles.fullName}>{account.name}</span>
+                    </td>
+                    <td style={styles.tableCell}>{account.email || '—'}</td>
+                    <td style={styles.tableCell}>
+                      <span style={{
+                        ...styles.roleBadge,
+                        backgroundColor: roleStyle.bg,
+                        color: roleStyle.color,
+                      }}>
+                        {account.role || 'Unknown'}
                       </span>
-                    ) : (
-                      <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
-                        Unlocked
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={styles.branchBadge}>
+                        {account.branch?.name || '—'}
                       </span>
-                    )}
-                  </td>
-                  <td style={styles.tableCell}>{formatDate(account.createdAt)}</td>
-                  <td style={styles.tableCell}>
-                    <div style={styles.actionButtons}>
-                      {account.status === 'Active' ? (
-                        <button onClick={() => handleDeactivate(account.id)} style={styles.deactivateBtn} title="Deactivate">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                          </svg>
-                        </button>
-                      ) : (
-                        <button onClick={() => handleActivate(account.id)} style={styles.activateBtn} title="Activate">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
-                          </svg>
-                        </button>
-                      )}
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={{
+                        ...styles.statusBadge,
+                        backgroundColor: account.status === 'Active' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                        color: account.status === 'Active' ? '#22c55e' : '#ef4444',
+                      }}>
+                        {account.status}
+                      </span>
+                    </td>
+                    <td style={styles.tableCell}>
                       {account.locked ? (
-                        <button onClick={() => handleUnlock(account.id)} style={styles.activateBtn} title="Unlock">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
-                          </svg>
-                        </button>
+                        <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
+                          🔒 Locked
+                        </span>
                       ) : (
-                        <button onClick={() => handleLock(account.id)} style={styles.deactivateBtn} title="Lock">
+                        <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
+                          🔓 Unlocked
+                        </span>
+                      )}
+                      {account.failed_attempts > 0 && (
+                        <span style={styles.failedAttempts}>
+                          ({account.failed_attempts} failed)
+                        </span>
+                      )}
+                    </td>
+                    <td style={styles.tableCell}>
+                      <div style={styles.actionButtons}>
+                        <button
+                          onClick={() => handleToggleStatus(account.id, account.status)}
+                          style={account.status === 'Active' ? styles.deactivateBtn : styles.activateBtn}
+                          title={account.status === 'Active' ? 'Deactivate' : 'Activate'}
+                        >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            {account.status === 'Active' ? (
+                              <>
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                              </>
+                            ) : (
+                              <>
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                              </>
+                            )}
                           </svg>
                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
+
+                        <button
+                          onClick={() => handleToggleLock(account.id, account.locked)}
+                          style={account.locked ? styles.activateBtn : styles.deactivateBtn}
+                          title={account.locked ? 'Unlock' : 'Lock'}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            {account.locked ? (
+                              <>
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                              </>
+                            ) : (
+                              <>
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                              </>
+                            )}
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -412,7 +477,7 @@ const styles = {
     borderRadius: 'var(--radius-md)',
     padding: '8px 12px',
     flex: 1,
-    maxWidth: '400px',
+    minWidth: '200px',
   },
   searchIcon: {
     color: 'var(--color-text-muted)',
@@ -433,6 +498,7 @@ const styles = {
     background: 'var(--color-bg-card)',
     color: 'var(--color-text-primary)',
     outline: 'none',
+    minWidth: '140px',
   },
   errorBanner: {
     padding: '12px 16px',
@@ -448,6 +514,13 @@ const styles = {
     borderRadius: 'var(--radius-md)',
     overflow: 'hidden',
   },
+  tableHeaderInfo: {
+    padding: '12px 16px',
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+    borderBottom: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card-hover)',
+  },
   table: {
     width: '100%',
     borderCollapse: 'collapse',
@@ -458,7 +531,7 @@ const styles = {
   tableHeaderCell: {
     padding: '12px 16px',
     textAlign: 'left',
-    fontSize: '12px',
+    fontSize: '11px',
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
@@ -473,19 +546,51 @@ const styles = {
     padding: '12px 16px',
     fontSize: '14px',
     color: 'var(--color-text-primary)',
+    verticalAlign: 'middle',
+  },
+  employeeIdBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    background: 'rgba(99, 102, 241, 0.1)',
+    color: '#6366f1',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
   fullName: {
     fontWeight: '600',
+  },
+  roleBadge: {
+    padding: '2px 10px',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontWeight: '600',
+    display: 'inline-block',
+  },
+  branchBadge: {
+    padding: '2px 8px',
+    background: 'rgba(59, 130, 246, 0.1)',
+    color: '#3b82f6',
+    borderRadius: '4px',
+    fontSize: '12px',
   },
   statusBadge: {
     padding: '4px 12px',
     borderRadius: '20px',
     fontSize: '11px',
     fontWeight: '600',
+    display: 'inline-block',
+  },
+  failedAttempts: {
+    display: 'block',
+    fontSize: '10px',
+    color: 'var(--color-text-muted)',
+    marginTop: '2px',
   },
   actionButtons: {
     display: 'flex',
-    gap: '8px',
+    gap: '6px',
   },
   deactivateBtn: {
     padding: '6px',
@@ -516,6 +621,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '16px',
+    paddingTop: '16px',
   },
   pageBtn: {
     padding: '8px 16px',

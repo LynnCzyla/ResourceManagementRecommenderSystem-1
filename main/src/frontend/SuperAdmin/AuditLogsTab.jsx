@@ -1,22 +1,22 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin`;
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/superadmin`;
 const ROWS_PER_PAGE = 10;
 
-// This tab is scoped to Admin-level activity only — Super Admin should not
-// see every role's logs here (that's the full audit trail on the Admin side).
-const ROLE_SCOPE = 'Admin';
-
-export default function AuditLogsTab() {
+export default function SuperAdminAuditLogsTab() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [actionFilter, setActionFilter] = useState('All');
+  const [roleFilter, setRoleFilter] = useState('All');
+  const [branchFilter, setBranchFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('All');
 
   const [actionsList, setActionsList] = useState([]);
+  const [rolesList, setRolesList] = useState([]);
+  const [branchesList, setBranchesList] = useState([]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -50,20 +50,27 @@ export default function AuditLogsTab() {
       weekAgo.setDate(weekAgo.getDate() - 7);
       return { startDate: toISODate(weekAgo), endDate: toISODate(today) };
     }
+    if (filter === 'Last 30 Days') {
+      const monthAgo = new Date(today);
+      monthAgo.setDate(monthAgo.getDate() - 30);
+      return { startDate: toISODate(monthAgo), endDate: toISODate(today) };
+    }
     return {};
   };
 
-  // Fetch dropdown options once, scoped to Admin role activity
+  // Fetch dropdown options
   useEffect(() => {
     const fetchFilters = async () => {
       try {
-        const params = new URLSearchParams({ role: ROLE_SCOPE });
-        const res = await fetch(`${API_BASE}/audit-logs/filters?${params.toString()}`, {
+        const res = await fetch(`${API_BASE}/audit-logs/filters`, {
           headers: getAuthHeaders(),
         });
         const json = await res.json();
+        
         if (json.success) {
           setActionsList(json.data.actions || []);
+          setRolesList(json.data.roles || []);
+          setBranchesList(json.data.branches || []);
         }
       } catch (err) {
         console.error('Error fetching filter options:', err);
@@ -72,33 +79,41 @@ export default function AuditLogsTab() {
     fetchFilters();
   }, []);
 
-  // Fetch top-level stat cards (independent of the table's own filters)
+  // ✅ FIXED: Fetch stats using the API instead of supabase directly
   useEffect(() => {
     const fetchStats = async () => {
       try {
         const headers = getAuthHeaders();
 
-        const fetchCount = async (extraParams = {}) => {
-          const params = new URLSearchParams({ role: ROLE_SCOPE, limit: '1', page: '1', ...extraParams });
-          const res = await fetch(`${API_BASE}/audit-logs?${params.toString()}`, { headers });
-          const json = await res.json();
-          return json.success ? (json.pagination?.total || 0) : 0;
-        };
+        // Fetch total count
+        const totalRes = await fetch(`${API_BASE}/audit-logs?limit=1&page=1`, { headers });
+        const totalJson = await totalRes.json();
+        const total = totalJson.success ? (totalJson.pagination?.total || 0) : 0;
 
+        // Fetch today's count
         const today = new Date().toISOString().split('T')[0];
+        const todayRes = await fetch(
+          `${API_BASE}/audit-logs?limit=1&page=1&startDate=${today}&endDate=${today}`,
+          { headers }
+        );
+        const todayJson = await todayRes.json();
+        const todayCount = todayJson.success ? (todayJson.pagination?.total || 0) : 0;
+
+        // Fetch this week's count
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 7);
         const weekAgoStr = weekAgo.toISOString().split('T')[0];
-
-        const [total, todayCount, weekCount] = await Promise.all([
-          fetchCount(),
-          fetchCount({ startDate: today, endDate: today }),
-          fetchCount({ startDate: weekAgoStr, endDate: today }),
-        ]);
+        const weekRes = await fetch(
+          `${API_BASE}/audit-logs?limit=1&page=1&startDate=${weekAgoStr}&endDate=${today}`,
+          { headers }
+        );
+        const weekJson = await weekRes.json();
+        const weekCount = weekJson.success ? (weekJson.pagination?.total || 0) : 0;
 
         setStats({ total, today: todayCount, week: weekCount });
       } catch (err) {
         console.error('Error fetching audit log stats:', err);
+        setStats({ total: 0, today: 0, week: 0 });
       }
     };
     fetchStats();
@@ -107,7 +122,7 @@ export default function AuditLogsTab() {
   // Reset to page 1 whenever a filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, actionFilter, dateFilter]);
+  }, [searchQuery, actionFilter, roleFilter, branchFilter, dateFilter]);
 
   // Fetch the actual table data
   useEffect(() => {
@@ -120,11 +135,12 @@ export default function AuditLogsTab() {
         const { startDate, endDate } = dateFilterToRange(dateFilter);
 
         const params = new URLSearchParams();
-        params.append('role', ROLE_SCOPE);
         params.append('limit', String(ROWS_PER_PAGE));
         params.append('page', String(currentPage));
         if (searchQuery.trim()) params.append('search', searchQuery.trim());
         if (actionFilter !== 'All') params.append('action', actionFilter);
+        if (roleFilter !== 'All') params.append('role', roleFilter);
+        if (branchFilter !== 'All') params.append('branch_id', branchFilter);
         if (startDate) params.append('startDate', startDate);
         if (endDate) params.append('endDate', endDate);
 
@@ -159,16 +175,17 @@ export default function AuditLogsTab() {
       isMounted = false;
       clearTimeout(timeoutId);
     };
-  }, [searchQuery, actionFilter, dateFilter, currentPage]);
+  }, [searchQuery, actionFilter, roleFilter, branchFilter, dateFilter, currentPage]);
 
   const handleExport = async () => {
     setExporting(true);
     try {
       const { startDate, endDate } = dateFilterToRange(dateFilter);
       const params = new URLSearchParams();
-      params.append('role', ROLE_SCOPE);
       if (searchQuery.trim()) params.append('search', searchQuery.trim());
       if (actionFilter !== 'All') params.append('action', actionFilter);
+      if (roleFilter !== 'All') params.append('role', roleFilter);
+      if (branchFilter !== 'All') params.append('branch_id', branchFilter);
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
 
@@ -181,7 +198,7 @@ export default function AuditLogsTab() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'admin_audit_logs.pdf';
+      a.download = `audit_logs_${new Date().toISOString().split('T')[0]}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -204,73 +221,29 @@ export default function AuditLogsTab() {
       UPDATE_ACCOUNT: '#3b82f6',
       LOGIN: '#8b5cf6',
       ACTIVATE_ACCOUNT: '#22c55e',
+      CREATE_USER: '#22c55e',
+      DELETE_USER: '#ef4444',
+      LOCK_ACCOUNT: '#f59e0b',
+      UNLOCK_ACCOUNT: '#22c55e',
+      'Account Locked': '#f59e0b',
+      'Account Unlocked': '#22c55e',
+      'Failed Login': '#ef4444',
+      'Password Reset': '#8b5cf6',
+      'Assigned': '#3b82f6',
+      'Created': '#22c55e',
+      'Deleted': '#ef4444',
+      'Updated': '#3b82f6',
+      'TEST_LOG': '#6b7280',
     };
     return colors[action] || '#6b7280';
   };
 
   const getActionIcon = (action) => {
     const style = { marginRight: '6px', verticalAlign: 'middle', display: 'inline-block' };
-    const icons = {
-      CREATE_ADMIN: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-      ),
-      UPDATE_BRANCH: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-        </svg>
-      ),
-      DEACTIVATE_ACCOUNT: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-      ),
-      CREATE_BRANCH: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
-          <line x1="9" y1="22" x2="9" y2="16"></line>
-          <line x1="15" y1="22" x2="15" y2="16"></line>
-          <line x1="9" y1="16" x2="15" y2="16"></line>
-          <path d="M8 6h2v2H8V6zm4 0h2v2h-2V6zm4 0h2v2h-2V6zM8 10h2v2H8v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"></path>
-        </svg>
-      ),
-      DELETE_ADMIN: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path>
-          <line x1="10" y1="11" x2="10" y2="17"></line>
-          <line x1="14" y1="11" x2="14" y2="17"></line>
-        </svg>
-      ),
-      UPDATE_ACCOUNT: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-        </svg>
-      ),
-      LOGIN: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
-        </svg>
-      ),
-      ACTIVATE_ACCOUNT: (
-        <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
-        </svg>
-      ),
-    };
-    return icons[action] || (
+    return (
       <svg style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-        <polyline points="10 9 9 9 8 9"></polyline>
       </svg>
     );
   };
@@ -288,11 +261,23 @@ export default function AuditLogsTab() {
     });
   };
 
+  const getRoleBadgeColor = (role) => {
+    const colors = {
+      'Super Admin': { bg: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' },
+      'Admin': { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' },
+      'Human Resources': { bg: 'rgba(236, 72, 153, 0.15)', color: '#ec4899' },
+      'Project Manager': { bg: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' },
+      'Resource Manager': { bg: 'rgba(16, 185, 129, 0.15)', color: '#10b981' },
+      'Employee': { bg: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' },
+    };
+    return colors[role] || { bg: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' };
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Admin Audit Logs</h1>
-        <p style={styles.subtitle}>Track actions performed by Admin accounts across the system</p>
+        <h1 style={styles.title}>Audit Logs</h1>
+        <p style={styles.subtitle}>Full system audit trail across all branches and roles</p>
       </div>
 
       <div style={styles.stats}>
@@ -324,6 +309,7 @@ export default function AuditLogsTab() {
             style={styles.searchInput}
           />
         </div>
+
         <select
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
@@ -331,9 +317,32 @@ export default function AuditLogsTab() {
         >
           <option value="All">All Actions</option>
           {actionsList.map((act) => (
-            <option key={act} value={act}>{act.replace(/_/g, ' ')}</option>
+            <option key={act} value={act}>{act}</option>
           ))}
         </select>
+
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          style={styles.filterSelect}
+        >
+          <option value="All">All Roles</option>
+          {rolesList.map((role) => (
+            <option key={role} value={role}>{role}</option>
+          ))}
+        </select>
+
+        <select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          style={styles.filterSelect}
+        >
+          <option value="All">All Branches</option>
+          {branchesList.map((branch) => (
+            <option key={branch.id} value={branch.id}>{branch.name}</option>
+          ))}
+        </select>
+
         <select
           value={dateFilter}
           onChange={(e) => setDateFilter(e.target.value)}
@@ -343,14 +352,16 @@ export default function AuditLogsTab() {
           <option value="Today">Today</option>
           <option value="Yesterday">Yesterday</option>
           <option value="Last 7 Days">Last 7 Days</option>
+          <option value="Last 30 Days">Last 30 Days</option>
         </select>
+
         <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}>
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          {exporting ? 'Exporting...' : 'Export PDF'}
+          {exporting ? 'Exporting...' : 'Export CSV'}
         </button>
       </div>
 
@@ -361,50 +372,64 @@ export default function AuditLogsTab() {
               <th style={styles.tableHeaderCell}>Timestamp</th>
               <th style={styles.tableHeaderCell}>Action</th>
               <th style={styles.tableHeaderCell}>Actor</th>
-              <th style={styles.tableHeaderCell}>Category</th>
+              <th style={styles.tableHeaderCell}>Role</th>
+              <th style={styles.tableHeaderCell}>Branch</th>
               <th style={styles.tableHeaderCell}>Details</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="5" style={styles.emptyCell}>Loading audit logs...</td>
+                <td colSpan="6" style={styles.emptyCell}>Loading audit logs...</td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan="5" style={{ ...styles.emptyCell, color: '#ef4444' }}>{error}</td>
+                <td colSpan="6" style={{ ...styles.emptyCell, color: '#ef4444' }}>{error}</td>
               </tr>
             ) : logs.length === 0 ? (
               <tr>
-                <td colSpan="5" style={styles.emptyCell}>No audit logs found</td>
+                <td colSpan="6" style={styles.emptyCell}>No audit logs found</td>
               </tr>
             ) : (
-              logs.map(log => (
-                <tr key={log.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>
-                    <span style={styles.timestamp}>{formatTimestamp(log.time)}</span>
-                  </td>
-                  <td style={styles.tableCell}>
-                    <span style={{
-                      ...styles.actionBadge,
-                      color: getActionColor(log.action),
-                      backgroundColor: `${getActionColor(log.action)}15`,
-                    }}>
-                      {getActionIcon(log.action)} {(log.action || '').replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>
-                    <div style={styles.actorCell}>
+              logs.map(log => {
+                const roleStyle = getRoleBadgeColor(log.user_role);
+                return (
+                  <tr key={log.id} style={styles.tableRow}>
+                    <td style={styles.tableCell}>
+                      <span style={styles.timestamp}>{formatTimestamp(log.time)}</span>
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={{
+                        ...styles.actionBadge,
+                        color: getActionColor(log.action),
+                        backgroundColor: `${getActionColor(log.action)}15`,
+                      }}>
+                        {getActionIcon(log.action)} {log.action || 'Unknown'}
+                      </span>
+                    </td>
+                    <td style={styles.tableCell}>
                       <span style={styles.actorName}>{log.user}</span>
-                      <span style={styles.actorRole}>{log.user_role}</span>
-                    </div>
-                  </td>
-                  <td style={styles.tableCell}>{log.category || '—'}</td>
-                  <td style={styles.tableCell}>
-                    <span style={styles.details}>{log.desc}</span>
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={{
+                        ...styles.roleBadge,
+                        backgroundColor: roleStyle.bg,
+                        color: roleStyle.color,
+                      }}>
+                        {log.user_role || 'Unknown'}
+                      </span>
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={styles.branchName}>
+                        {log.branch_name || '—'}
+                      </span>
+                    </td>
+                    <td style={styles.tableCell}>
+                      <span style={styles.details}>{log.desc}</span>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -495,6 +520,7 @@ const styles = {
     background: 'var(--color-bg-card)',
     color: 'var(--color-text-primary)',
     outline: 'none',
+    minWidth: '140px',
   },
   exportBtn: {
     display: 'inline-flex',
@@ -539,6 +565,7 @@ const styles = {
     padding: '12px 16px',
     fontSize: '14px',
     color: 'var(--color-text-primary)',
+    verticalAlign: 'middle',
   },
   timestamp: {
     fontFamily: 'monospace',
@@ -550,18 +577,21 @@ const styles = {
     borderRadius: '20px',
     fontSize: '11px',
     fontWeight: '600',
+    display: 'inline-block',
   },
-  actorCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
+  roleBadge: {
+    padding: '2px 10px',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontWeight: '600',
+    display: 'inline-block',
   },
   actorName: {
     fontWeight: '600',
   },
-  actorRole: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted)',
+  branchName: {
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
   },
   details: {
     maxWidth: '300px',

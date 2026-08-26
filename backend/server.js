@@ -16,6 +16,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const path = require("path");
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// ============ IMPORT AUTH MIDDLEWARE ============
+const { verifyToken } = require("./routes/Middleware/auth");
+
 // Routes
 const userRoutes = require("./routes/Admin/createUsers");
 const userManagementRoutes = require("./routes/Admin/userManagement");
@@ -30,20 +33,22 @@ const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
 const applicantRoutes = require('./routes/applicant/applicantRoutes');
+
+// ============ SUPER ADMIN ROUTES ============
 const superAdminDashboardRoutes = require('./routes/SuperAdmin/dashboard');
 const superAdminAccountsRoutes  = require('./routes/SuperAdmin/accounts');
 const superAdminAdminsRoutes    = require('./routes/SuperAdmin/admins');
 const superAdminBranchesRoutes  = require('./routes/SuperAdmin/branches');
+const superAdminAuditLogsRoutes = require('./routes/SuperAdmin/audit-logs');
 
-// ...
-
+// ============ MOUNT SUPER ADMIN ROUTES ============
 app.use('/api/superadmin', superAdminDashboardRoutes);
 app.use('/api/superadmin', superAdminAccountsRoutes);
 app.use('/api/superadmin', superAdminAdminsRoutes);
 app.use('/api/superadmin', superAdminBranchesRoutes);
+app.use('/api/superadmin', superAdminAuditLogsRoutes);
 
-
-
+// ============ MOUNT OTHER ROUTES ============
 app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
 app.use('/api/hr', require('./routes/HumanResource/Index'));
@@ -53,18 +58,15 @@ app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/admin', departmentsPositionsRoutes);
 app.use('/api/admin', contactAdminRoutes);
-app.use('/api/admin', dashboardRoutes);
-app.use('/api/admin', auditLogsRoutes);
+app.use('/api/admin', dashboardRoutes); // ← This should have auth middleware inside
+app.use('/api/admin', auditLogsRoutes); // ← This should have auth middleware inside
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", loginRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/users", userManagementRoutes);
+app.use("/api/users", userRoutes); // ← Create users (should be Super Admin only)
+app.use("/api/users", verifyToken, userManagementRoutes); // ✅ ADD AUTH MIDDLEWARE HERE
 app.use("/api/admin", unlockRoutes);
 app.use("/api/settings", systemSettingsRoutes);
 app.use('/api/employee', documentRoutes);
-
-app.use('/api/superadmin', superAdminDashboardRoutes);
-
 
 // ⭐ ADDED
 app.use('/api/employee', require('./routes/Employee/Assignments'));
@@ -79,7 +81,6 @@ app.get("/", (req, res) => {
 });
 
 // ============ CLEAR CACHE ENDPOINT ============
-// Call this when aliases are updated
 app.post('/api/admin/clear-alias-cache', (req, res) => {
     try {
         recommendationEngine.clearAliasCache();

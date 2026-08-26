@@ -12,5 +12,6 @@ npm install sweetalert2
 npm install @supabase/supabase-js
 npm install axios
 npm install exceljs
+npm install react-router-dom
 
 

@@ -1,37 +1,5 @@
 // backend/routes/SuperAdmin/dashboard.js
-//
-// Provides:
-//   GET /api/superadmin/dashboard/stats
-//   GET /api/superadmin/dashboard/activity?limit=5
-//
-// Data sources (real tables only, no mock values):
-//   - profiles            -> admin counts, account counts (role, status)
-//   - user_login_attempts -> locked account count
-//   - audit_logs          -> total logs + recent activity feed
-//   - branches            -> branch counts (OPTIONAL - see note below)
-//
-// NOTE ON BRANCHES:
-// Your Supabase schema does not currently contain a `branches` table
-// (BranchManagementTab.jsx is still running on frontend-only mock data).
-// This route tries to query `branches` anyway so it starts working
-// automatically the moment that table exists. If the table is missing, it
-// does NOT crash the dashboard — it just returns branchesTableAvailable:
-// false and 0 counts, so the frontend can show an honest "not set up yet"
-// state instead of a fake number.
-//
-// Suggested table if/when you're ready to make Branch Management real:
-//
-//   CREATE TABLE public.branches (
-//     id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
-//     name text NOT NULL,
-//     location text,
-//     address text,
-//     contact_number text,
-//     manager_name text,
-//     status text NOT NULL DEFAULT 'Active',
-//     created_at timestamp with time zone DEFAULT now(),
-//     CONSTRAINT branches_pkey PRIMARY KEY (id)
-//   );
+// Dashboard statistics and activity feed
 
 const express = require('express');
 const router = express.Router();
@@ -51,21 +19,35 @@ function formatRelativeTime(isoString) {
 // GET /api/superadmin/dashboard/stats
 router.get('/dashboard/stats', async (req, res) => {
   try {
-    // --- Admins (profiles.role = 'Admin') ---
+    console.log('📊 Fetching dashboard stats...');
+
+    // --- Admins (from profiles table with role = 'Admin') ---
+    // Get total admins from profiles table
     const { count: totalAdmins, error: totalAdminsError } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('role', 'Admin');
-    if (totalAdminsError) throw totalAdminsError;
 
+    if (totalAdminsError) {
+      console.error('❌ Error fetching total admins:', totalAdminsError);
+      throw new Error(`Total admins error: ${totalAdminsError.message}`);
+    }
+    console.log(`✅ Total admins: ${totalAdmins || 0}`);
+
+    // Get active admins from profiles table
     const { count: activeAdmins, error: activeAdminsError } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('role', 'Admin')
       .eq('status', 'Active');
-    if (activeAdminsError) throw activeAdminsError;
 
-    // --- Branches (optional table - handled gracefully if missing) ---
+    if (activeAdminsError) {
+      console.error('❌ Error fetching active admins:', activeAdminsError);
+      throw new Error(`Active admins error: ${activeAdminsError.message}`);
+    }
+    console.log(`✅ Active admins: ${activeAdmins || 0}`);
+
+    // --- Branches ---
     let totalBranches = 0;
     let activeBranches = 0;
     let branchesTableAvailable = true;
@@ -73,65 +55,144 @@ router.get('/dashboard/stats', async (req, res) => {
       const { count: branchesCount, error: branchesError } = await supabase
         .from('branches')
         .select('*', { count: 'exact', head: true });
-      if (branchesError) throw branchesError;
-      totalBranches = branchesCount || 0;
+      
+      if (branchesError) {
+        console.warn('⚠️ Branches table error:', branchesError.message);
+        branchesTableAvailable = false;
+      } else {
+        totalBranches = branchesCount || 0;
+        console.log(`✅ Total branches: ${totalBranches}`);
 
-      const { count: activeBranchesCount, error: activeBranchesError } = await supabase
-        .from('branches')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Active');
-      if (activeBranchesError) throw activeBranchesError;
-      activeBranches = activeBranchesCount || 0;
+        const { count: activeBranchesCount, error: activeBranchesError } = await supabase
+          .from('branches')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'Active');
+        
+        if (!activeBranchesError) {
+          activeBranches = activeBranchesCount || 0;
+        }
+      }
     } catch (branchErr) {
       branchesTableAvailable = false;
-      totalBranches = 0;
-      activeBranches = 0;
+      console.warn('⚠️ Branches table not available:', branchErr.message);
     }
 
-    // --- Accounts (all profiles, every role) ---
+    // --- Total Accounts (all profiles) ---
     const { count: totalAccounts, error: totalAccountsError } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true });
-    if (totalAccountsError) throw totalAccountsError;
+    
+    if (totalAccountsError) {
+      console.error('❌ Error fetching total accounts:', totalAccountsError);
+      throw new Error(`Total accounts error: ${totalAccountsError.message}`);
+    }
+    console.log(`✅ Total accounts: ${totalAccounts || 0}`);
 
+    // --- Active Accounts ---
     const { count: activeAccounts, error: activeAccountsError } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'Active');
-    if (activeAccountsError) throw activeAccountsError;
+    
+    if (activeAccountsError) {
+      console.error('❌ Error fetching active accounts:', activeAccountsError);
+      throw new Error(`Active accounts error: ${activeAccountsError.message}`);
+    }
+    console.log(`✅ Active accounts: ${activeAccounts || 0}`);
 
     const inactiveAccounts = Math.max((totalAccounts || 0) - (activeAccounts || 0), 0);
 
-    const { count: lockedAccounts, error: lockedError } = await supabase
-      .from('user_login_attempts')
-      .select('*', { count: 'exact', head: true })
-      .eq('locked', true);
-    if (lockedError) throw lockedError;
+    // --- Locked accounts ---
+    let lockedAccounts = 0;
+    try {
+      const { count: lockedCount, error: lockedError } = await supabase
+        .from('user_login_attempts')
+        .select('*', { count: 'exact', head: true })
+        .eq('locked', true);
+      
+      if (!lockedError) {
+        lockedAccounts = lockedCount || 0;
+      } else {
+        console.warn('⚠️ user_login_attempts table error:', lockedError.message);
+      }
+    } catch (err) {
+      console.warn('⚠️ Could not fetch locked accounts:', err.message);
+    }
+    console.log(`✅ Locked accounts: ${lockedAccounts}`);
 
     // --- Audit logs ---
-    const { count: totalLogs, error: logsError } = await supabase
-      .from('audit_logs')
-      .select('*', { count: 'exact', head: true });
-    if (logsError) throw logsError;
+    let totalLogs = 0;
+    try {
+      const { count: logsCount, error: logsError } = await supabase
+        .from('audit_logs')
+        .select('*', { count: 'exact', head: true });
+      
+      if (!logsError) {
+        totalLogs = logsCount || 0;
+      } else {
+        console.warn('⚠️ audit_logs table error:', logsError.message);
+      }
+    } catch (err) {
+      console.warn('⚠️ Could not fetch audit logs:', err.message);
+    }
+    console.log(`✅ Total logs: ${totalLogs}`);
 
+    // --- Users by role ---
+    const { data: allProfiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('role');
+
+    if (profilesError) {
+      console.error('❌ Error fetching roles:', profilesError);
+      throw new Error(`Roles error: ${profilesError.message}`);
+    }
+
+    // Count roles
+    const roleStats = {};
+    (allProfiles || []).forEach(profile => {
+      const role = profile.role || 'Unknown';
+      roleStats[role] = (roleStats[role] || 0) + 1;
+    });
+    console.log('✅ Role counts:', roleStats);
+
+    // Format role stats for frontend
+    const formattedRoleStats = {
+      'Super Admin': roleStats['Super Admin'] || 0,
+      'Admin': roleStats['Admin'] || 0,
+      'Human Resources': roleStats['Human Resources'] || 0,
+      'Project Manager': roleStats['Project Manager'] || 0,
+      'Resource Manager': roleStats['Resource Manager'] || 0,
+      'Employee': roleStats['Employee'] || 0,
+      'Unknown': roleStats['Unknown'] || 0,
+    };
+
+    const responseData = {
+      totalAdmins: totalAdmins || 0,
+      activeAdmins: activeAdmins || 0,
+      totalBranches,
+      activeBranches,
+      branchesTableAvailable,
+      totalAccounts: totalAccounts || 0,
+      activeAccounts: activeAccounts || 0,
+      inactiveAccounts,
+      lockedAccounts,
+      totalLogs,
+      roleStats: formattedRoleStats,
+    };
+
+    console.log('📊 Dashboard stats fetched successfully!');
     res.json({
       success: true,
-      data: {
-        totalAdmins: totalAdmins || 0,
-        activeAdmins: activeAdmins || 0,
-        totalBranches,
-        activeBranches,
-        branchesTableAvailable,
-        totalAccounts: totalAccounts || 0,
-        activeAccounts: activeAccounts || 0,
-        inactiveAccounts,
-        lockedAccounts: lockedAccounts || 0,
-        totalLogs: totalLogs || 0,
-      },
+      data: responseData,
     });
   } catch (err) {
-    console.error('Error fetching super admin dashboard stats:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('❌ Error fetching super admin dashboard stats:', err);
+    console.error('❌ Error stack:', err.stack);
+    
+    res.status(500).json({ 
+      success: false, 
+      error: err.message || 'Failed to fetch dashboard stats',
+    });
   }
 });
 
@@ -145,7 +206,15 @@ router.get('/dashboard/activity', async (req, res) => {
       .select('id, user_id, action, system_category, log_description, created_at')
       .order('created_at', { ascending: false })
       .limit(limit);
-    if (error) throw error;
+    
+    if (error) {
+      // If table doesn't exist, return empty array
+      if (error.code === '42P01') {
+        console.warn('⚠️ audit_logs table does not exist yet');
+        return res.json({ success: true, data: [] });
+      }
+      throw error;
+    }
 
     const userIds = [...new Set((data || []).map((log) => log.user_id).filter(Boolean))];
     let profileMap = new Map();
@@ -179,6 +248,7 @@ router.get('/dashboard/activity', async (req, res) => {
         actorRole: actor?.role || null,
         details: log.log_description || log.system_category || '',
         timestamp: formatRelativeTime(log.created_at),
+        createdAt: log.created_at,
       };
     });
 
