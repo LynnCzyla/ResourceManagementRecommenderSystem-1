@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 
 const API = 'http://localhost:5000/api/admin';
 
+// ─── Helper: Get auth headers ────────────────────────────────────────────────
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': token ? `Bearer ${token}` : '',
+  };
+};
+
 // ─── Reusable Alert ────────────────────────────────────────────────────────────
 function Alert({ type, message, onClose }) {
   if (!message) return null;
@@ -105,11 +114,13 @@ function DepartmentsSubTab() {
   const fetchDepartments = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API}/departments`);
+      const headers = getAuthHeaders();
+      const res = await fetch(`${API}/departments`, { headers });
       const data = await res.json();
       if (data.success) setDepartments(data.data);
       else showAlert('error', data.error || 'Failed to load departments.');
-    } catch {
+    } catch (err) {
+      console.error('Error fetching departments:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setLoading(false);
@@ -132,9 +143,10 @@ function DepartmentsSubTab() {
     if (!addForm.department_name.trim()) return showAlert('error', 'Department name is required.');
     setAddLoading(true);
     try {
+      const headers = getAuthHeaders();
       const res = await fetch(`${API}/departments`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(addForm),
       });
       const data = await res.json();
@@ -145,7 +157,8 @@ function DepartmentsSubTab() {
       } else {
         showAlert('error', data.error || 'Failed to add department.');
       }
-    } catch {
+    } catch (err) {
+      console.error('Error adding department:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setAddLoading(false);
@@ -161,9 +174,10 @@ function DepartmentsSubTab() {
     if (!editForm.department_name.trim()) return showAlert('error', 'Department name is required.');
     setEditLoading(true);
     try {
+      const headers = getAuthHeaders();
       const res = await fetch(`${API}/departments/${editTarget.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(editForm),
       });
       const data = await res.json();
@@ -174,7 +188,8 @@ function DepartmentsSubTab() {
       } else {
         showAlert('error', data.error || 'Failed to update department.');
       }
-    } catch {
+    } catch (err) {
+      console.error('Error updating department:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setEditLoading(false);
@@ -185,7 +200,11 @@ function DepartmentsSubTab() {
   const handleDelete = async () => {
     setDeleteLoading(true);
     try {
-      const res = await fetch(`${API}/departments/${deleteTarget.id}`, { method: 'DELETE' });
+      const headers = getAuthHeaders();
+      const res = await fetch(`${API}/departments/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers,
+      });
       const data = await res.json();
       if (data.success) {
         showAlert('success', `Department "${deleteTarget.department_name}" deleted.`);
@@ -195,7 +214,8 @@ function DepartmentsSubTab() {
         showAlert('error', data.error || 'Failed to delete. Make sure no positions are linked to this department.');
         setDeleteTarget(null);
       }
-    } catch {
+    } catch (err) {
+      console.error('Error deleting department:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setDeleteLoading(false);
@@ -400,15 +420,18 @@ function PositionsSubTab() {
   const fetchAll = async () => {
     try {
       setLoading(true);
+      const headers = getAuthHeaders();
       const [posRes, deptRes] = await Promise.all([
-        fetch(`${API}/positions`),
-        fetch(`${API}/departments`),
+        fetch(`${API}/positions`, { headers }),
+        fetch(`${API}/departments`, { headers }),
       ]);
       const posData = await posRes.json();
       const deptData = await deptRes.json();
       if (posData.success) setPositions(posData.data);
+      else showAlert('error', posData.error || 'Failed to load positions.');
       if (deptData.success) setDepartments(deptData.data);
-    } catch {
+    } catch (err) {
+      console.error('Error fetching data:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setLoading(false);
@@ -437,9 +460,10 @@ function PositionsSubTab() {
     if (!addForm.department_id) return showAlert('error', 'Please select a department.');
     setAddLoading(true);
     try {
+      const headers = getAuthHeaders();
       const res = await fetch(`${API}/positions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(addForm),
       });
       const data = await res.json();
@@ -450,7 +474,8 @@ function PositionsSubTab() {
       } else {
         showAlert('error', data.error || 'Failed to add position.');
       }
-    } catch {
+    } catch (err) {
+      console.error('Error adding position:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setAddLoading(false);
@@ -466,9 +491,10 @@ function PositionsSubTab() {
     if (!editForm.position_name.trim()) return showAlert('error', 'Position name is required.');
     setEditLoading(true);
     try {
+      const headers = getAuthHeaders();
       const res = await fetch(`${API}/positions/${editTarget.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(editForm),
       });
       const data = await res.json();
@@ -479,7 +505,8 @@ function PositionsSubTab() {
       } else {
         showAlert('error', data.error || 'Failed to update position.');
       }
-    } catch {
+    } catch (err) {
+      console.error('Error updating position:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setEditLoading(false);
@@ -490,7 +517,11 @@ function PositionsSubTab() {
   const handleDelete = async () => {
     setDeleteLoading(true);
     try {
-      const res = await fetch(`${API}/positions/${deleteTarget.id}`, { method: 'DELETE' });
+      const headers = getAuthHeaders();
+      const res = await fetch(`${API}/positions/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers,
+      });
       const data = await res.json();
       if (data.success) {
         showAlert('success', `Position "${deleteTarget.position_name}" deleted.`);
@@ -500,7 +531,8 @@ function PositionsSubTab() {
         showAlert('error', data.error || 'Failed to delete. Employees may still be assigned to this position.');
         setDeleteTarget(null);
       }
-    } catch {
+    } catch (err) {
+      console.error('Error deleting position:', err);
       showAlert('error', 'Could not connect to the server.');
     } finally {
       setDeleteLoading(false);
@@ -829,7 +861,6 @@ const styles = {
     color: 'var(--color-primary)',
   },
 
-  // Toolbar
   toolbar: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -872,7 +903,6 @@ const styles = {
     minWidth: 180,
   },
 
-  // Table
   tableWrapper: { width: '100%', overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
   theadRow: { borderBottom: '2px solid var(--color-border)' },
@@ -897,7 +927,6 @@ const styles = {
     textAlign: 'right',
   },
 
-  // Badges & Indicators
   deptNameCell: { display: 'flex', alignItems: 'center', gap: 10 },
   deptDot: {
     width: 8,
@@ -916,7 +945,6 @@ const styles = {
     borderRadius: 4,
   },
 
-  // Action buttons
   actionGroup: { display: 'flex', gap: 8, justifyContent: 'flex-end' },
   editBtn: {
     backgroundColor: 'var(--color-primary-light)',
@@ -941,7 +969,6 @@ const styles = {
     transition: 'all 0.2s',
   },
 
-  // Primary & Danger buttons
   primaryBtn: {
     backgroundColor: 'var(--color-primary)',
     color: '#ffffff',
@@ -969,7 +996,6 @@ const styles = {
     color: '#ffffff',
   },
 
-  // Modal
   modalOverlay: {
     position: 'fixed',
     inset: 0,
@@ -1018,7 +1044,6 @@ const styles = {
     backgroundColor: 'var(--color-bg-root)',
   },
 
-  // Form
   formGroup: { marginBottom: 18 },
   formLabel: {
     display: 'block',
@@ -1054,7 +1079,6 @@ const styles = {
     boxSizing: 'border-box',
   },
 
-  // Alert
   alert: {
     display: 'flex',
     alignItems: 'center',
@@ -1074,7 +1098,6 @@ const styles = {
     opacity: 0.7,
   },
 
-  // Warning note
   warningNote: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -1088,7 +1111,6 @@ const styles = {
     lineHeight: 1.5,
   },
 
-  // Empty & Loading
   emptyState: {
     display: 'flex',
     flexDirection: 'column',

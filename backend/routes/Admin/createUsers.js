@@ -5,6 +5,10 @@ const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
 const path = require("path");
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { verifyToken } = require('../Middleware/auth');
+
+// ✅ Apply auth middleware to ALL routes
+router.use(verifyToken);
 
 // Generate a random password
 const generatePassword = () => {
@@ -18,38 +22,93 @@ const generatePassword = () => {
   return password;
 };
 
-// Generate sequential employee ID
-const generateEmployeeId = async () => {
+// ✅ FIXED: Generate sequential employee ID per branch
+const generateEmployeeId = async (branchCode = 'PHIL') => {
   try {
-    // Get the last employee ID
+    console.log(`🔍 Generating employee ID for branch: ${branchCode}`);
+    
+    // Get ALL employee IDs for this branch and find the highest number
     const { data, error } = await supabase
       .from("profiles")
       .select("employee_id")
-      .order("employee_id", { ascending: false })
-      .limit(1);
+      .like("employee_id", `WEA-${branchCode}-%`)
+      .order("employee_id", { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error fetching employee IDs:', error);
+      return `WEA-${branchCode}-${Date.now().toString().slice(-6)}`;
+    }
 
     let lastNumber = 0;
     
     if (data && data.length > 0) {
-      // Extract the number from EMP-XXX
-      const lastId = data[0].employee_id;
-      const match = lastId.match(/EMP-(\d+)/);
-      if (match) {
-        lastNumber = parseInt(match[1], 10);
+      for (const record of data) {
+        const match = record.employee_id.match(new RegExp(`WEA-${branchCode}-(\\d+)`));
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > lastNumber) {
+            lastNumber = num;
+          }
+        }
       }
+      console.log(`📊 Last employee number for branch ${branchCode}: ${lastNumber}`);
+    } else {
+      console.log(`📊 No existing employees found for branch ${branchCode}, starting from 0`);
     }
 
-    // Increment the number and pad with zeros
     const nextNumber = lastNumber + 1;
     const paddedNumber = String(nextNumber).padStart(3, '0');
+    const newEmployeeId = `WEA-${branchCode}-${paddedNumber}`;
+    console.log(`✅ Generated new employee ID: ${newEmployeeId}`);
     
-    return `EMP-${paddedNumber}`;
+    return newEmployeeId;
   } catch (error) {
-    console.error("Error generating employee ID:", error);
-    // Fallback to timestamp-based ID if there's an error
-    return `EMP-${Date.now().toString().slice(-6)}`;
+    console.error("❌ Error generating employee ID:", error);
+    const fallbackId = `WEA-${branchCode}-${Date.now().toString().slice(-6)}`;
+    console.log(`⚠️ Using fallback employee ID: ${fallbackId}`);
+    return fallbackId;
+  }
+};
+
+// ✅ FIXED: Get branch code from branch name (no code column needed)
+const getBranchCode = async (branchId) => {
+  try {
+    console.log(`🔍 Getting branch code for branch_id: ${branchId}`);
+    
+    const { data, error } = await supabase
+      .from("branches")
+      .select("name")
+      .eq("id", branchId)
+      .single();
+    
+    if (error) {
+      console.error('❌ Error fetching branch:', error);
+      console.warn(`⚠️ Could not find branch for ${branchId}, using default 'PHIL'`);
+      return 'PHIL';
+    }
+    
+    if (!data) {
+      console.warn(`⚠️ No branch found for ${branchId}, using default 'PHIL'`);
+      return 'PHIL';
+    }
+    
+    // ✅ Extract code from name (e.g., "WEA-SGP" -> "SGP")
+    const name = data.name;
+    const match = name.match(/WEA-([A-Z]+)/);
+    
+    if (match && match[1]) {
+      const code = match[1];
+      console.log(`✅ Branch found: ${name} -> Code: ${code}`);
+      return code;
+    }
+    
+    // Fallback: If name doesn't match pattern, use first 3 characters
+    const fallbackCode = name.substring(0, 3).toUpperCase();
+    console.log(`⚠️ Branch name doesn't match pattern, using fallback: ${fallbackCode}`);
+    return fallbackCode;
+  } catch (error) {
+    console.error('❌ Error fetching branch code:', error);
+    return 'PHIL';
   }
 };
 
@@ -65,7 +124,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // Send welcome email with temporary password
-const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporaryPassword, role) => {
+const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporaryPassword, role, branchName) => {
   const mailOptions = {
     from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
     to: email,
@@ -91,6 +150,15 @@ const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporar
               ${employeeId}
             </p>
           </div>
+          
+          ${branchName ? `
+          <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
+            <p style="margin: 0 0 8px 0; color: #475569; font-weight: 600;">Your Branch:</p>
+            <p style="margin: 0; font-size: 16px; font-weight: 600; color: #1e293b;">
+              ${branchName}
+            </p>
+          </div>
+          ` : ''}
           
           <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
             <p style="margin: 0 0 8px 0; color: #475569; font-weight: 600;">Your temporary password:</p>
@@ -138,11 +206,8 @@ router.post("/create", async (req, res) => {
       role = "Employee",
       contact_number,
       position_id,
-      location,
       join_date,
-      years_experience,
-      availability_status = "Available",
-      total_available_hours = 40
+      availability_status = "Available"
     } = req.body;
 
     // Validate required fields
@@ -152,6 +217,39 @@ router.post("/create", async (req, res) => {
         error: "First name, last name, and email are required"
       });
     }
+
+    // ✅ Get the current user's branch_id from the authenticated user
+    const adminBranchId = req.user.branch_id;
+    const adminEmployeeId = req.user.employee_id;
+    const adminRole = req.user.role;
+
+    console.log(`👤 Creating user by: ${adminEmployeeId} (${adminRole})`);
+    console.log(`🏢 Admin branch_id: ${adminBranchId}`);
+
+    // ✅ Check if admin has permission to create users
+    if (!adminBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: "Your account is not assigned to a branch. Please contact Super Admin."
+      });
+    }
+
+    // ✅ Get branch code for employee ID generation
+    const branchCode = await getBranchCode(adminBranchId);
+    console.log(`📋 Branch code: ${branchCode}`);
+    
+    // ✅ Get branch name for email
+    const { data: branchData, error: branchError } = await supabase
+      .from("branches")
+      .select("name")
+      .eq("id", adminBranchId)
+      .single();
+
+    if (branchError) {
+      console.warn('Could not fetch branch name:', branchError.message);
+    }
+
+    const branchName = branchData?.name || null;
 
     // Generate a random password
     const generatedPassword = generatePassword();
@@ -176,10 +274,11 @@ router.post("/create", async (req, res) => {
       });
     }
 
-    // Generate sequential employee ID
-    const employeeId = await generateEmployeeId();
+    // ✅ Generate sequential employee ID with branch code
+    const employeeId = await generateEmployeeId(branchCode);
+    console.log(`🎯 Generated Employee ID: ${employeeId}`);
 
-    // 2. Create profile - REMOVED email field from insert
+    // 2. Create profile with branch_id from the admin who created it
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
       .insert({
@@ -188,15 +287,14 @@ router.post("/create", async (req, res) => {
         first_name,
         middle_name: middle_name || null,
         last_name,
-        // email: email, // ← REMOVED THIS LINE - email is not in profiles table
         contact_number: contact_number || null,
         position_id: position_id || null,
         role: role || "Employee",
         availability_status: availability_status || "Available",
-        total_available_hours: total_available_hours || 40,
-        // location and years_experience removed — no such columns on public.profiles
         join_date: join_date || new Date().toISOString().split("T")[0],
         status: "Active",
+        branch_id: adminBranchId,
+        created_by: req.user.id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -204,9 +302,7 @@ router.post("/create", async (req, res) => {
       .single();
 
     if (profileError) {
-      // Rollback: Delete auth user if profile creation fails
       await supabase.auth.admin.deleteUser(authData.user.id);
-      
       return res.status(400).json({
         success: false,
         error: profileError.message
@@ -214,12 +310,12 @@ router.post("/create", async (req, res) => {
     }
 
     // 3. Create notification for the new user
-      await supabase.from('notifications').insert({
-        recipient_id: authData.user.id,
-        type: 'system',
-        text: `👋 Welcome! Your account has been created with role ${role}.`,
-        read: false  // ✅ add this explicitly
-      });
+    await supabase.from('notifications').insert({
+      recipient_id: authData.user.id,
+      type: 'system',
+      text: `👋 Welcome! Your account has been created with role ${role} at ${branchName || 'WEA'}. Employee ID: ${employeeId}`,
+      read: false
+    });
 
     // 4. Send welcome email with temporary password
     const emailSent = await sendWelcomeEmail(
@@ -228,7 +324,8 @@ router.post("/create", async (req, res) => {
       last_name,
       employeeId,
       generatedPassword,
-      role
+      role,
+      branchName
     );
 
     await logAuditEvent({
@@ -236,21 +333,28 @@ router.post("/create", async (req, res) => {
       userId: authData.user.id,
       action: 'Created',
       systemCategory: 'User Management',
-      logDescription: `Created new user account for ${email}`,
+      logDescription: `Created new user account for ${email} with Employee ID: ${employeeId} at branch: ${branchName || adminBranchId}`,
+      branch: adminBranchId,
+      performed_by: req.user.employee_id
     });
 
     res.status(201).json({
       success: true,
-      message: "User created successfully. Temporary password sent to email.",
+      message: `User created successfully with Employee ID: ${employeeId} assigned to branch: ${branchName || adminBranchId}. Temporary password sent to email.`,
       user: {
         ...profileData,
-        email: authData.user.email // Get email from auth data
+        email: authData.user.email,
+        branch_name: branchName
       },
       auth_user: authData.user,
       email_sent: emailSent,
-
-      // Add this
-      temporary_password: generatedPassword
+      temporary_password: generatedPassword,
+      assigned_branch: {
+        id: adminBranchId,
+        name: branchName,
+        code: branchCode
+      },
+      employee_id: employeeId
     });
 
   } catch (error) {
@@ -267,29 +371,26 @@ router.post("/resend-password/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Get user profile
-    const { data: profile, error: profileError } = await supabase
+    const { data: targetProfile, error: targetError } = await supabase
       .from("profiles")
-      .select("first_name, last_name")
+      .select("branch_id, first_name, last_name, employee_id, role")
       .eq("id", userId)
       .single();
 
-    if (profileError) {
+    if (targetError) {
       return res.status(404).json({
         success: false,
         error: "User not found"
       });
     }
 
-    await logAuditEvent({
-      req,
-      userId: userId,
-      action: 'Created',
-      systemCategory: 'User Management',
-      logDescription: `Resent temporary password for ${profile.first_name} ${profile.last_name}`,
-    });
+    if (!req.user.is_super_admin && targetProfile.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to resend password for this user"
+      });
+    }
 
-    // Get email from auth users
     const { data: authData, error: authError } = await supabase.auth.admin.getUserById(userId);
     
     if (authError) {
@@ -300,11 +401,8 @@ router.post("/resend-password/:userId", async (req, res) => {
     }
 
     const userEmail = authData.user.email;
-
-    // Generate new temporary password
     const newPassword = generatePassword();
 
-    // Update auth user password
     const { error: updateError } = await supabase.auth.admin.updateUserById(
       userId,
       { password: newPassword }
@@ -317,15 +415,31 @@ router.post("/resend-password/:userId", async (req, res) => {
       });
     }
 
-    // Send email with new temporary password
+    const { data: branchData } = await supabase
+      .from("branches")
+      .select("name")
+      .eq("id", targetProfile.branch_id)
+      .single();
+
     const emailSent = await sendWelcomeEmail(
       userEmail,
-      profile.first_name,
-      profile.last_name,
-      profile.employee_id,
+      targetProfile.first_name,
+      targetProfile.last_name,
+      targetProfile.employee_id,
       newPassword,
-      profile.role
+      targetProfile.role,
+      branchData?.name || null
     );
+
+    await logAuditEvent({
+      req,
+      userId: userId,
+      action: 'Created',
+      systemCategory: 'User Management',
+      logDescription: `Resent temporary password for ${targetProfile.first_name} ${targetProfile.last_name}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
+    });
 
     res.json({
       success: true,
@@ -338,6 +452,38 @@ router.post("/resend-password/:userId", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Internal server error"
+    });
+  }
+});
+
+// ✅ Get next employee ID for a branch (preview)
+router.get("/next-employee-id", async (req, res) => {
+  try {
+    const adminBranchId = req.user.branch_id;
+    
+    if (!adminBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: "Your account is not assigned to a branch"
+      });
+    }
+
+    const branchCode = await getBranchCode(adminBranchId);
+    const employeeId = await generateEmployeeId(branchCode);
+
+    res.json({
+      success: true,
+      data: {
+        employee_id: employeeId,
+        branch_code: branchCode,
+        branch_id: adminBranchId
+      }
+    });
+  } catch (error) {
+    console.error("Error getting next employee ID:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

@@ -1,4 +1,5 @@
-// frontend/ContactAdmin.jsx
+// frontend/ContactAdmin.jsx - Updated with branch selection
+
 import React, { useState, useEffect } from 'react';
 
 export default function ContactAdmin({ isOpen, onClose }) {
@@ -9,9 +10,31 @@ export default function ContactAdmin({ isOpen, onClose }) {
   const [purpose, setPurpose] = useState('');
   const [message, setMessage] = useState('');
   const [phone, setPhone] = useState('');
+  const [branchId, setBranchId] = useState(''); // ✅ NEW
+  const [branches, setBranches] = useState([]); // ✅ NEW
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+
+  // ✅ Fetch branches on mount
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/admin/branches');
+        const result = await response.json();
+        if (result.success) {
+          setBranches(result.data || []);
+          // Set default branch if there's only one
+          if (result.data && result.data.length === 1) {
+            setBranchId(result.data[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching branches:', err);
+      }
+    };
+    fetchBranches();
+  }, []);
 
   // Reset state whenever the modal is opened fresh
   useEffect(() => {
@@ -23,6 +46,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
       setPurpose('');
       setMessage('');
       setPhone('');
+      setBranchId('');
       setError('');
       setSuccess(false);
     }
@@ -48,15 +72,29 @@ export default function ContactAdmin({ isOpen, onClose }) {
       return;
     }
 
+    if (!branchId) {
+      setError('Please select a branch.');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      console.log('📩 Sending contact admin request:', { firstName, middleName, lastName, email, purpose, phone });
+      console.log('📩 Sending contact admin request:', { firstName, middleName, lastName, email, purpose, phone, branchId });
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/contact-admin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, middleName, lastName, email, purpose, message, phone }),
+        body: JSON.stringify({ 
+          firstName, 
+          middleName, 
+          lastName, 
+          email, 
+          purpose, 
+          message, 
+          phone,
+          branchId // ✅ NEW
+        }),
       });
 
       const result = await response.json();
@@ -188,6 +226,25 @@ export default function ContactAdmin({ isOpen, onClose }) {
                   style={styles.input}
                   disabled={isLoading}
                 />
+              </div>
+
+              {/* ✅ NEW: Branch Selection */}
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Branch</label>
+                <select
+                  value={branchId}
+                  onChange={(e) => setBranchId(e.target.value)}
+                  style={styles.select}
+                  required
+                  disabled={isLoading}
+                >
+                  <option value="">Select a branch...</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name} {branch.location ? `(${branch.location})` : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div style={styles.inputGroup}>
@@ -364,6 +421,19 @@ const styles = {
     transition: 'all 0.3s ease',
     boxSizing: 'border-box',
   },
+  select: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
+    outline: 'none',
+    transition: 'all 0.3s ease',
+    boxSizing: 'border-box',
+    cursor: 'pointer',
+  },
   textarea: {
     width: '100%',
     padding: '12px 14px',
@@ -437,23 +507,3 @@ const styles = {
     margin: '0 auto 20px',
   },
 };
-
-// Add keyframe styles
-if (typeof document !== 'undefined' && !document.getElementById('contact-admin-keyframes')) {
-  const style = document.createElement('style');
-  style.id = 'contact-admin-keyframes';
-  style.innerHTML = `
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(12px) scale(0.98); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
-    }
-  `;
-  document.head.appendChild(style);
-}

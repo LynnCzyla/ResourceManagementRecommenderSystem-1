@@ -5,6 +5,11 @@ const supabase = require("../../supabase");
 const nodemailer = require("nodemailer");
 const path = require("path");
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { verifyToken } = require('../Middleware/auth');
+
+// ✅ Apply auth middleware to protected routes
+// (POST /contact-admin and GET /branches are public - no auth needed)
+// All other routes require authentication
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -70,11 +75,41 @@ const sendConfirmationEmail = async ({ fullName, email, purpose, message }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/admin/contact-admin — submit from login page
+// GET /api/admin/branches — Get all active branches for dropdown (PUBLIC)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/branches", async (req, res) => {
+  try {
+    console.log("📊 Branches requested (public endpoint)");
+
+    const { data, error } = await supabase
+      .from("branches")
+      .select("id, name, location")  // ✅ Fixed: removed 'code' column
+      .eq("status", "Active")
+      .order("name", { ascending: true });
+
+    if (error) throw error;
+
+    console.log(`✅ Found ${data?.length || 0} branches`);
+
+    res.json({
+      success: true,
+      data: data || [],
+    });
+  } catch (error) {
+    console.error("Error fetching branches:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/contact-admin — submit from login page (PUBLIC - no auth)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/contact-admin", async (req, res) => {
   try {
-    const { firstName, middleName, lastName, email, purpose, message, phone } = req.body;
+    const { firstName, middleName, lastName, email, purpose, message, phone, branchId } = req.body;
 
     if (!firstName || !lastName || !email || !purpose || !message) {
       return res.status(400).json({
@@ -83,11 +118,18 @@ router.post("/contact-admin", async (req, res) => {
       });
     }
 
+    if (!branchId) {
+      return res.status(400).json({
+        success: false,
+        error: "Please select a branch."
+      });
+    }
+
     const fullName = buildFullName(firstName, middleName, lastName);
 
-    console.log("📩 New contact admin request:", { firstName, middleName, lastName, email, purpose, phone });
+    console.log("📩 New contact admin request:", { firstName, middleName, lastName, email, purpose, phone, branchId });
 
-    // 1. Save contact request to database
+    // 1. Save contact request to database with branch_id
     const { error: insertError } = await supabase
       .from("contact_requests")
       .insert([{
@@ -98,7 +140,8 @@ router.post("/contact-admin", async (req, res) => {
         request_type: purpose,
         message,
         phone: phone || null,
-        status: "pending"
+        branch_id: branchId,
+        status: "Pending"
       }]);
 
     if (insertError) {
@@ -115,22 +158,43 @@ router.post("/contact-admin", async (req, res) => {
       action: 'Created',
       systemCategory: 'Contact Requests',
       logDescription: `Created contact request from ${fullName} (${email})`,
+      branch: branchId || null,
     });
 
-    // 2. 🔔 Notify all admins about the new contact request
+    // 2. 🔔 Notify admins based on branch
     try {
-      const { data: admins, error: adminError } = await supabase
+      let adminQuery = supabase
         .from('profiles')
         .select('id')
         .eq('role', 'Admin');
 
+      // ✅ If branchId is provided, only notify admins in that branch
+      if (branchId) {
+        adminQuery = adminQuery.eq('branch_id', branchId);
+      }
+
+      const { data: admins, error: adminError } = await adminQuery;
+
       if (adminError) {
         console.error("❌ Failed to fetch admins:", adminError.message);
       } else if (admins && admins.length > 0) {
+        // Get branch name for notification
+        let branchName = 'All Branches';
+        if (branchId) {
+          const { data: branchData } = await supabase
+            .from('branches')
+            .select('name')
+            .eq('id', branchId)
+            .single();
+          if (branchData) {
+            branchName = branchData.name;
+          }
+        }
+
         const adminNotifications = admins.map(admin => ({
           recipient_id: admin.id,
           type: 'alert',
-          text: `📩 New contact request from ${fullName} (${email}) — Purpose: ${purpose}`,
+          text: `📩 New contact request from ${fullName} (${email}) — Purpose: ${purpose} — Branch: ${branchName}`,
           read: false
         }));
 
@@ -173,18 +237,36 @@ router.post("/contact-admin", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/admin/contact-requests — fetch all contact requests
+// GET /api/admin/contact-requests — fetch all contact requests (filtered by branch)
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/contact-requests", async (req, res) => {
+router.get("/contact-requests", verifyToken, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    console.log(`📊 Contact requests requested by: ${req.user.employee_id} (${req.user.role})`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+
+    let query = supabase
       .from("contact_requests")
       .select("*")
       .order("created_at", { ascending: false });
 
+    // ✅ Filter by branch for non-super admins
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      query = query.eq("branch_id", req.user.branch_id);
+    }
+
+    const { data, error } = await query;
+
     if (error) throw error;
 
-    res.json({ success: true, requests: data || [] });
+    res.json({ 
+      success: true, 
+      requests: data || [],
+      meta: {
+        branch_filter: req.user.is_super_admin ? 'all' : req.user.branch_id,
+        user_role: req.user.role,
+        is_super_admin: req.user.is_super_admin,
+      }
+    });
   } catch (error) {
     console.error("Error fetching contact requests:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -192,19 +274,66 @@ router.get("/contact-requests", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PATCH /api/admin/contact-requests/:id/status — update status
+// GET /api/admin/contact-requests/:id — get single request
 // ─────────────────────────────────────────────────────────────────────────────
-router.patch("/contact-requests/:id/status", async (req, res) => {
+router.get("/contact-requests/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, processed_by, processed_at } = req.body;
+
+    const { data, error } = await supabase
+      .from("contact_requests")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) throw error;
+
+    // ✅ Check if user has permission to view this request
+    if (!req.user.is_super_admin && data.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to view this request"
+      });
+    }
+
+    res.json({ success: true, request: data });
+  } catch (error) {
+    console.error("Error fetching contact request:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/admin/contact-requests/:id/status — update status
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch("/contact-requests/:id/status", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    // ✅ Check if user has permission to update this request
+    const { data: existingRequest, error: checkError } = await supabase
+      .from("contact_requests")
+      .select("branch_id")
+      .eq("id", id)
+      .single();
+
+    if (checkError) throw checkError;
+
+    // Non-super admins can only update requests in their branch
+    if (!req.user.is_super_admin && existingRequest.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to update this request"
+      });
+    }
 
     const { data, error } = await supabase
       .from("contact_requests")
       .update({
-        status,
-        processed_by: processed_by || null,
-        processed_at: processed_at || new Date().toISOString(),
+        status: status || "Pending",
+        processed_by: req.user.id,
+        processed_at: new Date().toISOString(),
       })
       .eq("id", id)
       .select()
@@ -214,10 +343,12 @@ router.patch("/contact-requests/:id/status", async (req, res) => {
 
     await logAuditEvent({
       req,
-      userId: processed_by || null,
+      userId: req.user.id,
       action: 'Updated',
       systemCategory: 'Contact Requests',
       logDescription: `Updated contact request ${id} to ${status}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
     });
 
     res.json({ success: true, request: data });
@@ -230,9 +361,26 @@ router.patch("/contact-requests/:id/status", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/admin/contact-requests/:id — delete a request
 // ─────────────────────────────────────────────────────────────────────────────
-router.delete("/contact-requests/:id", async (req, res) => {
+router.delete("/contact-requests/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // ✅ Check if user has permission to delete this request
+    const { data: existingRequest, error: checkError } = await supabase
+      .from("contact_requests")
+      .select("branch_id")
+      .eq("id", id)
+      .single();
+
+    if (checkError) throw checkError;
+
+    // Non-super admins can only delete requests in their branch
+    if (!req.user.is_super_admin && existingRequest.branch_id !== req.user.branch_id) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to delete this request"
+      });
+    }
 
     const { error } = await supabase
       .from("contact_requests")
@@ -243,14 +391,60 @@ router.delete("/contact-requests/:id", async (req, res) => {
 
     await logAuditEvent({
       req,
+      userId: req.user.id,
       action: 'Deleted',
       systemCategory: 'Contact Requests',
       logDescription: `Deleted contact request ${id}`,
+      branch: req.user.branch_id,
+      performed_by: req.user.employee_id
     });
 
     res.json({ success: true });
   } catch (error) {
     console.error("Error deleting contact request:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/contact-requests/count — get count by status (filtered by branch)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/contact-requests/count", verifyToken, async (req, res) => {
+  try {
+    let query = supabase
+      .from("contact_requests")
+      .select("status", { count: 'exact', head: true });
+
+    // ✅ Filter by branch for non-super admins
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      query = query.eq("branch_id", req.user.branch_id);
+    }
+
+    const { count, error } = await query;
+
+    if (error) throw error;
+
+    // Get pending count
+    let pendingQuery = supabase
+      .from("contact_requests")
+      .select("status", { count: 'exact', head: true })
+      .eq("status", "Pending");
+
+    if (!req.user.is_super_admin && req.user.branch_id) {
+      pendingQuery = pendingQuery.eq("branch_id", req.user.branch_id);
+    }
+
+    const { count: pendingCount } = await pendingQuery;
+
+    res.json({
+      success: true,
+      data: {
+        total: count || 0,
+        pending: pendingCount || 0,
+      }
+    });
+  } catch (error) {
+    console.error("Error counting contact requests:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
