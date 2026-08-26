@@ -21,7 +21,7 @@ if (!process.env.SUPABASE_JWT_SECRET) {
   console.warn('⚠️ SUPABASE_JWT_SECRET is not set — add it to backend/.env (Supabase Dashboard → Settings → API → JWT Secret)');
 }
 
-// ✅ FIXED: Cache with pending promise lock to prevent stampede
+// Cache with pending promise lock to prevent stampede
 let cachedSessionTimeout = 30;
 let lastFetchTime = 0;
 let pendingTimeoutPromise = null;
@@ -30,21 +30,17 @@ const getSessionTimeout = async () => {
   const now = Date.now();
   const isStale = now - lastFetchTime > 5 * 60 * 1000;
   
-  // If there's already a pending fetch, wait for it
   if (pendingTimeoutPromise) {
     console.log('⏳ Waiting for pending session timeout fetch...');
     return pendingTimeoutPromise;
   }
   
-  // If cache is fresh, return cached value
   if (!isStale) {
     return cachedSessionTimeout;
   }
   
-  // Set lastFetchTime BEFORE the query starts to prevent stampede
   lastFetchTime = now;
   
-  // Create the pending promise
   pendingTimeoutPromise = (async () => {
     try {
       console.log('🔄 Fetching session timeout from database...');
@@ -59,14 +55,12 @@ const getSessionTimeout = async () => {
         cachedSessionTimeout = data[0].session_timeout;
         console.log(`✅ Session timeout cached: ${cachedSessionTimeout} minutes`);
       } else {
-        // If error or no data, keep existing cached value
         console.warn('⚠️ No session timeout found, using cached value:', cachedSessionTimeout);
       }
       
       return cachedSessionTimeout;
     } catch (error) {
       console.error('❌ Error fetching session timeout:', error);
-      // Roll back lastFetchTime so next request retries
       lastFetchTime = 0;
       return cachedSessionTimeout;
     } finally {
@@ -75,6 +69,38 @@ const getSessionTimeout = async () => {
   })();
   
   return pendingTimeoutPromise;
+};
+
+// ✅ FIXED: Get profile with branch_id from profiles table
+const getProfileWithBranch = async (userId) => {
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        employee_id,
+        first_name,
+        last_name,
+        role,
+        branch_id,
+        department_id,
+        status,
+        avatar_url,
+        created_by
+      `)
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      console.error('❌ Error fetching profile:', error);
+      return null;
+    }
+
+    return profile;
+  } catch (error) {
+    console.error('❌ Error in getProfileWithBranch:', error);
+    return null;
+  }
 };
 
 const verifyToken = async (req, res, next) => {
@@ -93,7 +119,7 @@ const verifyToken = async (req, res, next) => {
     // Check if it is a local dev/testing token
     if (token && token.startsWith('hr-token-')) {
       req.user = {
-        id: '733cc8de-259c-43a8-9c82-48bb575d07b5', // Mell Ebuen's real HR user ID in Supabase
+        id: '733cc8de-259c-43a8-9c82-48bb575d07b5',
         email: 'hr@wea.com',
         role: 'Human Resources'
       };
@@ -130,7 +156,19 @@ const verifyToken = async (req, res, next) => {
       });
     }
 
-    const user = { id: decoded.sub, email: decoded.email, role: decoded.role };
+    const userId = decoded.sub;
+    const userEmail = decoded.email;
+
+    // ✅ FIXED: Get profile with branch_id from profiles table
+    const profile = await getProfileWithBranch(userId);
+    
+    if (!profile) {
+      console.error('❌ Profile not found for user:', userId);
+      return res.status(401).json({
+        success: false,
+        message: 'User profile not found'
+      });
+    }
 
     // Check session timeout from database
     const sessionTimeout = await getSessionTimeout();
@@ -147,7 +185,26 @@ const verifyToken = async (req, res, next) => {
       }
     }
 
-    req.user = user;
+    // ✅ FIXED: Attach complete user info including branch_id
+    req.user = {
+      id: userId,
+      email: userEmail,
+      profile_id: profile.id,
+      employee_id: profile.employee_id,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      role: profile.role,
+      branch_id: profile.branch_id,
+      department_id: profile.department_id,
+      status: profile.status,
+      avatar_url: profile.avatar_url,
+      created_by: profile.created_by,
+      is_super_admin: profile.role === 'Super Admin',
+      is_admin: profile.role === 'Admin' || profile.role === 'Super Admin'
+    };
+
+    console.log(`✅ Auth: ${profile.employee_id} (${profile.role}) - Branch: ${profile.branch_id}`);
+
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
@@ -158,7 +215,7 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// ✅ Add cache clear function for admin use
+// Cache clear function for admin use
 const clearSessionTimeoutCache = () => {
   lastFetchTime = 0;
   pendingTimeoutPromise = null;

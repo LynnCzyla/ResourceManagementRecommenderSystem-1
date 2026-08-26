@@ -1,74 +1,70 @@
 // backend/routes/SuperAdmin/accounts.js
-//
-// Account STATUS management for Admin accounts only.
-// "Admin" now means: a profile that has a matching row in public.admins.
-// Handles Active/Inactive toggling and lock/unlock via user_login_attempts.
-// Does NOT create/edit/delete profiles, and does NOT grant/revoke admin
-// membership itself — that's a separate concern (see note at bottom of file).
+// Manages ALL user accounts (not just admins)
 
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 
-// Checks whether a given profile is currently an Admin (has a row in public.admins).
-async function isAdminProfile(profileId) {
-  const { data, error } = await supabase
-    .from('admins')
-    .select('id')
-    .eq('profile_id', profileId)
-    .maybeSingle();
-  if (error) throw error;
-  return !!data;
-}
-
-// GET /api/superadmin/accounts?search=&status=&locked=&page=&limit=
+// GET /api/superadmin/accounts
+// Now shows ALL user accounts, not just admins
 router.get('/accounts', async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
     const search = (req.query.search || '').trim();
-    const status = req.query.status; // 'Active' | 'Inactive'
+    const role = req.query.role;
+    const status = req.query.status;
+    const branchId = req.query.branch_id;
+    const showLocked = req.query.locked;
 
-    // Join admins -> profiles. !inner makes the profiles filter (status/search)
-    // actually constrain the top-level admins query instead of just the embed.
     let query = supabase
-      .from('admins')
-      .select(
-        `
-        id,
-        profile_id,
-        profiles!admins_profile_id_fkey!inner (
+      .from('profiles')
+      .select(`
+        *,
+        branches:profiles_branch_id_fkey (
           id,
-          employee_id,
-          first_name,
-          middle_name,
-          last_name,
-          status,
-          created_at
+          name,
+          location,
+          status
         )
-      `,
-        { count: 'exact' }
-      );
+      `, { count: 'exact' });
 
-    if (status) {
-      query = query.eq('profiles.status', status);
-    }
+    // Apply filters
+    if (status) query = query.eq('status', status);
+    if (role) query = query.eq('role', role);
+    if (branchId) query = query.eq('branch_id', branchId);
     if (search) {
       query = query.or(
-        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,employee_id.ilike.%${search}%`,
-        { foreignTable: 'profiles' }
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,employee_id.ilike.%${search}%`
       );
     }
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const { data: adminRows, error, count } = await query
-      .order('created_at', { referencedTable: 'profiles', ascending: false })
+    const { data: profiles, error, count } = await query
+      .order('created_at', { ascending: false })
       .range(from, to);
+    
     if (error) throw error;
 
-    const profileIds = (adminRows || []).map((a) => a.profiles.id);
+    // ← NEW: Get emails from auth.users for all profiles
+    const profileIds = (profiles || []).map((p) => p.id);
+    let emailMap = new Map();
+    
+    if (profileIds.length > 0) {
+      // Get auth users with their emails
+      const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+      
+      if (!authError && authUsers) {
+        // Create a map of user_id -> email
+        authUsers.users.forEach(user => {
+          emailMap.set(user.id, user.email);
+        });
+      }
+    }
+
+    // Get login attempt data for lock status
     let lockMap = new Map();
     if (profileIds.length > 0) {
       const { data: loginAttempts, error: loginError } = await supabase
@@ -80,23 +76,28 @@ router.get('/accounts', async (req, res) => {
       }
     }
 
-    let accounts = (adminRows || []).map((a) => {
-      const p = a.profiles;
+    // Format response with emails
+    let accounts = (profiles || []).map((p) => {
       const lock = lockMap.get(p.id);
       return {
         id: p.id,
         employee_id: p.employee_id,
         name: `${p.first_name || ''}${p.middle_name ? ` ${p.middle_name}` : ''} ${p.last_name || ''}`.trim(),
-        status: p.status,
+        email: emailMap.get(p.id) || '', // ← Get email from auth
+        role: p.role || 'employee',
+        status: p.status || 'Active',
+        branch: p.branches || null,
+        branch_id: p.branch_id,
         failedAttempts: lock?.failed_attempts || 0,
         locked: lock?.locked || false,
-        lockedAt: lock?.locked_at || null,
-        createdAt: p.created_at,
+        locked_at: lock?.locked_at || null,
+        created_at: p.created_at,
       };
     });
 
-    if (req.query.locked === 'true') accounts = accounts.filter((a) => a.locked);
-    else if (req.query.locked === 'false') accounts = accounts.filter((a) => !a.locked);
+    // Filter by locked status if requested
+    if (showLocked === 'true') accounts = accounts.filter((a) => a.locked);
+    else if (showLocked === 'false') accounts = accounts.filter((a) => !a.locked);
 
     res.json({
       success: true,
@@ -109,33 +110,67 @@ router.get('/accounts', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Error fetching admin accounts:', err);
+    console.error('Error fetching accounts:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// PATCH /api/superadmin/accounts/:id/status   { status: 'Active' | 'Inactive' }
+// PATCH /api/superadmin/accounts/:id/status
 router.patch('/accounts/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+
   if (!['Active', 'Inactive'].includes(status)) {
-    return res.status(400).json({ success: false, error: "status must be 'Active' or 'Inactive'." });
+    return res.status(400).json({
+      success: false,
+      error: "status must be 'Active' or 'Inactive'."
+    });
   }
+
   try {
-    const isAdmin = await isAdminProfile(id);
-    if (!isAdmin) {
-      return res.status(404).json({ success: false, error: 'Admin account not found.' });
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, employee_id, first_name, last_name')
+      .eq('id', id)
+      .single();
+
+    if (profileError || !profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found.'
+      });
     }
 
     const { data, error } = await supabase
       .from('profiles')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({
+        status,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', id)
       .select()
       .single();
+
     if (error) throw error;
-    if (!data) return res.status(404).json({ success: false, error: 'Admin account not found.' });
-    res.json({ success: true, data });
+
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'UPDATE_USER_STATUS',
+        system_category: 'Account Management',
+        log_description: `Changed ${profile.first_name} ${profile.last_name} (${profile.employee_id}) status to ${status}`,
+      });
+
+    res.json({
+      success: true,
+      message: `Account status updated to ${status}`,
+      data: {
+        id: data.id,
+        status: data.status,
+        updated_at: data.updated_at
+      }
+    });
   } catch (err) {
     console.error('Error updating account status:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -145,35 +180,72 @@ router.patch('/accounts/:id/status', async (req, res) => {
 // PATCH /api/superadmin/accounts/:id/unlock
 router.patch('/accounts/:id/unlock', async (req, res) => {
   const { id } = req.params;
+
   try {
-    const isAdmin = await isAdminProfile(id);
-    if (!isAdmin) {
-      return res.status(404).json({ success: false, error: 'Admin account not found.' });
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, employee_id, first_name, last_name')
+      .eq('id', id)
+      .single();
+
+    if (profileError || !profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found.'
+      });
     }
 
     const { data, error } = await supabase
       .from('user_login_attempts')
-      .update({ locked: false, failed_attempts: 0, locked_by: null, locked_at: null })
+      .update({
+        locked: false,
+        failed_attempts: 0,
+        locked_by: null,
+        locked_at: null
+      })
       .eq('user_id', id)
       .select()
       .maybeSingle();
+
     if (error) throw error;
 
-    res.json({ success: true, data });
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'UNLOCK_USER_ACCOUNT',
+        system_category: 'Account Management',
+        log_description: `Unlocked ${profile.first_name} ${profile.last_name} (${profile.employee_id}) account`,
+      });
+
+    res.json({
+      success: true,
+      message: 'Account unlocked successfully',
+      data
+    });
   } catch (err) {
     console.error('Error unlocking account:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// PATCH /api/superadmin/accounts/:id/lock   { locked_by?: uuid of the acting SuperAdmin }
+// PATCH /api/superadmin/accounts/:id/lock
 router.patch('/accounts/:id/lock', async (req, res) => {
   const { id } = req.params;
   const { locked_by } = req.body;
+
   try {
-    const isAdmin = await isAdminProfile(id);
-    if (!isAdmin) {
-      return res.status(404).json({ success: false, error: 'Admin account not found.' });
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, employee_id, first_name, last_name')
+      .eq('id', id)
+      .single();
+
+    if (profileError || !profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found.'
+      });
     }
 
     const { data: existing } = await supabase
@@ -186,7 +258,11 @@ router.patch('/accounts/:id/lock', async (req, res) => {
     if (existing) {
       const { data, error } = await supabase
         .from('user_login_attempts')
-        .update({ locked: true, locked_by: locked_by || null, locked_at: new Date().toISOString() })
+        .update({
+          locked: true,
+          locked_by: locked_by || req.user?.id || null,
+          locked_at: new Date().toISOString()
+        })
         .eq('user_id', id)
         .select()
         .single();
@@ -195,14 +271,32 @@ router.patch('/accounts/:id/lock', async (req, res) => {
     } else {
       const { data, error } = await supabase
         .from('user_login_attempts')
-        .insert({ user_id: id, locked: true, locked_by: locked_by || null, locked_at: new Date().toISOString() })
+        .insert({
+          user_id: id,
+          locked: true,
+          locked_by: locked_by || req.user?.id || null,
+          locked_at: new Date().toISOString()
+        })
         .select()
         .single();
       if (error) throw error;
       result = data;
     }
 
-    res.json({ success: true, data: result });
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'LOCK_USER_ACCOUNT',
+        system_category: 'Account Management',
+        log_description: `Locked ${profile.first_name} ${profile.last_name} (${profile.employee_id}) account`,
+      });
+
+    res.json({
+      success: true,
+      message: 'Account locked successfully',
+      data: result
+    });
   } catch (err) {
     console.error('Error locking account:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -210,7 +304,3 @@ router.patch('/accounts/:id/lock', async (req, res) => {
 });
 
 module.exports = router;
-
-// NOTE: This file only manages accounts that are ALREADY in public.admins.
-// It has no route to add someone to admins (grant) or remove them (revoke).
-// If you need that, it's a separate set of endpoints — see the question below.

@@ -8,7 +8,6 @@ const emptyForm = {
   location: '',
   address: '',
   contact_number: '',
-  manager_name: '',
   status: 'Active',
 };
 
@@ -29,7 +28,9 @@ export default function BranchManagementTab() {
 
   const showSuccessAlert = (message, title = 'Success!') => {
     Swal.fire({
-      title, text: message, icon: 'success',
+      title,
+      text: message,
+      icon: 'success',
       confirmButtonColor: 'var(--color-primary)',
       confirmButtonText: 'OK',
       background: 'var(--color-bg-card)',
@@ -41,7 +42,9 @@ export default function BranchManagementTab() {
 
   const showErrorAlert = (message, title = 'Error!') => {
     Swal.fire({
-      title, text: message, icon: 'error',
+      title,
+      text: message,
+      icon: 'error',
       confirmButtonColor: 'var(--color-danger)',
       confirmButtonText: 'OK',
       background: 'var(--color-bg-card)',
@@ -53,7 +56,10 @@ export default function BranchManagementTab() {
 
   const showConfirmationAlert = (title, text, confirmText = 'Yes, proceed!') => {
     return Swal.fire({
-      title, text, icon: 'warning', showCancelButton: true,
+      title,
+      text,
+      icon: 'warning',
+      showCancelButton: true,
       confirmButtonColor: 'var(--color-primary)',
       cancelButtonColor: 'var(--color-text-muted)',
       confirmButtonText: confirmText,
@@ -89,19 +95,27 @@ export default function BranchManagementTab() {
   }, [searchQuery, statusFilter, pagination.page, pagination.limit]);
 
   useEffect(() => {
-    const timer = setTimeout(() => loadBranches(1), 300); // debounce search/filter
+    const timer = setTimeout(() => loadBranches(1), 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, statusFilter]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      // Remove manager_name from form data (it's auto-assigned later)
+      const submitData = {
+        name: formData.name,
+        location: formData.location,
+        address: formData.address,
+        contact_number: formData.contact_number,
+        status: formData.status,
+      };
+
       const res = await fetch(`${API_BASE}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(submitData),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to create branch');
@@ -121,10 +135,19 @@ export default function BranchManagementTab() {
     e.preventDefault();
     setSubmitting(true);
     try {
+      // Remove manager_name from form data (it's auto-assigned)
+      const submitData = {
+        name: formData.name,
+        location: formData.location,
+        address: formData.address,
+        contact_number: formData.contact_number,
+        status: formData.status,
+      };
+
       const res = await fetch(`${API_BASE}/branches/${selectedBranch.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(submitData),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to update branch');
@@ -167,7 +190,6 @@ export default function BranchManagementTab() {
       location: branch.location || '',
       address: branch.address || '',
       contact_number: branch.contact_number || '',
-      manager_name: branch.manager_name || '',
       status: branch.status || 'Active',
     });
     setShowEditModal(true);
@@ -197,7 +219,7 @@ export default function BranchManagementTab() {
           lineHeight: '1.5'
         }}>
           ⚠️ <strong>Branches database table is not configured in Supabase.</strong><br/>
-          To enable Branch Management, please create the <code>branches</code> table in your Supabase SQL editor using the schema defined in the dashboard queries or run the migration script.
+          To enable Branch Management, please create the <code>branches</code> table in your Supabase SQL editor.
         </div>
       )}
 
@@ -261,9 +283,20 @@ export default function BranchManagementTab() {
                     <span style={styles.branchName}>{branch.name}</span>
                   </td>
                   <td style={styles.tableCell}>{branch.location}</td>
-                  <td style={styles.tableCell}>{branch.address}</td>
+                  <td style={styles.tableCell}>
+                    <span style={styles.addressText}>{branch.address}</span>
+                  </td>
                   <td style={styles.tableCell}>{branch.contact_number}</td>
-                  <td style={styles.tableCell}>{branch.manager_name}</td>
+                  <td style={styles.tableCell}>
+                    {branch.admin_info ? (
+                      <span style={styles.managerBadge}>
+                        {branch.admin_info.name}
+                        <span style={styles.managerId}>({branch.admin_info.employee_id})</span>
+                      </span>
+                    ) : (
+                      <span style={styles.noManager}>No manager assigned</span>
+                    )}
+                  </td>
                   <td style={styles.tableCell}>
                     <span style={{
                       ...styles.statusBadge,
@@ -315,7 +348,7 @@ export default function BranchManagementTab() {
         )}
       </div>
 
-      {/* Create Modal */}
+      {/* Create Modal - Removed Manager Name */}
       {showCreateModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
@@ -324,7 +357,66 @@ export default function BranchManagementTab() {
               <button onClick={() => setShowCreateModal(false)} style={styles.closeBtn}>×</button>
             </div>
             <form onSubmit={handleCreate} style={styles.modalForm}>
-              <FormFields formData={formData} setFormData={setFormData} />
+              <div style={styles.formSection}>
+                <h4 style={styles.sectionTitle}>Branch Information</h4>
+                
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Branch Name <span style={styles.required}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="e.g., WEA-PHIL, WEA-Singapore"
+                  />
+                  <span style={styles.helperText}>Format: WEA-Location (e.g., WEA-PHIL)</span>
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="e.g., Manila, Singapore"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Address</label>
+                  <input
+                    type="text"
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="Full branch address"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Contact Number</label>
+                  <input
+                    type="text"
+                    value={formData.contact_number}
+                    onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="e.g., 09123456789"
+                  />
+                </div>
+              </div>
+
+              <div style={styles.infoBox}>
+                <span style={styles.infoIcon}>💡</span>
+                <span style={styles.infoText}>
+                  After creating the branch, assign an admin in the <strong>Admin Management</strong> tab. 
+                  The assigned admin will automatically become the branch manager.
+                </span>
+              </div>
+
               <div style={styles.modalActions}>
                 <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
                 <button type="submit" disabled={submitting} style={styles.submitBtn}>
@@ -336,7 +428,7 @@ export default function BranchManagementTab() {
         </div>
       )}
 
-      {/* Edit Modal */}
+      {/* Edit Modal - Removed Manager Name */}
       {showEditModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
@@ -345,7 +437,76 @@ export default function BranchManagementTab() {
               <button onClick={() => setShowEditModal(false)} style={styles.closeBtn}>×</button>
             </div>
             <form onSubmit={handleEdit} style={styles.modalForm}>
-              <FormFields formData={formData} setFormData={setFormData} isEdit />
+              <div style={styles.formSection}>
+                <h4 style={styles.sectionTitle}>Branch Information</h4>
+                
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Branch Name <span style={styles.required}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="e.g., WEA-PHIL, WEA-Singapore"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="e.g., Manila, Singapore"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Address</label>
+                  <input
+                    type="text"
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="Full branch address"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Contact Number</label>
+                  <input
+                    type="text"
+                    value={formData.contact_number}
+                    onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="e.g., 09123456789"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    style={styles.formInput}
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={styles.infoBox}>
+                <span style={styles.infoIcon}>💡</span>
+                <span style={styles.infoText}>
+                  To change the branch manager, go to <strong>Admin Management</strong> and update the admin assigned to this branch.
+                </span>
+              </div>
+
               <div style={styles.modalActions}>
                 <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>Cancel</button>
                 <button type="submit" disabled={submitting} style={styles.submitBtn}>
@@ -360,107 +521,94 @@ export default function BranchManagementTab() {
   );
 }
 
-function FormFields({ formData, setFormData, isEdit }) {
-  return (
-    <>
-      <div style={styles.formGroup}>
-        <label style={styles.formLabel}>Branch Name</label>
-        <input
-          type="text" required
-          value={formData.name}
-          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          style={styles.formInput}
-        />
-      </div>
-      <div style={styles.formGroup}>
-        <label style={styles.formLabel}>Location</label>
-        <input
-          type="text"
-          value={formData.location}
-          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-          style={styles.formInput}
-        />
-      </div>
-      <div style={styles.formGroup}>
-        <label style={styles.formLabel}>Address</label>
-        <input
-          type="text"
-          value={formData.address}
-          onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-          style={styles.formInput}
-        />
-      </div>
-      <div style={styles.formGroup}>
-        <label style={styles.formLabel}>Contact Number</label>
-        <input
-          type="text"
-          value={formData.contact_number}
-          onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
-          style={styles.formInput}
-        />
-      </div>
-      <div style={styles.formGroup}>
-        <label style={styles.formLabel}>Manager Name</label>
-        <input
-          type="text"
-          value={formData.manager_name}
-          onChange={(e) => setFormData({ ...formData, manager_name: e.target.value })}
-          style={styles.formInput}
-        />
-      </div>
-      {isEdit && (
-        <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Status</label>
-          <select
-            value={formData.status}
-            onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-            style={styles.formInput}
-          >
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-          </select>
-        </div>
-      )}
-    </>
-  );
-}
+// ============================================
+// STYLES
+// ============================================
 
 const styles = {
   container: { display: 'flex', flexDirection: 'column', gap: '24px' },
   header: { marginBottom: '8px' },
   title: { fontSize: '28px', fontWeight: '800', letterSpacing: '-0.75px', marginBottom: '4px', color: 'var(--color-text-primary)' },
   subtitle: { fontSize: '14px', color: 'var(--color-text-secondary)' },
+
   controls: { display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' },
   searchWrapper: { display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '8px 12px', flex: 1, maxWidth: '400px' },
   searchIcon: { color: 'var(--color-text-muted)' },
   searchInput: { border: 'none', background: 'transparent', outline: 'none', flex: 1, fontSize: '14px', color: 'var(--color-text-primary)' },
   filterSelect: { padding: '8px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-card)', color: 'var(--color-text-primary)', fontSize: '14px' },
   createBtn: { display: 'flex', alignItems: 'center', padding: '8px 16px', backgroundColor: 'var(--color-primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-md)', fontSize: '14px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' },
+
   tableContainer: { background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' },
   table: { width: '100%', borderCollapse: 'collapse' },
   tableHeader: { background: 'var(--color-bg-card-hover)' },
   tableHeaderCell: { padding: '12px 16px', textAlign: 'left', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' },
   tableRow: { borderBottom: '1px solid var(--color-border)', transition: 'background-color 0.2s' },
-  tableCell: { padding: '12px 16px', fontSize: '14px', color: 'var(--color-text-primary)' },
+  tableCell: { padding: '12px 16px', fontSize: '14px', color: 'var(--color-text-primary)', verticalAlign: 'middle' },
+
   branchName: { fontWeight: '600', color: 'var(--color-primary)' },
+  addressText: { fontSize: '13px', color: 'var(--color-text-secondary)' },
+  
+  managerBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '4px 10px',
+    background: 'rgba(99, 102, 241, 0.1)',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: '500',
+    color: '#6366f1',
+  },
+  managerId: {
+    fontSize: '10px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '400',
+  },
+  noManager: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+  },
+
   statusBadge: { padding: '4px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' },
   actionButtons: { display: 'flex', gap: '8px' },
   editBtn: { padding: '6px', background: 'transparent', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer', transition: 'all 0.2s' },
   deleteBtn: { padding: '6px', background: 'transparent', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-danger)', cursor: 'pointer', transition: 'all 0.2s' },
   emptyCell: { padding: '32px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '14px' },
+
   pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '16px' },
   pageBtn: { padding: '6px 14px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer' },
   pageInfo: { fontSize: '13px', color: 'var(--color-text-secondary)' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-  modal: { background: 'var(--color-bg-card)', borderRadius: 'var(--radius-md)', width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--color-border)' },
+
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' },
+  modal: { background: 'var(--color-bg-card)', borderRadius: 'var(--radius-md)', width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--color-border)', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--color-border)' },
   modalTitle: { fontSize: '18px', fontWeight: '700', color: 'var(--color-text-primary)', margin: 0 },
   closeBtn: { background: 'transparent', border: 'none', fontSize: '24px', color: 'var(--color-text-muted)', cursor: 'pointer', padding: 0, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
   modalForm: { padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' },
+  formSection: { display: 'flex', flexDirection: 'column', gap: '14px' },
+  sectionTitle: { fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)', margin: '0 0 4px 0' },
+  
   formGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
   formLabel: { fontSize: '13px', fontWeight: '600', color: 'var(--color-text-primary)' },
-  formInput: { padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', fontSize: '14px', background: 'var(--color-bg-root)', color: 'var(--color-text-primary)', outline: 'none' },
-  modalActions: { display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' },
+  required: { color: 'var(--color-danger)' },
+  formInput: { padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', fontSize: '14px', background: 'var(--color-bg-root)', color: 'var(--color-text-primary)', outline: 'none', width: '100%' },
+  helperText: { fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' },
+
+  infoBox: {
+    display: 'flex',
+    gap: '10px',
+    padding: '12px 16px',
+    background: 'rgba(59, 130, 246, 0.08)',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid rgba(59, 130, 246, 0.15)',
+    alignItems: 'flex-start',
+  },
+  infoIcon: { fontSize: '16px', marginTop: '1px' },
+  infoText: { fontSize: '13px', color: 'var(--color-text-secondary)', lineHeight: '1.5' },
+
+  modalActions: { display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' },
   cancelBtn: { padding: '10px 20px', background: 'transparent', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)', cursor: 'pointer', transition: 'all 0.2s' },
   submitBtn: { padding: '10px 20px', background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: '14px', fontWeight: '600', color: '#ffffff', cursor: 'pointer', transition: 'all 0.2s' },
 };

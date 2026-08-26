@@ -1,20 +1,17 @@
 // backend/routes/SuperAdmin/admins.js
-//
-// Full CRUD for Admin accounts.
-// An "Admin" = a profiles row that has a matching row in the `admins`
-// junction table (see super_admins/admins schema). SuperAdmin manages
-// Admins here — create, edit profile details, delete.
-// Account status (Active/Inactive) and lock/unlock live in accounts.js,
-// not here.
-//
-// NOTE: creating/deleting an Admin uses supabase.auth.admin.* which is
-// a privileged operation — the `supabase` client in ../../supabase must
-// be initialized with the SERVICE ROLE key on the backend, not the anon key.
+// COMPLETE Admin Management System
+// Includes: CRUD + Status Management + Lock/Unlock + Email
 
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { sendAdminWelcomeEmail } = require('../../utils/mailer'); // ← Use shared mailer
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+// Generate random password (or use the one from mailer)
 function generateTempPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
   let pwd = '';
@@ -24,22 +21,64 @@ function generateTempPassword() {
   return pwd;
 }
 
-// Flatten a { id: admins.id, created_at, profile: {...} } row into a
-// single object the frontend can render directly. `id` on the flattened
-// object is the PROFILE id (used by PUT/DELETE below), `admin_record_id`
-// is the row id in the `admins` junction table.
-function flattenAdminRow(row) {
-  if (!row || !row.profile) return null;
-  const { profile, ...adminMeta } = row;
-  return {
-    admin_record_id: adminMeta.id,
-    admin_created_at: adminMeta.created_at,
-    ...profile,
-  };
+// Generate sequential employee ID with WEA-Location format
+const generateEmployeeId = async (branchName) => {
+  try {
+    let location = 'BRANCH';
+    if (branchName) {
+      if (branchName.includes('-')) {
+        location = branchName.split('-')[1] || branchName;
+      } else {
+        location = branchName;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("employee_id")
+      .like("employee_id", `WEA-${location}-%`)
+      .order("employee_id", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+
+    let lastNumber = 0;
+    
+    if (data && data.length > 0) {
+      const lastId = data[0].employee_id;
+      const match = lastId.match(/WEA-.*-(\d+)/);
+      if (match) {
+        lastNumber = parseInt(match[1], 10);
+      }
+    }
+
+    const nextNumber = lastNumber + 1;
+    const paddedNumber = String(nextNumber).padStart(3, '0');
+    
+    return `WEA-${location}-${paddedNumber}`;
+  } catch (error) {
+    console.error("Error generating employee ID:", error);
+    return `WEA-${branchName || 'BRANCH'}-${Date.now().toString().slice(-6)}`;
+  }
+};
+
+// Check if profile is an Admin
+async function isAdminProfile(profileId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, branch_id')
+    .eq('id', profileId)
+    .eq('role', 'Admin')
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
+// ============================================
+// FORM OPTIONS
+// ============================================
+
 // GET /api/superadmin/admins/options
-// Departments + positions for the create/edit form dropdowns (real data only).
 router.get('/admins/options', async (req, res) => {
   try {
     const { data: departments, error: deptError } = await supabase
@@ -54,9 +93,20 @@ router.get('/admins/options', async (req, res) => {
       .order('position_name', { ascending: true });
     if (posError) throw posError;
 
+    const { data: branches, error: branchError } = await supabase
+      .from('branches')
+      .select('id, name, location, status')
+      .eq('status', 'Active')
+      .order('name', { ascending: true });
+    if (branchError) throw branchError;
+
     res.json({
       success: true,
-      data: { departments: departments || [], positions: positions || [] },
+      data: {
+        departments: departments || [],
+        positions: positions || [],
+        branches: branches || []
+      },
     });
   } catch (err) {
     console.error('Error fetching admin form options:', err);
@@ -64,35 +114,57 @@ router.get('/admins/options', async (req, res) => {
   }
 });
 
-// GET /api/superadmin/admins?search=&department_id=&page=&limit=
+// ============================================
+// LIST ADMIN ACCOUNTS
+// ============================================
+
+// GET /api/superadmin/admins
 router.get('/admins', async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
     const search = (req.query.search || '').trim();
     const departmentId = req.query.department_id;
+    const branchId = req.query.branch_id;
+    const status = req.query.status;
+    const showLocked = req.query.locked;
 
-    // !inner is required so we can filter/search on the embedded
-    // profiles columns below.
     let query = supabase
-      .from('admins')
-      .select(
-        `id, created_at,
-         profile:profiles!admins_profile_id_fkey!inner (
-           id, employee_id, first_name, middle_name, last_name,
-           contact_number, position_id, department_id, status, join_date,
-           created_at,
-           positions ( position_name ),
-           departments ( department_name )
-         )`,
-        { count: 'exact' }
-      );
+      .from('profiles')
+      .select(`
+        id,
+        employee_id,
+        first_name,
+        middle_name,
+        last_name,
+        contact_number,
+        position_id,
+        department_id,
+        role,
+        status,
+        join_date,
+        created_at,
+        updated_at,
+        branch_id,
+        created_by,
+        departments (
+          department_name
+        ),
+        positions (
+          position_name
+        ),
+        branches:profiles_branch_id_fkey (
+          id, name, location, status
+        )
+      `, { count: 'exact' })
+      .eq('role', 'Admin');
 
-    if (departmentId) query = query.eq('profile.department_id', departmentId);
+    if (departmentId) query = query.eq('department_id', departmentId);
+    if (branchId) query = query.eq('branch_id', branchId);
+    if (status) query = query.eq('status', status);
     if (search) {
       query = query.or(
-        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,employee_id.ilike.%${search}%`,
-        { foreignTable: 'profile' }
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,employee_id.ilike.%${search}%`
       );
     }
 
@@ -102,25 +174,70 @@ router.get('/admins', async (req, res) => {
     const { data, error, count } = await query
       .order('created_at', { ascending: false })
       .range(from, to);
+
     if (error) throw error;
 
-    const dataWithEmails = await Promise.all(
-      (data || []).map(async (row) => {
-        if (!row.profile) return row;
+    const profileIds = (data || []).map((a) => a.id);
+    let lockMap = new Map();
+    if (profileIds.length > 0) {
+      const { data: loginAttempts, error: loginError } = await supabase
+        .from('user_login_attempts')
+        .select('user_id, failed_attempts, locked, locked_at')
+        .in('user_id', profileIds);
+      if (!loginError && loginAttempts) {
+        lockMap = new Map(loginAttempts.map((l) => [l.user_id, l]));
+      }
+    }
+
+    const dataWithDetails = await Promise.all(
+      (data || []).map(async (profile) => {
         try {
-          const { data: authUser } = await supabase.auth.admin.getUserById(row.profile.id);
-          row.profile.email = authUser?.user?.email || '';
+          const { data: authUser } = await supabase.auth.admin.getUserById(profile.id);
+          profile.email = authUser?.user?.email || '';
         } catch (e) {
-          console.warn('Error fetching email for admin:', row.profile.id, e);
-          row.profile.email = '';
+          profile.email = '';
         }
-        return row;
+        
+        const lock = lockMap.get(profile.id);
+        profile.failed_attempts = lock?.failed_attempts || 0;
+        profile.locked = lock?.locked || false;
+        profile.locked_at = lock?.locked_at || null;
+        
+        return profile;
       })
     );
 
+    let admins = (dataWithDetails || []).map(profile => ({
+      id: profile.id,
+      employee_id: profile.employee_id,
+      first_name: profile.first_name,
+      middle_name: profile.middle_name,
+      last_name: profile.last_name,
+      email: profile.email || '',
+      contact_number: profile.contact_number,
+      department_id: profile.department_id,
+      position_id: profile.position_id,
+      role: profile.role,
+      status: profile.status,
+      join_date: profile.join_date,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at,
+      branch_id: profile.branch_id,
+      branch: profile.branches || null,
+      created_by: profile.created_by,
+      departments: profile.departments || null,
+      positions: profile.positions || null,
+      failed_attempts: profile.failed_attempts || 0,
+      locked: profile.locked || false,
+      locked_at: profile.locked_at || null,
+    }));
+
+    if (showLocked === 'true') admins = admins.filter((a) => a.locked);
+    else if (showLocked === 'false') admins = admins.filter((a) => !a.locked);
+
     res.json({
       success: true,
-      data: (dataWithEmails || []).map(flattenAdminRow).filter(Boolean),
+      data: admins,
       pagination: {
         page,
         limit,
@@ -134,10 +251,109 @@ router.get('/admins', async (req, res) => {
   }
 });
 
+// ============================================
+// GET SINGLE ADMIN
+// ============================================
+
+router.get('/admins/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        employee_id,
+        first_name,
+        middle_name,
+        last_name,
+        contact_number,
+        position_id,
+        department_id,
+        role,
+        status,
+        join_date,
+        created_at,
+        updated_at,
+        branch_id,
+        created_by,
+        departments (
+          department_name
+        ),
+        positions (
+          position_name
+        ),
+        branches:profiles_branch_id_fkey (
+          id, name, location, status
+        )
+      `)
+      .eq('id', id)
+      .eq('role', 'Admin')
+      .single();
+
+    if (error || !profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin not found'
+      });
+    }
+
+    let email = '';
+    try {
+      const { data: authUser } = await supabase.auth.admin.getUserById(id);
+      email = authUser?.user?.email || '';
+    } catch (e) {
+      console.warn('Error fetching email:', id);
+    }
+
+    const { data: loginData } = await supabase
+      .from('user_login_attempts')
+      .select('failed_attempts, locked, locked_at')
+      .eq('user_id', id)
+      .maybeSingle();
+
+    const adminData = {
+      id: profile.id,
+      employee_id: profile.employee_id,
+      first_name: profile.first_name,
+      middle_name: profile.middle_name,
+      last_name: profile.last_name,
+      email: email,
+      contact_number: profile.contact_number,
+      department_id: profile.department_id,
+      position_id: profile.position_id,
+      role: profile.role,
+      status: profile.status,
+      join_date: profile.join_date,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at,
+      branch_id: profile.branch_id,
+      branch: profile.branches || null,
+      created_by: profile.created_by,
+      departments: profile.departments || null,
+      positions: profile.positions || null,
+      failed_attempts: loginData?.failed_attempts || 0,
+      locked: loginData?.locked || false,
+      locked_at: loginData?.locked_at || null,
+    };
+
+    res.json({
+      success: true,
+      data: adminData
+    });
+  } catch (err) {
+    console.error('Error fetching admin:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================
+// CREATE ADMIN WITH EMAIL
+// ============================================
+
 // POST /api/superadmin/admins
 router.post('/admins', async (req, res) => {
   const {
-    employee_id,
     first_name,
     middle_name,
     last_name,
@@ -146,40 +362,85 @@ router.post('/admins', async (req, res) => {
     department_id,
     position_id,
     join_date,
+    branch_id,
   } = req.body;
 
-  // The SuperAdmin performing this action, if you have auth middleware
-  // attaching it to req (e.g. req.user.id). Left null if not present.
   const grantedBy = req.user?.id || null;
 
-  if (!employee_id || !first_name || !last_name || !email) {
+  if (!first_name || !last_name || !email) {
     return res.status(400).json({
       success: false,
-      error: 'employee_id, first_name, last_name, and email are required.',
+      error: 'first_name, last_name, and email are required.',
+    });
+  }
+
+  if (!branch_id) {
+    return res.status(400).json({
+      success: false,
+      error: 'branch_id is required. Admin must be assigned to a branch.',
     });
   }
 
   try {
+    const { data: branch, error: branchError } = await supabase
+      .from('branches')
+      .select('id, name')
+      .eq('id', branch_id)
+      .single();
+
+    if (branchError || !branch) {
+      return res.status(404).json({
+        success: false,
+        error: 'Branch not found.'
+      });
+    }
+
+    // Get Super Admin name for the email
+    let createdByName = 'Super Admin';
+    if (grantedBy) {
+      const { data: creatorProfile } = await supabase
+        .from('profiles')
+        .select('first_name, last_name')
+        .eq('id', grantedBy)
+        .single();
+      
+      if (creatorProfile) {
+        createdByName = `${creatorProfile.first_name} ${creatorProfile.last_name}`.trim();
+      }
+    }
+
+    const employeeId = await generateEmployeeId(branch.name);
     const tempPassword = generateTempPassword();
 
+    // Create auth user
     const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: tempPassword,
       email_confirm: true,
+      user_metadata: {
+        first_name,
+        middle_name,
+        last_name,
+        role: 'Admin'
+      }
     });
     if (authError) throw authError;
 
+    // Create profile with role = 'Admin'
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .insert({
         id: authUser.user.id,
-        employee_id,
+        employee_id: employeeId,
         first_name,
         middle_name: middle_name || null,
         last_name,
         contact_number: contact_number || null,
         department_id: department_id || null,
         position_id: position_id || null,
+        role: 'Admin',
+        branch_id: branch_id,
+        created_by: grantedBy,
         status: 'Active',
         join_date: join_date || null,
       })
@@ -191,28 +452,78 @@ router.post('/admins', async (req, res) => {
       throw profileError;
     }
 
+    // Insert into admins table for tracking
     const { data: adminRecord, error: adminError } = await supabase
       .from('admins')
       .insert({
         profile_id: profile.id,
+        branch_id: branch_id,
         created_by: grantedBy,
       })
       .select()
       .single();
 
     if (adminError) {
-      // Roll back profile + auth user so we don't leave orphans
       await supabase.from('profiles').delete().eq('id', profile.id);
       await supabase.auth.admin.deleteUser(authUser.user.id);
       throw adminError;
     }
 
-    // tempPassword is returned once so the SuperAdmin can hand it to the
-    // new Admin — it is never stored or logged in plaintext anywhere else.
+    // Update branch with manager
+    await supabase
+      .from('branches')
+      .update({
+        manager_id: profile.id,
+        manager_name: `${first_name} ${last_name}`.trim()
+      })
+      .eq('id', branch_id);
+
+    // ✅ SEND WELCOME EMAIL using the shared mailer
+    let emailSent = false;
+    try {
+      const emailResult = await sendAdminWelcomeEmail({
+        to: email,
+        firstName: first_name,
+        lastName: last_name,
+        employeeId: employeeId,
+        temporaryPassword: tempPassword,
+        branchName: branch.name,
+        createdBy: createdByName,
+      });
+      emailSent = emailResult.success;
+      
+      if (emailSent) {
+        console.log(`✅ Welcome email sent to ${email}`);
+      } else {
+        console.warn(`⚠️ Failed to send welcome email to ${email}:`, emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('❌ Email error:', emailError);
+    }
+
+    // Log the action
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: grantedBy,
+        action: 'CREATE_ADMIN',
+        system_category: 'Admin Management',
+        log_description: `Created admin ${first_name} ${last_name} for branch ${branch.name}`,
+      });
+
     res.status(201).json({
       success: true,
-      data: { admin_record_id: adminRecord.id, ...profile, email },
-      tempPassword,
+      message: emailSent 
+        ? 'Admin created successfully! Welcome email sent.'
+        : 'Admin created successfully! (Email could not be sent)',
+      data: {
+        admin_record_id: adminRecord.id,
+        ...profile,
+        email,
+        branch: branch.name
+      },
+      tempPassword, // Still return for manual sharing if needed
+      email_sent: emailSent,
     });
   } catch (err) {
     console.error('Error creating admin:', err);
@@ -220,32 +531,43 @@ router.post('/admins', async (req, res) => {
   }
 });
 
-// PUT /api/superadmin/admins/:id  (:id = profile id)
+// ============================================
+// UPDATE ADMIN
+// ============================================
+
 router.put('/admins/:id', async (req, res) => {
   const { id } = req.params;
-  const { first_name, middle_name, last_name, email, contact_number, department_id, position_id, join_date } =
-    req.body;
+  const {
+    first_name,
+    middle_name,
+    last_name,
+    email,
+    contact_number,
+    department_id,
+    position_id,
+    join_date,
+    branch_id,
+    status
+  } = req.body;
 
   if (!first_name || !last_name) {
-    return res.status(400).json({ success: false, error: 'first_name and last_name are required.' });
+    return res.status(400).json({
+      success: false,
+      error: 'first_name and last_name are required.'
+    });
   }
 
   try {
-    // Confirm this profile is actually an Admin before editing it here.
-    const { data: adminLink, error: linkError } = await supabase
-      .from('admins')
-      .select('id')
-      .eq('profile_id', id)
-      .single();
-    if (linkError || !adminLink) {
-      return res.status(404).json({ success: false, error: 'Admin not found.' });
+    const adminData = await isAdminProfile(id);
+    if (!adminData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin not found.'
+      });
     }
 
     if (email) {
-      const { error: authError } = await supabase.auth.admin.updateUserById(id, {
-        email: email
-      });
-      if (authError) throw authError;
+      await supabase.auth.admin.updateUserById(id, { email });
     }
 
     const { data, error } = await supabase
@@ -258,47 +580,261 @@ router.put('/admins/:id', async (req, res) => {
         department_id: department_id || null,
         position_id: position_id || null,
         join_date: join_date || null,
+        status: status || 'Active',
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
       .select()
       .single();
+
     if (error) throw error;
 
-    await supabase.from('admins').update({ updated_at: new Date().toISOString() }).eq('id', adminLink.id);
+    await supabase
+      .from('branches')
+      .update({ manager_name: `${first_name} ${last_name}`.trim() })
+      .eq('manager_id', id);
 
-    res.json({ success: true, data: { ...data, email } });
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'UPDATE_ADMIN',
+        system_category: 'Admin Management',
+        log_description: `Updated admin ${first_name} ${last_name}`,
+      });
+
+    res.json({
+      success: true,
+      message: 'Admin updated successfully',
+      data: { ...data, email }
+    });
   } catch (err) {
     console.error('Error updating admin:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// DELETE /api/superadmin/admins/:id  (:id = profile id)
+// ============================================
+// DELETE ADMIN
+// ============================================
+
 router.delete('/admins/:id', async (req, res) => {
   const { id } = req.params;
+
   try {
-    const { data: adminLink, error: linkError } = await supabase
-      .from('admins')
-      .select('id')
-      .eq('profile_id', id)
-      .single();
-    if (linkError || !adminLink) {
-      return res.status(404).json({ success: false, error: 'Admin not found.' });
+    const adminData = await isAdminProfile(id);
+    if (!adminData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin not found.'
+      });
     }
 
-    const { error: deleteAdminLinkError } = await supabase.from('admins').delete().eq('id', adminLink.id);
-    if (deleteAdminLinkError) throw deleteAdminLinkError;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('first_name, last_name, employee_id')
+      .eq('id', id)
+      .single();
 
-    const { error: deleteProfileError } = await supabase.from('profiles').delete().eq('id', id);
-    if (deleteProfileError) throw deleteProfileError;
+    await supabase.from('admins').delete().eq('profile_id', id);
+    
+    await supabase
+      .from('branches')
+      .update({ manager_id: null, manager_name: null })
+      .eq('manager_id', id);
+    
+    await supabase.from('profiles').delete().eq('id', id);
+    await supabase.auth.admin.deleteUser(id);
 
-    const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(id);
-    if (deleteAuthError) throw deleteAuthError;
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'DELETE_ADMIN',
+        system_category: 'Admin Management',
+        log_description: `Deleted admin ${profile?.first_name} ${profile?.last_name}`,
+      });
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      message: 'Admin deleted successfully'
+    });
   } catch (err) {
     console.error('Error deleting admin:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================
+// ACCOUNT STATUS MANAGEMENT
+// ============================================
+
+router.patch('/admins/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!['Active', 'Inactive'].includes(status)) {
+    return res.status(400).json({
+      success: false,
+      error: "status must be 'Active' or 'Inactive'."
+    });
+  }
+
+  try {
+    const adminData = await isAdminProfile(id);
+    if (!adminData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin account not found.'
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({
+        status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'UPDATE_ADMIN_STATUS',
+        system_category: 'Account Management',
+        log_description: `Changed admin ${data.employee_id} status to ${status}`,
+      });
+
+    res.json({
+      success: true,
+      message: `Account status updated to ${status}`,
+      data: {
+        id: data.id,
+        status: data.status,
+        updated_at: data.updated_at
+      }
+    });
+  } catch (err) {
+    console.error('Error updating account status:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.patch('/admins/:id/lock', async (req, res) => {
+  const { id } = req.params;
+  const { locked_by } = req.body;
+
+  try {
+    const adminData = await isAdminProfile(id);
+    if (!adminData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin account not found.'
+      });
+    }
+
+    const { data: existing } = await supabase
+      .from('user_login_attempts')
+      .select('id')
+      .eq('user_id', id)
+      .maybeSingle();
+
+    let result;
+    if (existing) {
+      const { data, error } = await supabase
+        .from('user_login_attempts')
+        .update({
+          locked: true,
+          locked_by: locked_by || req.user?.id || null,
+          locked_at: new Date().toISOString()
+        })
+        .eq('user_id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      result = data;
+    } else {
+      const { data, error } = await supabase
+        .from('user_login_attempts')
+        .insert({
+          user_id: id,
+          locked: true,
+          locked_by: locked_by || req.user?.id || null,
+          locked_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      result = data;
+    }
+
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'LOCK_ADMIN_ACCOUNT',
+        system_category: 'Account Management',
+        log_description: `Locked admin account ${id}`,
+      });
+
+    res.json({
+      success: true,
+      message: 'Account locked successfully',
+      data: result
+    });
+  } catch (err) {
+    console.error('Error locking account:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.patch('/admins/:id/unlock', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const adminData = await isAdminProfile(id);
+    if (!adminData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin account not found.'
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('user_login_attempts')
+      .update({
+        locked: false,
+        failed_attempts: 0,
+        locked_by: null,
+        locked_at: null
+      })
+      .eq('user_id', id)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'UNLOCK_ADMIN_ACCOUNT',
+        system_category: 'Account Management',
+        log_description: `Unlocked admin account ${id}`,
+      });
+
+    res.json({
+      success: true,
+      message: 'Account unlocked successfully',
+      data
+    });
+  } catch (err) {
+    console.error('Error unlocking account:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
