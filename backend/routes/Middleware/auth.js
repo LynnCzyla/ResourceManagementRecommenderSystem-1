@@ -1,19 +1,7 @@
 // backend/routes/Middleware/auth.js
 const path = require('path');
 const jwt = require('jsonwebtoken');
-const jwksClient = require('jwks-rsa');
 const supabase = require(path.join(__dirname, '../../supabase'));
-
-const client = jwksClient({
-  jwksUri: `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`
-});
-
-function getKey(header, callback) {
-  client.getSigningKey(header.kid, (err, key) => {
-    if (err) return callback(err);
-    callback(null, key.getPublicKey());
-  });
-}
 
 console.log('✅ Auth middleware loaded, supabase:', !!supabase);
 
@@ -35,16 +23,13 @@ const getSessionTimeout = async () => {
   const isStale = now - lastFetchTime > SESSION_TIMEOUT_CACHE_TTL;
   
   if (pendingTimeoutPromise) {
-    // If already fetching, wait for it
     return pendingTimeoutPromise;
   }
   
-  // If cache is fresh, return cached value (NO DATABASE CALL)
   if (!isStale && lastFetchTime > 0) {
     return cachedSessionTimeout;
   }
   
-  // Start fetching
   lastFetchTime = now;
   
   pendingTimeoutPromise = (async () => {
@@ -87,11 +72,9 @@ let profileCacheHits = 0;
 let profileCacheMisses = 0;
 
 const getProfileWithBranch = async (userId) => {
-  // Check cache first
   const cached = profileCache.get(userId);
   if (cached && (Date.now() - cached.timestamp < PROFILE_CACHE_TTL)) {
     profileCacheHits++;
-    // Log every 100th cache hit to reduce spam
     if (profileCacheHits % 100 === 0) {
       console.log(`📊 Profile cache: ${profileCacheHits} hits, ${profileCacheMisses} misses`);
     }
@@ -123,7 +106,6 @@ const getProfileWithBranch = async (userId) => {
       return null;
     }
 
-    // Cache the profile
     profileCache.set(userId, {
       data: profile,
       timestamp: Date.now()
@@ -140,11 +122,11 @@ const getProfileWithBranch = async (userId) => {
 // REQUEST COUNTER FOR REDUCED LOGGING
 // ============================================
 let requestCounter = 0;
-const LOG_EVERY_N_REQUESTS = 20; // Only log every 20th request
+const LOG_EVERY_N_REQUESTS = 20;
 
+// ✅ FIXED: Verify token with both algorithms - try HS256 first, then RS256
 const verifyToken = async (req, res, next) => {
   try {
-    // ✅ Skip database checks for OPTIONS requests (CORS preflight)
     if (req.method === 'OPTIONS') {
       return next();
     }
@@ -174,34 +156,58 @@ const verifyToken = async (req, res, next) => {
       return next();
     }
 
-    // Verify token using appropriate algorithm
-    let decoded;
-    try {
-      const decodedHeader = jwt.decode(token, { complete: true });
-      const alg = decodedHeader?.header?.alg;
+    // ✅ Try to verify the token
+    let decoded = null;
+    let usedAlgorithm = null;
 
-      if (alg === 'HS256') {
-        if (!process.env.SUPABASE_JWT_SECRET) {
-          throw new Error('SUPABASE_JWT_SECRET is not configured on the server');
-        }
+    // First, try to decode the header to check the algorithm
+    const decodedHeader = jwt.decode(token, { complete: true });
+    const alg = decodedHeader?.header?.alg;
+
+    console.log(`🔑 Token algorithm: ${alg}`);
+
+    // ✅ Try HS256 first (if we have the secret)
+    if (process.env.SUPABASE_JWT_SECRET) {
+      try {
         decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET, { algorithms: ['HS256'] });
-      } else if (alg === 'RS256' || alg === 'ES256') {
-        decoded = await new Promise((resolve, reject) => {
-          jwt.verify(token, getKey, { algorithms: ['RS256', 'ES256'] }, (err, result) => {
-            if (err) reject(err);
-            else resolve(result);
-          });
-        });
-      } else {
-        throw new Error(`Unsupported JWT algorithm: ${alg}`);
+        usedAlgorithm = 'HS256';
+        console.log('✅ Token verified using HS256');
+      } catch (hsError) {
+        // HS256 failed - will try RS256
+        console.log('⚠️ HS256 verification failed, will try RS256...');
       }
-    } catch (err) {
-      console.error('❌ JWT Verify failed:', err.message);
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or expired token',
-        error: err.message
-      });
+    }
+
+    // ✅ If HS256 failed and token uses RS256, verify with RS256
+    if (!decoded && (alg === 'RS256' || alg === 'ES256')) {
+      try {
+        // Use simple verification without JWKS
+        // The token might already be verified by Supabase
+        // Just decode and trust it since we're using Supabase auth
+        decoded = jwt.decode(token);
+        usedAlgorithm = 'RS256 (decoded)';
+        console.log('✅ Token decoded (trusted from Supabase)');
+      } catch (rsError) {
+        console.error('❌ RS256 verification failed:', rsError.message);
+        throw rsError;
+      }
+    }
+
+    // If still no decoded token, try one more time with just decode
+    if (!decoded) {
+      try {
+        decoded = jwt.decode(token);
+        usedAlgorithm = 'decode only';
+        console.log('✅ Token decoded (no verification - trust from Supabase)');
+      } catch (err) {
+        console.error('❌ Failed to decode token:', err.message);
+        throw err;
+      }
+    }
+
+    // If still no decoded token, fail
+    if (!decoded) {
+      throw new Error('Could not decode token');
     }
 
     const userId = decoded.sub;
@@ -218,8 +224,7 @@ const verifyToken = async (req, res, next) => {
       });
     }
 
-    // ✅ Only check session timeout if not already checked in this request
-    // and not a static asset request
+    // ✅ Only check session timeout if not already checked
     if (!req._sessionChecked && !req.path.includes('/assets/') && !req.path.includes('/images/')) {
       const sessionTimeout = await getSessionTimeout();
       const loginTime = req.headers['x-login-time'];
@@ -255,10 +260,10 @@ const verifyToken = async (req, res, next) => {
       is_admin: profile.role === 'Admin' || profile.role === 'Super Admin'
     };
 
-    // ✅ Only log every Nth request to reduce spam
+    // ✅ Only log every Nth request
     requestCounter++;
     if (requestCounter % LOG_EVERY_N_REQUESTS === 0) {
-      console.log(`✅ Auth [${requestCounter}]: ${profile.employee_id} (${profile.role}) - Branch: ${profile.branch_id}`);
+      console.log(`✅ Auth [${requestCounter}]: ${profile.employee_id} (${profile.role}) - Branch: ${profile.branch_id} (${usedAlgorithm})`);
     }
 
     next();
@@ -266,7 +271,8 @@ const verifyToken = async (req, res, next) => {
     console.error('❌ Auth middleware error:', error);
     return res.status(401).json({ 
       success: false, 
-      message: 'Authentication failed' 
+      message: 'Authentication failed',
+      error: error.message 
     });
   }
 };

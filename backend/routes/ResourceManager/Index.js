@@ -11,7 +11,7 @@ router.get('/test', (req, res) => {
         success: true, 
         message: 'RM Router is working!',
         timestamp: new Date().toISOString(),
-        routes: ['/dashboard', '/projects', '/employees', '/requirements', '/assignments', '/recommendations']
+        routes: ['/dashboard', '/projects', '/employees', '/requirements', '/assignments', '/recommendations', '/reports']
     });
 });
 
@@ -45,7 +45,12 @@ const recommendationsRoutes = require('./recommendations');
 console.log('✅ recommendations route loaded');
 
 const resourceRequestsRoutes = require('./resourceRequests');
+console.log('✅ resourceRequests route loaded');
 
+// ✅ ADD: Reports route
+console.log('📦 Loading Reports route...');
+const reportsRoutes = require('./Reports');
+console.log('✅ Reports route loaded');
 
 // Register routes
 console.log('🔗 Registering routes...');
@@ -56,6 +61,7 @@ router.use('/assignments', assignmentsRoutes);
 router.use('/employees', employeesRoutes);
 router.use('/recommendations', recommendationsRoutes);
 router.use('/resource-requests', resourceRequestsRoutes);
+router.use('/reports', reportsRoutes); // ✅ ADD THIS LINE
 console.log('✅ All routes registered');
 
 console.log('✅ RM Routes registered with auth middleware');

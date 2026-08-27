@@ -28,7 +28,6 @@ export default function RMDashboardTab() {
   const [activeProjectsCount, setActiveProjectsCount] = useState(0);
   const [workloadCounts, setWorkloadCounts] = useState({ available: 0, limited: 0, fullyLoaded: 0 });
 
-  // ✅ Real Resource Analytics data (previously hardcoded)
   const [departmentUtilization, setDepartmentUtilization] = useState([]);
   const [workloadDistributionPct, setWorkloadDistributionPct] = useState({ available: 0, limited: 0, fullyLoaded: 0 });
   const [monthlyTrend, setMonthlyTrend] = useState([]);
@@ -36,6 +35,8 @@ export default function RMDashboardTab() {
   const [hiringNeed, setHiringNeed] = useState(null);
 
   const [loading, setLoading] = useState(true);
+  const [pdfLoading, setPdfLoading] = useState(false); // ✅ Separate for PDF
+  const [excelLoading, setExcelLoading] = useState(false); // ✅ Separate for Excel
   const [error, setError] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [workloadFilter, setWorkloadFilter] = useState('All');
@@ -54,8 +55,6 @@ export default function RMDashboardTab() {
       setTotalEmployees(data.totalEmployees || 0);
       setActiveProjectsCount(data.activeProjectsCount || 0);
       setWorkloadCounts(data.workloadCounts || { available: 0, limited: 0, fullyLoaded: 0 });
-
-      // ✅ Wire in real analytics data returned by /api/rm/dashboard
       setDepartmentUtilization(data.departmentUtilization || []);
       setWorkloadDistributionPct(data.workloadDistributionPct || { available: 0, limited: 0, fullyLoaded: 0 });
       setMonthlyTrend(data.monthlyTrend || []);
@@ -73,13 +72,89 @@ export default function RMDashboardTab() {
     return emp.workloadStatus === workloadFilter;
   });
 
-  // Role distribution for the report modal, computed from live data.
   const roleDistribution = employees.reduce((acc, emp) => {
     acc[emp.role] = (acc[emp.role] || 0) + 1;
     return acc;
   }, {});
 
-  const handleGenerateReport = () => setShowReport(true);
+  // ✅ Generate Report - supports both PDF and Excel with separate loading
+  const generateReport = async (format) => {
+    // Set the appropriate loading state
+    if (format === 'pdf') {
+      setPdfLoading(true);
+    } else {
+      setExcelLoading(true);
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        alert('You are not logged in. Please log in again.');
+        return;
+      }
+  
+      const response = await fetch('http://localhost:5000/api/rm/reports/utilization', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          format: format,
+          departmentFilter: null,
+        }),
+      });
+  
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to generate report: ${response.status} - ${errorText}`);
+      }
+  
+      const blob = await response.blob();
+      
+      if (!blob || blob.size === 0) {
+        throw new Error('Generated report is empty');
+      }
+  
+      const url = window.URL.createObjectURL(blob);
+      
+      const contentDisposition = response.headers.get('content-disposition');
+      const extension = format === 'pdf' ? 'pdf' : 'xlsx';
+      let filename = `Utilization_Report_${new Date().toISOString().split('T')[0]}.${extension}`;
+      
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match && match[1]) {
+          filename = match[1].replace(/['"]/g, '');
+        }
+      }
+  
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }, 100);
+  
+      setShowReport(false);
+  
+    } catch (error) {
+      console.error('❌ Error generating report:', error);
+      alert('Failed to generate report: ' + error.message);
+    } finally {
+      // Reset the appropriate loading state
+      if (format === 'pdf') {
+        setPdfLoading(false);
+      } else {
+        setExcelLoading(false);
+      }
+    }
+  };
 
   // Calculations for Resource Analytics Statistics
   const employeesOnly = employees.filter(
@@ -88,7 +163,6 @@ export default function RMDashboardTab() {
   const hasEmployeesData = employeesOnly.length > 0;
   const activeEmployeesCount = employeesOnly.filter((e) => e.workloadStatus !== 'Available').length;
   
-  // Workforce Utilization % based on workloadStatus weighting or average utilization rates
   const avgUtilization = hasEmployeesData
     ? Math.round(employeesOnly.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / employeesOnly.length)
     : 0;
@@ -131,7 +205,7 @@ export default function RMDashboardTab() {
 
   const isNearRightEdge = (index) => {
     const pointX = getX(index);
-    const tooltipWidth = 190; // matches minWidth: '180px' + margin
+    const tooltipWidth = 190;
     return (svgWidth - pointX) < tooltipWidth;
   };
 
@@ -225,7 +299,23 @@ export default function RMDashboardTab() {
         <div className="glass-card" style={styles.panel}>
           <div style={styles.panelHeader}>
             <h2 style={styles.panelTitle}>Employee Utilization & Workload</h2>
-            <button onClick={handleGenerateReport} style={styles.reportBtn}>Generate Utilization Report</button>
+            {/* ✅ Button group with separate loading states */}
+            <div style={styles.buttonGroup}>
+              <button 
+                onClick={() => generateReport('pdf')} 
+                style={styles.reportBtn}
+                disabled={pdfLoading || excelLoading}
+              >
+                {pdfLoading ? 'Generating...' : 'Generate PDF'}
+              </button>
+              <button 
+                onClick={() => generateReport('excel')} 
+                style={styles.excelBtn}
+                disabled={pdfLoading || excelLoading}
+              >
+                {excelLoading ? 'Generating...' : 'Export Excel'}
+              </button>
+            </div>
           </div>
 
           <div style={styles.filterRow}>
@@ -370,7 +460,7 @@ export default function RMDashboardTab() {
                   <span style={styles.chartSubtitle}>Comparison of cumulative unfulfilled requests vs. currently available employees over time.</span>
                 </div>
                 
-                 <div style={styles.chartWrapper}>
+                <div style={styles.chartWrapper}>
                   <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} width="100%" height="auto" style={{ display: 'block' }}>
                     {/* Horizontal gridlines */}
                     {[0, 0.25, 0.5, 0.75, 1.0].map((ratio, index) => {
@@ -609,13 +699,17 @@ export default function RMDashboardTab() {
                 </div>
               </div>
 
-              <button onClick={() => { alert('Report downloaded successfully!'); setShowReport(false); }} style={{ ...styles.downloadBtn, display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+              <button 
+                onClick={() => generateReport('pdf')} 
+                style={{ ...styles.downloadBtn, display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
+                disabled={pdfLoading || excelLoading}
+              >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
-                Download PDF Report
+                {pdfLoading ? 'Generating...' : 'Download PDF Report'}
               </button>
             </div>
           </div>
@@ -694,8 +788,22 @@ const styles = {
     fontWeight: '700',
     margin: 0,
   },
+  buttonGroup: {
+    display: 'flex',
+    gap: '8px',
+  },
   reportBtn: {
     backgroundColor: 'var(--color-primary)',
+    color: '#ffffff',
+    border: 'none',
+    padding: '8px 14px',
+    borderRadius: '6px',
+    fontWeight: '700',
+    fontSize: '12px',
+    cursor: 'pointer',
+  },
+  excelBtn: {
+    backgroundColor: '#217346',
     color: '#ffffff',
     border: 'none',
     padding: '8px 14px',
