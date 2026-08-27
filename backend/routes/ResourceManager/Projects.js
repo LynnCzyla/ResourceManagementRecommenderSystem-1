@@ -1,12 +1,29 @@
+// backend/routes/ResourceManager/Projects.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { verifyToken } = require('../Middleware/auth');
 
-// ✅ Cache for projects data
+// ✅ Apply auth middleware
+router.use(verifyToken);
+
+// ✅ Cache for projects data with branch-aware keys
 const cache = {
-  data: null,
-  timestamp: 0,
+  data: {}, // Store by branch_id
   ttl: 60000 // 1 minute cache
+};
+
+const getCacheKey = (branchId) => `branch_${branchId || 'all'}`;
+
+const clearProjectsCache = (branchId = null) => {
+  if (branchId) {
+    const key = getCacheKey(branchId);
+    delete cache.data[key];
+    console.log(`🗑️ Projects cache cleared for branch: ${branchId}`);
+  } else {
+    cache.data = {};
+    console.log('🗑️ All projects cache cleared');
+  }
 };
 
 // Statuses that mean "not started yet"
@@ -14,31 +31,90 @@ const NOT_STARTED_STATUSES = ['Pending', 'Pending Approval', 'Inactive'];
 
 /**
  * GET /api/rm/projects
- * Powers RMProjectsTab.jsx - OPTIMIZED VERSION
+ * Powers RMProjectsTab.jsx - WITH BRANCH FILTERING VIA created_by
  */
-// ✅ CHANGE: Remove '/projects' from path - use '/'
 router.get('/', async (req, res) => {
   try {
-    // ✅ Check cache first
-    const now = Date.now();
-    if (cache.data && (now - cache.timestamp) < cache.ttl) {
-      console.log('📁 Returning CACHED projects data');
-      return res.json(cache.data);
+    const userBranchId = req.user.branch_id;
+    const isSuperAdmin = req.user.is_super_admin;
+    const userRole = req.user.role;
+
+    console.log(`📁 Projects requested by: ${req.user.employee_id} (${userRole})`);
+    console.log(`🏢 Branch filter: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+
+    if (!isSuperAdmin && !userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account is not assigned to a branch. Please contact your administrator.'
+      });
     }
 
-    console.log('📁 Fetching FRESH projects data...');
+    // ✅ Use branch-specific cache key
+    const cacheKey = getCacheKey(isSuperAdmin ? 'all' : userBranchId);
+    const now = Date.now();
+
+    if (cache.data[cacheKey] && (now - cache.data[cacheKey].timestamp) < cache.ttl) {
+      console.log(`📁 Returning CACHED projects data for branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+      return res.json(cache.data[cacheKey].data);
+    }
+
+    console.log(`📁 Fetching FRESH projects data for branch: ${isSuperAdmin ? 'ALL' : userBranchId}...`);
     const startTime = Date.now();
 
-    // ✅ Run all queries in PARALLEL
+    // ✅ Step 1: Get all users in this branch
+    let branchUserQuery = supabase
+      .from('profiles')
+      .select('id')
+      .eq('status', 'Active');
+
+    if (!isSuperAdmin && userBranchId) {
+      branchUserQuery = branchUserQuery.eq('branch_id', userBranchId);
+    }
+
+    const { data: branchUsers, error: userError } = await branchUserQuery;
+
+    if (userError) {
+      console.error('Error fetching branch users:', userError);
+      throw userError;
+    }
+
+    const userIds = branchUsers.map(u => u.id);
+    console.log(`📁 Found ${userIds.length} users in branch`);
+
+    // ✅ Step 2: Get projects created by users in this branch
+    let projectsQuery = supabase
+      .from('projects')
+      .select('id, project_code, project_name, project_description, status, start_date, end_date, priority, created_by')
+      .order('created_at', { ascending: false });
+
+    // Filter by created_by (users in this branch) for non-super admins
+    if (!isSuperAdmin && userIds.length > 0) {
+      projectsQuery = projectsQuery.in('created_by', userIds);
+    } else if (!isSuperAdmin && userIds.length === 0) {
+      // No users in branch, return empty
+      return res.json({
+        success: true,
+        projects: [],
+        totalProjects: 0,
+        summary: {
+          active: 0,
+          completed: 0,
+          onHold: 0,
+          totalTeamMembers: 0,
+        },
+        meta: {
+          branch_filter: isSuperAdmin ? 'all' : userBranchId,
+          user_role: userRole,
+          is_super_admin: isSuperAdmin,
+        }
+      });
+    }
+
     const [projectsResult, requirementsResult, assignmentsResult] = await Promise.all([
-      supabase
-        .from('projects')
-        .select('id, project_code, project_name, project_description, status, start_date, end_date, priority'),
-      
+      projectsQuery,
       supabase
         .from('project_resource_requirements')
         .select('id, project_id, requirement_skills ( skills )'),
-      
       supabase
         .from('project_assignments')
         .select(`
@@ -59,6 +135,20 @@ router.get('/', async (req, res) => {
     const assignments = assignmentsResult.data || [];
 
     console.log(`📁 Data: ${projects.length} projects, ${requirements.length} requirements, ${assignments.length} assignments`);
+
+    // ✅ Get creator info for each project
+    const creatorIds = [...new Set(projects.map(p => p.created_by).filter(Boolean))];
+    let creatorMap = new Map();
+    if (creatorIds.length > 0) {
+      const { data: creators, error: creatorErr } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, employee_id')
+        .in('id', creatorIds);
+      
+      if (!creatorErr && creators) {
+        creatorMap = new Map(creators.map(c => [c.id, c]));
+      }
+    }
 
     // ✅ Get unique profile IDs from assignments
     const assignedProfileIds = [...new Set(
@@ -99,7 +189,20 @@ router.get('/', async (req, res) => {
       assignmentsByProject.get(assignment.project_id).push(assignment);
     }
 
-    // ✅ Process projects in a single pass
+    // ✅ Get branch name for response
+    let branchName = 'All Branches';
+    if (!isSuperAdmin && userBranchId) {
+      const { data: branchData } = await supabase
+        .from('branches')
+        .select('name')
+        .eq('id', userBranchId)
+        .single();
+      if (branchData) {
+        branchName = branchData.name;
+      }
+    }
+
+    // ✅ Process projects
     const result = [];
     const toActivate = [];
     for (const proj of projects) {
@@ -120,6 +223,12 @@ router.get('/', async (req, res) => {
           )}`,
         };
       });
+
+      // ✅ Get creator info
+      const creator = creatorMap.get(proj.created_by);
+      const createdByName = creator 
+        ? `${creator.first_name || ''} ${creator.last_name || ''}`.trim() || 'Unknown'
+        : 'Unknown';
 
       let status = proj.status;
       const hasMembers = assignedEmployees.length > 0;
@@ -142,6 +251,8 @@ router.get('/', async (req, res) => {
         assignedEmployees,
         teamSize: assignedEmployees.length,
         skillsCount: requiredSkills.length,
+        createdBy: proj.created_by,
+        createdByName: createdByName,
       });
     }
 
@@ -165,14 +276,22 @@ router.get('/', async (req, res) => {
         completed: result.filter(p => p.status === 'Completed').length,
         onHold: result.filter(p => p.status === 'On Hold').length,
         totalTeamMembers: result.reduce((sum, p) => sum + p.teamSize, 0),
+      },
+      meta: {
+        branch: branchName,
+        branch_filter: isSuperAdmin ? 'all' : userBranchId,
+        user_role: userRole,
+        is_super_admin: isSuperAdmin,
       }
     };
 
-    cache.data = responseData;
-    cache.timestamp = Date.now();
+    cache.data[cacheKey] = {
+      data: responseData,
+      timestamp: Date.now()
+    };
 
     const endTime = Date.now();
-    console.log(`✅ Projects processed in ${endTime - startTime}ms`);
+    console.log(`✅ Projects processed in ${endTime - startTime}ms for branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
 
     res.json(responseData);
 
@@ -183,12 +302,13 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * GET /api/rm/projects/:id (NEW - For project detail with avatars)
+ * GET /api/rm/projects/:id
  */
-// ✅ CHANGE: Remove '/projects' from path - use '/:id'
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userBranchId = req.user.branch_id;
+    const isSuperAdmin = req.user.is_super_admin;
 
     const { data: project, error } = await supabase
       .from('projects')
@@ -201,6 +321,7 @@ router.get('/:id', async (req, res) => {
         start_date,
         end_date,
         priority,
+        created_by,
         project_assignments (
           profile_id,
           assigned_role,
@@ -209,7 +330,8 @@ router.get('/:id', async (req, res) => {
             id,
             first_name,
             last_name,
-            avatar_url
+            avatar_url,
+            branch_id
           )
         )
       `)
@@ -221,10 +343,41 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Project not found' });
     }
 
+    // ✅ Check if user has access to this project (via created_by branch)
+    if (!isSuperAdmin) {
+      // Get the creator's branch
+      const { data: creator } = await supabase
+        .from('profiles')
+        .select('branch_id')
+        .eq('id', project.created_by)
+        .single();
+
+      if (!creator || creator.branch_id !== userBranchId) {
+        return res.status(403).json({
+          success: false,
+          error: 'You do not have permission to view this project'
+        });
+      }
+    }
+
+    // Get creator info
+    let createdByName = 'Unknown';
+    if (project.created_by) {
+      const { data: creator } = await supabase
+        .from('profiles')
+        .select('first_name, last_name')
+        .eq('id', project.created_by)
+        .single();
+      if (creator) {
+        createdByName = `${creator.first_name || ''} ${creator.last_name || ''}`.trim() || 'Unknown';
+      }
+    }
+
     res.json({
       success: true,
       project: {
         ...project,
+        createdByName: createdByName,
         assignedEmployees: (project.project_assignments || []).map((a) => ({
           employeeId: a.profile_id,
           employeeName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : 'Unknown',
@@ -242,16 +395,34 @@ router.get('/:id', async (req, res) => {
 /**
  * POST /api/rm/projects/:id/assign
  */
-// ✅ CHANGE: Remove '/projects' from path - use '/:id/assign'
 router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
   const { employeeId, role } = req.body;
+  const userBranchId = req.user.branch_id;
+  const isSuperAdmin = req.user.is_super_admin;
 
   if (!employeeId) {
     return res.status(400).json({ success: false, error: 'employeeId is required' });
   }
 
   try {
+    // ✅ Check if employee belongs to user's branch
+    const { data: employee, error: empError } = await supabase
+      .from('profiles')
+      .select('branch_id, role')
+      .eq('id', employeeId)
+      .single();
+
+    if (empError) throw empError;
+
+    if (!isSuperAdmin && employee.branch_id !== userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'You can only assign employees from your branch'
+      });
+    }
+
+    // ✅ Check if already assigned
     const { data: existing, error: existErr } = await supabase
       .from('project_assignments')
       .select('id')
@@ -283,6 +454,7 @@ router.post('/:id/assign', async (req, res) => {
     
     if (error) throw error;
 
+    // ✅ Check and update project status if needed
     const { data: projectRow } = await supabase
       .from('projects')
       .select('status')
@@ -296,7 +468,7 @@ router.post('/:id/assign', async (req, res) => {
         .eq('id', id);
     }
 
-    clearProjectsCache();
+    clearProjectsCache(isSuperAdmin ? null : userBranchId);
 
     res.json({ 
       success: true, 
@@ -312,11 +484,28 @@ router.post('/:id/assign', async (req, res) => {
 /**
  * DELETE /api/rm/projects/:id/assign/:employeeId
  */
-// ✅ CHANGE: Remove '/projects' from path - use '/:id/assign/:employeeId'
 router.delete('/:id/assign/:employeeId', async (req, res) => {
   const { id, employeeId } = req.params;
+  const userBranchId = req.user.branch_id;
+  const isSuperAdmin = req.user.is_super_admin;
 
   try {
+    // ✅ Check if employee belongs to user's branch
+    const { data: employee, error: empError } = await supabase
+      .from('profiles')
+      .select('branch_id')
+      .eq('id', employeeId)
+      .single();
+
+    if (empError) throw empError;
+
+    if (!isSuperAdmin && employee.branch_id !== userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'You can only remove employees from your branch'
+      });
+    }
+
     const { error } = await supabase
       .from('project_assignments')
       .delete()
@@ -325,7 +514,7 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     
     if (error) throw error;
 
-    clearProjectsCache();
+    clearProjectsCache(isSuperAdmin ? null : userBranchId);
 
     res.json({ 
       success: true,
@@ -336,12 +525,6 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-const clearProjectsCache = () => {
-  cache.data = null;
-  cache.timestamp = 0;
-  console.log('🗑️ Projects cache cleared');
-};
 
 module.exports = router;
 module.exports.clearProjectsCache = clearProjectsCache;
