@@ -1,4 +1,4 @@
-// frontend/ContactAdmin.jsx - Updated with branch selection
+// frontend/ContactAdmin.jsx - Updated with branch selection and new API path
 
 import React, { useState, useEffect } from 'react';
 
@@ -10,21 +10,21 @@ export default function ContactAdmin({ isOpen, onClose }) {
   const [purpose, setPurpose] = useState('');
   const [message, setMessage] = useState('');
   const [phone, setPhone] = useState('');
-  const [branchId, setBranchId] = useState(''); // ✅ NEW
-  const [branches, setBranches] = useState([]); // ✅ NEW
+  const [branchId, setBranchId] = useState('');
+  const [branches, setBranches] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  // ✅ Fetch branches on mount
+  // ✅ Fetch branches on mount - UPDATED PATH
   useEffect(() => {
     const fetchBranches = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/admin/branches');
+        // ✅ Using the new public path
+        const response = await fetch('http://localhost:5000/api/public/admin/branches');
         const result = await response.json();
         if (result.success) {
           setBranches(result.data || []);
-          // Set default branch if there's only one
           if (result.data && result.data.length === 1) {
             setBranchId(result.data[0].id);
           }
@@ -66,23 +66,24 @@ export default function ContactAdmin({ isOpen, onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
+  
     if (!firstName || !lastName || !email || !purpose || !message) {
       setError('Please fill in all required fields.');
       return;
     }
-
+  
     if (!branchId) {
       setError('Please select a branch.');
       return;
     }
-
+  
     setIsLoading(true);
-
+  
     try {
       console.log('📩 Sending contact admin request:', { firstName, middleName, lastName, email, purpose, phone, branchId });
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/contact-admin`, {
+  
+      // ✅ Using the new public path
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/public/admin/contact-admin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -93,16 +94,16 @@ export default function ContactAdmin({ isOpen, onClose }) {
           purpose, 
           message, 
           phone,
-          branchId // ✅ NEW
+          branchId
         }),
       });
-
+  
       const result = await response.json();
-
+  
       if (!result.success) {
         throw new Error(result.error || 'Failed to send message');
       }
-
+  
       console.log('✅ Message sent to admin');
       setSuccess(true);
     } catch (err) {
@@ -228,7 +229,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
                 />
               </div>
 
-              {/* ✅ NEW: Branch Selection */}
+              {/* Branch Selection */}
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Branch</label>
                 <select

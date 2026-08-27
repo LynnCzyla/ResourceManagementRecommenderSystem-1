@@ -26,7 +26,11 @@ const forgotPasswordRoutes = require("./routes/Auth/forgotPassword");
 const systemSettingsRoutes = require("./routes/Admin/systemSettings");
 const unlockRoutes = require("./routes/Admin/unlockUsers");
 const loginRoutes = require("./routes/Auth/login");
-const contactAdminRoutes = require('./routes/Admin/contactAdmin');
+
+// ✅ Import both public and protected contact routes
+const contactPublicRoutes = require('./routes/Public/contactPublic');
+const contactProtectedRoutes = require('./routes/Admin/contactAdmin');
+
 const departmentsPositionsRoutes = require('./routes/Admin/departmentsPositions');
 const notificationsRouter = require('./routes/notifications');
 const documentRoutes = require('./routes/Employee/documentRoutes');
@@ -56,14 +60,18 @@ app.use('/api/public', require('./routes/Public/clientFeedback'));
 
 app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
+
+// ✅ MOUNT CONTACT ROUTES - PUBLIC (no auth) and PROTECTED (with auth)
+app.use('/api/public/admin', contactPublicRoutes);    // Public routes - NO auth required
+app.use('/api/admin', contactProtectedRoutes);         // Protected routes - Auth required
+
 app.use('/api/admin', departmentsPositionsRoutes);
-app.use('/api/admin', contactAdminRoutes);
-app.use('/api/admin', dashboardRoutes); // ← This should have auth middleware inside
-app.use('/api/admin', auditLogsRoutes); // ← This should have auth middleware inside
+app.use('/api/admin', dashboardRoutes);
+app.use('/api/admin', auditLogsRoutes);
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", loginRoutes);
-app.use("/api/users", userRoutes); // ← Create users (should be Super Admin only)
-app.use("/api/users", verifyToken, userManagementRoutes); // ✅ ADD AUTH MIDDLEWARE HERE
+app.use("/api/users", userRoutes);
+app.use("/api/users", verifyToken, userManagementRoutes);
 app.use("/api/admin", unlockRoutes);
 app.use("/api/settings", systemSettingsRoutes);
 app.use('/api/employee', documentRoutes);

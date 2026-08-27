@@ -20,9 +20,36 @@ class RecommendationEngine {
     }
 
     /**
-     * Main method: Get ranked candidates for a project
+     * Get project with creator's branch info
      */
-    async getCandidatesForProject(projectId, options = {}) {
+    async _getProject(projectId) {
+        const { data, error } = await supabase
+            .from('projects')
+            .select(`
+                id, 
+                project_name, 
+                project_description, 
+                status, 
+                priority, 
+                created_by, 
+                start_date, 
+                end_date,
+                profiles:created_by (
+                    branch_id
+                )
+            `)
+            .eq('id', projectId)
+            .single();
+
+        if (error) throw error;
+        return data;
+    }
+
+    /**
+     * Main method: Get ranked candidates for a project
+     * ✅ FIXED: Uses creator's branch for filtering
+     */
+    async getCandidatesForProject(projectId, options = {}, userBranchId = null, isSuperAdmin = false) {
         const {
             excludeProfileIds = [],
             minMatchingScore = 0.0,
@@ -35,10 +62,25 @@ class RecommendationEngine {
         if (requirementId) {
             console.log(`📋 Using specific requirement: ${requirementId}`);
         }
+        console.log(`🏢 Branch filter: ${isSuperAdmin ? 'ALL' : userBranchId}`);
     
-        // 1. Get project
+        // 1. Get project with creator's branch info
         const project = await this._getProject(projectId);
         if (!project) throw new Error('Project not found');
+    
+        const projectBranchId = project.profiles?.branch_id;
+    
+        // ✅ Check if project creator belongs to user's branch
+        if (!isSuperAdmin && userBranchId) {
+            if (!projectBranchId) {
+                console.warn(`⚠️ Project creator ${project.created_by} has no branch assigned`);
+                throw new Error('Project creator not assigned to any branch');
+            }
+            if (projectBranchId !== userBranchId) {
+                console.warn(`⚠️ Project creator's branch ${projectBranchId} != User branch ${userBranchId}`);
+                throw new Error('You do not have permission to view this project');
+            }
+        }
     
         // 2. Get required skills
         const requiredSkills = requirementId 
@@ -58,7 +100,7 @@ class RecommendationEngine {
             };
         }
     
-        // 3. 🆕 Get already assigned employees for THIS requirement
+        // 3. Get already assigned employees for THIS requirement
         const assignedProfileIds = await this._getAssignedEmployeesForRequirement(requirementId);
         if (assignedProfileIds.length > 0) {
             console.log(`👥 ${assignedProfileIds.length} employees already assigned to requirement ${requirementId}, excluding them`);
@@ -67,8 +109,8 @@ class RecommendationEngine {
         // 4. Combine with excludeProfileIds
         const allExcludeIds = [...new Set([...excludeProfileIds, ...assignedProfileIds])];
     
-        // 5. Get all available employees (excluding assigned ones)
-        const employees = await this._getAvailableEmployees(allExcludeIds);
+        // 5. Get all available employees (excluding assigned ones) ✅ WITH BRANCH FILTERING
+        const employees = await this._getAvailableEmployees(allExcludeIds, userBranchId, isSuperAdmin);
         console.log(`👥 Found ${employees.length} available employees (${assignedProfileIds.length} excluded for this requirement)`);
     
         // 6. Calculate scores for each employee
@@ -102,9 +144,9 @@ class RecommendationEngine {
             }
         };
     }
-    
+
     /**
-     * 🆕 Get employees already assigned to a SPECIFIC requirement
+     * Get employees already assigned to a SPECIFIC requirement
      */
     async _getAssignedEmployeesForRequirement(requirementId) {
         if (!requirementId) return [];
@@ -115,12 +157,12 @@ class RecommendationEngine {
                 .select('profile_id')
                 .eq('requirement_id', requirementId)
                 .in('status', ['Assigned', 'Active']);
-    
+
             if (error) {
                 console.error('❌ Error fetching assigned employees:', error);
                 return [];
             }
-    
+
             return (data || []).map(item => item.profile_id).filter(Boolean);
         } catch (error) {
             console.error('❌ Error in _getAssignedEmployeesForRequirement:', error);
@@ -130,14 +172,13 @@ class RecommendationEngine {
 
     /**
      * Calculate scores for a single employee
-     * 🆕 Uses skill_aliases + skill_components for intelligent matching
      */
     async _calculateScore(employee, requiredSkills) {
         // Step 1: Get employee skills
         const employeeSkills = await this._getEmployeeSkills(employee.id);
         console.log(`📋 ${employee.first_name} - Skills:`, employeeSkills);
         
-        // Step 2: Get employee skill components (NEW!)
+        // Step 2: Get employee skill components
         const employeeComponents = await this._getEmployeeSkillComponents(employee.id);
         if (employeeComponents.length > 0) {
             console.log(`📋 ${employee.first_name} - Components:`, employeeComponents);
@@ -149,7 +190,7 @@ class RecommendationEngine {
         
         // Step 4: Build expanded skill sets
         const expandedSkills = new Set();
-        const matchSources = {}; // Track where matches came from
+        const matchSources = {};
         
         // 4a: Add all employee skills
         employeeSkills.forEach(s => {
@@ -158,7 +199,7 @@ class RecommendationEngine {
             matchSources[normalized] = 'skill';
         });
         
-        // 4b: Add skill components (NEW!)
+        // 4b: Add skill components
         employeeComponents.forEach(c => {
             const normalized = c.toLowerCase().trim();
             expandedSkills.add(normalized);
@@ -168,14 +209,12 @@ class RecommendationEngine {
         // 4c: Add aliases and masters for skills
         const normalizedEmployee = employeeSkills.map(s => s.toLowerCase().trim());
         for (const empSkill of normalizedEmployee) {
-            // If this skill is an alias, add its master
             if (aliasMap[empSkill]) {
                 const master = aliasMap[empSkill];
                 expandedSkills.add(master);
                 matchSources[master] = 'alias';
                 console.log(`   🔄 Alias: "${empSkill}" → Master: "${master}"`);
             }
-            // If this skill is a master, add all its aliases
             if (masterAliases[empSkill]) {
                 masterAliases[empSkill].forEach(alias => {
                     expandedSkills.add(alias);
@@ -185,7 +224,7 @@ class RecommendationEngine {
             }
         }
         
-        // 4d: Also expand components with aliases (NEW!)
+        // 4d: Also expand components with aliases
         const normalizedComponents = employeeComponents.map(c => c.toLowerCase().trim());
         for (const comp of normalizedComponents) {
             if (aliasMap[comp]) {
@@ -213,7 +252,6 @@ class RecommendationEngine {
             // Try exact match
             for (const empSkill of expandedSkills) {
                 if (!usedSkills.has(empSkill) && empSkill === reqLower) {
-                    // Find the original skill/component name
                     const originalSkill = employeeSkills.find(s => 
                         s.toLowerCase().trim() === empSkill
                     ) || employeeComponents.find(c => 
@@ -283,6 +321,7 @@ class RecommendationEngine {
             lastName: employee.last_name,
             department: employee.department || null,
             role: employee.role || null,
+            branchId: employee.branch_id || null,
             matchingScore: Math.round(matchingScore * 1000) / 1000,
             workloadScore: workload,
             availabilityFactor: Math.round(availabilityFactor * 1000) / 1000,
@@ -291,21 +330,18 @@ class RecommendationEngine {
             matchedSkills,
             missingSkills,
             skillMatchCount: `${matchedSkills.length}/${requiredSkills.length}`,
-            matchDetails: matchDetails, // 🆕 For debugging
+            matchDetails: matchDetails,
             status: this._getRecommendationStatus(recommendationScore)
         };
     }
 
     /**
-     * 🆕 Get skill components for an employee
-     * Uses skill_components table
-     * FIXED: Correct query structure
+     * Get skill components for an employee
      */
     async _getEmployeeSkillComponents(profileId) {
         console.log(`📋 Getting skill components for employee ${profileId}`);
         
         try {
-            // Get employee skills first
             const { data: employeeSkills, error: skillsError } = await supabase
                 .from('employee_skills')
                 .select('skill_id')
@@ -332,7 +368,6 @@ class RecommendationEngine {
 
             console.log(`📋 Found ${skillIds.length} skill IDs for employee`);
 
-            // Get components for these skill IDs
             const { data: components, error: compError } = await supabase
                 .from('skill_components')
                 .select('component_name')
@@ -348,7 +383,6 @@ class RecommendationEngine {
                 return [];
             }
 
-            // Extract and deduplicate component names
             const componentNames = components
                 .map(item => item.component_name)
                 .filter(Boolean)
@@ -369,7 +403,6 @@ class RecommendationEngine {
 
     /**
      * Get alias map: alias → master
-     * Uses skill_aliases table with caching
      */
     async _getAliasMap() {
         if (this._aliasMap !== null && this._aliasCacheTime !== null) {
@@ -462,7 +495,65 @@ class RecommendationEngine {
         return await this._getAliasMap();
     }
 
-    // ============ EXISTING METHODS (unchanged) ============
+    /**
+     * ✅ FIXED: Get available employees with BRANCH FILTERING
+     */
+    async _getAvailableEmployees(excludeIds = [], userBranchId = null, isSuperAdmin = false) {
+        console.log(`📋 Getting available employees...`);
+        console.log(`🏢 Branch filter: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+        
+        try {
+            let query = supabase
+                .from('profiles')
+                .select(`
+                    id, 
+                    employee_id, 
+                    first_name, 
+                    last_name, 
+                    role,
+                    branch_id,
+                    department_id,
+                    departments:department_id (
+                        department_name
+                    )
+                `)
+                .eq('status', 'Active')
+                .eq('role', 'Employee');
+
+            // ✅ Apply branch filter for non-super admins
+            if (!isSuperAdmin && userBranchId) {
+                query = query.eq('branch_id', userBranchId);
+                console.log(`🔍 Filtering employees by branch: ${userBranchId}`);
+            }
+
+            if (excludeIds.length > 0) {
+                query = query.not('id', 'in', `(${excludeIds.map(id => `'${id}'`).join(',')})`);
+            }
+
+            const { data, error } = await query;
+            
+            if (error) {
+                console.error('❌ Error fetching employees:', error);
+                return [];
+            }
+            
+            const employees = (data || []).map(emp => ({
+                id: emp.id,
+                employee_id: emp.employee_id,
+                first_name: emp.first_name,
+                last_name: emp.last_name,
+                role: emp.role,
+                branch_id: emp.branch_id,
+                department: emp.departments?.department_name || null
+            }));
+            
+            console.log(`✅ Found ${employees.length} employees in ${isSuperAdmin ? 'ALL branches' : 'branch'}`);
+            return employees;
+        } catch (error) {
+            console.error('❌ Error in _getAvailableEmployees:', error);
+            return [];
+        }
+    }
 
     async _getRequiredSkills(requirementId) {
         console.log(`📋 Getting required skills for requirement ${requirementId}`);
@@ -557,65 +648,6 @@ class RecommendationEngine {
         }
     }
 
-    async _getProject(projectId) {
-        const { data, error } = await supabase
-            .from('projects')
-            .select('id, project_name, project_description, status, priority, created_by, start_date, end_date')
-            .eq('id', projectId)
-            .single();
-
-        if (error) throw error;
-        return data;
-    }
-
-    async _getAvailableEmployees(excludeIds = []) {
-        console.log(`📋 Getting available employees...`);
-        
-        try {
-            let query = supabase
-                .from('profiles')
-                .select(`
-                    id, 
-                    employee_id, 
-                    first_name, 
-                    last_name, 
-                    role,
-                    department_id,
-                    departments:department_id (
-                        department_name
-                    )
-                `)
-                .eq('status', 'Active')
-                .eq('role', 'Employee');
-
-            if (excludeIds.length > 0) {
-                query = query.not('id', 'in', `(${excludeIds.map(id => `'${id}'`).join(',')})`);
-            }
-
-            const { data, error } = await query;
-            
-            if (error) {
-                console.error('❌ Error fetching employees:', error);
-                return [];
-            }
-            
-            const employees = (data || []).map(emp => ({
-                id: emp.id,
-                employee_id: emp.employee_id,
-                first_name: emp.first_name,
-                last_name: emp.last_name,
-                role: emp.role,
-                department: emp.departments?.department_name || null
-            }));
-            
-            console.log(`✅ Found ${employees.length} employees`);
-            return employees;
-        } catch (error) {
-            console.error('❌ Error in _getAvailableEmployees:', error);
-            return [];
-        }
-    }
-
     async _getEmployeeSkills(profileId) {
         console.log(`📋 Getting skills for employee ${profileId}`);
         
@@ -676,7 +708,6 @@ class RecommendationEngine {
 
     async _getHistoricalPerformance(profileId) {
         try {
-            // Get all performance records for this employee from client feedback
             const { data, error } = await supabase
                 .from('performance_records')
                 .select('rating')
@@ -686,20 +717,17 @@ class RecommendationEngine {
 
             if (error) {
                 console.error('❌ Error fetching performance records:', error);
-                return this.DEFAULT_HP;  // ← Return 0.70 on error
+                return this.DEFAULT_HP;
             }
 
-            // If no records found, return DEFAULT_HP (0.70)
             if (!data || data.length === 0) {
                 console.log(`📋 No performance records found for employee ${profileId}, using default`);
-                return this.DEFAULT_HP;  // ← Return 0.70, not 0!
+                return this.DEFAULT_HP;
             }
 
-            // Calculate average rating
             const totalRating = data.reduce((sum, record) => sum + Number(record.rating), 0);
             const avgRating = totalRating / data.length;
 
-            // Convert to HP factor (0-1 range)
             const hp = Math.min(avgRating / 5, 1.0);
             
             console.log(`📊 Employee ${profileId}: ${data.length} records, avg rating: ${avgRating.toFixed(2)}, HP: ${hp.toFixed(3)}`);
@@ -707,17 +735,12 @@ class RecommendationEngine {
             return hp;
         } catch (error) {
             console.error('❌ Error in _getHistoricalPerformance:', error);
-            return this.DEFAULT_HP;  // ← Return 0.70 on error
+            return this.DEFAULT_HP;
         }
     }
 
-    /**
-     * 🆕 Get detailed performance data for an employee
-     * Returns rating and all sub-ratings for the profile modal
-     */
     async _getPerformanceDetails(profileId) {
         try {
-            // Get performance records with all details from the database
             const { data, error } = await supabase
                 .from('performance_records')
                 .select(`
@@ -743,19 +766,17 @@ class RecommendationEngine {
                 .eq('feedback_source', 'client')
                 .eq('feedback_status', 'submitted')
                 .order('rated_at', { ascending: false });
-    
+
             if (error) {
                 console.error('❌ Error fetching performance details:', error);
                 return this._getDefaultPerformanceDetails();
             }
-    
-            // If no records found, return default (no data)
+
             if (!data || data.length === 0) {
                 console.log(`📋 No performance details found for employee ${profileId}`);
                 return this._getDefaultPerformanceDetails();
             }
-    
-            // Calculate averages from actual data
+
             const count = data.length;
             const avgRating = data.reduce((sum, r) => sum + Number(r.rating), 0) / count;
             
@@ -765,14 +786,13 @@ class RecommendationEngine {
             const avgQuality = data.reduce((sum, r) => sum + (Number(r.quality_of_work_rating) || 0), 0) / count;
             const avgTeamwork = data.reduce((sum, r) => sum + (Number(r.teamwork_rating) || 0), 0) / count;
             const avgProblemSolving = data.reduce((sum, r) => sum + (Number(r.problem_solving_rating) || 0), 0) / count;
-    
-            // Get the most recent feedback
+
             const latest = data[0];
-    
+
             return {
                 averageRating: avgRating,
                 ratingCount: count,
-                hasData: true,  // ← Flag indicating data exists
+                hasData: true,
                 ratings: data.map(r => ({
                     rating: Number(r.rating),
                     ratedAt: r.rated_at,
@@ -802,14 +822,11 @@ class RecommendationEngine {
         }
     }
 
-    /**
-     * Get default performance details when no records exist
-     */
     _getDefaultPerformanceDetails() {
         return {
             averageRating: 0,
             ratingCount: 0,
-            hasData: false,  // ← Flag indicating no data
+            hasData: false,
             ratings: [],
             technicalSkills: 0,
             communication: 0,

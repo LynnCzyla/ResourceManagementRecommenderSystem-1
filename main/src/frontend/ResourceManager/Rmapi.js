@@ -232,8 +232,8 @@ export async function fetchRecommendations(requirementId) {
     const data = await res.json();
     console.log('📋 Recommendations data received:', data);
 
-    const candidates = data.data?.candidates ||
-                      data.data?.recommended ||
+    const candidates = data.data?.recommended ||
+                      data.data?.candidates ||
                       data.candidates ||
                       [];
 
@@ -243,7 +243,9 @@ export async function fetchRecommendations(requirementId) {
       success: true,
       data: {
         recommended: candidates,
-        all: candidates
+        all: candidates,
+        totalCandidates: data.data?.totalCandidates || candidates.length,
+        requiredSkills: data.data?.requiredSkills || []
       }
     };
   } catch (error) {
@@ -256,11 +258,12 @@ export async function fetchRecommendations(requirementId) {
   }
 }
 
-// Alternative method: Get requirement then project recommendations
+// ✅ FIXED: Alternative method with correct endpoint
 async function fetchRecommendationsAlternative(requirementId, headers) {
   console.log(`📋 Trying alternative: Get requirement ${requirementId} first...`);
 
   try {
+    // First, get the requirement to find the project_id
     const reqRes = await fetch(`${API_BASE}/requirements/${requirementId}`, { headers });
 
     if (!reqRes.ok) {
@@ -270,15 +273,20 @@ async function fetchRecommendationsAlternative(requirementId, headers) {
     const requirementData = await reqRes.json();
     console.log('📋 Requirement data:', requirementData);
 
-    if (!requirementData || !requirementData.project_id) {
+    // Handle different response formats
+    const projectId = requirementData.project_id || 
+                     requirementData.data?.project_id || 
+                     requirementData.requirement?.project_id;
+    
+    if (!projectId) {
       throw new Error('No project_id found in requirement');
     }
 
-    const projectId = requirementData.project_id;
     console.log(`📋 Found project ${projectId} for requirement ${requirementId}`);
 
+    // ✅ FIXED: Correct endpoint for project recommendations
     const projectRes = await fetch(
-      `${API_BASE}/projects/${projectId}/recommendations?minMatchingScore=0&maxCandidates=20`,
+      `${API_BASE}/recommendations/projects/${projectId}?minMatchingScore=0&maxCandidates=20`,
       { headers }
     );
 
@@ -289,8 +297,8 @@ async function fetchRecommendationsAlternative(requirementId, headers) {
     const data = await projectRes.json();
     console.log('📋 Project recommendations received:', data);
 
-    const candidates = data.data?.candidates ||
-                      data.data?.recommended ||
+    const candidates = data.data?.recommended ||
+                      data.data?.candidates ||
                       data.candidates ||
                       [];
 
@@ -298,7 +306,9 @@ async function fetchRecommendationsAlternative(requirementId, headers) {
       success: true,
       data: {
         recommended: candidates,
-        all: candidates
+        all: candidates,
+        totalCandidates: data.data?.totalCandidates || candidates.length,
+        requiredSkills: data.data?.requiredSkills || []
       }
     };
   } catch (error) {
@@ -307,15 +317,51 @@ async function fetchRecommendationsAlternative(requirementId, headers) {
   }
 }
 
+// ✅ FIXED: Employee Performance endpoint
 export async function fetchEmployeePerformance(profileId) {
   console.log(`📊 Fetching performance for employee ${profileId}...`);
   try {
-      const headers = await authHeaders();
-      const res = await fetch(`${API_BASE}/employee/${profileId}/performance`, { headers });
-      return handle(res);
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/recommendations/employees/${profileId}/performance`, { headers });
+    return handle(res);
   } catch (error) {
-      console.error('❌ Performance fetch error:', error);
-      throw error;
+    console.error('❌ Performance fetch error:', error);
+    throw error;
+  }
+}
+
+// ✅ NEW: Employee Workload endpoint
+export async function fetchEmployeeWorkload(profileId) {
+  console.log(`📊 Fetching workload for employee ${profileId}...`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/recommendations/employees/${profileId}/workload`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Workload fetch error:', error);
+    throw error;
+  }
+}
+
+// ✅ FIXED: Assign employee to project
+export async function assignEmployeeToProjectRM(projectId, { profileId, taskTitle, priority, dueDate }) {
+  console.log(`📋 Assigning employee ${profileId} to project ${projectId}...`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/recommendations/projects/${projectId}/assign`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ 
+        profileId, 
+        taskTitle, 
+        priority, 
+        dueDate 
+      }),
+    });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Assignment error:', error);
+    throw error;
   }
 }
 
@@ -394,6 +440,9 @@ export default {
   fetchRequirements,
   fetchAssignments,
   fetchRecommendations,
+  fetchEmployeePerformance,
+  fetchEmployeeWorkload,
+  assignEmployeeToProjectRM,
   createAssignment,
   updateRequirementStatus,
   fetchResourceRequests,
