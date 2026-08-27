@@ -34,6 +34,25 @@ function setCache(key, data) {
 // Transform a profiles row into the shape the PM tabs expect
 function transformEmployee(row) {
   const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unnamed';
+  
+  // Calculate availability based on workload if not provided
+  let availability = row.availability_status || 'Available';
+  let totalAvailableHours = 40; // Default value
+  
+  // If we have workload data, calculate availability
+  if (row.workload_score !== undefined) {
+    const availabilityFactor = Math.max(0, 1 - (row.workload_score / 10));
+    totalAvailableHours = Math.round(availabilityFactor * 40);
+    
+    if (availabilityFactor < 0.3) {
+      availability = 'Overloaded';
+    } else if (availabilityFactor < 0.6) {
+      availability = 'Limited';
+    } else {
+      availability = 'Available';
+    }
+  }
+  
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -41,11 +60,12 @@ function transformEmployee(row) {
     role: row.positions?.position_name || 'Unassigned',
     department: row.departments?.department_name || '',
     avatar: row.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
-    availability: row.availability_status,
-    totalAvailableHours: row.total_available_hours,
+    availability: availability,
+    totalAvailableHours: totalAvailableHours,
   };
 }
 
+// ✅ Updated SELECT without total_available_hours
 const EMPLOYEE_SELECT = `
   id,
   employee_id,
@@ -53,7 +73,6 @@ const EMPLOYEE_SELECT = `
   last_name,
   avatar_url,
   availability_status,
-  total_available_hours,
   status,
   positions ( position_name ),
   departments ( department_name )
@@ -167,7 +186,36 @@ router.get('/employees', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const transformed = (data || []).map(transformEmployee);
+    // ✅ Get workload scores for each employee
+    const employeeIds = (data || []).map(emp => emp.id);
+    let workloadMap = {};
+    
+    if (employeeIds.length > 0) {
+      const { data: tasksData, error: tasksError } = await supabase
+        .from('project_tasks')
+        .select('profile_id, priority')
+        .in('profile_id', employeeIds)
+        .in('status', ['Active', 'In Progress']);
+
+      if (!tasksError && tasksData) {
+        const priorityWeights = { 'High': 3, 'Medium': 2, 'Low': 1 };
+        tasksData.forEach(task => {
+          if (!workloadMap[task.profile_id]) {
+            workloadMap[task.profile_id] = 0;
+          }
+          workloadMap[task.profile_id] += priorityWeights[task.priority] || 1;
+        });
+      }
+    }
+
+    // Transform with workload data
+    const transformed = (data || []).map(emp => {
+      const workloadScore = workloadMap[emp.id] || 0;
+      return transformEmployee({
+        ...emp,
+        workload_score: workloadScore
+      });
+    });
     
     // Cache the result
     setCache(cacheKey, transformed);
