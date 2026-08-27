@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects } from './Rmapi';
+import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects, fetchEmployeeDetails } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
 export default function RMEmployeeDirectoryTab() {
@@ -10,7 +10,10 @@ export default function RMEmployeeDirectoryTab() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState('All');
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [employeeDetails, setEmployeeDetails] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [assignForm, setAssignForm] = useState({
     projectId: '',
     startDate: new Date().toISOString().split('T')[0],
@@ -38,12 +41,10 @@ export default function RMEmployeeDirectoryTab() {
   };
 
   const handleToggleVerify = async (empId) => {
-    // optimistic update
     setEmployees((prev) => prev.map((emp) => (emp.id === empId ? { ...emp, isVerified: !emp.isVerified } : emp)));
     try {
       await toggleEmployeeVerified(empId);
     } catch (err) {
-      // revert on failure
       setEmployees((prev) => prev.map((emp) => (emp.id === empId ? { ...emp, isVerified: !emp.isVerified } : emp)));
       alert(`Couldn't update verification status: ${err.message}`);
     }
@@ -78,6 +79,7 @@ export default function RMEmployeeDirectoryTab() {
       });
       alert(`Assigned ${selectedEmployee.name} to project`);
       handleCloseAssignModal();
+      loadEmployees();
     } catch (err) {
       alert(`Couldn't assign employee: ${err.message}`);
     } finally {
@@ -85,7 +87,60 @@ export default function RMEmployeeDirectoryTab() {
     }
   };
 
-  // Normalize roles to Title Case helper
+  // ✅ View Employee Details
+  // ✅ Updated: View Employee Details with better debugging
+const handleViewEmployee = async (emp) => {
+  setSelectedEmployee(emp);
+  setShowViewModal(true);
+  setLoadingDetails(true);
+  setEmployeeDetails(null);
+  
+  try {
+    const details = await fetchEmployeeDetails(emp.id);
+    console.log('📊 Employee Details Response:', details);
+    
+    // ✅ Ensure tasks have title property
+    if (details.tasks) {
+      details.tasks = details.tasks.map(task => ({
+        ...task,
+        title: task.title || 'Untitled Task'
+      }));
+    }
+    
+    // ✅ Ensure projects have tasks with title
+    if (details.projects) {
+      details.projects = details.projects.map(project => ({
+        ...project,
+        tasks: (project.tasks || []).map(task => ({
+          ...task,
+          title: task.title || 'Untitled Task'
+        }))
+      }));
+    }
+    
+    setEmployeeDetails(details);
+  } catch (err) {
+    console.error('Error fetching employee details:', err);
+    setEmployeeDetails({
+      ...emp,
+      projects: [],
+      tasks: [],
+      workloadScore: 0,
+      utilizationRate: 0,
+      taskCount: 0,
+      workloadStatus: 'Unknown'
+    });
+  } finally {
+    setLoadingDetails(false);
+  }
+};
+
+  const handleCloseViewModal = () => {
+    setShowViewModal(false);
+    setSelectedEmployee(null);
+    setEmployeeDetails(null);
+  };
+
   const toTitleCase = (str) => {
     if (!str) return '';
     return str
@@ -192,11 +247,10 @@ export default function RMEmployeeDirectoryTab() {
                         </span>
                       )}
                     </h3>
-                      <div style={styles.empId}>{emp.employeeId || 'No ID'}</div>
-                      <div style={styles.empRole}>{emp.role || 'Unassigned'}</div>
+                    <div style={styles.empId}>{emp.employeeId || 'No ID'}</div>
+                    <div style={styles.empRole}>{emp.role || 'Unassigned'}</div>
                   </div>
                 </div>
-                
               </div>
 
               {/* Skills Section */}
@@ -225,6 +279,12 @@ export default function RMEmployeeDirectoryTab() {
 
               {/* Footer / Actions */}
               <div style={styles.cardFooter}>
+                <button
+                  onClick={() => handleViewEmployee(emp)}
+                  style={styles.viewBtn}
+                >
+                  View Details
+                </button>
                 {emp.isAssignable ? (
                   <button
                     onClick={() => handleOpenAssignModal(emp)}
@@ -234,7 +294,7 @@ export default function RMEmployeeDirectoryTab() {
                   </button>
                 ) : (
                   <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontStyle: 'italic', display: 'block', width: '100%', textAlign: 'center', alignSelf: 'center' }}>
-                    Not assignable — Resource/Project Manager or Admin/HR role
+                    Not assignable
                   </span>
                 )}
               </div>
@@ -247,13 +307,9 @@ export default function RMEmployeeDirectoryTab() {
       {showAssignModal && selectedEmployee && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
-            {/* Modal Header */}
             <div style={styles.modalHeader}>
               <h2 style={styles.modalTitle}>Assign Employee to Project</h2>
-              <button
-                onClick={handleCloseAssignModal}
-                style={styles.modalCloseBtn}
-              >
+              <button onClick={handleCloseAssignModal} style={styles.modalCloseBtn}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"></line>
                   <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -261,14 +317,12 @@ export default function RMEmployeeDirectoryTab() {
               </button>
             </div>
 
-            {/* Employee Profile Card */}
             <div style={styles.modalProfileCard}>
               <div style={styles.modalProfileBadge}>[{selectedEmployee.department}]</div>
               <h3 style={styles.modalProfileName}>{selectedEmployee.name}</h3>
               <div style={styles.modalProfileRole}>{selectedEmployee.role}</div>
             </div>
 
-            {/* Form Fields */}
             <form onSubmit={handleAssignSubmit} style={styles.modalForm}>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Select Project</label>
@@ -307,13 +361,8 @@ export default function RMEmployeeDirectoryTab() {
                 />
               </div>
 
-              {/* Footer Buttons */}
               <div style={styles.modalFooter}>
-                <button
-                  type="button"
-                  onClick={handleCloseAssignModal}
-                  style={styles.modalCancelBtn}
-                >
+                <button type="button" onClick={handleCloseAssignModal} style={styles.modalCancelBtn}>
                   Cancel
                 </button>
                 <button
@@ -325,6 +374,168 @@ export default function RMEmployeeDirectoryTab() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ View Employee Details Modal */}
+      {showViewModal && selectedEmployee && (
+        <div style={styles.modalOverlay} onClick={(e) => {
+          if (e.target === e.currentTarget) handleCloseViewModal();
+        }}>
+          <div style={{ ...styles.modal, maxWidth: '700px' }}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Employee Details</h2>
+              <button onClick={handleCloseViewModal} style={styles.modalCloseBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            {loadingDetails ? (
+              <div style={styles.loadingDetails}>Loading employee details...</div>
+            ) : employeeDetails ? (
+              <>
+                {/* Employee Profile */}
+                <div style={styles.viewProfileSection}>
+                  <div style={styles.viewProfileHeader}>
+                    <RMAvatar name={employeeDetails.name} src={employeeDetails.avatar} size={60} />
+                    <div style={styles.viewProfileInfo}>
+                      <h3 style={styles.viewProfileName}>
+                        {employeeDetails.name}
+                        {employeeDetails.isVerified && (
+                          <span style={styles.verifyBadge}>✓ Verified</span>
+                        )}
+                      </h3>
+                      <div style={styles.viewProfileId}>{employeeDetails.employeeId || 'No ID'}</div>
+                      <div style={styles.viewProfileRole}>{employeeDetails.role || 'Unassigned'}</div>
+                      <div style={styles.viewProfileDept}>{employeeDetails.department || 'No Department'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Workload Summary */}
+                <div style={styles.viewWorkloadSection}>
+                  <div style={styles.viewWorkloadGrid}>
+                    <div style={styles.viewWorkloadItem}>
+                      <span style={styles.viewWorkloadLabel}>Workload Score</span>
+                      <span style={styles.viewWorkloadValue}>{employeeDetails.workloadScore || 0}</span>
+                    </div>
+                    <div style={styles.viewWorkloadItem}>
+                      <span style={styles.viewWorkloadLabel}>Utilization</span>
+                      <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
+                    </div>
+                    <div style={styles.viewWorkloadItem}>
+                      <span style={styles.viewWorkloadLabel}>Status</span>
+                      <span style={{
+                        ...styles.viewStatusBadge,
+                        backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' : 
+                                       employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' : 
+                                       'rgba(239, 68, 68, 0.1)',
+                        color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' : 
+                               employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' : 
+                               'var(--color-danger)'
+                      }}>
+                        {employeeDetails.workloadStatus || 'Unknown'}
+                      </span>
+                    </div>
+                    <div style={styles.viewWorkloadItem}>
+                      <span style={styles.viewWorkloadLabel}>Tasks</span>
+                      <span style={styles.viewWorkloadValue}>{employeeDetails.taskCount || 0}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Projects & Tasks */}
+                <div style={styles.viewSection}>
+                  <h4 style={styles.viewSectionTitle}>
+                    📋 Projects & Tasks ({employeeDetails.projects?.length || 0} projects)
+                  </h4>
+                  
+                  {employeeDetails.projects && employeeDetails.projects.length > 0 ? (
+                    <div style={styles.viewProjectList}>
+                      {employeeDetails.projects.map((project, idx) => (
+                        <div key={idx} style={styles.viewProjectCard}>
+                          <div style={styles.viewProjectHeader}>
+                            <span style={styles.viewProjectName}>
+                              {project.project_name || 'Unnamed Project'}
+                              <span style={styles.viewProjectCode}>({project.project_code || 'N/A'})</span>
+                            </span>
+                            <span style={{
+                              ...styles.viewProjectStatus,
+                              backgroundColor: project.project_status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-bg-hover)',
+                              color: project.project_status === 'Active' ? 'var(--color-success)' : 'var(--color-text-muted)'
+                            }}>
+                              {project.project_status || 'Active'}
+                            </span>
+                          </div>
+                          
+                          <div style={styles.viewProjectTasks}>
+                            {project.tasks && project.tasks.length > 0 ? (
+                              project.tasks.map((task, taskIdx) => (
+                                <div key={taskIdx} style={styles.viewTaskItem}>
+                                  <div style={{ flex: 1 }}>
+                                    <span style={styles.viewTaskName}>• {task.title || 'Untitled Task'}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <span style={{
+                                      ...styles.viewTaskPriority,
+                                      backgroundColor: task.priority === 'High' ? 'rgba(239, 68, 68, 0.1)' :
+                                                    task.priority === 'Medium' ? 'rgba(245, 158, 11, 0.1)' :
+                                                    'rgba(16, 185, 129, 0.1)',
+                                      color: task.priority === 'High' ? 'var(--color-danger)' :
+                                            task.priority === 'Medium' ? 'var(--color-warning)' :
+                                            'var(--color-success)'
+                                    }}>
+                                      {task.priority || 'Low'}
+                                    </span>
+                                    <span style={{
+                                      ...styles.viewTaskStatus,
+                                      backgroundColor: task.status === 'Completed' ? 'var(--color-primary-light)' :
+                                                    task.status === 'In Progress' ? 'rgba(245, 158, 11, 0.1)' :
+                                                    task.status === 'Completed-Hidden' ? 'var(--color-bg-hover)' :
+                                                    'rgba(239, 68, 68, 0.1)',
+                                      color: task.status === 'Completed' ? 'var(--color-success)' :
+                                            task.status === 'In Progress' ? 'var(--color-warning)' :
+                                            task.status === 'Completed-Hidden' ? 'var(--color-text-muted)' :
+                                            'var(--color-danger)'
+                                    }}>
+                                      {task.status || 'Pending'}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No tasks in this project</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={styles.viewEmptyText}>No projects or tasks assigned</p>
+                  )}
+                </div>
+
+                {/* Skills */}
+                <div style={styles.viewSection}>
+                  <h4 style={styles.viewSectionTitle}>Skills</h4>
+                  <div style={styles.viewSkillsList}>
+                    {employeeDetails.skills && employeeDetails.skills.length > 0 ? (
+                      employeeDetails.skills.map((skill, idx) => (
+                        <span key={idx} style={styles.skillPill}>{skill}</span>
+                      ))
+                    ) : (
+                      <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No skills listed</span>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p style={styles.viewEmptyText}>No details available</p>
+            )}
           </div>
         </div>
       )}
@@ -431,17 +642,6 @@ const styles = {
     borderRadius: '4px',
     fontWeight: '700',
   },
-  verifyToggleBtn: {
-    fontSize: '10px',
-    fontWeight: '700',
-    color: 'var(--color-text-secondary)',
-    background: 'transparent',
-    border: '1px solid var(--color-border)',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  },
   empId: {
     fontSize: '11px',
     color: 'var(--color-text-muted)',
@@ -498,7 +698,20 @@ const styles = {
     borderTop: '1px solid var(--color-border)',
     paddingTop: '16px',
     display: 'flex',
-    justifyContent: 'stretch',
+    gap: '8px',
+  },
+  viewBtn: {
+    flex: 1,
+    padding: '10px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontWeight: '700',
+    fontSize: '13px',
+    cursor: 'pointer',
+    textAlign: 'center',
+    transition: 'all 0.2s',
   },
   assignBtn: {
     flex: 1,
@@ -661,5 +874,211 @@ const styles = {
     fontSize: '13px',
     cursor: 'pointer',
     transition: 'all 0.2s',
-  }
+  },
+  // ✅ View Modal Specific Styles
+  loadingDetails: {
+    padding: '40px',
+    textAlign: 'center',
+    color: 'var(--color-text-muted)',
+  },
+  viewProfileSection: {
+    padding: '20px 24px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  viewProfileHeader: {
+    display: 'flex',
+    gap: '16px',
+    alignItems: 'center',
+  },
+  viewProfileInfo: {
+    flex: 1,
+  },
+  viewProfileName: {
+    fontSize: '18px',
+    fontWeight: '800',
+    margin: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: 'var(--color-text-primary)',
+  },
+  viewProfileId: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontFamily: 'monospace',
+    fontWeight: '700',
+    marginTop: '2px',
+  },
+  viewProfileRole: {
+    fontSize: '14px',
+    color: 'var(--color-text-secondary)',
+    fontWeight: '600',
+    marginTop: '2px',
+  },
+  viewProfileDept: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    marginTop: '2px',
+  },
+  viewWorkloadSection: {
+    padding: '16px 24px',
+    borderBottom: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+  },
+  viewWorkloadGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '16px',
+  },
+  viewWorkloadItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    textAlign: 'center',
+  },
+  viewWorkloadLabel: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    fontWeight: '600',
+  },
+  viewWorkloadValue: {
+    fontSize: '20px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+    marginTop: '4px',
+  },
+  viewStatusBadge: {
+    fontSize: '12px',
+    fontWeight: '700',
+    padding: '4px 12px',
+    borderRadius: '30px',
+    display: 'inline-block',
+    marginTop: '4px',
+  },
+  viewSection: {
+    padding: '16px 24px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  viewSectionTitle: {
+    fontSize: '14px',
+    fontWeight: '700',
+    margin: '0 0 12px 0',
+    color: 'var(--color-text-primary)',
+  },
+  viewAssignmentList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  viewAssignmentItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 12px',
+    background: 'var(--color-bg-root)',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+  },
+  viewAssignmentName: {
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+  },
+  viewAssignmentRole: {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+  },
+  viewAssignmentStatus: {
+    fontSize: '11px',
+    fontWeight: '700',
+    color: 'var(--color-success)',
+  },
+  viewTaskList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  viewTaskItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 12px',
+    background: 'var(--color-bg-root)',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+  },
+  viewTaskName: {
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    flex: 1,
+  },
+  viewTaskPriority: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    margin: '0 8px',
+  },
+  viewTaskStatus: {
+    fontSize: '11px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+  },
+  viewSkillsList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+  },
+  viewEmptyText: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+    margin: 0,
+  },
+
+  // Add to styles object
+  viewProjectList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  viewProjectCard: {
+    border: '1px solid var(--color-border)',
+    borderRadius: '8px',
+    padding: '12px 16px',
+    background: 'var(--color-bg-root)',
+  },
+  viewProjectHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+    paddingBottom: '8px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  viewProjectName: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  viewProjectCode: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '400',
+    marginLeft: '8px',
+  },
+  viewProjectStatus: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 10px',
+    borderRadius: '20px',
+  },
+  viewProjectTasks: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
 };
