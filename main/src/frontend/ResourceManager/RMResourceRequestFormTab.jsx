@@ -4,8 +4,8 @@ import { fetchResourceRequests, createResourceRequest } from './Rmapi';
 
 const emptyForm = {
   requestTitle: '',
-  department: '',
-  position: '',
+  department: '', // Will be a department ID from database
+  position: '', // Will be a position ID from database
   quantity: 1,
   requiredSkills: '',
   experienceLevel: 'Junior',
@@ -20,10 +20,109 @@ export default function RMResourceRequestFormTab() {
   const [submittedRequests, setSubmittedRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  
+  // State for dropdown options from database
+  const [departments, setDepartments] = useState([]);
+  const [allPositions, setAllPositions] = useState([]); // All positions from API
+  const [filteredPositions, setFilteredPositions] = useState([]); // Positions filtered by department
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [errorLoading, setErrorLoading] = useState(null);
 
+  // Fetch departments and positions from database
   useEffect(() => {
+    loadDropdownOptions();
     loadRequests();
   }, []);
+
+  // Filter positions when department changes
+  useEffect(() => {
+    if (formData.department) {
+      // Filter positions by department_id
+      const filtered = allPositions.filter(
+        pos => pos.department_id === parseInt(formData.department) || 
+               pos.department_id === formData.department
+      );
+      setFilteredPositions(filtered);
+      
+      // Reset position selection if current position doesn't belong to selected department
+      if (formData.position) {
+        const posStillValid = filtered.some(
+          pos => pos.id === parseInt(formData.position) || pos.id === formData.position
+        );
+        if (!posStillValid) {
+          setFormData(prev => ({ ...prev, position: '' }));
+        }
+      }
+    } else {
+      // If no department selected, show all positions or empty
+      setFilteredPositions([]);
+      setFormData(prev => ({ ...prev, position: '' }));
+    }
+  }, [formData.department, allPositions]);
+
+  const loadDropdownOptions = async () => {
+    setLoadingOptions(true);
+    setErrorLoading(null);
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Fetch departments
+      console.log('📋 Fetching departments...');
+      const deptRes = await fetch('http://localhost:5000/api/admin/departments', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      const deptData = await deptRes.json();
+      console.log('📋 Departments response:', deptData);
+      
+      // Handle different response formats
+      let departmentsList = [];
+      if (deptData.success && deptData.data) {
+        departmentsList = deptData.data;
+      } else if (Array.isArray(deptData)) {
+        departmentsList = deptData;
+      } else if (deptData.departments) {
+        departmentsList = deptData.departments;
+      }
+      
+      setDepartments(departmentsList);
+      console.log(`✅ Loaded ${departmentsList.length} departments`);
+
+      // Fetch positions
+      console.log('📋 Fetching positions...');
+      const posRes = await fetch('http://localhost:5000/api/admin/positions', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      const posData = await posRes.json();
+      console.log('📋 Positions response:', posData);
+      
+      // Handle different response formats
+      let positionsList = [];
+      if (posData.success && posData.data) {
+        positionsList = posData.data;
+      } else if (Array.isArray(posData)) {
+        positionsList = posData;
+      } else if (posData.positions) {
+        positionsList = posData.positions;
+      }
+      
+      setAllPositions(positionsList);
+      console.log(`✅ Loaded ${positionsList.length} positions`);
+
+    } catch (error) {
+      console.error('❌ Failed to load dropdown options:', error);
+      setErrorLoading(error.message);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
 
   const loadRequests = async () => {
     setLoading(true);
@@ -38,7 +137,8 @@ export default function RMResourceRequestFormTab() {
   };
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
   };
 
   const handleSubmit = async (e) => {
@@ -48,6 +148,7 @@ export default function RMResourceRequestFormTab() {
       await createResourceRequest(formData);
 
       setFormData(emptyForm);
+      setFilteredPositions([]); // Clear filtered positions after submit
       await loadRequests();
 
       Swal.fire({
@@ -195,6 +296,22 @@ export default function RMResourceRequestFormTab() {
       color: 'var(--color-text-muted)',
       fontSize: '14px',
     },
+    loadingText: {
+      textAlign: 'center',
+      color: 'var(--color-text-muted)',
+      padding: '12px',
+    },
+    errorText: {
+      textAlign: 'center',
+      color: 'var(--color-danger)',
+      padding: '12px',
+      fontSize: '14px',
+    },
+    infoText: {
+      fontSize: '12px',
+      color: 'var(--color-text-muted)',
+      marginTop: '4px',
+    }
   };
 
   const getStatusStyle = (status) => {
@@ -210,6 +327,16 @@ export default function RMResourceRequestFormTab() {
     }
   };
 
+  // Get display name for department
+  const getDepartmentName = (dept) => {
+    return dept.department_name || dept.name || dept.DepartmentName || 'Unnamed Department';
+  };
+
+  // Get display name for position
+  const getPositionName = (pos) => {
+    return pos.position_title || pos.title || pos.PositionTitle || pos.position_name || 'Unnamed Position';
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -218,6 +345,12 @@ export default function RMResourceRequestFormTab() {
       </div>
 
       <div className="glass-card" style={styles.card}>
+        {errorLoading && (
+          <div style={styles.errorText}>
+            ⚠️ Error loading options: {errorLoading}. Please refresh the page.
+          </div>
+        )}
+        
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.formRow}>
             <div style={styles.formGroup}>
@@ -227,7 +360,7 @@ export default function RMResourceRequestFormTab() {
                 name="requestTitle"
                 required
                 style={styles.input}
-                placeholder="e.g., Additional Software Engineers"
+                placeholder="e.g., Additional Sales Engineer"
                 value={formData.requestTitle}
                 onChange={handleChange}
               />
@@ -240,29 +373,59 @@ export default function RMResourceRequestFormTab() {
                 style={styles.select}
                 value={formData.department}
                 onChange={handleChange}
+                disabled={loadingOptions}
               >
-                <option value="">Select Department</option>
-                <option value="Engineering">Engineering</option>
-                <option value="Design">Design</option>
-                <option value="Analytics">Analytics</option>
-                <option value="Operations">Operations</option>
-                <option value="Marketing">Marketing</option>
+                <option value="">
+                  {loadingOptions ? 'Loading departments...' : 'Select Department'}
+                </option>
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>
+                    {getDepartmentName(dept)}
+                  </option>
+                ))}
               </select>
+              {!loadingOptions && departments.length === 0 && (
+                <div style={{ fontSize: '12px', color: 'var(--color-warning)', marginTop: '4px' }}>
+                  No departments found. Please add departments first.
+                </div>
+              )}
             </div>
           </div>
 
           <div style={styles.formRow}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Position *</label>
-              <input
-                type="text"
+              <select
                 name="position"
                 required
-                style={styles.input}
-                placeholder="e.g., Senior Software Engineer"
+                style={styles.select}
                 value={formData.position}
                 onChange={handleChange}
-              />
+                disabled={loadingOptions || !formData.department}
+              >
+                <option value="">
+                  {!formData.department 
+                    ? 'Please select a department first' 
+                    : loadingOptions 
+                      ? 'Loading positions...' 
+                      : 'Select Position'}
+                </option>
+                {filteredPositions.map((pos) => (
+                  <option key={pos.id} value={pos.id}>
+                    {getPositionName(pos)}
+                  </option>
+                ))}
+              </select>
+              {formData.department && filteredPositions.length === 0 && !loadingOptions && (
+                <div style={{ fontSize: '12px', color: 'var(--color-warning)', marginTop: '4px' }}>
+                  No positions found for this department. Please add positions first.
+                </div>
+              )}
+              {!formData.department && (
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                  Select a department to see available positions
+                </div>
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity *</label>
@@ -280,13 +443,12 @@ export default function RMResourceRequestFormTab() {
 
           <div style={styles.formRow}>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Required Skills *</label>
+              <label style={styles.label}>Required Skills</label>
               <input
                 type="text"
                 name="requiredSkills"
-                required
                 style={styles.input}
-                placeholder="e.g., React, Node.js, Python"
+                placeholder="e.g., Costing Structures, AutoCAD 3D (comma separated)"
                 value={formData.requiredSkills}
                 onChange={handleChange}
               />
@@ -334,7 +496,6 @@ export default function RMResourceRequestFormTab() {
             </div>
           </div>
 
-          {/* Budget field removed — Resource Managers have no authority to set salary/budget */}
           <div style={styles.formGroup}>
             <label style={styles.label}>Urgency *</label>
             <select
