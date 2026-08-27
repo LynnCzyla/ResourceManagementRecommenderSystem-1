@@ -2,100 +2,160 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { verifyToken } = require('../Middleware/auth');
 
-// ✅ Simple in-memory cache
-const cache = {
-  data: null,
-  timestamp: 0,
-  ttl: 60000 // Cache for 1 minute (60,000 milliseconds)
+// ✅ Apply auth middleware
+router.use(verifyToken);
+
+// ✅ Priority weights based on your paper
+const PRIORITY_WEIGHTS = {
+  'Low': 1,
+  'Medium': 2,
+  'High': 3
 };
 
-// Converts a string like "senior design engineer" or "SENIOR DESIGN ENGINEER"
-// into "Senior Design Engineer".
+// ✅ Simple in-memory cache with branch-aware keys
+const cache = {
+  data: {},
+  ttl: 60000 // Cache for 1 minute
+};
+
 const toTitleCase = (str) =>
   (str || '')
     .trim()
     .toLowerCase()
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 
+const getCacheKey = (branchId) => `branch_${branchId || 'all'}`;
+
+const clearDashboardCache = (branchId = null) => {
+  if (branchId) {
+    const key = getCacheKey(branchId);
+    delete cache.data[key];
+    console.log(`🗑️ Dashboard cache cleared for branch: ${branchId}`);
+  } else {
+    cache.data = {};
+    console.log('🗑️ All dashboard cache cleared');
+  }
+};
+
 /**
  * GET /api/rm/dashboard
- * Powers RMDashboardTab.jsx - OPTIMIZED VERSION
+ * Powers RMDashboardTab.jsx - WITH BRANCH FILTERING & WORKLOAD SCORE
  */
-// ✅ CHANGE: Remove '/dashboard' from the path - just use '/'
 router.get('/', async (req, res) => {
   try {
-    // ✅ Check cache first
-    const now = Date.now();
-    if (cache.data && (now - cache.timestamp) < cache.ttl) {
-      console.log('📊 Returning CACHED dashboard data');
-      return res.json(cache.data);
+    const userBranchId = req.user.branch_id;
+    const isSuperAdmin = req.user.is_super_admin;
+    const userRole = req.user.role;
+
+    console.log(`📊 RM Dashboard requested by: ${req.user.employee_id} (${userRole})`);
+    console.log(`🏢 Branch filter: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+
+    if (!isSuperAdmin && !userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account is not assigned to a branch. Please contact your administrator.'
+      });
     }
 
-    console.log('📊 Fetching FRESH dashboard data...');
+    const cacheKey = getCacheKey(isSuperAdmin ? 'all' : userBranchId);
+    const now = Date.now();
+
+    if (cache.data[cacheKey] && (now - cache.data[cacheKey].timestamp) < cache.ttl) {
+      console.log(`📊 Returning CACHED dashboard data for branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+      return res.json(cache.data[cacheKey].data);
+    }
+
+    console.log(`📊 Fetching FRESH dashboard data for branch: ${isSuperAdmin ? 'ALL' : userBranchId}...`);
     const startTime = Date.now();
+
+    // ✅ Build employee query with branch filtering
+    let employeeQuery = supabase
+      .from('profiles')
+      .select(`
+        id,
+        employee_id,
+        first_name,
+        last_name,
+        status,
+        role,
+        created_at,
+        avatar_url,
+        branch_id,
+        position_id,
+        positions ( position_name ),
+        departments ( department_name )
+      `)
+      .eq('status', 'Active');
+
+    if (!isSuperAdmin && userBranchId) {
+      employeeQuery = employeeQuery.eq('branch_id', userBranchId);
+    }
+
+    // ✅ Get all projects
+    const projectsQuery = supabase
+      .from('projects')
+      .select('id, status, project_code, project_name');
 
     // ✅ Run queries in PARALLEL
     const [employeesResult, assignmentsResult, projectsResult, tasksResult] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select(`
-          id,
-          employee_id,
-          first_name,
-          last_name,
-          status,
-          role,
-          created_at,
-          avatar_url,
-          positions ( position_name ),
-          departments ( department_name )
-        `)
-        .eq('status', 'Active'),
-
+      employeeQuery,
       supabase
         .from('project_assignments')
-        .select('profile_id, status')
+        .select('profile_id, project_id, status')
         .eq('status', 'Assigned'),
-
-      supabase
-        .from('projects')
-        .select('id, status'),
-
+      projectsQuery,
       supabase
         .from('project_tasks')
-        .select('profile_id, status, project_id')
+        .select('profile_id, status, project_id, priority') // ✅ Removed task_name and weight
     ]);
 
-    // ✅ Check for errors FIRST
     if (employeesResult.error) throw employeesResult.error;
     if (assignmentsResult.error) throw assignmentsResult.error;
     if (projectsResult.error) throw projectsResult.error;
     if (tasksResult.error) throw tasksResult.error;
 
-    // ✅ Define projects BEFORE using it
-    const projects = projectsResult.data || [];
-    const projectIds = projects.map(p => p.id);  // ✅ Now defined!
-
-    // ✅ Filter tasks to only include relevant projects
-    const allTasks = tasksResult.data || [];
-    const tasks = allTasks.filter(t => projectIds.includes(t.project_id));
-
-    // Admin accounts aren't assignable to projects/tasks
+    // ✅ ONLY show users with role = 'Employee'
     const employees = (employeesResult.data || []).filter(
-      (emp) => (emp.role || '').trim().toLowerCase() !== 'admin'
+      (emp) => {
+        const role = (emp.role || '').trim().toLowerCase();
+        return role === 'employee';
+      }
     );
-    const assignments = assignmentsResult.data || [];
+
+    const allAssignments = assignmentsResult.data || [];
+    const allProjects = projectsResult.data || [];
+    const allTasks = tasksResult.data || [];
+
+    // ✅ Get employee IDs for this branch
+    const employeeIds = employees.map(e => e.id);
+
+    // ✅ Filter assignments to only those from this branch's employees
+    const assignments = allAssignments.filter(a => employeeIds.includes(a.profile_id));
+
+    // ✅ Get project IDs from filtered assignments
+    const projectIdsFromAssignments = [...new Set(assignments.map(a => a.project_id))];
+
+    // ✅ Filter projects to only those that have assignments from this branch
+    let projects = allProjects.filter(p => projectIdsFromAssignments.includes(p.id));
+
+    if (projectIdsFromAssignments.length === 0) {
+      projects = [];
+    }
+
+    // ✅ Get ALL tasks for employees in this branch
+    const tasks = allTasks.filter(t => employeeIds.includes(t.profile_id));
 
     console.log(`📊 Data: ${employees.length} employees, ${assignments.length} assignments, ${projects.length} projects, ${tasks.length} tasks`);
 
-    // ✅ Count assignments efficiently (single pass)
+    // ✅ Count assignments
     const assignmentCounts = {};
     for (const a of assignments) {
       assignmentCounts[a.profile_id] = (assignmentCounts[a.profile_id] || 0) + 1;
     }
 
-    // ✅ Count tasks assigned to each employee (single pass)
+    // ✅ Count tasks per employee
     const taskCounts = {};
     for (const t of tasks) {
       if (t.profile_id) {
@@ -103,55 +163,70 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // ✅ Count active projects (single pass)
+    // ✅ Calculate Workload Score per employee (weighted by priority)
+    const workloadScores = {};
+    for (const t of tasks) {
+      if (t.profile_id) {
+        const priority = t.priority || 'Low';
+        const weight = PRIORITY_WEIGHTS[priority] || 1;
+        workloadScores[t.profile_id] = (workloadScores[t.profile_id] || 0) + weight;
+      }
+    }
+
+    // ✅ Count active projects
     let activeProjectsCount = 0;
     for (const p of projects) {
       if (p.status === 'Active') activeProjectsCount++;
     }
 
-    // ✅ Process employees with counters (single pass)
+    // ✅ Process employees with Workload Score
     const employeeRows = [];
     let availableCount = 0;
     let limitedCount = 0;
     let fullyLoadedCount = 0;
 
     for (const emp of employees) {
-      const count = assignmentCounts[emp.id] || 0;
       const taskCount = taskCounts[emp.id] || 0;
+      const workloadScore = workloadScores[emp.id] || 0;
+      
       let workloadStatus;
-
-      if (taskCount === 0) {
+      let utilizationRate;
+      
+      // ✅ Workload status based on Workload Score (weighted)
+      if (workloadScore === 0) {
         workloadStatus = 'Available';
+        utilizationRate = 0;
         availableCount++;
-      } else if (taskCount === 1) {
+      } else if (workloadScore <= 3) {
         workloadStatus = 'Limited Availability';
+        utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
         limitedCount++;
       } else {
         workloadStatus = 'Fully Utilized';
+        utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
         fullyLoadedCount++;
       }
 
-      const rawPosition = emp.positions?.position_name?.trim();
+      // ✅ Get position name
+      const positionName = emp.positions?.position_name || null;
+      const rawPosition = positionName?.trim();
       const rawRole = (emp.role || '').trim();
       const roleLower = rawRole.toLowerCase();
 
-      // ✅ CHANGE: Drop the "Employee / " prefix — just show the position/role itself
-      // (e.g. "Human Resources" instead of "Employee / Human Resources").
       let displayRole;
-      if (roleLower === 'project manager') {
+      if (rawPosition && rawPosition.toLowerCase() !== 'employee') {
+        displayRole = toTitleCase(rawPosition);
+      } else if (roleLower === 'project manager') {
         displayRole = 'Project Manager';
       } else if (roleLower === 'resource manager') {
         displayRole = 'Resource Manager';
-      } else if (rawPosition && rawPosition.toLowerCase() !== 'employee') {
-        displayRole = toTitleCase(rawPosition);
       } else if (rawRole && roleLower !== 'employee') {
         displayRole = toTitleCase(rawRole);
       } else {
         displayRole = 'Employee';
       }
 
-      const hasTask = (taskCounts[emp.id] || 0) > 0;
-      const utilizationRate = Math.min(taskCount * 50, 100);
+      const hasTask = taskCount > 0;
 
       employeeRows.push({
         id: emp.id,
@@ -159,18 +234,24 @@ router.get('/', async (req, res) => {
         name: `${emp.first_name} ${emp.last_name}`,
         avatar: emp.avatar_url || null,
         role: displayRole,
+        position: positionName || 'Unassigned',
+        positionId: emp.position_id || null,
         rawRole: emp.role,
         department: emp.departments?.department_name || 'Unassigned',
         workloadStatus,
         utilizationRate,
-        assignmentCount: count,
+        taskCount: taskCount,
+        workloadScore: workloadScore,
+        assignmentCount: assignmentCounts[emp.id] || 0,
         taskStatus: hasTask ? 'Assigned' : 'Unassigned',
         createdAt: emp.created_at || null,
       });
     }
 
-    // ✅ Resource Utilization by Department — computed from real per-employee
-    // utilization rates instead of hardcoded numbers.
+    // ✅ Log workload distribution
+    console.log(`📊 Workload Distribution: Available: ${availableCount}, Limited: ${limitedCount}, Fully Loaded: ${fullyLoadedCount}`);
+
+    // ✅ Resource Utilization by Department
     const deptStats = {};
     for (const row of employeeRows) {
       const dept = row.department;
@@ -186,7 +267,7 @@ router.get('/', async (req, res) => {
       }))
       .sort((a, b) => b.utilization - a.utilization);
 
-    // ✅ Workload Distribution — real percentages instead of hardcoded 40/30/30.
+    // ✅ Workload Distribution based on Workload Score
     const totalForPct = employeeRows.length || 1;
     const workloadDistributionPct = {
       available: Math.round((availableCount / totalForPct) * 100),
@@ -194,9 +275,7 @@ router.get('/', async (req, res) => {
       fullyLoaded: Math.round((fullyLoadedCount / totalForPct) * 100),
     };
 
-    // ✅ Build the last 6 calendar months once, shared by the "Monthly Resource
-    // Requests Trend" chart and the new "Workload vs. Employee Growth" chart
-    // so both use the exact same buckets.
+    // ✅ Build the last 6 calendar months
     const monthMeta = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date();
@@ -210,28 +289,33 @@ router.get('/', async (req, res) => {
     sixMonthsAgo.setDate(1);
     sixMonthsAgo.setHours(0, 0, 0, 0);
 
-    // ✅ Monthly Resource Requests Trend — pulled from a `project_resource_requirements`
-    // table (created_at), last 6 months. Degrades gracefully (empty array)
-    // if that table doesn't exist yet or the query fails, instead of
-    // showing fabricated numbers.
+    // ✅ Monthly Resource Requests Trend
     let monthlyTrend = [];
-    let requestMonthBuckets = {};
     try {
-      const { data: requestsData, error: requestsError } = await supabase
+      let reqQuery = supabase
         .from('project_resource_requirements')
-        .select('created_at, quantity_needed, role_title')
+        .select('created_at, quantity_needed, role_title, project_id')
         .gte('created_at', sixMonthsAgo.toISOString());
+
+      if (!isSuperAdmin && userBranchId) {
+        if (projectIdsFromAssignments.length > 0) {
+          reqQuery = reqQuery.in('project_id', projectIdsFromAssignments);
+        } else {
+          reqQuery = reqQuery.eq('project_id', 0);
+        }
+      }
+
+      const { data: requestsData, error: requestsError } = await reqQuery;
 
       if (requestsError) throw requestsError;
 
-      // Filter out resource requests for project managers, resource managers, admins, and HR
       const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
       const filteredReqs = (requestsData || []).filter((r) => {
         const title = (r.role_title || '').trim().toLowerCase();
         return !excludedKeywords.some((kw) => title.includes(kw));
       });
 
-      requestMonthBuckets = monthMeta.reduce((acc, m) => ({ ...acc, [m.key]: 0 }), {});
+      const requestMonthBuckets = monthMeta.reduce((acc, m) => ({ ...acc, [m.key]: 0 }), {});
       for (const r of filteredReqs) {
         const d = new Date(r.created_at);
         const key = `${d.getFullYear()}-${d.getMonth()}`;
@@ -245,37 +329,37 @@ router.get('/', async (req, res) => {
         count: requestMonthBuckets[key],
       }));
     } catch (trendErr) {
-      console.warn('⚠️ Could not compute monthly resource request trend:', trendErr.message);
+      console.warn('⚠️ Monthly resource request trend error:', trendErr.message);
       monthlyTrend = [];
-      requestMonthBuckets = monthMeta.reduce((acc, m) => ({ ...acc, [m.key]: 0 }), {});
     }
 
-    // ✅ Demand vs. Available Capacity — cumulative open demand (Pending resource-request
-    // quantity_needed created on or before the end of the month) mapped against cumulative
-    // available capacity (active Employees with workloadStatus of 'Available' or 'Limited Availability'
-    // hired on or before the end of the month).
-    // Note: workloadStatus is computed from current task counts, not historical per-month task counts.
-    // If historical workload status isn't tracked, we use current workloadStatus for all months
-    // as an approximation (this limitation will be flagged in the capstone writeup).
+    // ✅ Demand vs. Available Capacity
     let demandVsAvailableCapacity = [];
     try {
-      const { data: pendingReqs, error: reqsError } = await supabase
+      let pendingQuery = supabase
         .from('project_resource_requirements')
-        .select('created_at, quantity_needed, role_title')
+        .select('created_at, quantity_needed, role_title, project_id')
         .eq('status', 'Pending')
         .gte('created_at', sixMonthsAgo.toISOString());
 
+      if (!isSuperAdmin && userBranchId) {
+        if (projectIdsFromAssignments.length > 0) {
+          pendingQuery = pendingQuery.in('project_id', projectIdsFromAssignments);
+        } else {
+          pendingQuery = pendingQuery.eq('project_id', 0);
+        }
+      }
+
+      const { data: pendingReqs, error: reqsError } = await pendingQuery;
+
       if (reqsError) throw reqsError;
 
-      // Filter out role_title keywords for managers/admins/HR
       const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
       const filteredPending = (pendingReqs || []).filter((r) => {
         const title = (r.role_title || '').trim().toLowerCase();
         return !excludedKeywords.some((kw) => title.includes(kw));
       });
 
-      // Filter capacity: active Employees (database role is 'Employee')
-      // who are currently 'Available' or 'Limited Availability'.
       const availableCapacityEmployees = employeeRows.filter((e) => {
         const roleMatch = (e.rawRole || '').trim().toLowerCase() === 'employee';
         const isAvailable = e.workloadStatus === 'Available' || e.workloadStatus === 'Limited Availability';
@@ -283,12 +367,10 @@ router.get('/', async (req, res) => {
       });
 
       demandVsAvailableCapacity = monthMeta.map(({ key, label, endOfMonth }) => {
-        // Calculate cumulative pending demand: sum of quantity_needed for all pending requests created on or before endOfMonth
         const openDemand = filteredPending
           .filter((r) => new Date(r.created_at) <= endOfMonth)
           .reduce((sum, r) => sum + (r.quantity_needed || r.quantity || 1), 0);
 
-        // Calculate available capacity: count of active Employees with workload status 'Available' or 'Limited Availability' created on or before endOfMonth
         const availableCapacity = availableCapacityEmployees
           .filter((e) => e.createdAt ? new Date(e.createdAt) <= endOfMonth : true)
           .length;
@@ -300,13 +382,11 @@ router.get('/', async (req, res) => {
         };
       });
     } catch (growthErr) {
-      console.warn('⚠️ Could not compute demand vs available capacity:', growthErr.message);
+      console.warn('⚠️ Demand vs capacity error:', growthErr.message);
       demandVsAvailableCapacity = [];
     }
 
-    // ✅ Hiring Outlook — flags whether the current headcount looks like it
-    // needs reinforcement, based on average utilization and how many
-    // departments are running hot (>=85% utilization).
+    // ✅ Hiring Outlook
     const overallUtilizationRate = employeeRows.length
       ? Math.round(employeeRows.reduce((sum, e) => sum + e.utilizationRate, 0) / employeeRows.length)
       : 0;
@@ -314,7 +394,7 @@ router.get('/', async (req, res) => {
     const overloadedDepartments = departmentUtilization.filter((d) => d.utilization >= 85);
 
     let recommendation;
-    let level; // 'high' | 'medium' | 'low'
+    let level;
     if (overallUtilizationRate >= 80 || overloadedDepartments.length >= 2) {
       recommendation = 'Hiring Recommended';
       level = 'high';
@@ -335,8 +415,25 @@ router.get('/', async (req, res) => {
       fullyLoadedCount,
     };
 
+    // ✅ Get branch info
+    let branchInfo = null;
+    if (!isSuperAdmin && userBranchId) {
+      const { data: branch, error: branchError } = await supabase
+        .from('branches')
+        .select('id, name, location')
+        .eq('id', userBranchId)
+        .single();
+      
+      if (!branchError && branch) {
+        branchInfo = branch;
+      }
+    }
+
     const responseData = {
       success: true,
+      branch: branchInfo,
+      is_super_admin: isSuperAdmin,
+      user_role: userRole,
       totalEmployees: employeeRows.length,
       activeProjectsCount,
       workloadCounts: {
@@ -352,12 +449,13 @@ router.get('/', async (req, res) => {
       hiringNeed,
     };
 
-    // ✅ Store in cache
-    cache.data = responseData;
-    cache.timestamp = Date.now();
+    cache.data[cacheKey] = {
+      data: responseData,
+      timestamp: Date.now()
+    };
 
     const endTime = Date.now();
-    console.log(`✅ Dashboard processed in ${endTime - startTime}ms`);
+    console.log(`✅ Dashboard processed in ${endTime - startTime}ms for branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
 
     res.json(responseData);
 
@@ -370,13 +468,5 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ Optional: Clear cache when data changes (call this from other routes)
-const clearDashboardCache = () => {
-  cache.data = null;
-  cache.timestamp = 0;
-  console.log('🗑️ Dashboard cache cleared');
-};
-
-// Export the router and the cache clearer
 module.exports = router;
 module.exports.clearDashboardCache = clearDashboardCache;

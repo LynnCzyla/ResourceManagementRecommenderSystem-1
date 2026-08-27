@@ -10,3 +10,4 @@ npm install uuid
 npm install pdfkit
 npm install jsonwebtoken
 npm install jwks-rsa
+npm install pdfkit exceljs
