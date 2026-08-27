@@ -2,30 +2,61 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { verifyToken } = require('../Middleware/auth');
 
-// ✅ Simple in-memory cache
-let cachedData = null;
-let cacheTimestamp = 0;
-const CACHE_DURATION = 60000; // 1 minute
+// ✅ Apply auth middleware
+router.use(verifyToken);
+
+// ✅ Simple in-memory cache with branch-aware keys
+const cache = {
+  data: {},
+  ttl: 60000 // 1 minute
+};
+
+const getCacheKey = (branchId) => `branch_${branchId || 'all'}`;
+
+const clearEmployeeCache = (branchId = null) => {
+  if (branchId) {
+    const key = getCacheKey(branchId);
+    delete cache.data[key];
+    console.log(`🗑️ Employee cache cleared for branch: ${branchId}`);
+  } else {
+    cache.data = {};
+    console.log('🗑️ All employee cache cleared');
+  }
+};
 
 /**
  * GET /api/rm/employees
- * Powers RMEmployeeDirectoryTab.jsx - OPTIMIZED (avatar removed from list)
+ * Powers RMEmployeeDirectoryTab.jsx - WITH BRANCH FILTERING - ONLY EMPLOYEE ROLE
  */
-// ✅ CHANGE: Remove '/employees' from the path - just use '/'
 router.get('/', async (req, res) => {
   try {
-    // ✅ Check cache first
-    const now = Date.now();
-    if (cachedData && (now - cacheTimestamp) < CACHE_DURATION) {
-      console.log('👥 Returning CACHED employees data');
-      return res.json(cachedData);
+    const userBranchId = req.user.branch_id;
+    const isSuperAdmin = req.user.is_super_admin;
+    const userRole = req.user.role;
+
+    console.log(`👥 Employees requested by: ${req.user.employee_id} (${userRole})`);
+    console.log(`🏢 Branch filter: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+
+    if (!isSuperAdmin && !userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account is not assigned to a branch. Please contact your administrator.'
+      });
     }
 
-    console.log('👥 Fetching FRESH employees data...');
+    const cacheKey = getCacheKey(isSuperAdmin ? 'all' : userBranchId);
+    const now = Date.now();
 
-    // ✅ REMOVED avatar_url from select - only fetch what's needed
-    const { data: profiles, error: profErr } = await supabase
+    if (cache.data[cacheKey] && (now - cache.data[cacheKey].timestamp) < cache.ttl) {
+      console.log(`👥 Returning CACHED employees data for branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+      return res.json(cache.data[cacheKey].data);
+    }
+
+    console.log(`👥 Fetching FRESH employees data for branch: ${isSuperAdmin ? 'ALL' : userBranchId}...`);
+
+    let query = supabase
       .from('profiles')
       .select(`
         id,
@@ -35,23 +66,40 @@ router.get('/', async (req, res) => {
         status,
         role,
         avatar_url,
+        branch_id,
         positions ( position_name ),
         departments ( department_name ),
         employee_skills ( skills ( skill_name ) )
       `)
-      .eq('status', 'Active');
+      .eq('status', 'Active')
+      .eq('role', 'Employee');
+
+    if (!isSuperAdmin && userBranchId) {
+      query = query.eq('branch_id', userBranchId);
+    }
+
+    const { data: profiles, error: profErr } = await query;
     if (profErr) throw profErr;
 
-    const { data: documents, error: docErr } = await supabase
-      .from('documents')
-      .select('id, employee_id, file_name, created_at')
-      .eq('document_type', 'Certificate');
-    if (docErr) throw docErr;
+    const employeeIds = profiles.map(p => p.employee_id);
+    
+    let documents = [];
+    if (employeeIds.length > 0) {
+      const { data: docData, error: docErr } = await supabase
+        .from('documents')
+        .select('id, employee_id, file_name, created_at')
+        .eq('document_type', 'Certificate')
+        .in('employee_id', employeeIds);
+      
+      if (!docErr && docData) {
+        documents = docData;
+      }
+    }
 
     const employees = (profiles || []).map((p) => {
       const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unnamed';
-      // ✅ Generate avatar URL instead of storing/transmitting base64
       const fallbackAvatar = `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`;
+      
       const certifications = (documents || [])
         .filter((d) => d.employee_id === p.employee_id)
         .map((d) => ({
@@ -61,18 +109,12 @@ router.get('/', async (req, res) => {
           date: d.created_at ? d.created_at.split('T')[0] : '',
         }));
 
-      // Determine assignability - exclude admins, project/resource managers, and HR/human resources positions
-      const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
-      const roleValue = (p.role || '').trim().toLowerCase();
-      const positionValue = (p.positions?.position_name || '').trim().toLowerCase();
-      const isAssignable = !excludedKeywords.includes(roleValue) &&
-                           !excludedKeywords.some((kw) => positionValue.includes(kw));
+      const isAssignable = true;
 
       return {
         id: p.id,
         employeeId: p.employee_id,
         name,
-        // ✅ Use generated avatar URL instead of stored base64 if no avatar_url uploaded
         avatar: p.avatar_url || fallbackAvatar,
         role: p.positions?.position_name || p.role || null,
         department: p.departments?.department_name || 'Unassigned',
@@ -80,14 +122,26 @@ router.get('/', async (req, res) => {
         certifications,
         isVerified: p.is_verified || false,
         isAssignable,
+        branch_id: p.branch_id,
       };
     });
 
-    const responseData = { success: true, employees };
+    const responseData = { 
+      success: true, 
+      employees,
+      meta: {
+        total: employees.length,
+        branch_filter: isSuperAdmin ? 'all' : userBranchId,
+        user_role: userRole,
+        is_super_admin: isSuperAdmin,
+        role_filter: 'Employee',
+      }
+    };
 
-    // ✅ Store in cache
-    cachedData = responseData;
-    cacheTimestamp = Date.now();
+    cache.data[cacheKey] = {
+      data: responseData,
+      timestamp: Date.now()
+    };
 
     res.json(responseData);
   } catch (err) {
@@ -97,13 +151,14 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * GET /api/rm/employees/:id (NEW - For detail view with avatar)
- * Use this endpoint when you need the actual avatar
+ * GET /api/rm/employees/:id
+ * Get single employee detail with branch check
  */
-// ✅ CHANGE: Remove '/employees' from the path - just use '/:id'
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userBranchId = req.user.branch_id;
+    const isSuperAdmin = req.user.is_super_admin;
 
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -112,18 +167,28 @@ router.get('/:id', async (req, res) => {
         employee_id,
         first_name,
         last_name,
-        avatar_url,  
+        avatar_url,
         status,
+        role,
+        branch_id,
         positions ( position_name ),
         departments ( department_name ),
         employee_skills ( skills ( skill_name ) )
       `)
       .eq('id', id)
+      .eq('role', 'Employee')
       .single();
 
     if (error) throw error;
     if (!profile) {
       return res.status(404).json({ success: false, error: 'Employee not found' });
+    }
+
+    if (!isSuperAdmin && profile.branch_id !== userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to view this employee'
+      });
     }
 
     const name = `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed';
@@ -135,11 +200,12 @@ router.get('/:id', async (req, res) => {
         id: profile.id,
         employeeId: profile.employee_id,
         name,
-        avatar: profile.avatar_url || fallbackAvatar,  // ✅ Return actual avatar for detail
+        avatar: profile.avatar_url || fallbackAvatar,
         role: profile.positions?.position_name || profile.role || null,
         department: profile.departments?.department_name || 'Unassigned',
         skills: (profile.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
         isVerified: profile.is_verified || false,
+        branch_id: profile.branch_id,
       }
     });
   } catch (error) {
@@ -149,20 +215,217 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
- * PATCH /api/rm/employees/:id/verify
- * Toggles a "verified profile" flag.
+ * GET /api/rm/employees/:id/details
+ * Get detailed employee information including projects and tasks
  */
-// ✅ CHANGE: Remove '/employees' from the path - just use '/:id/verify'
+router.get('/:id/details', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userBranchId = req.user.branch_id;
+    const isSuperAdmin = req.user.is_super_admin;
+
+    console.log(`👤 Fetching details for employee: ${id}`);
+
+    // ✅ Get employee profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        employee_id,
+        first_name,
+        last_name,
+        middle_name,
+        avatar_url,
+        status,
+        role,
+        branch_id,
+        position_id,
+        positions ( position_name ),
+        departments ( department_name )
+      `)
+      .eq('id', id)
+      .eq('role', 'Employee')
+      .single();
+
+    if (profileError) {
+      console.error('Profile error:', profileError);
+      throw profileError;
+    }
+    
+    if (!profile) {
+      return res.status(404).json({ success: false, error: 'Employee not found' });
+    }
+
+    // ✅ Check branch access
+    if (!isSuperAdmin && profile.branch_id !== userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to view this employee'
+      });
+    }
+
+    // ✅ Get tasks with project information
+    const { data: tasks, error: tasksError } = await supabase
+      .from('project_tasks')
+      .select(`
+        id,
+        title,
+        description,
+        priority,
+        status,
+        due_date,
+        created_at,
+        project_id,
+        projects:project_id (
+          id,
+          project_code,
+          project_name,
+          status
+        )
+      `)
+      .eq('profile_id', id)
+      .order('created_at', { ascending: false });
+
+    if (tasksError) {
+      console.error('Tasks error:', tasksError);
+      throw tasksError;
+    }
+
+    console.log(`📊 Found ${tasks?.length || 0} tasks for employee`);
+
+    // ✅ Group tasks by project
+    const projectsMap = {};
+    (tasks || []).forEach(task => {
+      const project = task.projects || {};
+      const projectId = task.project_id || 'no-project';
+      
+      if (!projectsMap[projectId]) {
+        projectsMap[projectId] = {
+          project_id: projectId,
+          project_name: project.project_name || 'No Project',
+          project_code: project.project_code || 'N/A',
+          project_status: project.status || 'Active',
+          tasks: []
+        };
+      }
+      
+      projectsMap[projectId].tasks.push({
+        id: task.id,
+        title: task.title || 'Untitled Task',
+        description: task.description || '',
+        priority: task.priority || 'Low',
+        status: task.status || 'Pending',
+        due_date: task.due_date,
+        created_at: task.created_at,
+      });
+    });
+
+    // Convert to array
+    const projectsWithTasks = Object.values(projectsMap);
+
+    // ✅ Calculate workload score
+    const PRIORITY_WEIGHTS = { 'Low': 1, 'Medium': 2, 'High': 3 };
+    let workloadScore = 0;
+    let taskCount = tasks?.length || 0;
+    
+    (tasks || []).forEach(task => {
+      const weight = PRIORITY_WEIGHTS[task.priority] || 1;
+      workloadScore += weight;
+    });
+
+    // ✅ Determine workload status
+    let workloadStatus;
+    let utilizationRate;
+    
+    if (workloadScore === 0) {
+      workloadStatus = 'Available';
+      utilizationRate = 0;
+    } else if (workloadScore <= 3) {
+      workloadStatus = 'Limited Availability';
+      utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
+    } else {
+      workloadStatus = 'Fully Utilized';
+      utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
+    }
+
+    const name = `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed';
+    const fallbackAvatar = `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`;
+
+    // ✅ Get skills
+    const { data: skillsData, error: skillsError } = await supabase
+      .from('employee_skills')
+      .select(`
+        skills (
+          skill_name
+        )
+      `)
+      .eq('profile_id', profile.id);
+
+    if (skillsError) {
+      console.error('Skills error:', skillsError);
+    }
+
+    const skills = (skillsData || []).map(s => s.skills?.skill_name).filter(Boolean);
+
+    res.json({
+      success: true,
+      data: {
+        id: profile.id,
+        employeeId: profile.employee_id,
+        name: name,
+        avatar: profile.avatar_url || fallbackAvatar,
+        role: profile.positions?.position_name || profile.role || null,
+        department: profile.departments?.department_name || 'Unassigned',
+        skills: skills,
+        isVerified: profile.is_verified || false,
+        projects: projectsWithTasks,
+        tasks: tasks || [],
+        taskCount: taskCount,
+        workloadScore: workloadScore,
+        workloadStatus: workloadStatus,
+        utilizationRate: utilizationRate,
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching employee details:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+/**
+ * PATCH /api/rm/employees/:id/verify
+ * Toggles verified profile flag with branch check
+ */
 router.patch('/:id/verify', async (req, res) => {
   const { id } = req.params;
+  const userBranchId = req.user.branch_id;
+  const isSuperAdmin = req.user.is_super_admin;
 
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('profiles')
-      .select('is_verified')
+      .select('is_verified, branch_id, role')
       .eq('id', id)
       .single();
     if (fetchErr) throw fetchErr;
+
+    if (existing.role !== 'Employee') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only Employee accounts can be verified'
+      });
+    }
+
+    if (!isSuperAdmin && existing.branch_id !== userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to modify this employee'
+      });
+    }
 
     const { data, error } = await supabase
       .from('profiles')
@@ -172,9 +435,7 @@ router.patch('/:id/verify', async (req, res) => {
       .single();
     if (error) throw error;
 
-    // ✅ Clear cache when data changes
-    cachedData = null;
-    cacheTimestamp = 0;
+    clearEmployeeCache(isSuperAdmin ? null : userBranchId);
 
     res.json({ success: true, employee: data });
   } catch (err) {
@@ -185,18 +446,40 @@ router.patch('/:id/verify', async (req, res) => {
 
 /**
  * POST /api/rm/employees/:id/assign
- * Assigns an employee to a project
+ * Assigns an employee to a project with branch check
  */
-// ✅ CHANGE: Remove '/employees' from the path - just use '/:id/assign'
 router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
   const { projectId, startDate, role, notes } = req.body;
+  const userBranchId = req.user.branch_id;
+  const isSuperAdmin = req.user.is_super_admin;
 
   if (!projectId || !startDate) {
     return res.status(400).json({ success: false, error: 'projectId and startDate are required' });
   }
 
   try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from('profiles')
+      .select('branch_id, role')
+      .eq('id', id)
+      .single();
+    if (fetchErr) throw fetchErr;
+
+    if (existing.role !== 'Employee') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only Employee accounts can be assigned to projects'
+      });
+    }
+
+    if (!isSuperAdmin && existing.branch_id !== userBranchId) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to assign this employee'
+      });
+    }
+
     const { data, error } = await supabase
       .from('project_assignments')
       .insert({
@@ -206,6 +489,7 @@ router.post('/:id/assign', async (req, res) => {
         start_date: startDate,
         status: 'Assigned',
         assigned_by: req.user?.id || null,
+        assigned_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -217,12 +501,11 @@ router.post('/:id/assign', async (req, res) => {
         action: 'ASSIGN_EMPLOYEE',
         system_category: 'Resource Manager',
         log_description: `Assigned profile ${id} to project ${projectId}. Notes: ${notes}`,
+        branch: userBranchId,
       });
     }
 
-    // ✅ Clear cache when data changes
-    cachedData = null;
-    cacheTimestamp = 0;
+    clearEmployeeCache(isSuperAdmin ? null : userBranchId);
 
     res.json({ success: true, assignment: data });
   } catch (err) {
@@ -232,3 +515,4 @@ router.post('/:id/assign', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.clearEmployeeCache = clearEmployeeCache;

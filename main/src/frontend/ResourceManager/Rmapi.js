@@ -1,4 +1,4 @@
-// D:\ResourceManagementRecommenderSystem\main\src\frontend\ResourceManager\Rmapi.js
+// main/src/frontend/ResourceManager/Rmapi.js
 import { supabase } from '../../lib/supabaseClient';
 
 // Use consistent API base URL
@@ -36,6 +36,33 @@ async function authHeaders() {
     };
   }
 }
+
+export const fetchEmployeeDetails = async (employeeId) => {
+  try {
+    const token = localStorage.getItem('token');
+    console.log(`🔍 Fetching details for employee: ${employeeId}`);
+    
+    const response = await fetch(`http://localhost:5000/api/rm/employees/${employeeId}/details`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Error response:', errorData);
+      throw new Error(errorData.error || 'Failed to fetch employee details');
+    }
+    
+    const data = await response.json();
+    console.log('✅ Employee details fetched:', data.data);
+    return data.data;
+  } catch (error) {
+    console.error('❌ Error fetching employee details:', error);
+    throw error;
+  }
+};
 
 async function handle(res) {
   try {
