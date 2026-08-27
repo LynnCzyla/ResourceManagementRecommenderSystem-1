@@ -5,7 +5,7 @@ const { verifyToken } = require('../Middleware/auth');
 
 console.log('✅ RM Router initializing...');
 
-// ✅ ADD THIS TEST ROUTE (NO AUTH REQUIRED)
+// ✅ TEST ROUTE (NO AUTH REQUIRED)
 router.get('/test', (req, res) => {
     res.json({ 
         success: true, 
@@ -47,7 +47,6 @@ console.log('✅ recommendations route loaded');
 const resourceRequestsRoutes = require('./resourceRequests');
 console.log('✅ resourceRequests route loaded');
 
-// ✅ ADD: Reports route
 console.log('📦 Loading Reports route...');
 const reportsRoutes = require('./Reports');
 console.log('✅ Reports route loaded');
@@ -61,7 +60,7 @@ router.use('/assignments', assignmentsRoutes);
 router.use('/employees', employeesRoutes);
 router.use('/recommendations', recommendationsRoutes);
 router.use('/resource-requests', resourceRequestsRoutes);
-router.use('/reports', reportsRoutes); // ✅ ADD THIS LINE
+router.use('/reports', reportsRoutes);
 console.log('✅ All routes registered');
 
 console.log('✅ RM Routes registered with auth middleware');
