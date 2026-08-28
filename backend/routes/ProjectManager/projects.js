@@ -142,8 +142,8 @@ function invalidateProjectsCache() {
 
 // ── Routes ──────────────────────────────────────────────────────────────
 
-// GET /api/pm/projects — list all projects (optional ?createdBy=<profileId>)
-router.get('/projects', async (req, res) => {
+// ✅ GET /api/pm/projects — list all projects (optional ?createdBy=<profileId>)
+router.get('/', async (req, res) => {
   try {
     const { createdBy } = req.query;
     const cacheKey = `list:${createdBy || 'all'}`;
@@ -173,8 +173,8 @@ router.get('/projects', async (req, res) => {
   }
 });
 
-// GET /api/pm/projects/:id
-router.get('/projects/:id', async (req, res) => {
+// ✅ GET /api/pm/projects/:id
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { data, error } = await supabase
@@ -193,8 +193,8 @@ router.get('/projects/:id', async (req, res) => {
   }
 });
 
-// POST /api/pm/projects — create a project, its resource requirements, and their skills
-router.post('/projects', async (req, res) => {
+// ✅ POST /api/pm/projects — create a project, its resource requirements, and their skills
+router.post('/', async (req, res) => {
   try {
     const {
       name,
@@ -288,8 +288,8 @@ router.post('/projects', async (req, res) => {
   }
 });
 
-// PUT /api/pm/projects/:id — update project details
-router.put('/projects/:id', async (req, res) => {
+// ✅ PUT /api/pm/projects/:id — update project details
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, description, startDate, endDate, priority, status, teamSize, duration } = req.body;
@@ -329,8 +329,8 @@ router.put('/projects/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/pm/projects/:id/status — quick status change (e.g. approve -> Active)
-router.patch('/projects/:id/status', async (req, res) => {
+// ✅ PATCH /api/pm/projects/:id/status — quick status change (e.g. approve -> Active)
+router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -363,8 +363,8 @@ router.patch('/projects/:id/status', async (req, res) => {
   }
 });
 
-// DELETE /api/pm/projects/:id
-router.delete('/projects/:id', async (req, res) => {
+// ✅ DELETE /api/pm/projects/:id
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { error } = await supabase.from('projects').delete().eq('id', id);

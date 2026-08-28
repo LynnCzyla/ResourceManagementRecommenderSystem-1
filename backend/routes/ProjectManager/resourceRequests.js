@@ -38,10 +38,6 @@ async function findPositionIdByName(roleName) {
   return data && data.length > 0 ? data[0].id : null;
 }
 
-// requirement_skills stores the skill as plain text (column `skills`) —
-// there is no skill_id foreign key on this table. We still upsert into the
-// master `skills` table so the skill exists for autocomplete/reporting
-// elsewhere, but the link to the requirement is just the text value.
 async function attachSkillsToRequirement(requirementId, skillNames = []) {
   for (const rawName of skillNames) {
     const name = rawName.trim();
@@ -78,12 +74,15 @@ function transformRequest(row) {
     status: row.status,
     quantity: row.quantity_needed,
     justification: row.justification,
+    createdBy: row.created_by,
+    requestedBy: row.created_by, // Alias for clarity
+    projectOwner: row.projects?.created_by,
   };
 }
 
 const REQUEST_SELECT = `
   *,
-  projects ( id, project_name ),
+  projects ( id, project_name, created_by ),
   positions ( id, position_name ),
   requirement_skills (
     id,
@@ -93,20 +92,86 @@ const REQUEST_SELECT = `
 
 // ── Routes ──────────────────────────────────────────────────────────────
 
-// GET /api/pm/resource-requests — list all (optional ?projectId= filter)
-router.get('/resource-requests', async (req, res) => {
+// ✅ GET /api/pm/resource-requests — WITH PROPER PM FILTERING
+router.get('/', async (req, res) => {
   try {
     const { projectId } = req.query;
+    const userId = req.user?.id;
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userRole = req.user?.role;
+
+    console.log(`📋 Fetching resource requests for user: ${userId}`);
+    console.log(`🏢 Branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+    console.log(`👤 Role: ${userRole}`);
 
     let query = supabase
       .from('project_resource_requirements')
       .select(REQUEST_SELECT)
       .order('created_at', { ascending: false });
 
-    if (projectId) query = query.eq('project_id', projectId);
+    // ✅ If projectId is provided, filter by it
+    if (projectId) {
+      query = query.eq('project_id', projectId);
+    }
+
+    // ✅ For Project Managers: Only show requests from their projects
+    if (!isSuperAdmin && userRole === 'Project Manager') {
+      // Get projects created by this PM
+      const { data: myProjects } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('created_by', userId);
+
+      const projectIds = myProjects?.map(p => p.id) || [];
+
+      if (projectIds.length === 0) {
+        return res.status(200).json({ success: true, data: [] });
+      }
+
+      // ✅ Filter by projects owned by this PM
+      query = query.in('project_id', projectIds);
+      
+      console.log(`🔍 Filtering by ${projectIds.length} projects owned by PM`);
+    }
+
+    // ✅ For Resource Managers: Filter by branch
+    if (!isSuperAdmin && userRole === 'Resource Manager') {
+      // Get all users in this branch
+      const { data: branchUsers } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('branch_id', userBranchId)
+        .eq('status', 'Active');
+
+      const userIds = branchUsers?.map(u => u.id) || [];
+
+      if (userIds.length === 0) {
+        return res.status(200).json({ success: true, data: [] });
+      }
+
+      // Get projects created by users in this branch
+      const { data: branchProjects } = await supabase
+        .from('projects')
+        .select('id')
+        .in('created_by', userIds);
+
+      const projectIds = branchProjects?.map(p => p.id) || [];
+
+      if (projectIds.length === 0) {
+        return res.status(200).json({ success: true, data: [] });
+      }
+
+      // ✅ Filter by projects in this branch
+      query = query.in('project_id', projectIds);
+      
+      console.log(`🔍 Filtering by ${projectIds.length} projects in branch`);
+    }
 
     const { data, error } = await query;
     if (error) throw error;
+
+    console.log(`✅ Found ${data?.length || 0} resource requests`);
 
     res.status(200).json({ success: true, data: (data || []).map(transformRequest) });
   } catch (error) {
@@ -115,16 +180,67 @@ router.get('/resource-requests', async (req, res) => {
   }
 });
 
-// POST /api/pm/resource-requests — create one or more resource requests for a project
-router.post('/resource-requests', async (req, res) => {
+// ✅ POST /api/pm/resource-requests — PM creates request for their project
+router.post('/', async (req, res) => {
   try {
     const { projectId, resources = [] } = req.body;
+    const userId = req.user?.id;
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userRole = req.user?.role;
+
+    console.log(`📋 Creating resource request for project: ${projectId}`);
+    console.log(`👤 User: ${userId}`);
+    console.log(`🏢 Branch: ${userBranchId}`);
+    console.log(`👤 Role: ${userRole}`);
 
     if (!projectId) {
       return res.status(400).json({ success: false, message: 'Project is required' });
     }
     if (!resources.length) {
       return res.status(400).json({ success: false, message: 'At least one resource requirement is required' });
+    }
+
+    // ✅ Verify the project exists and user has access
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select('id, created_by, project_name')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // ✅ Check if user has access to this project
+    // - PM must own the project (created_by = userId)
+    // - Super Admin can create for any project
+    // - RM cannot create (should use HR route)
+    if (userRole === 'Project Manager') {
+      if (project.created_by !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can only create resource requests for your own projects'
+        });
+      }
+    } else if (userRole === 'Resource Manager') {
+      return res.status(403).json({
+        success: false,
+        message: 'Resource Managers should use the HR resource request route'
+      });
+    } else if (!isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to create resource requests'
+      });
+    }
+
+    // ✅ Check if user belongs to a branch
+    if (!isSuperAdmin && !userBranchId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is not assigned to a branch'
+      });
     }
 
     const createdIds = [];
@@ -144,6 +260,7 @@ router.post('/resource-requests', async (req, res) => {
           start_date: resource.startDate || null,
           end_date: resource.endDate || null,
           status: 'Pending',
+          created_by: userId,
         })
         .select()
         .single();
@@ -167,9 +284,9 @@ router.post('/resource-requests', async (req, res) => {
 
     await logAuditEvent({
       req,
-      action: 'Assigned',
+      action: 'Created',
       systemCategory: 'Resource Management',
-      logDescription: `Submitted resource request(s) for project ${projectId}`,
+      logDescription: `PM ${userId} submitted resource request(s) for project ${projectId}`,
     });
 
     res.status(201).json({
@@ -183,19 +300,82 @@ router.post('/resource-requests', async (req, res) => {
   }
 });
 
-// PATCH /api/pm/resource-requests/:id/status — approve / reject a request
-router.patch('/resource-requests/:id/status', async (req, res) => {
+// ✅ PATCH /api/pm/resource-requests/:id/status — only project owner or super admin
+router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+    const userId = req.user?.id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userRole = req.user?.role;
+
+    console.log(`📋 Updating resource request ${id} to ${status}`);
+    console.log(`👤 User: ${userId}, Role: ${userRole}`);
 
     if (!status || !['Pending', 'Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ success: false, message: "Status must be 'Pending', 'Approved', or 'Rejected'" });
     }
 
+    // ✅ Check if user has permission to update this request
+    const { data: existing, error: findError } = await supabase
+      .from('project_resource_requirements')
+      .select(`
+        id,
+        project_id,
+        created_by,
+        projects:project_id (
+          created_by
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (findError || !existing) {
+      return res.status(404).json({ success: false, message: 'Resource request not found' });
+    }
+
+    // ✅ Check permissions
+    const isProjectOwner = existing.projects?.created_by === userId;
+    const isRequester = existing.created_by === userId;
+
+    // PM can update if they own the project OR they created the request
+    // RM can update (approve/reject) if they are in the same branch
+    // Super Admin can update anything
+    let hasPermission = isSuperAdmin;
+    
+    if (userRole === 'Project Manager') {
+      hasPermission = isProjectOwner || isRequester;
+    } else if (userRole === 'Resource Manager') {
+      // RM can approve/reject requests in their branch
+      // Check if the project is in RM's branch
+      const { data: project } = await supabase
+        .from('projects')
+        .select('created_by')
+        .eq('id', existing.project_id)
+        .single();
+      
+      if (project) {
+        const { data: projectOwner } = await supabase
+          .from('profiles')
+          .select('branch_id')
+          .eq('id', project.created_by)
+          .single();
+        
+        const userBranchId = req.user?.branch_id;
+        hasPermission = projectOwner?.branch_id === userBranchId;
+      }
+    }
+
+    if (!hasPermission) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to update this request'
+      });
+    }
+
     const { data, error } = await supabase
       .from('project_resource_requirements')
-      .update({ status })
+      .update({ status, updated_at: new Date().toISOString() })
       .eq('id', id)
       .select()
       .single();
@@ -217,10 +397,44 @@ router.patch('/resource-requests/:id/status', async (req, res) => {
   }
 });
 
-// DELETE /api/pm/resource-requests/:id
-router.delete('/resource-requests/:id', async (req, res) => {
+// ✅ DELETE /api/pm/resource-requests/:id — only project owner or requester
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+
+    console.log(`📋 Deleting resource request ${id}`);
+
+    // ✅ Check if user has permission to delete this request
+    const { data: existing, error: findError } = await supabase
+      .from('project_resource_requirements')
+      .select(`
+        id,
+        project_id,
+        created_by,
+        projects:project_id (
+          created_by
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (findError || !existing) {
+      return res.status(404).json({ success: false, message: 'Resource request not found' });
+    }
+
+    // ✅ Only the project owner, the requester, or super admin can delete
+    const isProjectOwner = existing.projects?.created_by === userId;
+    const isRequester = existing.created_by === userId;
+
+    if (!isSuperAdmin && !isProjectOwner && !isRequester) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to delete this request'
+      });
+    }
+
     const { error } = await supabase.from('project_resource_requirements').delete().eq('id', id);
     if (error) throw error;
 

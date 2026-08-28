@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getProjects, createProject } from './pmApi';
+import { getProjects, createProject, getSkills } from './pmApi';
 
 const calculateDurationDays = (startDate, endDate) => {
   if (!startDate || !endDate) return '';
@@ -17,12 +17,20 @@ export default function PMProjectsTab({ user }) {
   const [submitError, setSubmitError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('name');
+  
+  // Skills state for autocomplete
+  const [allSkills, setAllSkills] = useState([]);
+  const [isLoadingSkills, setIsLoadingSkills] = useState(false);
+  const [skillSuggestions, setSkillSuggestions] = useState([]);
+  const [showSkillSuggestions, setShowSkillSuggestions] = useState(false);
+
   const initialResources = [{
     role: '',
     quantity: 1,
     experience: 'Intermediate',
     assignment: 'Full-time',
-    skills: '',
+    skills: [],
+    skillInput: '',
     justification: ''
   }];
 
@@ -37,6 +45,26 @@ export default function PMProjectsTab({ user }) {
     resources: initialResources
   });
 
+  // ✅ Fetch all skills from database on mount - using getSkills from pmApi
+  useEffect(() => {
+    const fetchSkills = async () => {
+      setIsLoadingSkills(true);
+      try {
+        const data = await getSkills();
+        if (data) {
+          setAllSkills(data || []);
+          console.log('✅ Skills loaded:', data.length);
+        }
+      } catch (error) {
+        console.error('Error fetching skills:', error);
+        setAllSkills([]);
+      } finally {
+        setIsLoadingSkills(false);
+      }
+    };
+    fetchSkills();
+  }, []);
+
   const loadProjects = async () => {
     try {
       const data = await getProjects(user?.id);
@@ -50,6 +78,96 @@ export default function PMProjectsTab({ user }) {
   useEffect(() => {
     loadProjects();
   }, [user]);
+
+  // ✅ Handle skill input with comma separation
+  const handleSkillInputChange = (index, value) => {
+    // Check if the last character is a comma
+    if (value.endsWith(',')) {
+      // Remove the comma and trim
+      const skillName = value.slice(0, -1).trim();
+      if (skillName) {
+        // Add the skill
+        setFormData(prev => {
+          const updated = [...prev.resources];
+          if (!updated[index].skills.includes(skillName)) {
+            updated[index].skills = [...updated[index].skills, skillName];
+          }
+          updated[index].skillInput = '';
+          return { ...prev, resources: updated };
+        });
+        setSkillSuggestions([]);
+        setShowSkillSuggestions(false);
+        return;
+      }
+    }
+
+    // Update the input value
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      updated[index].skillInput = value;
+      return { ...prev, resources: updated };
+    });
+
+    // Show suggestions based on input
+    if (value.length > 0) {
+      const filtered = allSkills.filter(skill => 
+        skill.skill_name.toLowerCase().includes(value.toLowerCase())
+      );
+      setSkillSuggestions(filtered.slice(0, 10));
+      setShowSkillSuggestions(true);
+    } else {
+      setSkillSuggestions([]);
+      setShowSkillSuggestions(false);
+    }
+  };
+
+  // ✅ Handle Enter key to add skill
+  const handleSkillKeyDown = (index, e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const input = formData.resources[index]?.skillInput || '';
+      const trimmed = input.trim();
+      if (trimmed) {
+        setFormData(prev => {
+          const updated = [...prev.resources];
+          if (!updated[index].skills.includes(trimmed)) {
+            updated[index].skills = [...updated[index].skills, trimmed];
+          }
+          updated[index].skillInput = '';
+          return { ...prev, resources: updated };
+        });
+        setSkillSuggestions([]);
+        setShowSkillSuggestions(false);
+      }
+    }
+  };
+
+  // ✅ Select a skill from suggestions (click)
+  const handleSelectSkill = (index, skillName) => {
+    if (!skillName || skillName.trim() === '') return;
+    
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      if (!updated[index].skills.includes(skillName.trim())) {
+        updated[index].skills = [...updated[index].skills, skillName.trim()];
+      }
+      updated[index].skillInput = '';
+      return { ...prev, resources: updated };
+    });
+    setSkillSuggestions([]);
+    setShowSkillSuggestions(false);
+  };
+
+  // ✅ Remove a skill from the selected list
+  const handleRemoveSkill = (resourceIndex, skillToRemove) => {
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      updated[resourceIndex].skills = updated[resourceIndex].skills.filter(
+        s => s !== skillToRemove
+      );
+      return { ...prev, resources: updated };
+    });
+  };
 
   const handleResourceChange = (index, field, value) => {
     setFormData(prev => {
@@ -69,7 +187,8 @@ export default function PMProjectsTab({ user }) {
           quantity: 1,
           experience: 'Intermediate',
           assignment: 'Full-time',
-          skills: '',
+          skills: [],
+          skillInput: '',
           justification: ''
         }
       ]
@@ -98,10 +217,13 @@ export default function PMProjectsTab({ user }) {
         quantity: 1,
         experience: 'Intermediate',
         assignment: 'Full-time',
-        skills: '',
+        skills: [],
+        skillInput: '',
         justification: ''
       }]
     });
+    setSkillSuggestions([]);
+    setShowSkillSuggestions(false);
   };
 
   const handleCreateSubmit = async (e) => {
@@ -110,6 +232,12 @@ export default function PMProjectsTab({ user }) {
 
     setSubmitError('');
     try {
+      // Convert skills array to comma-separated string for backend
+      const resourcesWithSkills = formData.resources.map(res => ({
+        ...res,
+        skills: res.skills.join(', ')
+      }));
+
       await createProject({
         name: formData.name,
         description: formData.description,
@@ -118,7 +246,7 @@ export default function PMProjectsTab({ user }) {
         startDate: formData.startDate || new Date().toISOString().split('T')[0],
         endDate: formData.endDate || new Date().toISOString().split('T')[0],
         priority: formData.priority,
-        resources: formData.resources,
+        resources: resourcesWithSkills,
         createdBy: user?.id,
       });
 
@@ -359,70 +487,118 @@ export default function PMProjectsTab({ user }) {
                   <span style={styles.sectionTitle}>Resource Requirements</span>
                 </div>
 
-                {formData.resources.map((res, index) => (
-                  <div key={index} style={styles.resourceCard}>
-                    <div style={styles.resourceCardHeader}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontWeight: '600', fontSize: '13px' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                          <circle cx="12" cy="7" r="4"></circle>
-                        </svg>
-                        Resource Requirement #{index + 1}
-                      </div>
-                      {formData.resources.length > 1 && (
-                        <button type="button" onClick={() => handleRemoveResource(index)} style={styles.removeBtn}>Remove</button>
-                      )}
-                    </div>
+                {formData.resources.map((res, index) => {
+                  const filteredSuggestions = allSkills.filter(skill => 
+                    skill.skill_name.toLowerCase().includes((res.skillInput || '').toLowerCase()) &&
+                    !res.skills.includes(skill.skill_name)
+                  ).slice(0, 10);
+                  const showSuggestions = res.skillInput && res.skillInput.length > 0 && filteredSuggestions.length > 0;
 
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formGroup, flex: 2 }}>
-                        <label style={styles.formLabel}>Position/Role <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <input 
-                          type="text" 
-                          value={res.role} 
-                          onChange={(e) => handleResourceChange(index, 'role', e.target.value)} 
-                          style={styles.modalInput} 
-                          placeholder="e.g., Frontend Developer"
-                          required
+                  return (
+                    <div key={index} style={styles.resourceCard}>
+                      <div style={styles.resourceCardHeader}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontWeight: '600', fontSize: '13px' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                          </svg>
+                          Resource Requirement #{index + 1}
+                        </div>
+                        {formData.resources.length > 1 && (
+                          <button type="button" onClick={() => handleRemoveResource(index)} style={styles.removeBtn}>Remove</button>
+                        )}
+                      </div>
+
+                      <div style={styles.formRow}>
+                        <div style={{ ...styles.formGroup, flex: 2 }}>
+                          <label style={styles.formLabel}>Position/Role <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                          <input 
+                            type="text" 
+                            value={res.role} 
+                            onChange={(e) => handleResourceChange(index, 'role', e.target.value)} 
+                            style={styles.modalInput} 
+                            placeholder="e.g., Frontend Developer"
+                            required
+                          />
+                        </div>
+                        <div style={{ ...styles.formGroup, flex: 1 }}>
+                          <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                          <input 
+                            type="number" 
+                            min="1"
+                            value={res.quantity} 
+                            onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)} 
+                            style={styles.modalInput} 
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* ✅ Comma-separated Skills Input with Autocomplete */}
+                      <div style={styles.formGroup}>
+                        <label style={styles.formLabel}>Required Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        
+                        {/* Selected Skills Tags */}
+                        {res.skills.length > 0 && (
+                          <div style={styles.selectedSkillsContainer}>
+                            {res.skills.map((skill, idx) => (
+                              <span key={idx} style={styles.selectedSkillTag}>
+                                {skill}
+                                <button 
+                                  type="button" 
+                                  onClick={() => handleRemoveSkill(index, skill)}
+                                  style={styles.removeSkillBtn}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Autocomplete Input with comma support */}
+                        <div style={{ position: 'relative' }}>
+                          <input 
+                            type="text" 
+                            value={res.skillInput || ''}
+                            onChange={(e) => handleSkillInputChange(index, e.target.value)}
+                            onKeyDown={(e) => handleSkillKeyDown(index, e)}
+                            style={styles.modalInput}
+                            placeholder={res.skills.length > 0 ? "Type skill and press comma or Enter..." : "Type skill and press comma or Enter..."}
+                          />
+                          
+                          {showSuggestions && (
+                            <div style={styles.suggestionsDropdown}>
+                              {filteredSuggestions.map((skill) => (
+                                <div
+                                  key={skill.id}
+                                  onMouseDown={() => handleSelectSkill(index, skill.skill_name)}
+                                  style={styles.suggestionItem}
+                                >
+                                  {skill.skill_name}
+                                </div>
+                              ))}
+                              {isLoadingSkills && (
+                                <div style={styles.suggestionItem}>Loading skills...</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span style={styles.inputHelp}>Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add. Suggestions appear automatically.</span>
+                      </div>
+
+                      <div style={styles.formGroup}>
+                        <label style={styles.formLabel}>Justification / Requirements</label>
+                        <textarea 
+                          value={res.justification} 
+                          onChange={(e) => handleResourceChange(index, 'justification', e.target.value)} 
+                          style={styles.modalTextarea} 
+                          placeholder="Why is this resource needed? What will they work on?"
                         />
                       </div>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <input 
-                          type="number" 
-                          min="1"
-                          value={res.quantity} 
-                          onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)} 
-                          style={styles.modalInput} 
-                          required
-                        />
-                      </div>
                     </div>
-
-                    <div style={styles.formGroup}>
-                      <label style={styles.formLabel}>Required Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                      <input 
-                        type="text" 
-                        value={res.skills} 
-                        onChange={(e) => handleResourceChange(index, 'skills', e.target.value)} 
-                        style={styles.modalInput} 
-                        placeholder="e.g., High-Voltage Wiring, Circuit Calibration, LOTO Protocol"
-                        required
-                      />
-                      <span style={styles.inputHelp}>Separate multiple skills with commas</span>
-                    </div>
-
-                    <div style={styles.formGroup}>
-                      <label style={styles.formLabel}>Justification / Requirements</label>
-                      <textarea 
-                        value={res.justification} 
-                        onChange={(e) => handleResourceChange(index, 'justification', e.target.value)} 
-                        style={styles.modalTextarea} 
-                        placeholder="Why is this resource needed? What will they work on?"
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 <button type="button" onClick={handleAddResource} style={styles.addResourceBtn}>
                   + Add Another Resource Requirement
@@ -775,5 +951,54 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '700',
-  }
+  },
+  // Autocomplete styles
+  suggestionsDropdown: {
+    position: 'absolute',
+    top: 'calc(100% + 4px)',
+    left: 0,
+    right: 0,
+    background: 'var(--color-bg-card)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '8px',
+    maxHeight: '200px',
+    overflowY: 'auto',
+    zIndex: 1000,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+  },
+  suggestionItem: {
+    padding: '8px 12px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  selectedSkillsContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+    marginBottom: '8px',
+  },
+  selectedSkillTag: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    fontSize: '12px',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+    fontWeight: '600',
+  },
+  removeSkillBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-primary)',
+    cursor: 'pointer',
+    fontSize: '14px',
+    padding: '0 2px',
+    display: 'flex',
+    alignItems: 'center',
+    fontWeight: 'bold',
+  },
 };

@@ -130,7 +130,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
       case 'weekly-report':
         return <PMWeeklyReportTab user={user} />;
       case 'feedback':
-        return <PMFeedbackFormTab />;
+        return <PMFeedbackFormTab user={user} />;
       default:
         return <PMDashboardTab user={user} />;
     }
