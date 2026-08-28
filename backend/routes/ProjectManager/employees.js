@@ -78,8 +78,9 @@ const EMPLOYEE_SELECT = `
   departments ( department_name )
 `;
 
-// GET /api/pm/employees — list active employees with caching
-router.get('/employees', async (req, res) => {
+// ✅ CHANGED: GET /api/pm/employees — list active employees with caching
+// Changed from '/employees' to '/'
+router.get('/', async (req, res) => {
   try {
     const { departmentId, pmId, projectId } = req.query;
 
@@ -231,8 +232,9 @@ router.get('/employees', async (req, res) => {
   }
 });
 
-// Add a cache clear endpoint (optional, for when employees are updated)
-router.post('/employees/cache/clear', (req, res) => {
+// ✅ CHANGED: Add a cache clear endpoint (optional, for when employees are updated)
+// Changed from '/employees/cache/clear' to '/cache/clear'
+router.post('/cache/clear', (req, res) => {
   cache.clear();
   res.status(200).json({ success: true, message: 'Employee cache cleared' });
 });

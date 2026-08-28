@@ -23,11 +23,6 @@ function transformTask(row) {
   };
 }
 
-// project_tasks has TWO foreign keys to profiles (profile_id = assignee,
-// created_by = creator), so the embed must specify which FK to follow —
-// otherwise PostgREST throws an ambiguous-relationship error (PGRST201).
-// The nested `positions` embed gives us the assignee's job title, and
-// `avatar_url` lets the dashboard show a real avatar instead of "?".
 const TASK_SELECT = `
   id,
   project_id,
@@ -44,9 +39,6 @@ const TASK_SELECT = `
   profiles!project_tasks_profile_id_fkey ( id, first_name, last_name, avatar_url, positions ( position_name ) )
 `;
 
-// Simple in-memory cache for the list endpoint — same rationale as
-// ProjectManager/projects.js: this query gets hit on every tab switch
-// with a deep join, so cache it briefly instead of re-querying each time.
 const tasksCache = new Map();
 const TASKS_CACHE_TTL_MS = 30 * 1000;
 
@@ -62,10 +54,15 @@ function invalidateTasksCache() {
   tasksCache.clear();
 }
 
-// GET /api/pm/tasks — list tasks (optional ?projectId= / ?employeeId= filters)
-router.get('/tasks', async (req, res) => {
+// ✅ GET /api/pm/tasks — list tasks (optional ?projectId= / ?employeeId= filters)
+router.get('/', async (req, res) => {
   try {
     const { projectId, employeeId } = req.query;
+    const userId = req.user?.id;
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userRole = req.user?.role;
+
     const cacheKey = `list:${projectId || ''}:${employeeId || ''}`;
 
     const cached = getTasksCached(cacheKey);
@@ -81,6 +78,23 @@ router.get('/tasks', async (req, res) => {
     if (projectId) query = query.eq('project_id', projectId);
     if (employeeId) query = query.eq('profile_id', employeeId);
 
+    // ✅ For Project Managers: Only show tasks from their projects
+    if (!isSuperAdmin && userRole === 'Project Manager') {
+      // Get projects created by this PM
+      const { data: myProjects } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('created_by', userId);
+
+      const projectIds = myProjects?.map(p => p.id) || [];
+
+      if (projectIds.length === 0) {
+        return res.status(200).json({ success: true, data: [] });
+      }
+
+      query = query.in('project_id', projectIds);
+    }
+
     const { data, error } = await query;
     if (error) throw error;
 
@@ -94,13 +108,31 @@ router.get('/tasks', async (req, res) => {
   }
 });
 
-// POST /api/pm/tasks — create/assign a new task
-router.post('/tasks', async (req, res) => {
+// ✅ POST /api/pm/tasks — create/assign a new task
+router.post('/', async (req, res) => {
   try {
     const { projectId, employeeId, title, description, priority = 'Medium', dueDate, createdBy } = req.body;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
 
     if (!projectId || !employeeId || !title) {
       return res.status(400).json({ success: false, message: 'Project, employee, and title are required' });
+    }
+
+    // ✅ Verify the user owns the project (PM only)
+    if (userRole === 'Project Manager') {
+      const { data: project } = await supabase
+        .from('projects')
+        .select('created_by')
+        .eq('id', projectId)
+        .single();
+
+      if (!project || project.created_by !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can only create tasks for your own projects'
+        });
+      }
     }
 
     const { data, error } = await supabase
@@ -114,17 +146,14 @@ router.post('/tasks', async (req, res) => {
         status: 'Pending',
         due_date: dueDate || null,
         progress_logs: [],
-        created_by: createdBy || null,
+        created_by: createdBy || userId || null,
       })
       .select(TASK_SELECT)
       .single();
 
     if (error) throw error;
 
-    // Notify the assigned employee. This is best-effort — a failure here
-    // (e.g. an RLS policy blocking inserts on `notifications`) must not
-    // block the response, since the task row itself was already committed
-    // successfully above.
+    // Notify the assigned employee
     const { error: notifyError } = await supabase.from('notifications').insert({
       recipient_id: employeeId,
       type: 'alert',
@@ -137,7 +166,7 @@ router.post('/tasks', async (req, res) => {
 
     await logAuditEvent({
       req,
-      userId: createdBy || null,
+      userId: createdBy || userId || null,
       action: 'Assigned',
       systemCategory: 'Resource Management',
       logDescription: `Assigned task "${title}" to employee ${employeeId}`,
@@ -151,11 +180,29 @@ router.post('/tasks', async (req, res) => {
   }
 });
 
-// PUT /api/pm/tasks/:id — reassign / change status / due date / details
-router.put('/tasks/:id', async (req, res) => {
+// ✅ PUT /api/pm/tasks/:id — reassign / change status / due date / details
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { employeeId, status, dueDate, title, description, priority, progressLogs } = req.body;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    // ✅ Verify the user owns the project (PM only)
+    if (userRole === 'Project Manager') {
+      const { data: task } = await supabase
+        .from('project_tasks')
+        .select('project_id, projects:project_id (created_by)')
+        .eq('id', id)
+        .single();
+
+      if (!task || task.projects?.created_by !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can only update tasks from your own projects'
+        });
+      }
+    }
 
     const updateData = { updated_at: new Date().toISOString() };
     if (employeeId !== undefined) updateData.profile_id = employeeId;
@@ -191,9 +238,8 @@ router.put('/tasks/:id', async (req, res) => {
   }
 });
 
-// POST /api/pm/tasks/:id/progress — append a progress log entry
-// (also auto-advances status: 0% stays Pending, >0% -> In Progress, 100% -> Completed)
-router.post('/tasks/:id/progress', async (req, res) => {
+// ✅ POST /api/pm/tasks/:id/progress — append a progress log entry
+router.post('/:id/progress', async (req, res) => {
   try {
     const { id } = req.params;
     const { percentage, note, loggedBy } = req.body;
@@ -261,10 +307,29 @@ router.post('/tasks/:id/progress', async (req, res) => {
   }
 });
 
-// DELETE /api/pm/tasks/:id
-router.delete('/tasks/:id', async (req, res) => {
+// ✅ DELETE /api/pm/tasks/:id
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    // ✅ Verify the user owns the project (PM only)
+    if (userRole === 'Project Manager') {
+      const { data: task } = await supabase
+        .from('project_tasks')
+        .select('project_id, projects:project_id (created_by)')
+        .eq('id', id)
+        .single();
+
+      if (!task || task.projects?.created_by !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can only delete tasks from your own projects'
+        });
+      }
+    }
+
     const { error } = await supabase.from('project_tasks').delete().eq('id', id);
     if (error) throw error;
 

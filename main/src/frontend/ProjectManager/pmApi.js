@@ -15,6 +15,14 @@
 const PM_BASE = 'http://localhost:5000/api/pm';
 const NOTIF_BASE = 'http://localhost:5000/api/notifications';
 
+// ── Auth Helper ──────────────────────────────────────────────────────────
+
+// ✅ Get auth token from localStorage
+function getAuthToken() {
+  const token = localStorage.getItem('token');
+  return token || null;
+}
+
 // ── Caching & Deduplication ──────────────────────────────────────────
 
 // Simple in-memory cache for GET requests
@@ -56,6 +64,23 @@ async function request(base, path, options = {}) {
   const method = options.method || 'GET';
   const cacheKey = getCacheKey(url, options);
   
+  // ✅ Get auth token
+  const token = getAuthToken();
+  
+  // ✅ Build headers with Authorization
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+  
+  // ✅ Add Authorization header if token exists
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  // Log token status (don't log the actual token)
+  console.log(`🔑 Auth token ${token ? 'present' : 'missing'}`);
+  
   // For GET requests, check cache first
   if (method === 'GET' && !options.skipCache) {
     const cached = getCached(cacheKey);
@@ -82,10 +107,7 @@ async function request(base, path, options = {}) {
       console.log(`🌐 API Request: ${method} ${url}`);
       
       const res = await fetch(url, {
-        headers: { 
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+        headers,
         signal: options.signal || controller.signal,
         ...options,
       });
@@ -100,6 +122,13 @@ async function request(base, path, options = {}) {
         console.log(`  → Response:`, body);
       } catch {
         console.log(`  → No JSON body`);
+      }
+
+      // ✅ Handle 401 specifically - token expired or invalid
+      if (res.status === 401) {
+        console.error('🔑 Token expired or invalid. Please login again.');
+        // You could redirect to login here if needed
+        // window.location.href = '/login';
       }
 
       if (!res.ok || (body && body.success === false)) {
@@ -126,7 +155,7 @@ async function request(base, path, options = {}) {
         throw err;
       }
       
-      // ✅ FIXED: Only retry once (check if it's already a retry)
+      // Only retry on network errors, not auth errors
       if (!options.retry && (err.message.includes('fetch') || err.message.includes('network'))) {
         console.log(`🔁 Retrying request (attempt 2): ${url}`);
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -272,6 +301,14 @@ export function assignEmployeeToProject(projectId, employeeId, role, assignedBy)
   });
 }
 
+// ── Skills ──────────────────────────────────────────────────────────────
+
+// ✅ Get skills for autocomplete
+export function getSkills(search = '', signal) {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+  return pm(`/skills${qs}`, { signal });
+}
+
 // ── Resource requests ───────────────────────────────────────────────────
 
 export function getResourceRequests(projectId, signal) {
@@ -369,6 +406,31 @@ export function deleteNotification(id) {
   clearCacheForEndpoints(['/notifications']);
   return notif(`/${id}`, { 
     method: 'DELETE',
+    skipCache: true
+  });
+}
+
+
+// ── Feedback Requests ───────────────────────────────────────────────────
+
+export function getFeedbackRequests(createdBy, signal) {
+  const qs = createdBy ? `?createdBy=${encodeURIComponent(createdBy)}` : '';
+  return pm(`/feedback-requests${qs}`, { signal });
+}
+
+export function createFeedbackRequest(payload) {
+  clearCacheForEndpoints(['/feedback-requests']);
+  return pm('/feedback-requests', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
+}
+
+export function resendFeedbackRequest(id) {
+  clearCacheForEndpoints(['/feedback-requests']);
+  return pm(`/feedback-requests/${id}/resend`, {
+    method: 'POST',
     skipCache: true
   });
 }

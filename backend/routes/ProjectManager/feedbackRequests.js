@@ -7,13 +7,16 @@ const {
   resendFeedbackRequest,
 } = require('../../controllers/feedbackRequestController');
 
-// GET /api/pm/feedback-requests?createdBy=<profileId>
-router.get('/feedback-requests', getFeedbackRequests);
+// ✅ GET /api/pm/feedback-requests?createdBy=<profileId>
+// Changed from '/feedback-requests' to '/'
+router.get('/', getFeedbackRequests);
 
-// POST /api/pm/feedback-requests
-router.post('/feedback-requests', createFeedbackRequest);
+// ✅ POST /api/pm/feedback-requests
+// Changed from '/feedback-requests' to '/'
+router.post('/', createFeedbackRequest);
 
-// POST /api/pm/feedback-requests/:id/resend
-router.post('/feedback-requests/:id/resend', resendFeedbackRequest);
+// ✅ POST /api/pm/feedback-requests/:id/resend
+// Changed from '/feedback-requests/:id/resend' to '/:id/resend'
+router.post('/:id/resend', resendFeedbackRequest);
 
 module.exports = router;

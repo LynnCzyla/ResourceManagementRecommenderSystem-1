@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Swal from 'sweetalert2';
-import { getProjects, getEmployees } from './pmApi';
+import { getProjects, getEmployees, getFeedbackRequests, createFeedbackRequest, resendFeedbackRequest } from './pmApi';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PM_BASE = 'http://localhost:5000/api/pm';
 
 const STATUS_STYLES = {
   pending: { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8', label: 'Pending' },
@@ -15,8 +14,6 @@ const STATUS_STYLES = {
   expired: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444', label: 'Expired' },
 };
 
-// Labels used for the "(Status)" suffix next to a project name in the
-// dropdown. Keyed by feedback_requests.status (same values as STATUS_STYLES).
 const DROPDOWN_STATUS_LABELS = {
   pending: 'Pending',
   sent: 'Feedback Sent',
@@ -30,15 +27,6 @@ function defaultIntro(projectName) {
   return `We hope you've been satisfied with the progress of ${projectName || 'your project'}. We'd love to hear your feedback on the team members who worked on it.`;
 }
 
-// App.jsx always writes a full user object (with `.id`) to
-// localStorage['user'] on login, on session restore, and on every
-// getSession()/TOKEN_REFRESHED cycle — see checkSession() and
-// handleLogin() in App.jsx. Whatever prop-drilling issue is dropping
-// `.id` on the way down to this tab, localStorage is the one place
-// that's reliably kept in sync, so we fall back to it rather than
-// silently sending createdBy: null/undefined to the backend (which
-// now hard-fails with a 400 instead of a cryptic DB error, but it's
-// still better to just not fail).
 function resolveUserId(user) {
   if (user?.id) return user.id;
   try {
@@ -56,8 +44,6 @@ function resolveUserId(user) {
   return undefined;
 }
 
-// Same fallback pattern as resolveUserId — used to label the PM's own
-// checkbox entry in the "Team Members to Rate" list.
 function resolvePmDisplayName(user) {
   const fromProp = user?.name || [user?.first_name, user?.last_name].filter(Boolean).join(' ');
   if (fromProp) return fromProp;
@@ -65,9 +51,7 @@ function resolvePmDisplayName(user) {
     const stored = JSON.parse(localStorage.getItem('user') || 'null');
     const fromStorage = stored?.name || [stored?.first_name, stored?.last_name].filter(Boolean).join(' ');
     if (fromStorage) return fromStorage;
-  } catch (err) {
-    // resolveUserId already logs the parse failure for this same read
-  }
+  } catch (err) {}
   return 'Project Manager (You)';
 }
 
@@ -112,28 +96,31 @@ export default function PMFeedbackFormTab({ user }) {
     return () => { cancelled = true; };
   }, [effectiveUserId]);
 
-  // Load real sent-request history from the backend instead of localStorage
+  // Load real sent-request history from the backend using pmApi
   const loadHistory = async () => {
-    if (!effectiveUserId) return;
+    if (!effectiveUserId) {
+      console.warn('No effectiveUserId, skipping history load');
+      return;
+    }
     setHistoryLoading(true);
     try {
-      const res = await fetch(`${PM_BASE}/feedback-requests?createdBy=${encodeURIComponent(effectiveUserId)}`);
-      const body = await res.json();
-      if (!res.ok || body.success === false) throw new Error(body.message || 'Failed to load history');
-      setSentRequests(body.data || []);
+      const data = await getFeedbackRequests(effectiveUserId);
+      setSentRequests(data || []);
     } catch (err) {
       console.error('Failed to load feedback request history:', err);
+      setSentRequests([]);
     } finally {
       setHistoryLoading(false);
     }
   };
 
-  useEffect(() => { loadHistory(); }, [effectiveUserId]);
+  useEffect(() => { 
+    if (effectiveUserId) {
+      loadHistory(); 
+    }
+  }, [effectiveUserId]);
 
-  // Load the employees actually assigned to the selected project, plus the
-  // PM themselves — the PM manages the project but isn't in
-  // project_assignments, so getEmployees() alone would never surface them
-  // as a rateable person.
+  // Load the employees actually assigned to the selected project, plus the PM
   useEffect(() => {
     if (!formData.projectId) {
       setEmployees([]);
@@ -163,19 +150,14 @@ export default function PMFeedbackFormTab({ user }) {
     return () => { cancelled = true; };
   }, [formData.projectId, effectiveUserId, pmDisplayName]);
 
-  // Keep the intro message in sync with the project name unless the PM has
-  // started editing it themselves.
+  // Keep the intro message in sync with the project name unless edited
   useEffect(() => {
     if (!introTouched) {
       setFormData(prev => ({ ...prev, introMessage: defaultIntro(prev.projectName) }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.projectName]);
 
-  // For each project, find its MOST RECENT feedback_requests row (by
-  // createdAt) so the dropdown can show "(Completed)" / "(Feedback Sent)"
-  // etc. next to the project name. A project with no feedback request yet
-  // gets no suffix at all.
+  // For each project, find its MOST RECENT feedback_requests row
   const projectFeedbackStatusMap = useMemo(() => {
     const map = {};
     for (const req of sentRequests) {
@@ -194,10 +176,6 @@ export default function PMFeedbackFormTab({ user }) {
     return statusMap;
   }, [sentRequests]);
 
-  // Projects sorted so ones whose latest feedback request is "completed"
-  // sink to the bottom of the dropdown — those don't need action from the
-  // PM right now. Everything else (never requested, or still pending/sent/
-  // viewed/in progress/expired) stays on top, alphabetical within each group.
   const sortedProjects = useMemo(() => {
     const withStatus = projects.map(p => {
       const feedbackStatus = projectFeedbackStatusMap[p.id] || null;
@@ -207,7 +185,6 @@ export default function PMFeedbackFormTab({ user }) {
         isDone: feedbackStatus === 'completed',
       };
     });
-
     return [...withStatus].sort((a, b) => {
       if (a.isDone !== b.isDone) return a.isDone ? 1 : -1;
       return (a.name || '').localeCompare(b.name || '');
@@ -264,24 +241,15 @@ export default function PMFeedbackFormTab({ user }) {
 
     setIsSending(true);
     try {
-      const res = await fetch(`${PM_BASE}/feedback-requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          createdBy: effectiveUserId,
-          clientName: formData.clientName.trim(),
-          clientEmail: formData.clientEmail.trim(),
-          projectId: formData.projectId,
-          employeeIds: selectedEmployeeIds,
-          introMessage: formData.introMessage.trim(),
-          redirectOrigin: window.location.origin,
-        }),
+      await createFeedbackRequest({
+        createdBy: effectiveUserId,
+        clientName: formData.clientName.trim(),
+        clientEmail: formData.clientEmail.trim(),
+        projectId: formData.projectId,
+        employeeIds: selectedEmployeeIds,
+        introMessage: formData.introMessage.trim(),
+        redirectOrigin: window.location.origin,
       });
-      const body = await res.json();
-
-      if (!res.ok || body.success === false) {
-        throw new Error(body.message || 'Failed to send feedback request');
-      }
 
       resetForm();
       await loadHistory();
@@ -314,13 +282,7 @@ export default function PMFeedbackFormTab({ user }) {
     if (resendingId) return;
     setResendingId(request.id);
     try {
-      const res = await fetch(`${PM_BASE}/feedback-requests/${request.id}/resend`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ redirectOrigin: window.location.origin }),
-    });
-      const body = await res.json();
-      if (!res.ok || body.success === false) throw new Error(body.message || 'Failed to resend');
+      await resendFeedbackRequest(request.id);
       await loadHistory();
       Swal.fire({
         title: 'Resent!',
@@ -357,9 +319,7 @@ export default function PMFeedbackFormTab({ user }) {
         background: 'var(--color-bg-card)',
         color: 'var(--color-text-primary)',
       });
-    } catch {
-      // clipboard API unavailable; ignore silently
-    }
+    } catch {}
   };
 
   const selectedProject = useMemo(
