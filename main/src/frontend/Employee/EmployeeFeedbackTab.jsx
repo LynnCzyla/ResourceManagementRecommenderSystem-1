@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { supabase } from '../../lib/supabaseClient';
 
@@ -85,6 +85,62 @@ export default function EmployeeFeedbackTab({ user }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const groupedFeedback = useMemo(() => {
+    const groups = {};
+    (feedback || []).forEach(item => {
+      const name = item.projectName;
+      if (!groups[name]) groups[name] = [];
+      groups[name].push(item);
+    });
+
+    const result = [];
+    Object.keys(groups).forEach(projName => {
+      const groupItems = groups[projName];
+      const clientItem = groupItems.find(i => i.feedbackSource === 'client');
+      const pmItem = groupItems.find(i => i.feedbackSource === 'project_manager');
+
+      if (clientItem && pmItem) {
+        const avgOverall = Math.round(((Number(clientItem.ratings?.rating || 0) + Number(pmItem.ratings?.rating || 0)) / 2) * 10) / 10;
+        
+        const mergedRatings = {};
+        Object.keys(RATING_LABELS).forEach(key => {
+          const vals = [];
+          if (clientItem.ratings?.[key] != null) vals.push(Number(clientItem.ratings[key]));
+          if (pmItem.ratings?.[key] != null) vals.push(Number(pmItem.ratings[key]));
+          mergedRatings[key] = vals.length > 0 ? (vals.reduce((a,b)=>a+b,0)/vals.length) : null;
+        });
+
+        result.push({
+          id: `merged_${clientItem.id}_${pmItem.id}`,
+          projectName: projName,
+          isMerged: true,
+          rating: avgOverall,
+          ratings: mergedRatings,
+          submittedAt: clientItem.submittedAt || pmItem.submittedAt,
+          client: clientItem,
+          pm: pmItem,
+        });
+      } else {
+        const single = clientItem || pmItem;
+        result.push({
+          id: single.id,
+          projectName: projName,
+          isMerged: false,
+          rating: single.ratings?.rating || 0,
+          ratings: single.ratings || {},
+          submittedAt: single.submittedAt,
+          feedbackSource: single.feedbackSource,
+          clientName: single.clientName,
+          client: single.feedbackSource === 'client' ? single : null,
+          pm: single.feedbackSource === 'project_manager' ? single : null,
+        });
+      }
+    });
+
+    // Sort by latest date
+    return result.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+  }, [feedback]);
+
   if (loading) {
     return <div style={styles.centerMsg}>Loading your feedback…</div>;
   }
@@ -149,7 +205,7 @@ export default function EmployeeFeedbackTab({ user }) {
           {/* Individual feedback list */}
           <h3 style={styles.sectionTitle}>Feedback History</h3>
           <div style={styles.feedbackList}>
-            {feedback.map((item) => {
+            {groupedFeedback.map((item) => {
               const isExpanded = expandedId === item.id;
               return (
                 <div key={item.id} style={styles.feedbackCard}>
@@ -160,49 +216,185 @@ export default function EmployeeFeedbackTab({ user }) {
                     <div>
                       <span style={styles.feedbackProject}>{item.projectName}</span>
                       <span style={styles.feedbackMeta}>
-                        {item.clientName} · {formatDate(item.submittedAt)}
+                        {item.isMerged ? (
+                          <span style={{ 
+                            fontWeight: 600, 
+                            color: '#8b5cf6',
+                            marginRight: 4 
+                          }}>
+                            [Client & PM Evaluated]
+                          </span>
+                        ) : (
+                          <span style={{ 
+                            fontWeight: 600, 
+                            color: item.feedbackSource === 'project_manager' ? 'var(--color-primary)' : 'var(--color-success)',
+                            marginRight: 4 
+                          }}>
+                            [{item.feedbackSource === 'project_manager' ? 'Project Manager' : 'Client'}]
+                          </span>
+                        )}
+                        {item.isMerged ? '' : `by ${item.clientName}`} · {formatDate(item.submittedAt)}
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <Stars value={item.ratings.rating} />
+                      <Stars value={item.rating} />
                       <span style={styles.expandIcon}>{isExpanded ? '▲' : '▼'}</span>
                     </div>
                   </div>
 
                   {isExpanded && (
                     <div style={styles.feedbackCardBody}>
-                      <div style={styles.ratingBreakdown}>
-                        {Object.entries(RATING_LABELS)
-                          .filter(([key]) => key !== 'rating')
-                          .map(([key, label]) => (
-                            <div key={key} style={styles.ratingRow}>
-                              <span style={styles.ratingLabel}>{label}</span>
-                              <Stars value={item.ratings[key]} size={13} />
+                      {item.isMerged ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                          {/* Client Evaluation */}
+                          <div style={{ padding: 12, borderBottom: '1px dashed var(--color-border)' }}>
+                            <h4 style={{ margin: '0 0 8px 0', color: '#3b82f6', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>
+                              Client Feedback ({item.client.clientName})
+                            </h4>
+                            
+                            <div style={styles.ratingBreakdown}>
+                              {Object.entries(RATING_LABELS)
+                                .filter(([key]) => key !== 'rating')
+                                .map(([key, label]) => (
+                                  <div key={key} style={styles.ratingRow}>
+                                    <span style={styles.ratingLabel}>{label}</span>
+                                    <Stars value={item.client.ratings?.[key]} size={13} />
+                                  </div>
+                                ))}
                             </div>
-                          ))}
-                      </div>
 
-                      {item.strengths && (
-                        <div style={styles.commentBlock}>
-                          <span style={styles.commentLabel}>Strengths</span>
-                          <p style={styles.commentText}>{item.strengths}</p>
+                            {item.client.detailFeedback && (
+                              <div style={styles.commentBlock}>
+                                <span style={styles.commentLabel}>General Comments</span>
+                                <p style={styles.commentText}>{item.client.detailFeedback}</p>
+                              </div>
+                            )}
+
+                            {item.client.strengths && (
+                              <div style={styles.commentBlock}>
+                                <span style={styles.commentLabel}>Strengths</span>
+                                <p style={styles.commentText}>{item.client.strengths}</p>
+                              </div>
+                            )}
+
+                            {item.client.areasForImprovement && (
+                              <div style={styles.commentBlock}>
+                                <span style={styles.commentLabel}>Areas for Improvement</span>
+                                <p style={styles.commentText}>{item.client.areasForImprovement}</p>
+                              </div>
+                            )}
+
+                            {item.client.wouldRecommend != null && (
+                              <div style={{
+                                ...styles.recommendBadge,
+                                color: item.client.wouldRecommend ? 'var(--color-success)' : 'var(--color-danger)',
+                                borderColor: item.client.wouldRecommend ? 'var(--color-success)' : 'var(--color-danger)',
+                              }}>
+                                {item.client.wouldRecommend ? '✓ Recommended for future projects' : '✗ Not recommended for future projects'}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* PM Evaluation */}
+                          <div style={{ padding: 12 }}>
+                            <h4 style={{ margin: '0 0 8px 0', color: '#10b981', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>
+                              Project Manager Evaluation ({item.pm.clientName})
+                            </h4>
+
+                            <div style={styles.ratingBreakdown}>
+                              {Object.entries(RATING_LABELS)
+                                .filter(([key]) => key !== 'rating')
+                                .map(([key, label]) => (
+                                  <div key={key} style={styles.ratingRow}>
+                                    <span style={styles.ratingLabel}>{label}</span>
+                                    <Stars value={item.pm.ratings?.[key]} size={13} />
+                                  </div>
+                                ))}
+                            </div>
+
+                            {item.pm.detailFeedback && (
+                              <div style={styles.commentBlock}>
+                                <span style={styles.commentLabel}>General Comments</span>
+                                <p style={styles.commentText}>{item.pm.detailFeedback}</p>
+                              </div>
+                            )}
+
+                            {item.pm.strengths && (
+                              <div style={styles.commentBlock}>
+                                <span style={styles.commentLabel}>Strengths</span>
+                                <p style={styles.commentText}>{item.pm.strengths}</p>
+                              </div>
+                            )}
+
+                            {item.pm.areasForImprovement && (
+                              <div style={styles.commentBlock}>
+                                <span style={styles.commentLabel}>Areas for Improvement</span>
+                                <p style={styles.commentText}>{item.pm.areasForImprovement}</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
+                      ) : (
+                        <div style={{ padding: 12 }}>
+                          <div style={styles.ratingBreakdown}>
+                            {Object.entries(RATING_LABELS)
+                              .filter(([key]) => key !== 'rating')
+                              .map(([key, label]) => (
+                                <div key={key} style={styles.ratingRow}>
+                                  <span style={styles.ratingLabel}>{label}</span>
+                                  <Stars value={item.ratings[key]} size={13} />
+                                </div>
+                              ))}
+                          </div>
 
-                      {item.areasForImprovement && (
-                        <div style={styles.commentBlock}>
-                          <span style={styles.commentLabel}>Areas for Improvement</span>
-                          <p style={styles.commentText}>{item.areasForImprovement}</p>
-                        </div>
-                      )}
+                          {item.client?.detailFeedback && (
+                            <div style={styles.commentBlock}>
+                              <span style={styles.commentLabel}>General Comments</span>
+                              <p style={styles.commentText}>{item.client.detailFeedback}</p>
+                            </div>
+                          )}
+                          {item.pm?.detailFeedback && (
+                            <div style={styles.commentBlock}>
+                              <span style={styles.commentLabel}>General Comments</span>
+                              <p style={styles.commentText}>{item.pm.detailFeedback}</p>
+                            </div>
+                          )}
 
-                      {item.wouldRecommend != null && (
-                        <div style={{
-                          ...styles.recommendBadge,
-                          color: item.wouldRecommend ? 'var(--color-success)' : 'var(--color-danger)',
-                          borderColor: item.wouldRecommend ? 'var(--color-success)' : 'var(--color-danger)',
-                        }}>
-                          {item.wouldRecommend ? '✓ Recommended for future projects' : '✗ Not recommended for future projects'}
+                          {item.client?.strengths && (
+                            <div style={styles.commentBlock}>
+                              <span style={styles.commentLabel}>Strengths</span>
+                              <p style={styles.commentText}>{item.client.strengths}</p>
+                            </div>
+                          )}
+                          {item.pm?.strengths && (
+                            <div style={styles.commentBlock}>
+                              <span style={styles.commentLabel}>Strengths</span>
+                              <p style={styles.commentText}>{item.pm.strengths}</p>
+                            </div>
+                          )}
+
+                          {item.client?.areasForImprovement && (
+                            <div style={styles.commentBlock}>
+                              <span style={styles.commentLabel}>Areas for Improvement</span>
+                              <p style={styles.commentText}>{item.client.areasForImprovement}</p>
+                            </div>
+                          )}
+                          {item.pm?.areasForImprovement && (
+                            <div style={styles.commentBlock}>
+                              <span style={styles.commentLabel}>Areas for Improvement</span>
+                              <p style={styles.commentText}>{item.pm.areasForImprovement}</p>
+                            </div>
+                          )}
+
+                          {item.client?.wouldRecommend != null && (
+                            <div style={{
+                              ...styles.recommendBadge,
+                              color: item.client.wouldRecommend ? 'var(--color-success)' : 'var(--color-danger)',
+                              borderColor: item.client.wouldRecommend ? 'var(--color-success)' : 'var(--color-danger)',
+                            }}>
+                              {item.client.wouldRecommend ? '✓ Recommended for future projects' : '✗ Not recommended for future projects'}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
