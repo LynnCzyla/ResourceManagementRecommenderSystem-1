@@ -5,6 +5,15 @@
 // Never touches feedbackController.js, feedbackRequestController.js, or
 // any other table. No auth middleware — matches the existing PM public
 // route convention (routes/ProjectManager/* also has none).
+//
+// ── PM auto-sync (Prompt 1, item 1) ────────────────────────────────────
+// When a client rates someone who turns out to be a Project Manager,
+// submitFeedbackResponses() also writes a performance_records row for
+// that PM with feedback_source = 'client'. This is a create-only side
+// effect — nothing here ever UPDATEs an existing performance_records
+// row, so a PM can never edit their own client-sourced record; the only
+// writer of 'project_manager'-sourced rows is submitPmEvaluation() in
+// employeeFeedbackController.js.
 
 const supabase = require('../supabase');
 
@@ -24,9 +33,6 @@ function isExpired(row) {
   return row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false;
 }
 
-// Look up display names for the employees on a feedback request, same
-// pattern feedbackRequestController.js already uses (profiles.first_name +
-// last_name).
 async function getEmployeeSummaries(employeeIds) {
   if (!employeeIds || employeeIds.length === 0) return [];
 
@@ -48,6 +54,55 @@ async function getEmployeeSummaries(employeeIds) {
       role: p?.role || null,
     };
   });
+}
+
+// Create performance_records rows for any respondent (both PM and Employee)
+// so that Resource Managers can view them consolidated in performance_records.
+// Non-fatal: a failure here must never make the client's
+// feedback submission look like it failed — the feedback_responses rows
+// are already saved by the time this runs.
+async function syncPerformanceRecords({ feedbackRequestRow, insertedResponses }) {
+  try {
+    if (!insertedResponses || insertedResponses.length === 0) return;
+
+    const perfRows = insertedResponses.map(r => ({
+      profile_id: r.profile_id,
+      project_id: feedbackRequestRow.project_id,
+      // feedback_requests.created_by is the PM/staff member who set the
+      // request up — always a valid profiles.id, so it satisfies the
+      // NOT NULL created_by FK even though this row is client-sourced.
+      created_by: feedbackRequestRow.created_by,
+      client_name: feedbackRequestRow.client_name,
+      client_email: feedbackRequestRow.client_email,
+      feedback_response_id: r.id,
+      feedback_request_id: feedbackRequestRow.id,
+      rating: r.rating,
+      client_original_rating: r.rating,
+      technical_skills_rating: r.technical_skills_rating,
+      communication_rating: r.communication_rating,
+      timeliness_rating: r.timeliness_rating,
+      quality_of_work_rating: r.quality_of_work_rating,
+      teamwork_rating: r.teamwork_rating,
+      problem_solving_rating: r.problem_solving_rating,
+      deliverables_feedback: r.deliverables_feedback,
+      client_feedback: r.project_feedback,
+      strengths: r.strengths,
+      areas_for_improvement: r.areas_for_improvement,
+      project_feedback: r.project_feedback,
+      feedback_source: 'client',
+      feedback_status: 'submitted',
+      rated_at: new Date().toISOString(),
+    }));
+
+    if (perfRows.length > 0) {
+      const { error: insertError } = await supabase.from('performance_records').insert(perfRows);
+      if (insertError) {
+        console.error('Non-fatal: failed to create performance_records:', insertError);
+      }
+    }
+  } catch (err) {
+    console.error('Non-fatal: performance_records sync failed:', err);
+  }
 }
 
 // ── GET /api/public/feedback/:token ──────────────────────────────────────
@@ -96,9 +151,6 @@ const getFeedbackRequestByToken = async (req, res) => {
       });
     }
 
-    // Mark as viewed the first time the client opens the link. Non-fatal
-    // if this write fails — the client should still see and be able to
-    // submit the form.
     if (!row.viewed_at) {
       try {
         await supabase
@@ -198,7 +250,6 @@ const submitFeedbackResponses = async (req, res) => {
       });
     }
 
-    // Hard stop against double submission.
     if (row.status === 'completed') {
       return res.status(409).json({
         success: false,
@@ -237,12 +288,13 @@ const submitFeedbackResponses = async (req, res) => {
       return record;
     });
 
-    // Re-check status right before inserting isn't necessary beyond the
-    // check above since there's no auth/session to race against, but we
-    // still guard the insert itself.
-    const { error: insertError } = await supabase
+    // ✅ CHANGED: .select() added so we get back the inserted rows'
+    // (id, profile_id) — needed to link performance_records back to the
+    // exact feedback_responses row via feedback_response_id.
+    const { data: insertedResponses, error: insertError } = await supabase
       .from('feedback_responses')
-      .insert(rowsToInsert);
+      .insert(rowsToInsert)
+      .select();
 
     if (insertError) {
       console.error('Error inserting feedback_responses rows:', insertError);
@@ -263,10 +315,11 @@ const submitFeedbackResponses = async (req, res) => {
       .eq('id', row.id);
 
     if (updateError) {
-      // Responses are already saved — don't report this as a failure to
-      // the client, just log it.
       console.error('Non-fatal: failed to mark feedback_requests row as completed:', updateError);
     }
+
+    // ✅ NEW: auto-create performance_records for all rated respondents
+    await syncPerformanceRecords({ feedbackRequestRow: row, insertedResponses: insertedResponses || [] });
 
     res.status(201).json({ success: true, message: 'Feedback submitted successfully' });
   } catch (error) {
