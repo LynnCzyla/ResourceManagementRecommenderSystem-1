@@ -33,6 +33,15 @@ const IconLocked = () => (
   </svg>
 );
 
+const IconCreateAccount = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <line x1="19" y1="8" x2="19" y2="14"/>
+    <line x1="22" y1="11" x2="16" y2="11"/>
+  </svg>
+);
+
 export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,6 +58,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     last_name: '',
     email: '',
     role: 'Employee',
+    department_id: '',
+    position_id: '',
   });
 
   const [users, setUsers] = useState([]);
@@ -64,6 +75,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   // ── Contact Requests — real data from Supabase ──────────────────────────────
   const [contactRequests, setContactRequests] = useState([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
+
+  // ── Create Accounts — accepted job offers from HR, awaiting a system account ─
+  const [hiredEmployeesRaw, setHiredEmployeesRaw] = useState([]);
+  const [loadingHires, setLoadingHires] = useState(false);
+
+  // ── Departments & Positions — for the Department / Position form fields ─────
+  const [departments, setDepartments] = useState([]);
+  const [positions, setPositions] = useState([]);
 
   // ── SweetAlert helpers ───────────────────────────────────────────────────────
   const showSuccessAlert = (message, title = 'Success!') => {
@@ -134,6 +153,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           first_name: profile.first_name,
           middle_name: profile.middle_name,
           last_name: profile.last_name,
+          position_id: profile.position_id || '',
+          department_id: profile.department_id || '',
+          branch_name: profile.branches?.name || '',
         }));
         setUsers(transformedUsers);
         setError(null);
@@ -216,6 +238,44 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       console.error('Error fetching contact requests:', err);
     } finally {
       setLoadingRequests(false);
+    }
+  };
+
+  // ── Fetch hired employees from HR (to surface accepted offers) ───────────────
+  const fetchHiredEmployees = async () => {
+    try {
+      setLoadingHires(true);
+      const headers = getAuthHeaders();
+      const response = await fetch('http://localhost:5000/api/hr/hired-employees', { headers });
+      const data = await response.json();
+
+      if (data.success) {
+        setHiredEmployeesRaw(data.data || []);
+      } else {
+        console.error('Failed to fetch hired employees:', data.error);
+      }
+    } catch (err) {
+      console.error('Error fetching hired employees:', err);
+    } finally {
+      setLoadingHires(false);
+    }
+  };
+
+  // ── Fetch departments & positions (for the Department / Position fields) ────
+  const fetchDepartmentsAndPositions = async () => {
+    try {
+      const headers = getAuthHeaders();
+      const [deptRes, posRes] = await Promise.all([
+        fetch('http://localhost:5000/api/admin/departments', { headers }),
+        fetch('http://localhost:5000/api/admin/positions', { headers }),
+      ]);
+      const deptData = await deptRes.json();
+      const posData = await posRes.json();
+
+      if (deptData.success) setDepartments(deptData.data || []);
+      if (posData.success) setPositions(posData.data || []);
+    } catch (err) {
+      console.error('Error fetching departments/positions:', err);
     }
   };
 
@@ -438,6 +498,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     fetchUsers();
     fetchLockedAccounts();
     fetchContactRequests();
+    fetchHiredEmployees();
+    fetchDepartmentsAndPositions();
   }, []);
 
   useEffect(() => {
@@ -461,6 +523,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           last_name: formData.last_name,
           email: formData.email,
           role: formData.role,
+          position_id: formData.position_id || null,
+          redirectOrigin: window.location.origin,
         }),
       });
       const data = await response.json();
@@ -470,8 +534,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         resetForm();
         setError(null);
         await fetchUsers();
+        await fetchHiredEmployees();
         showSuccessAlert(
-          `User ${formData.first_name} ${formData.last_name} has been created successfully! The temporary password is ${data.temporary_password}`,
+          `User ${formData.first_name} ${formData.last_name} has been created successfully! A "Create Password" email has been sent to ${formData.email} so they can set up their own password.`,
           'Account Created!'
         );
       } else {
@@ -513,6 +578,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           last_name: formData.last_name,
           role: formData.role,
           email: formData.email,
+          position_id: formData.position_id || null,
         }),
       });
       const data = await response.json();
@@ -542,22 +608,96 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
   const openEditModal = (user) => {
     setSelectedUser(user);
+    const matchedPosition = positions.find(p => String(p.id) === String(user.position_id));
     setFormData({
       first_name: user.first_name || '',
       middle_name: user.middle_name || '',
       last_name: user.last_name || '',
       email: user.email || '',
       role: user.role || 'Employee',
+      department_id: matchedPosition?.department_id ? String(matchedPosition.department_id) : '',
+      position_id: user.position_id ? String(user.position_id) : '',
       password: ''
     });
     setShowEditModal(true);
   };
 
   const resetForm = () => {
-    setFormData({ first_name: '', middle_name: '', last_name: '', email: '', role: 'Employee' });
+    setFormData({ first_name: '', middle_name: '', last_name: '', email: '', role: 'Employee', department_id: '', position_id: '' });
     setSelectedUser(null);
     setError(null);
   };
+
+  // ── Best-effort role guess from the applicant's hired position ───────────────
+  const guessRoleFromPosition = (position) => {
+    const p = (position || '').toLowerCase();
+    if (p.includes('admin')) return 'Admin';
+    if (p.includes('resource manager')) return 'Resource Manager';
+    if (p.includes('project manager')) return 'Project Manager';
+    if (p.includes('human resource') || p.includes('hr assistant') || p.includes('hr ')) return 'Human Resources';
+    return 'Employee';
+  };
+
+  // ── Open the Create Account modal, prefilled from an accepted HR candidate ───
+  const openCreateModalFromHire = (candidate) => {
+    const nameParts = (candidate.name || '').trim().split(/\s+/).filter(Boolean);
+    const first_name = nameParts[0] || '';
+    const last_name = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+    // Best-effort match of the HR record's department/position text to the
+    // actual Department/Position records so the form fields auto-select.
+    const matchedDept = departments.find(
+      d => (d.department_name || '').trim().toLowerCase() === (candidate.department || '').trim().toLowerCase()
+    );
+    const candidatePositionsPool = matchedDept
+      ? positions.filter(p => String(p.department_id) === String(matchedDept.id))
+      : positions;
+    const matchedPosition = candidatePositionsPool.find(
+      p => (p.position_name || '').trim().toLowerCase() === (candidate.position || '').trim().toLowerCase()
+    ) || positions.find(
+      p => (p.position_name || '').trim().toLowerCase() === (candidate.position || '').trim().toLowerCase()
+    );
+
+    setSelectedUser(null);
+    setError(null);
+    setFormData({
+      first_name,
+      middle_name: '',
+      last_name,
+      email: candidate.email || '',
+      role: guessRoleFromPosition(candidate.position),
+      department_id: matchedDept ? String(matchedDept.id) : (matchedPosition ? String(matchedPosition.department_id) : ''),
+      position_id: matchedPosition ? String(matchedPosition.id) : '',
+    });
+    setShowCreateModal(true);
+  };
+
+  // ── Accepted HR offers that don't have a system account yet ──────────────────
+  const existingAccountEmails = new Set(
+    users.map(u => (u.email || '').trim().toLowerCase()).filter(Boolean)
+  );
+
+  const pendingHireCandidates = hiredEmployeesRaw
+    .filter(emp => {
+      const notes = emp.job_applications?.notes || '';
+      const offerAccepted = notes.includes('OFFER_SENT') && notes.includes('OFFER_ACCEPTED');
+      const email = (emp.email || '').trim().toLowerCase();
+      return offerAccepted && !!email && !existingAccountEmails.has(email);
+    })
+    .map(emp => ({
+      id: emp.id,
+      name: emp.name,
+      email: emp.email,
+      phone: emp.phone,
+      position: emp.positions?.position_name || emp.job_applications?.position_applied || 'N/A',
+      department: emp.departments?.department_name || emp.job_applications?.department || 'N/A',
+      hireDate: emp.hire_date,
+    }));
+
+  // ── Positions filtered by the currently selected department in the form ─────
+  const positionsForSelectedDepartment = formData.department_id
+    ? positions.filter(p => String(p.department_id) === String(formData.department_id))
+    : positions;
 
   // ── Pagination logic ──────────────────────────────────────────────────────────
   const filteredUsers = users.filter(u =>
@@ -741,6 +881,31 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           User Accounts {loading && '...'}
         </button>
         <button 
+          onClick={() => setSubTab('create')} 
+          onMouseEnter={(e) => {
+            if (subTab !== 'create') {
+              e.currentTarget.style.background = 'var(--color-primary-light)';
+              e.currentTarget.style.color = 'var(--color-primary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (subTab !== 'create') {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
+            }
+          }}
+          style={{ ...styles.subTabButton, borderBottomColor: subTab === 'create' ? 'var(--color-primary)' : 'transparent', color: subTab === 'create' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'create' ? '700' : '500', ...(subTab === 'create' ? styles.subTabButtonHover : {}) }}
+        >
+          <IconCreateAccount />
+          Create Accounts
+          {loadingHires && '...'}
+          {!loadingHires && pendingHireCandidates.length > 0 && (
+            <span style={{ marginLeft: '8px', backgroundColor: 'var(--color-danger)', color: 'white', borderRadius: '50%', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>
+              {pendingHireCandidates.length}
+            </span>
+          )}
+        </button>
+        <button 
           onClick={() => setSubTab('requests')} 
           onMouseEnter={(e) => {
             if (subTab !== 'requests') {
@@ -808,9 +973,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 style={styles.searchInput}
               />
             </div>
-            <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn} disabled={loading}>
-              + Create User Account
-            </button>
           </div>
 
           <div style={styles.tableWrapper}>
@@ -820,6 +982,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                   <th style={styles.th}>Full Name</th>
                   <th style={styles.th}>Email Address</th>
                   <th style={styles.th}>System Role</th>
+                  <th style={styles.th}>Branch</th>
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Created Date</th>
                   <th style={styles.th}>Actions</th>
@@ -827,9 +990,9 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </thead>
               <tbody>
                 {loading && currentItems.length === 0 ? (
-                  <tr><td colSpan="6" style={styles.emptyRow}>Loading users...</td></tr>
+                  <tr><td colSpan="7" style={styles.emptyRow}>Loading users...</td></tr>
                 ) : currentItems.length === 0 ? (
-                  <tr><td colSpan="6" style={styles.emptyRow}>No user accounts found.</td></tr>
+                  <tr><td colSpan="7" style={styles.emptyRow}>No user accounts found.</td></tr>
                 ) : (
                   currentItems.map(u => (
                     <tr key={u.id} style={styles.tableBodyRow}>
@@ -840,6 +1003,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                           {u.role}
                         </span>
                       </td>
+                      <td style={styles.td}>{u.branch_name || '—'}</td>
                       <td style={styles.td}>
                         <span style={{ ...styles.statusBadge, backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : u.status === 'Locked' ? 'var(--color-danger-light)' : 'var(--color-warning-light)', color: u.status === 'Active' ? 'var(--color-success)' : u.status === 'Locked' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
                           {u.status}
@@ -902,6 +1066,84 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
           {/* ✅ Pagination */}
           {renderPagination()}
+        </div>
+      )}
+
+      {/* ── Create Accounts Tab ── */}
+      {subTab === 'create' && (
+        <div className="glass-card">
+          <div style={styles.tableToolbar}>
+            <div>
+              <h2 style={{ ...styles.tabSectionTitle, marginBottom: '4px' }}>Create Accounts</h2>
+              <p style={{ ...styles.tabSectionSubtitle, marginBottom: 0 }}>
+                Employees who accepted their job offer from HR and are ready for a system account.
+              </p>
+            </div>
+            <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn} disabled={loading}>
+              + Create User Account
+            </button>
+          </div>
+
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeaderRow}>
+                  <th style={styles.th}>Employee</th>
+                  <th style={styles.th}>Email Address</th>
+                  <th style={styles.th}>Position</th>
+                  <th style={styles.th}>Department</th>
+                  <th style={styles.th}>Hire Date</th>
+                  <th style={styles.th}>Offer Status</th>
+                  <th style={styles.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingHires ? (
+                  <tr><td colSpan="7" style={styles.emptyRow}>Loading accepted offers...</td></tr>
+                ) : pendingHireCandidates.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={styles.emptyRow}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 0' }}>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-muted)', marginBottom: '12px' }}>
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                          <circle cx="9" cy="7" r="4"></circle>
+                          <line x1="19" y1="8" x2="19" y2="14"></line>
+                          <line x1="22" y1="11" x2="16" y2="11"></line>
+                        </svg>
+                        <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text-primary)' }}>No pending accounts to create</span>
+                        <span style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>Accepted job offers from HR will show up here.</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  pendingHireCandidates.map(candidate => (
+                    <tr key={candidate.id} style={styles.tableBodyRow}>
+                      <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{candidate.name}</td>
+                      <td style={styles.td}>{candidate.email}</td>
+                      <td style={styles.td}>{candidate.position}</td>
+                      <td style={styles.td}>{candidate.department}</td>
+                      <td style={styles.td}>{candidate.hireDate || 'N/A'}</td>
+                      <td style={styles.td}>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ ...styles.statusBadge, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-accent)' }}>Offer Sent✓</span>
+                          <span style={{ ...styles.statusBadge, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-success)' }}>✔ Accepted</span>
+                        </div>
+                      </td>
+                      <td style={styles.td}>
+                        <button
+                          onClick={() => openCreateModalFromHire(candidate)}
+                          style={{ ...styles.statusToggleBtn, color: '#ffffff', background: 'var(--color-primary)' }}
+                          disabled={loading}
+                        >
+                          + Create Account
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1129,9 +1371,35 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} placeholder="user@wea.com" required />
               </div>
               <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Department</label>
+                <select
+                  value={formData.department_id}
+                  onChange={(e) => setFormData({ ...formData, department_id: e.target.value, position_id: '' })}
+                  style={styles.modalSelect}
+                >
+                  <option value="">Select a department…</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.department_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Position</label>
+                <select
+                  value={formData.position_id}
+                  onChange={(e) => setFormData({ ...formData, position_id: e.target.value })}
+                  style={styles.modalSelect}
+                  disabled={!formData.department_id}
+                >
+                  <option value="">{formData.department_id ? 'Select a position…' : 'Select a department first'}</option>
+                  {positionsForSelectedDepartment.map((pos) => (
+                    <option key={pos.id} value={pos.id}>{pos.position_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Assign Role *</label>
                 <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} style={styles.modalSelect} required>
-                  <option value="Admin">Admin</option>
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
@@ -1173,9 +1441,35 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} required />
               </div>
               <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Department</label>
+                <select
+                  value={formData.department_id}
+                  onChange={(e) => setFormData({ ...formData, department_id: e.target.value, position_id: '' })}
+                  style={styles.modalSelect}
+                >
+                  <option value="">Select a department…</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.department_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Position</label>
+                <select
+                  value={formData.position_id}
+                  onChange={(e) => setFormData({ ...formData, position_id: e.target.value })}
+                  style={styles.modalSelect}
+                  disabled={!formData.department_id}
+                >
+                  <option value="">{formData.department_id ? 'Select a position…' : 'Select a department first'}</option>
+                  {positionsForSelectedDepartment.map((pos) => (
+                    <option key={pos.id} value={pos.id}>{pos.position_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={styles.formGroup}>
                 <label style={styles.formLabel}>System Role *</label>
                 <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} style={styles.modalSelect} required>
-                  <option value="Admin">Admin</option>
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
                   <option value="Employee">Employee</option>
