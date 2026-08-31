@@ -3,21 +3,35 @@ import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
 
 
-const mapApplication = (row) => ({
-  id: row.id,
-  name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
-  email: row.email,
-  phone: row.phone || '',
-  position: row.position_applied,
-  department: row.department || '',
-  status: row.status || 'Pending',
-  appliedDate: row.applied_date,
-  experience: row.experience || '',
-  skills: row.skills || '',
-  education: row.education || '',
-  coverLetter: row.cover_letter || '',
-  resume: row.resume_path || '',
-});
+const mapApplication = (row) => {
+  let location = row.location || '';
+  let coverLetter = row.cover_letter || '';
+  
+  if (!location && coverLetter.includes('[Applicant Address:')) {
+    const match = coverLetter.match(/\[Applicant Address:\s*(.*?)\]/);
+    if (match) {
+      location = match[1];
+      coverLetter = coverLetter.replace(/\[Applicant Address:\s*.*?\]/, '').trim();
+    }
+  }
+
+  return {
+    id: row.id,
+    name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+    email: row.email,
+    phone: row.phone || '',
+    position: row.position_applied,
+    department: row.department || '',
+    status: row.status || 'Pending',
+    appliedDate: row.applied_date,
+    experience: row.experience || '',
+    skills: row.skills || '',
+    education: row.education || '',
+    coverLetter: coverLetter,
+    resume: row.resume_path || '',
+    location: location || '—',
+  };
+};
 
 // An application is considered "History" once it's reached a terminal
 // outcome (Hired or Rejected). Everything else (Pending, Recommended,
@@ -500,6 +514,10 @@ export default function HRApplicationsTab() {
                       <div style={styles.detailItem}>
                         <span style={styles.detailLabel}>Phone:</span>
                         <span style={styles.detailValue}>{selectedApplication.phone}</span>
+                      </div>
+                      <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Address:</span>
+                        <span style={styles.detailValue}>{selectedApplication.location}</span>
                       </div>
                     </div>
                   </div>
