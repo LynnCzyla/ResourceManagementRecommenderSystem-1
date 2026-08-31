@@ -17,7 +17,12 @@ router.get("/", async (req, res) => {
     // ✅ Build query with branch filtering
     let query = supabase
       .from("profiles")
-      .select("*")
+      .select(`
+        *,
+        branches:branch_id (
+          name
+        )
+      `)
       .order("created_at", { ascending: false });
     
     // If not Super Admin, filter by branch
@@ -141,7 +146,8 @@ router.put("/:id", async (req, res) => {
       last_name,
       role,
       email,
-      branch_id
+      branch_id,
+      position_id
     } = req.body;
 
     const { data: existingProfile, error: checkError } = await supabase
@@ -187,6 +193,10 @@ router.put("/:id", async (req, res) => {
       role: role || "Employee",
       updated_at: new Date().toISOString()
     };
+
+    if (position_id !== undefined) {
+      updateData.position_id = position_id || null;
+    }
 
     if (branch_id && req.user.is_super_admin) {
       updateData.branch_id = branch_id;
