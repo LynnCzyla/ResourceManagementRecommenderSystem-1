@@ -5,21 +5,18 @@ const { verifyToken } = require('../Middleware/auth');
 
 console.log('✅ PM Router initializing...');
 
-// ✅ PUBLIC TEST ROUTE - NO AUTH REQUIRED (MUST BE BEFORE router.use(verifyToken))
 router.get('/test', (req, res) => {
   res.json({
     success: true,
     message: 'PM Router is working!',
     timestamp: new Date().toISOString(),
-    routes: ['/dashboard', '/projects', '/employees', '/skills', '/tasks', '/resource-requests', '/feedback-requests']
+    routes: ['/dashboard', '/projects', '/employees', '/skills', '/tasks', '/resource-requests', '/feedback-requests', '/performance']
   });
 });
 
-// ✅ Apply auth middleware to ALL routes below this line
 router.use(verifyToken);
 console.log('✅ Auth middleware applied');
 
-// Import routes
 console.log('📦 Loading Dashboard route...');
 router.use('/dashboard', require('./dashboard'));
 console.log('✅ Dashboard route loaded');
@@ -47,5 +44,9 @@ console.log('✅ Feedback Requests route loaded');
 console.log('📦 Loading Skills route...');
 router.use('/skills', require('./skills'));
 console.log('✅ Skills route loaded');
+
+console.log('📦 Loading Performance route...');
+router.use('/performance', require('./performance'));
+console.log('✅ Performance route loaded');
 
 module.exports = router;
