@@ -428,6 +428,25 @@ export async function createResourceRequest(payload) {
   }
 }
 
+// ---- Global Feedback Report ----
+export async function fetchGlobalFeedbackReport(filters = {}) {
+  console.log('📊 Fetching global feedback report...', filters);
+  try {
+    const headers = await authHeaders();
+    const params = new URLSearchParams();
+    if (filters.projectId) params.set('project_id', filters.projectId);
+    if (filters.pmId) params.set('pm_id', filters.pmId);
+    if (filters.empId) params.set('emp_id', filters.empId);
+    if (filters.feedbackSource) params.set('feedback_source', filters.feedbackSource);
+    const qs = params.toString();
+    const res = await fetch(`${API_BASE}/feedback-report${qs ? `?${qs}` : ''}`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Global feedback report fetch error:', error);
+    throw error;
+  }
+}
+
 // Default export for easy importing
 export default {
   fetchDashboard,
@@ -447,4 +466,5 @@ export default {
   updateRequirementStatus,
   fetchResourceRequests,
   createResourceRequest,
+  fetchGlobalFeedbackReport,
 };
