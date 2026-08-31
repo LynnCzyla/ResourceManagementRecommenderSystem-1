@@ -28,6 +28,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const supabase = require('../../supabase');
 
 // ------------------------------------------------------------
@@ -120,6 +121,7 @@ router.post('/applications', upload.single('resume'), async (req, res) => {
       education,
       skills,
       cover_letter,
+      location,
     } = req.body;
 
     if (!first_name || !last_name || !email || !position_applied) {
@@ -172,26 +174,60 @@ router.post('/applications', upload.single('resume'), async (req, res) => {
       resume_path = urlData.publicUrl;
     }
 
-    const { data, error } = await supabase
-      .from('job_applications')
-      .insert({
-        job_posting_id: job_posting_id || null,
-        first_name,
-        middle_name: middle_name || null,
-        last_name,
-        email,
-        phone: phone || null,
-        position_applied,
-        department: department || null,
-        experience: experience || null,
-        education: education || null,
-        skills: skills || null,
-        cover_letter: cover_letter || null,
-        resume_path,
-        status: 'Pending',
-      })
-      .select()
-      .single();
+    let data, error;
+    try {
+      const result = await supabase
+        .from('job_applications')
+        .insert({
+          job_posting_id: job_posting_id || null,
+          first_name,
+          middle_name: middle_name || null,
+          last_name,
+          email,
+          phone: phone || null,
+          position_applied,
+          department: department || null,
+          experience: experience || null,
+          education: education || null,
+          skills: skills || null,
+          cover_letter: cover_letter || null,
+          location: location || null,
+          resume_path,
+          status: 'Pending',
+        })
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+    } catch (insertError) {
+      if (insertError.message?.includes('column "location"') || insertError.code === '42703' || (insertError.message?.includes('violates') && insertError.message?.includes('security policy'))) {
+        const fallbackCoverLetter = `${cover_letter || ''}\n\n[Applicant Address: ${location}]`.trim();
+        const result = await supabase
+          .from('job_applications')
+          .insert({
+            job_posting_id: job_posting_id || null,
+            first_name,
+            middle_name: middle_name || null,
+            last_name,
+            email,
+            phone: phone || null,
+            position_applied,
+            department: department || null,
+            experience: experience || null,
+            education: education || null,
+            skills: skills || null,
+            cover_letter: fallbackCoverLetter,
+            resume_path,
+            status: 'Pending',
+          })
+          .select()
+          .single();
+        data = result.data;
+        error = result.error;
+      } else {
+        throw insertError;
+      }
+    }
 
     if (error) throw error;
 
