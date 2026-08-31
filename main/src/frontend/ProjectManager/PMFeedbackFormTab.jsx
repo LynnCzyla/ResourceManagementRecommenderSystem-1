@@ -429,9 +429,9 @@ export default function PMFeedbackFormTab({ user }) {
           <div style={styles.formGroup}>
             <label style={styles.label}>Project *</label>
             <select name="projectId" style={styles.select} value={formData.projectId} onChange={handleChange}>
-              <option value="">-- Select a project --</option>
+              <option value="" style={{ color: '#1f2937', backgroundColor: '#ffffff' }}>-- Select a project --</option>
               {sortedProjects.map(p => (
-                <option key={p.id} value={p.id}>
+                <option key={p.id} value={p.id} style={{ color: '#1f2937', backgroundColor: '#ffffff' }}>
                   {p.name}
                   {p.feedbackStatus ? ` (${DROPDOWN_STATUS_LABELS[p.feedbackStatus] || p.feedbackStatus})` : ''}
                 </option>
