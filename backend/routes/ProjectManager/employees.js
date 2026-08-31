@@ -85,11 +85,14 @@ router.get('/', async (req, res) => {
     const { departmentId, pmId, projectId } = req.query;
 
     // Check cache for this exact query
+    const useCache = !projectId;
     const cacheKey = getCacheKey({ departmentId, pmId, projectId });
-    const cachedData = getCached(cacheKey);
-    if (cachedData) {
-      console.log(`📦 Cache hit for employees: ${cacheKey}`);
-      return res.status(200).json({ success: true, data: cachedData });
+    if (useCache) {
+      const cachedData = getCached(cacheKey);
+      if (cachedData) {
+        console.log(`📦 Cache hit for employees: ${cacheKey}`);
+        return res.status(200).json({ success: true, data: cachedData });
+      }
     }
 
     console.log(`🔍 Cache miss for employees: ${cacheKey}`);
@@ -187,6 +190,19 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
+    // Fetch PM evaluated profile IDs for this project
+    const evaluatedProfileIds = new Set();
+    if (projectId) {
+      const { data: evaluations, error: evalError } = await supabase
+        .from('performance_records')
+        .select('profile_id')
+        .eq('project_id', projectId)
+        .eq('feedback_source', 'project_manager');
+      if (!evalError && evaluations) {
+        evaluations.forEach(ev => evaluatedProfileIds.add(ev.profile_id));
+      }
+    }
+
     // ✅ Get workload scores for each employee
     const employeeIds = (data || []).map(emp => emp.id);
     let workloadMap = {};
@@ -209,17 +225,22 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Transform with workload data
+    // Transform with workload data and evaluated flag
     const transformed = (data || []).map(emp => {
       const workloadScore = workloadMap[emp.id] || 0;
-      return transformEmployee({
-        ...emp,
-        workload_score: workloadScore
-      });
+      return {
+        ...transformEmployee({
+          ...emp,
+          workload_score: workloadScore
+        }),
+        isEvaluated: evaluatedProfileIds.has(emp.id)
+      };
     });
     
-    // Cache the result
-    setCache(cacheKey, transformed);
+    // Cache the result if caching is enabled
+    if (useCache) {
+      setCache(cacheKey, transformed);
+    }
 
     res.status(200).json({ success: true, data: transformed });
   } catch (error) {
