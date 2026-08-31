@@ -7,11 +7,10 @@ import RMProjectsTab from './RMProjectsTab';
 import RMRequestsTab from './RMRequestsTab';
 import RMResourceRequestFormTab from './RMResourceRequestFormTab';
 import ProfileSettings from '../ProfileSettings';
-
+import RMFeedbackReportTab from './RMFeedbackReportTab';
 // Isolated so its 1s tick doesn't re-render RMLayout (and therefore every tab) every second.
-function PHClock() {
+function PHClock({ user }) {
   const [phTime, setPhTime] = useState('');
-
   useEffect(() => {
     const options = {
       timeZone: 'Asia/Manila',
@@ -33,6 +32,20 @@ function PHClock() {
 
   return (
     <div style={styles.phClockContainer}>
+      {user?.role !== 'Super Admin' && user?.branch_name && (
+        <span style={{ 
+          marginRight: '12px', 
+          fontWeight: '700', 
+          fontSize: '12px', 
+          color: '#ffffff', 
+          backgroundColor: '#8b5cf6', 
+          padding: '2px 8px', 
+          borderRadius: '4px',
+          letterSpacing: '0.5px'
+        }}>
+          {user.branch_name}
+        </span>
+      )}
       <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
       <span style={styles.phClockTime}>{phTime}</span>
     </div>
@@ -229,6 +242,24 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
             </svg>
             {!sidebarCollapsed && <span style={styles.navText}>Request Form</span>}
           </div>
+
+          {/* Feedback Report */}
+          <div 
+            onClick={() => handleNavClick('feedbackReport')} 
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'feedbackReport' ? 'var(--color-primary-light)' : 'transparent',
+              borderLeftColor: activeTab === 'feedbackReport' ? 'var(--color-primary)' : 'transparent'
+            }}
+            title="Feedback Report"
+            className="hover-sidebar-item"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
+              <path d="M9 11l3 3L22 4"></path>
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+            </svg>
+            {!sidebarCollapsed && <span style={styles.navText}>Feedback Report</span>}
+          </div>
         </nav>
 
         {!sidebarCollapsed && (
@@ -244,7 +275,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
         <header style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Resource Manager Portal</span>
-            <PHClock />
+            <PHClock user={user} />
           </div>
           
           <div style={styles.topbarRight}>
@@ -373,6 +404,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
           <div style={tabVisibility('projects')}><RMProjectsTab /></div>
           <div style={tabVisibility('requests')}><RMRequestsTab /></div>
           <div style={tabVisibility('requestForm')}><RMResourceRequestFormTab /></div>
+          <div style={tabVisibility('feedbackReport')}><RMFeedbackReportTab /></div>
         </main>
       </div>
 
