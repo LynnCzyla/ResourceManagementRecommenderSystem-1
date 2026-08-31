@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { getProjects, createProject, getSkills } from './pmApi';
+import { getProjects, createProject, getSkills, updateProjectStatus } from './pmApi';
+
+// Statuses that count as "done" and belong in the Project History tab.
+const COMPLETED_STATUSES = ['Completed', 'Archived'];
 
 const calculateDurationDays = (startDate, endDate) => {
   if (!startDate || !endDate) return '';
@@ -17,20 +20,29 @@ export default function PMProjectsTab({ user }) {
   const [submitError, setSubmitError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('name');
-  
+
+  // ✅ Tabs: "active" (Projects) vs "history" (Project History / completed)
+  const [activeTab, setActiveTab] = useState('active');
+  const [statusUpdatingId, setStatusUpdatingId] = useState(null);
+  const [statusError, setStatusError] = useState('');
+
+  // ✅ Custom confirm modal (replaces browser window.confirm) for
+  // "Mark as Complete" / "Restore Project" actions.
+  const [confirmDialog, setConfirmDialog] = useState(null); // { project, kind: 'complete' | 'restore' }
+
   // Skills state for autocomplete
   const [allSkills, setAllSkills] = useState([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
-  const [skillSuggestions, setSkillSuggestions] = useState([]);
-  const [showSkillSuggestions, setShowSkillSuggestions] = useState(false);
 
   const initialResources = [{
     role: '',
     quantity: 1,
     experience: 'Intermediate',
     assignment: 'Full-time',
-    skills: [],
-    skillInput: '',
+    primarySkills: [],
+    primarySkillInput: '',
+    secondarySkills: [],
+    secondarySkillInput: '',
     justification: ''
   }];
 
@@ -79,24 +91,33 @@ export default function PMProjectsTab({ user }) {
     loadProjects();
   }, [user]);
 
+  // ── Skill tag helpers ───────────────────────────────────────────────
+  // `type` is 'primary' or 'secondary'. Maps to the resource's
+  // primarySkills/primarySkillInput or secondarySkills/secondarySkillInput fields.
+  const fieldNames = (type) => ({
+    skillsField: type === 'primary' ? 'primarySkills' : 'secondarySkills',
+    inputField: type === 'primary' ? 'primarySkillInput' : 'secondarySkillInput',
+  });
+
   // ✅ Handle skill input with comma separation
-  const handleSkillInputChange = (index, value) => {
+  const handleSkillInputChange = (index, type, value) => {
+    const { skillsField, inputField } = fieldNames(type);
+
     // Check if the last character is a comma
     if (value.endsWith(',')) {
-      // Remove the comma and trim
       const skillName = value.slice(0, -1).trim();
       if (skillName) {
-        // Add the skill
         setFormData(prev => {
           const updated = [...prev.resources];
-          if (!updated[index].skills.includes(skillName)) {
-            updated[index].skills = [...updated[index].skills, skillName];
+          if (!updated[index][skillsField].includes(skillName)) {
+            updated[index] = {
+              ...updated[index],
+              [skillsField]: [...updated[index][skillsField], skillName],
+            };
           }
-          updated[index].skillInput = '';
+          updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
-        setSkillSuggestions([]);
-        setShowSkillSuggestions(false);
         return;
       }
     }
@@ -104,67 +125,61 @@ export default function PMProjectsTab({ user }) {
     // Update the input value
     setFormData(prev => {
       const updated = [...prev.resources];
-      updated[index].skillInput = value;
+      updated[index] = { ...updated[index], [inputField]: value };
       return { ...prev, resources: updated };
     });
-
-    // Show suggestions based on input
-    if (value.length > 0) {
-      const filtered = allSkills.filter(skill => 
-        skill.skill_name.toLowerCase().includes(value.toLowerCase())
-      );
-      setSkillSuggestions(filtered.slice(0, 10));
-      setShowSkillSuggestions(true);
-    } else {
-      setSkillSuggestions([]);
-      setShowSkillSuggestions(false);
-    }
   };
 
   // ✅ Handle Enter key to add skill
-  const handleSkillKeyDown = (index, e) => {
+  const handleSkillKeyDown = (index, type, e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      const input = formData.resources[index]?.skillInput || '';
+      const { skillsField, inputField } = fieldNames(type);
+      const input = formData.resources[index]?.[inputField] || '';
       const trimmed = input.trim();
       if (trimmed) {
         setFormData(prev => {
           const updated = [...prev.resources];
-          if (!updated[index].skills.includes(trimmed)) {
-            updated[index].skills = [...updated[index].skills, trimmed];
+          if (!updated[index][skillsField].includes(trimmed)) {
+            updated[index] = {
+              ...updated[index],
+              [skillsField]: [...updated[index][skillsField], trimmed],
+            };
           }
-          updated[index].skillInput = '';
+          updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
-        setSkillSuggestions([]);
-        setShowSkillSuggestions(false);
       }
     }
   };
 
   // ✅ Select a skill from suggestions (click)
-  const handleSelectSkill = (index, skillName) => {
+  const handleSelectSkill = (index, type, skillName) => {
     if (!skillName || skillName.trim() === '') return;
-    
+    const { skillsField, inputField } = fieldNames(type);
+
     setFormData(prev => {
       const updated = [...prev.resources];
-      if (!updated[index].skills.includes(skillName.trim())) {
-        updated[index].skills = [...updated[index].skills, skillName.trim()];
+      if (!updated[index][skillsField].includes(skillName.trim())) {
+        updated[index] = {
+          ...updated[index],
+          [skillsField]: [...updated[index][skillsField], skillName.trim()],
+        };
       }
-      updated[index].skillInput = '';
+      updated[index][inputField] = '';
       return { ...prev, resources: updated };
     });
-    setSkillSuggestions([]);
-    setShowSkillSuggestions(false);
   };
 
   // ✅ Remove a skill from the selected list
-  const handleRemoveSkill = (resourceIndex, skillToRemove) => {
+  const handleRemoveSkill = (resourceIndex, type, skillToRemove) => {
+    const { skillsField } = fieldNames(type);
     setFormData(prev => {
       const updated = [...prev.resources];
-      updated[resourceIndex].skills = updated[resourceIndex].skills.filter(
-        s => s !== skillToRemove
-      );
+      updated[resourceIndex] = {
+        ...updated[resourceIndex],
+        [skillsField]: updated[resourceIndex][skillsField].filter(s => s !== skillToRemove),
+      };
       return { ...prev, resources: updated };
     });
   };
@@ -187,8 +202,10 @@ export default function PMProjectsTab({ user }) {
           quantity: 1,
           experience: 'Intermediate',
           assignment: 'Full-time',
-          skills: [],
-          skillInput: '',
+          primarySkills: [],
+          primarySkillInput: '',
+          secondarySkills: [],
+          secondarySkillInput: '',
           justification: ''
         }
       ]
@@ -217,13 +234,13 @@ export default function PMProjectsTab({ user }) {
         quantity: 1,
         experience: 'Intermediate',
         assignment: 'Full-time',
-        skills: [],
-        skillInput: '',
+        primarySkills: [],
+        primarySkillInput: '',
+        secondarySkills: [],
+        secondarySkillInput: '',
         justification: ''
       }]
     });
-    setSkillSuggestions([]);
-    setShowSkillSuggestions(false);
   };
 
   const handleCreateSubmit = async (e) => {
@@ -232,10 +249,11 @@ export default function PMProjectsTab({ user }) {
 
     setSubmitError('');
     try {
-      // Convert skills array to comma-separated string for backend
+      // Convert skill arrays to comma-separated strings for backend
       const resourcesWithSkills = formData.resources.map(res => ({
         ...res,
-        skills: res.skills.join(', ')
+        primarySkills: res.primarySkills.join(', '),
+        secondarySkills: res.secondarySkills.join(', '),
       }));
 
       await createProject({
@@ -259,15 +277,53 @@ export default function PMProjectsTab({ user }) {
     }
   };
 
-  const filteredProjects = projects.filter(proj => 
+  // ✅ Open the styled confirm dialog instead of the native browser confirm()
+  const handleCompleteProject = (proj) => {
+    setConfirmDialog({ project: proj, kind: 'complete' });
+  };
+
+  const handleRestoreProject = (proj) => {
+    setConfirmDialog({ project: proj, kind: 'restore' });
+  };
+
+  // ✅ Runs after the user confirms in the custom dialog. Marks a project
+  // Complete (-> Project History) or restores it back to Active.
+  const runConfirmedStatusChange = async () => {
+    if (!confirmDialog) return;
+    const { project: proj, kind } = confirmDialog;
+    const newStatus = kind === 'complete' ? 'Completed' : 'Active';
+
+    setStatusError('');
+    setStatusUpdatingId(proj.id);
+    setConfirmDialog(null);
+    try {
+      await updateProjectStatus(proj.id, newStatus);
+      await loadProjects();
+    } catch (err) {
+      console.error(`Failed to ${kind === 'complete' ? 'complete' : 'restore'} project:`, err);
+      setStatusError(err.message || `Failed to ${kind === 'complete' ? 'mark project as complete' : 'restore project'}`);
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
+  const searchedProjects = projects.filter(proj =>
     proj.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     proj.description.toLowerCase().includes(searchQuery.toLowerCase())
-  ).sort((a, b) => {
+  );
+
+  // Split into active (still running) vs history (completed/archived)
+  const activeProjects = searchedProjects.filter(proj => !COMPLETED_STATUSES.includes(proj.status));
+  const historyProjects = searchedProjects.filter(proj => COMPLETED_STATUSES.includes(proj.status));
+
+  const sortProjects = (list) => [...list].sort((a, b) => {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     if (sortBy === 'status') return a.status.localeCompare(b.status);
     if (sortBy === 'startDate') return new Date(a.startDate) - new Date(b.startDate);
     return 0;
   });
+
+  const filteredProjects = sortProjects(activeTab === 'history' ? historyProjects : activeProjects);
 
   return (
     <div style={styles.container}>
@@ -307,56 +363,127 @@ export default function PMProjectsTab({ user }) {
         </div>
       </div>
 
+      {/* ✅ Tabs: Projects (active) / Project History (completed, restorable) */}
+      <div style={styles.tabsRow}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('active')}
+          style={{ ...styles.tabBtn, ...(activeTab === 'active' ? styles.tabBtnActive : {}) }}
+        >
+          Projects
+          <span style={{ ...styles.tabCount, ...(activeTab === 'active' ? styles.tabCountActive : {}) }}>
+            {activeProjects.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('history')}
+          style={{ ...styles.tabBtn, ...(activeTab === 'history' ? styles.tabBtnActive : {}) }}
+        >
+          Project History
+          <span style={{ ...styles.tabCount, ...(activeTab === 'history' ? styles.tabCountActive : {}) }}>
+            {historyProjects.length}
+          </span>
+        </button>
+      </div>
+
       {loadError && (
         <div className="glass-card" style={{ padding: '12px 16px', color: 'var(--color-danger)', fontSize: '13px', fontWeight: '600' }}>{loadError}</div>
+      )}
+      {statusError && (
+        <div className="glass-card" style={{ padding: '12px 16px', color: 'var(--color-danger)', fontSize: '13px', fontWeight: '600' }}>{statusError}</div>
       )}
 
       {/* Projects Grid */}
       <div style={styles.projectsGrid}>
-        {projects.length === 0 ? (
+        {filteredProjects.length === 0 ? (
           <div className="glass-card" style={styles.emptyCard}>
-            No projects found. Create one to get started!
+            {activeTab === 'history'
+              ? 'No completed projects yet. Projects marked as complete will show up here.'
+              : (projects.length === 0
+                ? 'No projects found. Create one to get started!'
+                : 'No active projects match your search.')}
           </div>
         ) : (
-          filteredProjects.map(proj => (
-            <div key={proj.id} className="glass-card" style={styles.projCard}>
-              <div style={styles.cardHeader}>
-                <h3 style={styles.projName}>{proj.name}</h3>
-                <span style={{
-                  ...styles.statusBadge,
-                  backgroundColor: proj.status === 'Active' ? 'var(--color-primary-light)' : 'rgba(245, 158, 11, 0.1)',
-                  color: proj.status === 'Active' ? 'var(--color-success)' : 'var(--color-warning)'
-                }}>
-                  {proj.status}
-                </span>
-              </div>
-              <p style={styles.projDesc}>{proj.description}</p>
-              
-              <div style={styles.metaRow}>
-                <div style={styles.metaCol}>
-                  <span style={styles.metaLabel}>TIMELINE</span>
-                  <span style={styles.metaVal}>{proj.startDate} to {proj.endDate}</span>
+          filteredProjects.map(proj => {
+            const primary = proj.requiredPrimarySkills || proj.requiredSkills || [];
+            const secondary = proj.requiredSecondarySkills || [];
+            return (
+              <div key={proj.id} className="glass-card" style={styles.projCard}>
+                <div style={styles.cardHeader}>
+                  <h3 style={styles.projName}>{proj.name}</h3>
+                  <span style={{
+                    ...styles.statusBadge,
+                    backgroundColor: proj.status === 'Active' ? 'var(--color-primary-light)' : (COMPLETED_STATUSES.includes(proj.status) ? 'rgba(148, 163, 184, 0.15)' : 'rgba(245, 158, 11, 0.1)'),
+                    color: proj.status === 'Active' ? 'var(--color-success)' : (COMPLETED_STATUSES.includes(proj.status) ? 'var(--color-text-secondary)' : 'var(--color-warning)')
+                  }}>
+                    {proj.status}
+                  </span>
                 </div>
-                <div style={styles.metaCol}>
-                  <span style={styles.metaLabel}>MANPOWER NEEDED</span>
-                  <span style={styles.metaVal}>{proj.manpowerNeeded} requested</span>
-                </div>
-              </div>
+                <p style={styles.projDesc}>{proj.description}</p>
 
-              <div style={styles.skillsSection}>
-                <span style={styles.metaLabel}>REQUIRED SKILLS / CERTS</span>
-                <div style={styles.skillsContainer}>
-                  {proj.requiredSkills && proj.requiredSkills.length > 0 ? (
-                    proj.requiredSkills.map((skill, idx) => (
-                      <span key={idx} style={styles.skillTag}>{skill}</span>
-                    ))
+                <div style={styles.metaRow}>
+                  <div style={styles.metaCol}>
+                    <span style={styles.metaLabel}>TIMELINE</span>
+                    <span style={styles.metaVal}>{proj.startDate} to {proj.endDate}</span>
+                  </div>
+                  <div style={styles.metaCol}>
+                    <span style={styles.metaLabel}>MANPOWER NEEDED</span>
+                    <span style={styles.metaVal}>{proj.manpowerNeeded} requested</span>
+                  </div>
+                </div>
+
+                <div style={styles.skillsSection}>
+                  <span style={styles.metaLabel}>REQUIRED SKILLS / CERTS</span>
+                  {primary.length === 0 && secondary.length === 0 ? (
+                    <div style={styles.skillsContainer}>
+                      <span style={styles.noSkillsText}>No specific skills defined</span>
+                    </div>
                   ) : (
-                    <span style={styles.noSkillsText}>No specific skills defined</span>
+                    <>
+                      {primary.length > 0 && (
+                        <div style={styles.skillsContainer}>
+                          {primary.map((skill, idx) => (
+                            <span key={`p-${idx}`} style={styles.skillTag}>{skill}</span>
+                          ))}
+                        </div>
+                      )}
+                      {secondary.length > 0 && (
+                        <div style={{ ...styles.skillsContainer, marginTop: '4px' }}>
+                          {secondary.map((skill, idx) => (
+                            <span key={`s-${idx}`} style={styles.skillTagSecondary}>{skill}</span>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* ✅ Complete / Restore action */}
+                <div style={styles.cardFooterActions}>
+                  {activeTab === 'history' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleRestoreProject(proj)}
+                      disabled={statusUpdatingId === proj.id}
+                      style={styles.restoreBtn}
+                    >
+                      {statusUpdatingId === proj.id ? 'Restoring…' : '↺ Restore Project'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleCompleteProject(proj)}
+                      disabled={statusUpdatingId === proj.id}
+                      style={styles.completeBtn}
+                    >
+                      {statusUpdatingId === proj.id ? 'Updating…' : '✓ Mark as Complete'}
+                    </button>
                   )}
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -488,11 +615,17 @@ export default function PMProjectsTab({ user }) {
                 </div>
 
                 {formData.resources.map((res, index) => {
-                  const filteredSuggestions = allSkills.filter(skill => 
-                    skill.skill_name.toLowerCase().includes((res.skillInput || '').toLowerCase()) &&
-                    !res.skills.includes(skill.skill_name)
+                  const primarySuggestions = allSkills.filter(skill => 
+                    skill.skill_name.toLowerCase().includes((res.primarySkillInput || '').toLowerCase()) &&
+                    !res.primarySkills.includes(skill.skill_name)
                   ).slice(0, 10);
-                  const showSuggestions = res.skillInput && res.skillInput.length > 0 && filteredSuggestions.length > 0;
+                  const showPrimarySuggestions = res.primarySkillInput && res.primarySkillInput.length > 0 && primarySuggestions.length > 0;
+
+                  const secondarySuggestions = allSkills.filter(skill => 
+                    skill.skill_name.toLowerCase().includes((res.secondarySkillInput || '').toLowerCase()) &&
+                    !res.secondarySkills.includes(skill.skill_name)
+                  ).slice(0, 10);
+                  const showSecondarySuggestions = res.secondarySkillInput && res.secondarySkillInput.length > 0 && secondarySuggestions.length > 0;
 
                   return (
                     <div key={index} style={styles.resourceCard}>
@@ -534,19 +667,18 @@ export default function PMProjectsTab({ user }) {
                         </div>
                       </div>
 
-                      {/* ✅ Comma-separated Skills Input with Autocomplete */}
+                      {/* ✅ Primary Skills — required */}
                       <div style={styles.formGroup}>
-                        <label style={styles.formLabel}>Required Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        
-                        {/* Selected Skills Tags */}
-                        {res.skills.length > 0 && (
+                        <label style={styles.formLabel}>Primary Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+
+                        {res.primarySkills.length > 0 && (
                           <div style={styles.selectedSkillsContainer}>
-                            {res.skills.map((skill, idx) => (
+                            {res.primarySkills.map((skill, idx) => (
                               <span key={idx} style={styles.selectedSkillTag}>
                                 {skill}
                                 <button 
                                   type="button" 
-                                  onClick={() => handleRemoveSkill(index, skill)}
+                                  onClick={() => handleRemoveSkill(index, 'primary', skill)}
                                   style={styles.removeSkillBtn}
                                 >
                                   ×
@@ -556,23 +688,23 @@ export default function PMProjectsTab({ user }) {
                           </div>
                         )}
 
-                        {/* Autocomplete Input with comma support */}
                         <div style={{ position: 'relative' }}>
                           <input 
                             type="text" 
-                            value={res.skillInput || ''}
-                            onChange={(e) => handleSkillInputChange(index, e.target.value)}
-                            onKeyDown={(e) => handleSkillKeyDown(index, e)}
+                            value={res.primarySkillInput || ''}
+                            onChange={(e) => handleSkillInputChange(index, 'primary', e.target.value)}
+                            onKeyDown={(e) => handleSkillKeyDown(index, 'primary', e)}
                             style={styles.modalInput}
-                            placeholder={res.skills.length > 0 ? "Type skill and press comma or Enter..." : "Type skill and press comma or Enter..."}
+                            placeholder="Type skill and press comma or Enter..."
+                            required={res.primarySkills.length === 0}
                           />
-                          
-                          {showSuggestions && (
+
+                          {showPrimarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {filteredSuggestions.map((skill) => (
+                              {primarySuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, skill.skill_name)}
+                                  onMouseDown={() => handleSelectSkill(index, 'primary', skill.skill_name)}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
@@ -584,7 +716,58 @@ export default function PMProjectsTab({ user }) {
                             </div>
                           )}
                         </div>
-                        <span style={styles.inputHelp}>Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add. Suggestions appear automatically.</span>
+                        <span style={styles.inputHelp}>Must-have skills. Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add.</span>
+                      </div>
+
+                      {/* ✅ Secondary Skills — optional */}
+                      <div style={styles.formGroup}>
+                        <label style={styles.formLabel}>Secondary Skills</label>
+
+                        {res.secondarySkills.length > 0 && (
+                          <div style={styles.selectedSkillsContainer}>
+                            {res.secondarySkills.map((skill, idx) => (
+                              <span key={idx} style={styles.selectedSkillTagSecondary}>
+                                {skill}
+                                <button 
+                                  type="button" 
+                                  onClick={() => handleRemoveSkill(index, 'secondary', skill)}
+                                  style={styles.removeSkillBtnSecondary}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div style={{ position: 'relative' }}>
+                          <input 
+                            type="text" 
+                            value={res.secondarySkillInput || ''}
+                            onChange={(e) => handleSkillInputChange(index, 'secondary', e.target.value)}
+                            onKeyDown={(e) => handleSkillKeyDown(index, 'secondary', e)}
+                            style={styles.modalInput}
+                            placeholder="Type skill and press comma or Enter..."
+                          />
+
+                          {showSecondarySuggestions && (
+                            <div style={styles.suggestionsDropdown}>
+                              {secondarySuggestions.map((skill) => (
+                                <div
+                                  key={skill.id}
+                                  onMouseDown={() => handleSelectSkill(index, 'secondary', skill.skill_name)}
+                                  style={styles.suggestionItem}
+                                >
+                                  {skill.skill_name}
+                                </div>
+                              ))}
+                              {isLoadingSkills && (
+                                <div style={styles.suggestionItem}>Loading skills...</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span style={styles.inputHelp}>Nice-to-have skills. Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add.</span>
                       </div>
 
                       <div style={styles.formGroup}>
@@ -610,6 +793,67 @@ export default function PMProjectsTab({ user }) {
                 <button type="submit" style={styles.saveBtn}>Create Project</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ Custom Confirm Dialog — replaces native window.confirm() */}
+      {confirmDialog && (
+        <div style={styles.confirmOverlay} onClick={() => setConfirmDialog(null)}>
+          <div
+            className="glass-card"
+            style={styles.confirmCard}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                ...styles.confirmIconWrap,
+                background: confirmDialog.kind === 'complete' ? 'rgba(34, 197, 94, 0.12)' : 'var(--color-primary-light)',
+                color: confirmDialog.kind === 'complete' ? 'var(--color-success)' : 'var(--color-primary)',
+              }}
+            >
+              {confirmDialog.kind === 'complete' ? (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6 9 17l-5-5"></path>
+                </svg>
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                  <path d="M3 4v5h5"></path>
+                </svg>
+              )}
+            </div>
+
+            <h3 style={styles.confirmTitle}>
+              {confirmDialog.kind === 'complete' ? 'Mark project as complete?' : 'Restore this project?'}
+            </h3>
+            <p style={styles.confirmMessage}>
+              {confirmDialog.kind === 'complete' ? (
+                <>Mark <strong>"{confirmDialog.project.name}"</strong> as complete? It will move to Project History and can be restored later.</>
+              ) : (
+                <>Restore <strong>"{confirmDialog.project.name}"</strong> back to active projects?</>
+              )}
+            </p>
+
+            <div style={styles.confirmActions}>
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                style={styles.confirmCancelBtn}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={runConfirmedStatusChange}
+                style={{
+                  ...styles.confirmOkBtn,
+                  backgroundColor: confirmDialog.kind === 'complete' ? 'var(--color-success)' : 'var(--color-primary)',
+                }}
+              >
+                {confirmDialog.kind === 'complete' ? 'Mark as Complete' : 'Restore Project'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -689,6 +933,42 @@ const styles = {
     fontSize: '14px',
     cursor: 'pointer',
     transition: 'background-color 0.2s',
+  },
+  tabsRow: {
+    display: 'flex',
+    gap: '8px',
+    borderBottom: '1px solid var(--color-border)',
+    marginTop: '-8px',
+  },
+  tabBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+  },
+  tabBtnActive: {
+    color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  tabCount: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '30px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-muted)',
+  },
+  tabCountActive: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
   },
   projectsGrid: {
     display: 'grid',
@@ -770,10 +1050,45 @@ const styles = {
     color: 'var(--color-primary)',
     fontWeight: '600',
   },
+  skillTagSecondary: {
+    fontSize: '11px',
+    padding: '4px 10px',
+    borderRadius: '30px',
+    background: 'rgba(148, 163, 184, 0.15)',
+    color: 'var(--color-text-muted)',
+    fontWeight: '600',
+  },
   noSkillsText: {
     fontSize: '12px',
     color: 'var(--color-text-muted)',
     fontStyle: 'italic',
+  },
+  cardFooterActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    marginTop: '16px',
+    borderTop: '1px solid var(--color-border)',
+    paddingTop: '16px',
+  },
+  completeBtn: {
+    backgroundColor: 'var(--color-success)',
+    color: '#ffffff',
+    border: 'none',
+    padding: '8px 14px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '700',
+  },
+  restoreBtn: {
+    backgroundColor: 'transparent',
+    border: '1px solid var(--color-primary)',
+    color: 'var(--color-primary)',
+    padding: '8px 14px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '700',
   },
   emptyCard: {
     gridColumn: '1 / -1',
@@ -814,6 +1129,72 @@ const styles = {
     fontSize: '24px',
     cursor: 'pointer',
     color: 'var(--color-text-muted)',
+  },
+  // ── Custom confirm dialog ──────────────────────────────────────────
+  confirmOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    backdropFilter: 'blur(2px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1100,
+    padding: '16px',
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: '400px',
+    padding: '28px',
+    textAlign: 'left',
+  },
+  confirmIconWrap: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '16px',
+  },
+  confirmTitle: {
+    fontSize: '17px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+    marginBottom: '8px',
+  },
+  confirmMessage: {
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+    lineHeight: '1.6',
+    marginBottom: '24px',
+  },
+  confirmActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '10px',
+  },
+  confirmCancelBtn: {
+    background: 'transparent',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text-primary)',
+    padding: '10px 18px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '700',
+  },
+  confirmOkBtn: {
+    color: '#ffffff',
+    border: 'none',
+    padding: '10px 18px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '700',
   },
   sectionContainer: {
     backgroundColor: 'var(--color-bg-card-hover)',
@@ -994,6 +1375,28 @@ const styles = {
     background: 'transparent',
     border: 'none',
     color: 'var(--color-primary)',
+    cursor: 'pointer',
+    fontSize: '14px',
+    padding: '0 2px',
+    display: 'flex',
+    alignItems: 'center',
+    fontWeight: 'bold',
+  },
+  selectedSkillTagSecondary: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    fontSize: '12px',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    background: 'rgba(148, 163, 184, 0.15)',
+    color: 'var(--color-text-muted)',
+    fontWeight: '600',
+  },
+  removeSkillBtnSecondary: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-text-muted)',
     cursor: 'pointer',
     fontSize: '14px',
     padding: '0 2px',
