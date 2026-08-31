@@ -14,6 +14,7 @@ export default function ApplicantApplicationFormTab() {
     lastName: '',
     email: '',
     phone: '',
+    address: '',
     position: '',
     experience: '',
     education: '',
@@ -141,6 +142,7 @@ export default function ApplicantApplicationFormTab() {
       lastName: '',
       email: '',
       phone: '',
+      address: '',
       position: '',
       experience: '',
       education: '',
@@ -303,6 +305,17 @@ export default function ApplicantApplicationFormTab() {
                     placeholder="+63 XXX XXX XXXX"
                   />
                 </div>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Address *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  style={styles.formInput}
+                  placeholder="House/Unit No., Street, Barangay, City, Province"
+                />
               </div>
             </div>
 
