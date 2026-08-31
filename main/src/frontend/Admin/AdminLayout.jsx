@@ -172,6 +172,8 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         return <DashboardTab setActiveTab={setActiveTab} setUserMgmtOpen={setUserMgmtOpen} />;
       case 'user-accounts':
         return <UserManagementTab activeSubTab="accounts" />;
+      case 'create-accounts':
+        return <UserManagementTab activeSubTab="create" />;
       case 'contact-requests':
         return <UserManagementTab activeSubTab="requests" />;
       case 'locked-accounts':
@@ -272,6 +274,17 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
                   {!sidebarCollapsed ? '• User Accounts' : 'Accs'}
                 </div>
                 <div
+                  onClick={() => handleNavClick('create-accounts')}
+                  style={{
+                    ...styles.submenuItem,
+                    color: activeTab === 'create-accounts' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                    fontWeight: activeTab === 'create-accounts' ? '700' : '400'
+                  }}
+                  className="hover-submenu-item"
+                >
+                  {!sidebarCollapsed ? '• Create Accounts' : 'Create'}
+                </div>
+                <div
                   onClick={() => handleNavClick('contact-requests')}
                   style={{
                     ...styles.submenuItem,
@@ -352,6 +365,20 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Admin Portal</span>
             <div style={styles.phClockContainer}>
+              {user?.role !== 'Super Admin' && user?.branch_name && (
+                <span style={{ 
+                  marginRight: '12px', 
+                  fontWeight: '700', 
+                  fontSize: '12px', 
+                  color: '#ffffff', 
+                  backgroundColor: '#8b5cf6', 
+                  padding: '2px 8px', 
+                  borderRadius: '4px',
+                  letterSpacing: '0.5px'
+                }}>
+                  {user.branch_name}
+                </span>
+              )}
               <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
               <span style={styles.phClockTime}>{phTime}</span>
             </div>
