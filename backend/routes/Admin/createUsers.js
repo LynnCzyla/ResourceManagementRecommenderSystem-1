@@ -123,60 +123,81 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Send welcome email with temporary password
-const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporaryPassword, role, branchName) => {
+// Send "create your password" email with a Supabase recovery link (mirrors forgotPassword.js).
+// The user clicks through to /reset-password, which already displays the live password
+// requirements configured by the Super Admin (min length, uppercase, lowercase, number, special).
+const sendCreateAccountEmail = async (email, firstName, lastName, employeeId, createLink, role, branchName) => {
   const mailOptions = {
     from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
     to: email,
-    subject: 'Welcome to WEA Resource Management System',
+    subject: 'Create Your WEA Account Password',
     html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8fafc; border-radius: 12px;">
-        <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-          <div style="margin-bottom: 12px;">
-            <img src="cid:wealogo" alt="WEA Logo" style="height: 60px; object-fit: contain;" />
+      <div style="font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 16px; background-color: #0f172a;">
+
+        <!-- Card -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 20px; overflow: hidden;">
+
+          <!-- Header -->
+          <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
+            <div style="margin-bottom: 16px;">
+              <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
+            </div>
+            <h1 style="font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
+              Welcome to WEA!
+            </h1>
+            <p style="color: #94a3b8; font-size: 13px; font-weight: 500; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">
+              Resource Management System
+            </p>
           </div>
-          <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to WEA!</h1>
-          <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">Resource Management System</p>
+
+          <!-- Body -->
+          <div style="padding: 32px;">
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">
+              Hello ${firstName} ${lastName}, your account has been created with the role of
+              <strong style="color: #10b981;">${role}</strong>${branchName ? ` at <strong style="color: #10b981;">${branchName}</strong>` : ''}.
+              Click the button below to create your password and activate your account.
+            </p>
+
+            <div style="background: #0f172a; padding: 15px; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid #10b981;">
+              <p style="margin: 0 0 6px 0; color: #94a3b8; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Your Employee ID</p>
+              <p style="margin: 0; font-size: 18px; font-weight: 700; color: #f8fafc; font-family: monospace;">${employeeId}</p>
+            </div>
+
+            <!-- Button -->
+            <div style="text-align: center; margin-bottom: 28px;">
+              <a href="${createLink}" style="background: #10b981; color: #0f172a; padding: 14px 36px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; display: inline-block; font-family: 'Outfit', sans-serif;">
+                Create Password
+              </a>
+            </div>
+
+            <!-- Fallback link -->
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid #334155; border-radius: 12px; padding: 14px 16px; margin-bottom: 24px;">
+              <p style="color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px 0;">
+                Or paste this link into your browser
+              </p>
+              <a href="${createLink}" style="color: #0ea5e9; font-size: 12px; word-break: break-all; text-decoration: underline;">${createLink}</a>
+            </div>
+
+            <!-- Password requirements note -->
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 12px; padding: 14px 16px; margin-bottom: 24px;">
+              <p style="margin: 0; color: #6ee7b7; font-size: 13px; line-height: 1.6;">
+                🔒 On the Create Password page you'll see the exact password rules set by your Super Admin (minimum length, and whether uppercase, lowercase, numbers, and special characters are required). Your new password must meet all of them before it can be saved.
+              </p>
+            </div>
+
+            <!-- Warning -->
+            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 14px 16px;">
+              <p style="margin: 0; color: #f87171; font-size: 13px; line-height: 1.5;">
+                ⚠️ This link is valid for a limited time only. If you did not expect this account, please contact your administrator.
+              </p>
+            </div>
+          </div>
         </div>
-        
-        <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <h2 style="color: #1e293b; margin-top: 0;">Hello ${firstName} ${lastName}!</h2>
-          
-          <p style="color: #475569; line-height: 1.6;">Your account has been created successfully with the role of <strong style="color: #3b82f6;">${role}</strong>.</p>
-          
-          <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
-            <p style="margin: 0 0 8px 0; color: #475569; font-weight: 600;">Your Employee ID:</p>
-            <p style="margin: 0; font-size: 20px; font-weight: 700; color: #1e293b; font-family: monospace;">
-              ${employeeId}
-            </p>
-          </div>
-          
-          ${branchName ? `
-          <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
-            <p style="margin: 0 0 8px 0; color: #475569; font-weight: 600;">Your Branch:</p>
-            <p style="margin: 0; font-size: 16px; font-weight: 600; color: #1e293b;">
-              ${branchName}
-            </p>
-          </div>
-          ` : ''}
-          
-          <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
-            <p style="margin: 0 0 8px 0; color: #475569; font-weight: 600;">Your temporary password:</p>
-            <p style="margin: 0; font-size: 24px; font-weight: 700; color: #1e293b; letter-spacing: 2px; font-family: monospace; background: white; padding: 12px; border-radius: 6px; display: inline-block;">
-              ${temporaryPassword}
-            </p>
-          </div>
-          
-          <div style="background: #fef2f2; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ef4444;">
-            <p style="margin: 0; color: #dc2626; font-size: 14px;">
-              ⚠️ For security reasons, please change your password immediately after logging in.
-            </p>
-          </div>
-          
-          <p style="color: #94a3b8; font-size: 14px; text-align: center; margin-top: 20px;">
-            If you did not request this account, please ignore this email or contact support.
-          </p>
-        </div>
+
+        <!-- Footer -->
+        <p style="text-align: center; color: #475569; font-size: 11px; margin-top: 24px;">
+          © WEA Resource Management System
+        </p>
       </div>
     `,
     attachments: [{
@@ -190,7 +211,7 @@ const sendWelcomeEmail = async (email, firstName, lastName, employeeId, temporar
     await transporter.sendMail(mailOptions);
     return true;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending create-account email:', error);
     return false;
   }
 };
@@ -207,7 +228,8 @@ router.post("/create", async (req, res) => {
       contact_number,
       position_id,
       join_date,
-      availability_status = "Available"
+      availability_status = "Available",
+      redirectOrigin
     } = req.body;
 
     // Validate required fields
@@ -215,6 +237,14 @@ router.post("/create", async (req, res) => {
       return res.status(400).json({
         success: false,
         error: "First name, last name, and email are required"
+      });
+    }
+
+    // ✅ Only Super Admin can create Admin / Super Admin accounts from this endpoint
+    if (!req.user.is_super_admin && (role === "Admin" || role === "Super Admin")) {
+      return res.status(403).json({
+        success: false,
+        error: "You don't have permission to assign admin roles"
       });
     }
 
@@ -251,13 +281,15 @@ router.post("/create", async (req, res) => {
 
     const branchName = branchData?.name || null;
 
-    // Generate a random password
-    const generatedPassword = generatePassword();
+    // Generate a throwaway password just to satisfy the auth API — it is
+    // never shown or emailed. The user sets their real password themselves
+    // via the "Create Password" link below (same flow as Forgot Password).
+    const throwawayPassword = generatePassword();
 
-    // 1. Create auth user with generated password
+    // 1. Create auth user with the throwaway password
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
-      password: generatedPassword,
+      password: throwawayPassword,
       email_confirm: true,
       user_metadata: {
         first_name,
@@ -317,16 +349,37 @@ router.post("/create", async (req, res) => {
       read: false
     });
 
-    // 4. Send welcome email with temporary password
-    const emailSent = await sendWelcomeEmail(
-      email,
-      first_name,
-      last_name,
-      employeeId,
-      generatedPassword,
-      role,
-      branchName
-    );
+    // 4. Generate a Supabase recovery link (same mechanism as Forgot Password)
+    //    and email it so the user creates their own password.
+    const baseUrl = redirectOrigin || process.env.APP_URL || 'http://localhost:3000';
+    const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+
+    let emailSent = false;
+    try {
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "recovery",
+        email,
+        options: {
+          redirectTo: `${cleanBaseUrl}/reset-password`
+        }
+      });
+
+      if (linkError) throw linkError;
+
+      const createLink = linkData.properties.action_link;
+
+      emailSent = await sendCreateAccountEmail(
+        email,
+        first_name,
+        last_name,
+        employeeId,
+        createLink,
+        role,
+        branchName
+      );
+    } catch (linkErr) {
+      console.error('Error generating create-password link:', linkErr);
+    }
 
     await logAuditEvent({
       req,
@@ -340,7 +393,7 @@ router.post("/create", async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: `User created successfully with Employee ID: ${employeeId} assigned to branch: ${branchName || adminBranchId}. Temporary password sent to email.`,
+      message: `User created successfully with Employee ID: ${employeeId} assigned to branch: ${branchName || adminBranchId}. A "Create Password" email has been sent to the user.`,
       user: {
         ...profileData,
         email: authData.user.email,
@@ -348,7 +401,6 @@ router.post("/create", async (req, res) => {
       },
       auth_user: authData.user,
       email_sent: emailSent,
-      temporary_password: generatedPassword,
       assigned_branch: {
         id: adminBranchId,
         name: branchName,
@@ -366,10 +418,11 @@ router.post("/create", async (req, res) => {
   }
 });
 
-// Resend temporary password
+// Resend "create password" email (uses the same recovery-link flow as account creation)
 router.post("/resend-password/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    const { redirectOrigin } = req.body;
 
     const { data: targetProfile, error: targetError } = await supabase
       .from("profiles")
@@ -387,7 +440,7 @@ router.post("/resend-password/:userId", async (req, res) => {
     if (!req.user.is_super_admin && targetProfile.branch_id !== req.user.branch_id) {
       return res.status(403).json({
         success: false,
-        error: "You don't have permission to resend password for this user"
+        error: "You don't have permission to resend the account setup email for this user"
       });
     }
 
@@ -401,19 +454,6 @@ router.post("/resend-password/:userId", async (req, res) => {
     }
 
     const userEmail = authData.user.email;
-    const newPassword = generatePassword();
-
-    const { error: updateError } = await supabase.auth.admin.updateUserById(
-      userId,
-      { password: newPassword }
-    );
-
-    if (updateError) {
-      return res.status(400).json({
-        success: false,
-        error: updateError.message
-      });
-    }
 
     const { data: branchData } = await supabase
       .from("branches")
@@ -421,12 +461,32 @@ router.post("/resend-password/:userId", async (req, res) => {
       .eq("id", targetProfile.branch_id)
       .single();
 
-    const emailSent = await sendWelcomeEmail(
+    const baseUrl = redirectOrigin || process.env.APP_URL || 'http://localhost:3000';
+    const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+
+    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+      type: "recovery",
+      email: userEmail,
+      options: {
+        redirectTo: `${cleanBaseUrl}/reset-password`
+      }
+    });
+
+    if (linkError) {
+      return res.status(400).json({
+        success: false,
+        error: linkError.message
+      });
+    }
+
+    const createLink = linkData.properties.action_link;
+
+    const emailSent = await sendCreateAccountEmail(
       userEmail,
       targetProfile.first_name,
       targetProfile.last_name,
       targetProfile.employee_id,
-      newPassword,
+      createLink,
       targetProfile.role,
       branchData?.name || null
     );
@@ -436,19 +496,19 @@ router.post("/resend-password/:userId", async (req, res) => {
       userId: userId,
       action: 'Created',
       systemCategory: 'User Management',
-      logDescription: `Resent temporary password for ${targetProfile.first_name} ${targetProfile.last_name}`,
+      logDescription: `Resent create-password email for ${targetProfile.first_name} ${targetProfile.last_name}`,
       branch: req.user.branch_id,
       performed_by: req.user.employee_id
     });
 
     res.json({
       success: true,
-      message: "New temporary password sent to email",
+      message: "Create-password email resent",
       email_sent: emailSent
     });
 
   } catch (error) {
-    console.error("Error resending password:", error);
+    console.error("Error resending create-password email:", error);
     res.status(500).json({
       success: false,
       error: "Internal server error"
