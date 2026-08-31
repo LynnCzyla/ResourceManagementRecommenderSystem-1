@@ -6,8 +6,9 @@ import PMProjectsTab from './PMProjectsTab';
 import PMResourceRequestsTab from './PMResourceRequestsTab';
 import PMProjectTrackingTab from './PMProjectTrackingTab';
 import PMWeeklyReportTab from './PMWeeklyReportTab';
-import PMFeedbackFormTab from './PMFeedbackFormTab';
 import ProfileSettings from '../ProfileSettings';
+import PMFeedbackTabs from './PMFeedbackTabs';
+import PMMyFeedbackTab from './PMMyFeedbackTab';
 import { getNotifications, markAllNotificationsRead, deleteNotification as deleteNotificationApi } from './pmApi';
 
 function timeAgo(dateStr) {
@@ -130,7 +131,9 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
       case 'weekly-report':
         return <PMWeeklyReportTab user={user} />;
       case 'feedback':
-        return <PMFeedbackFormTab user={user} />;
+        return <PMFeedbackTabs user={user} />;
+      case 'myFeedback':
+        return <PMMyFeedbackTab user={user} />;
       default:
         return <PMDashboardTab user={user} />;
     }
@@ -276,6 +279,23 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
             </svg>
             {!sidebarCollapsed && <span style={styles.navText}>Feedback Form</span>}
           </div>
+
+          {/* My Feedback */}
+          <div
+            onClick={() => handleNavClick('myFeedback')}
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'myFeedback' ? 'var(--color-primary-light)' : 'transparent',
+              borderLeftColor: activeTab === 'myFeedback' ? 'var(--color-primary)' : 'transparent',
+            }}
+            title="My Feedback"
+            className="hover-sidebar-item"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.navIcon}>
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+            </svg>
+            {!sidebarCollapsed && <span style={styles.navText}>My Feedback</span>}
+          </div>
         </nav>
 
         {!sidebarCollapsed && (
@@ -292,6 +312,20 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>Project Manager Portal</span>
             <div style={styles.phClockContainer}>
+              {user?.role !== 'Super Admin' && user?.branch_name && (
+                <span style={{ 
+                  marginRight: '12px', 
+                  fontWeight: '700', 
+                  fontSize: '12px', 
+                  color: '#ffffff', 
+                  backgroundColor: '#8b5cf6', 
+                  padding: '2px 8px', 
+                  borderRadius: '4px',
+                  letterSpacing: '0.5px'
+                }}>
+                  {user.branch_name}
+                </span>
+              )}
               <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
               <span style={styles.phClockTime}>{phTime}</span>
             </div>
