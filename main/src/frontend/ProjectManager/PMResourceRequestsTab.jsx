@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getResourceRequests, createResourceRequest, getProjects } from './pmApi';
+import { getResourceRequests, createResourceRequest, getProjects, getSkills } from './pmApi';
 
 export default function PMResourceRequestsTab({ user }) {
   const [requests, setRequests] = useState([]);
@@ -13,12 +13,20 @@ export default function PMResourceRequestsTab({ user }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageJumpValue, setPageJumpValue] = useState('');
   const rowsPerPage = 10;
+
+  // Skills state for autocomplete
+  const [allSkills, setAllSkills] = useState([]);
+  const [isLoadingSkills, setIsLoadingSkills] = useState(false);
+
   const initialResources = [{
     role: '',
     quantity: 1,
     experience: 'Intermediate',
     assignment: 'Full-Time (40 hours/week)',
-    skills: '',
+    primarySkills: [],
+    primarySkillInput: '',
+    secondarySkills: [],
+    secondarySkillInput: '',
     startDate: '',
     endDate: '',
     justification: ''
@@ -28,6 +36,23 @@ export default function PMResourceRequestsTab({ user }) {
     projectId: '',
     resources: initialResources
   });
+
+  // ✅ Fetch all skills from database on mount, for autocomplete
+  useEffect(() => {
+    const fetchSkills = async () => {
+      setIsLoadingSkills(true);
+      try {
+        const data = await getSkills();
+        setAllSkills(data || []);
+      } catch (error) {
+        console.error('Error fetching skills:', error);
+        setAllSkills([]);
+      } finally {
+        setIsLoadingSkills(false);
+      }
+    };
+    fetchSkills();
+  }, []);
 
   const loadData = async () => {
     try {
@@ -48,6 +73,98 @@ export default function PMResourceRequestsTab({ user }) {
     loadData();
   }, [user]);
 
+  // ── Skill tag helpers ───────────────────────────────────────────────
+  // `type` is 'primary' or 'secondary'. Maps to the resource's
+  // primarySkills/primarySkillInput or secondarySkills/secondarySkillInput fields.
+  const fieldNames = (type) => ({
+    skillsField: type === 'primary' ? 'primarySkills' : 'secondarySkills',
+    inputField: type === 'primary' ? 'primarySkillInput' : 'secondarySkillInput',
+  });
+
+  // ✅ Handle skill input with comma separation
+  const handleSkillInputChange = (index, type, value) => {
+    const { skillsField, inputField } = fieldNames(type);
+
+    // Check if the last character is a comma
+    if (value.endsWith(',')) {
+      const skillName = value.slice(0, -1).trim();
+      if (skillName) {
+        setFormData(prev => {
+          const updated = [...prev.resources];
+          if (!updated[index][skillsField].includes(skillName)) {
+            updated[index] = {
+              ...updated[index],
+              [skillsField]: [...updated[index][skillsField], skillName],
+            };
+          }
+          updated[index][inputField] = '';
+          return { ...prev, resources: updated };
+        });
+        return;
+      }
+    }
+
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      updated[index] = { ...updated[index], [inputField]: value };
+      return { ...prev, resources: updated };
+    });
+  };
+
+  // ✅ Handle Enter key to add skill
+  const handleSkillKeyDown = (index, type, e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const { skillsField, inputField } = fieldNames(type);
+      const input = formData.resources[index]?.[inputField] || '';
+      const trimmed = input.trim();
+      if (trimmed) {
+        setFormData(prev => {
+          const updated = [...prev.resources];
+          if (!updated[index][skillsField].includes(trimmed)) {
+            updated[index] = {
+              ...updated[index],
+              [skillsField]: [...updated[index][skillsField], trimmed],
+            };
+          }
+          updated[index][inputField] = '';
+          return { ...prev, resources: updated };
+        });
+      }
+    }
+  };
+
+  // ✅ Select a skill from suggestions (click)
+  const handleSelectSkill = (index, type, skillName) => {
+    if (!skillName || skillName.trim() === '') return;
+    const { skillsField, inputField } = fieldNames(type);
+
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      if (!updated[index][skillsField].includes(skillName.trim())) {
+        updated[index] = {
+          ...updated[index],
+          [skillsField]: [...updated[index][skillsField], skillName.trim()],
+        };
+      }
+      updated[index][inputField] = '';
+      return { ...prev, resources: updated };
+    });
+  };
+
+  // ✅ Remove a skill from the selected list
+  const handleRemoveSkill = (resourceIndex, type, skillToRemove) => {
+    const { skillsField } = fieldNames(type);
+    setFormData(prev => {
+      const updated = [...prev.resources];
+      updated[resourceIndex] = {
+        ...updated[resourceIndex],
+        [skillsField]: updated[resourceIndex][skillsField].filter(s => s !== skillToRemove),
+      };
+      return { ...prev, resources: updated };
+    });
+  };
+
   const handleResourceChange = (index, field, value) => {
     setFormData(prev => {
       const updated = [...prev.resources];
@@ -66,7 +183,10 @@ export default function PMResourceRequestsTab({ user }) {
           quantity: 1,
           experience: 'Intermediate',
           assignment: 'Full-Time (40 hours/week)',
-          skills: '',
+          primarySkills: [],
+          primarySkillInput: '',
+          secondarySkills: [],
+          secondarySkillInput: '',
           startDate: '',
           endDate: '',
           justification: ''
@@ -91,7 +211,10 @@ export default function PMResourceRequestsTab({ user }) {
         quantity: 1,
         experience: 'Intermediate',
         assignment: 'Full-Time (40 hours/week)',
-        skills: '',
+        primarySkills: [],
+        primarySkillInput: '',
+        secondarySkills: [],
+        secondarySkillInput: '',
         startDate: '',
         endDate: '',
         justification: ''
@@ -105,9 +228,16 @@ export default function PMResourceRequestsTab({ user }) {
 
     setSubmitError('');
     try {
+      // Convert skill arrays to comma-separated strings for backend
+      const resourcesWithSkills = formData.resources.map(res => ({
+        ...res,
+        primarySkills: res.primarySkills.join(', '),
+        secondarySkills: res.secondarySkills.join(', '),
+      }));
+
       await createResourceRequest({
         projectId: formData.projectId,
-        resources: formData.resources,
+        resources: resourcesWithSkills,
       });
 
       await loadData();
@@ -121,11 +251,17 @@ export default function PMResourceRequestsTab({ user }) {
 
   const statusOptions = [...new Set(requests.map(r => r.status).filter(Boolean))];
 
-  const filteredRequests = requests.filter(req => 
-    (req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    req.skills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()))) &&
-    (statusFilter === 'all' || req.status === statusFilter)
-  ).sort((a, b) => {
+  // ✅ Search checks both primary and secondary skills (falls back to combined `skills` if present)
+  const filteredRequests = requests.filter(req => {
+    const allReqSkills = [
+      ...(req.primarySkills || req.skills || []),
+      ...(req.secondarySkills || [])
+    ];
+    const matchesSearch =
+      req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      allReqSkills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesSearch && (statusFilter === 'all' || req.status === statusFilter);
+  }).sort((a, b) => {
     if (sortBy === 'status') return a.status.localeCompare(b.status);
     if (sortBy === 'project') return a.projectName.localeCompare(b.projectName);
     if (sortBy === 'quantity') return a.quantity - b.quantity;
@@ -181,9 +317,9 @@ export default function PMResourceRequestsTab({ user }) {
                 style={styles.searchInput}
               />
             </div>
-            <select 
-              value={statusFilter} 
-              onChange={(e) => setStatusFilter(e.target.value)} 
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
               style={styles.sortSelect}
             >
               <option value="all">All Statuses</option>
@@ -191,9 +327,9 @@ export default function PMResourceRequestsTab({ user }) {
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
-            <select 
-              value={sortBy} 
-              onChange={(e) => setSortBy(e.target.value)} 
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
               style={styles.sortSelect}
             >
               <option value="status">Sort by Status</option>
@@ -251,30 +387,45 @@ export default function PMResourceRequestsTab({ user }) {
                   <td colSpan="6" style={styles.emptyRow}>No resource requests found.</td>
                 </tr>
               ) : (
-                paginatedRequests.map(req => (
-                  <tr key={req.id} style={styles.trRow}>
-                    <td style={{ ...styles.td, fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</td>
-                    <td style={styles.td}>
-                      <div style={styles.skillsWrapper}>
-                        {req.skills.map((skill, idx) => (
-                          <span key={idx} style={styles.skillTag}>{skill}</span>
-                        ))}
-                      </div>
-                    </td>
-                    <td style={styles.td}>{req.duration}</td>
-                    <td style={styles.td}>{req.startDate} to {req.endDate}</td>
-                    <td style={{ ...styles.td, fontWeight: '600' }}>{req.quantity}</td>
-                    <td style={styles.td}>
-                      <span style={{
-                        ...styles.statusBadge,
-                        backgroundColor: req.status === 'Approved' ? 'var(--color-primary-light)' : 'rgba(245, 158, 11, 0.1)',
-                        color: req.status === 'Approved' ? 'var(--color-success)' : 'var(--color-warning)'
-                      }}>
-                        {req.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                paginatedRequests.map(req => {
+                  const primary = req.primarySkills || req.skills || [];
+                  const secondary = req.secondarySkills || [];
+                  return (
+                    <tr key={req.id} style={styles.trRow}>
+                      <td style={{ ...styles.td, fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</td>
+                      <td style={styles.td}>
+                        <div style={styles.skillsGroup}>
+                          {primary.length > 0 && (
+                            <div style={styles.skillsWrapper}>
+                              {primary.map((skill, idx) => (
+                                <span key={`p-${idx}`} style={styles.skillTagPrimary}>{skill}</span>
+                              ))}
+                            </div>
+                          )}
+                          {secondary.length > 0 && (
+                            <div style={styles.skillsWrapper}>
+                              {secondary.map((skill, idx) => (
+                                <span key={`s-${idx}`} style={styles.skillTagSecondary}>{skill}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td style={styles.td}>{req.duration}</td>
+                      <td style={styles.td}>{req.startDate} to {req.endDate}</td>
+                      <td style={{ ...styles.td, fontWeight: '600' }}>{req.quantity}</td>
+                      <td style={styles.td}>
+                        <span style={{
+                          ...styles.statusBadge,
+                          backgroundColor: req.status === 'Approved' ? 'var(--color-primary-light)' : 'rgba(245, 158, 11, 0.1)',
+                          color: req.status === 'Approved' ? 'var(--color-success)' : 'var(--color-warning)'
+                        }}>
+                          {req.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -337,7 +488,7 @@ export default function PMResourceRequestsTab({ user }) {
               <h2 style={{ margin: 0, fontSize: 18 }}>New Resource Request</h2>
               <button onClick={() => setShowCreateModal(false)} style={styles.closeModalBtn}>&times;</button>
             </div>
-            
+
             <form onSubmit={handleCreateSubmit} style={{ marginTop: 16 }}>
               {submitError && (
                 <div style={{ ...styles.errorBanner, marginBottom: 16 }}>{submitError}</div>
@@ -345,9 +496,9 @@ export default function PMResourceRequestsTab({ user }) {
 
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Project <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                <select 
-                  value={formData.projectId} 
-                  onChange={(e) => setFormData({ ...formData, projectId: e.target.value })} 
+                <select
+                  value={formData.projectId}
+                  onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
                   style={styles.modalSelect}
                   required
                 >
@@ -364,89 +515,193 @@ export default function PMResourceRequestsTab({ user }) {
                   <span style={styles.sectionTitle}>Resource Requirements</span>
                 </div>
 
-                {formData.resources.map((res, index) => (
-                  <div key={index} style={styles.resourceCard}>
-                    <div style={styles.resourceCardHeader}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontWeight: '600', fontSize: '13px' }}>
-                        Resource #{index + 1}
-                      </div>
-                      {formData.resources.length > 1 && (
-                        <button type="button" onClick={() => handleRemoveResource(index)} style={styles.removeBtn}>Remove</button>
-                      )}
-                    </div>
+                {formData.resources.map((res, index) => {
+                  const primarySuggestions = allSkills.filter(skill =>
+                    skill.skill_name.toLowerCase().includes((res.primarySkillInput || '').toLowerCase()) &&
+                    !res.primarySkills.includes(skill.skill_name)
+                  ).slice(0, 10);
+                  const showPrimarySuggestions = res.primarySkillInput && res.primarySkillInput.length > 0 && primarySuggestions.length > 0;
 
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formGroup, flex: 2 }}>
-                        <label style={styles.formLabel}>Position/Role <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <input 
-                          type="text" 
-                          value={res.role} 
-                          onChange={(e) => handleResourceChange(index, 'role', e.target.value)} 
-                          style={styles.modalInput} 
-                          placeholder="e.g., Frontend Developer"
-                          required
+                  const secondarySuggestions = allSkills.filter(skill =>
+                    skill.skill_name.toLowerCase().includes((res.secondarySkillInput || '').toLowerCase()) &&
+                    !res.secondarySkills.includes(skill.skill_name)
+                  ).slice(0, 10);
+                  const showSecondarySuggestions = res.secondarySkillInput && res.secondarySkillInput.length > 0 && secondarySuggestions.length > 0;
+
+                  return (
+                    <div key={index} style={styles.resourceCard}>
+                      <div style={styles.resourceCardHeader}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontWeight: '600', fontSize: '13px' }}>
+                          Resource #{index + 1}
+                        </div>
+                        {formData.resources.length > 1 && (
+                          <button type="button" onClick={() => handleRemoveResource(index)} style={styles.removeBtn}>Remove</button>
+                        )}
+                      </div>
+
+                      <div style={styles.formRow}>
+                        <div style={{ ...styles.formGroup, flex: 2 }}>
+                          <label style={styles.formLabel}>Position/Role <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                          <input
+                            type="text"
+                            value={res.role}
+                            onChange={(e) => handleResourceChange(index, 'role', e.target.value)}
+                            style={styles.modalInput}
+                            placeholder="e.g., Frontend Developer"
+                            required
+                          />
+                        </div>
+                        <div style={{ ...styles.formGroup, flex: 1 }}>
+                          <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={res.quantity}
+                            onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)}
+                            style={styles.modalInput}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* ✅ Primary Skills — required, tag input with autocomplete */}
+                      <div style={styles.formGroup}>
+                        <label style={styles.formLabel}>Primary Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+
+                        {res.primarySkills.length > 0 && (
+                          <div style={styles.selectedSkillsContainer}>
+                            {res.primarySkills.map((skill, idx) => (
+                              <span key={idx} style={styles.selectedSkillTag}>
+                                {skill}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSkill(index, 'primary', skill)}
+                                  style={styles.removeSkillBtn}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="text"
+                            value={res.primarySkillInput || ''}
+                            onChange={(e) => handleSkillInputChange(index, 'primary', e.target.value)}
+                            onKeyDown={(e) => handleSkillKeyDown(index, 'primary', e)}
+                            style={styles.modalInput}
+                            placeholder="Type skill and press comma or Enter..."
+                            required={res.primarySkills.length === 0}
+                          />
+
+                          {showPrimarySuggestions && (
+                            <div style={styles.suggestionsDropdown}>
+                              {primarySuggestions.map((skill) => (
+                                <div
+                                  key={skill.id}
+                                  onMouseDown={() => handleSelectSkill(index, 'primary', skill.skill_name)}
+                                  style={styles.suggestionItem}
+                                >
+                                  {skill.skill_name}
+                                </div>
+                              ))}
+                              {isLoadingSkills && (
+                                <div style={styles.suggestionItem}>Loading skills...</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span style={styles.inputHelp}>Must-have skills. Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add.</span>
+                      </div>
+
+                      {/* ✅ Secondary Skills — optional, tag input with autocomplete */}
+                      <div style={styles.formGroup}>
+                        <label style={styles.formLabel}>Secondary Skills</label>
+
+                        {res.secondarySkills.length > 0 && (
+                          <div style={styles.selectedSkillsContainer}>
+                            {res.secondarySkills.map((skill, idx) => (
+                              <span key={idx} style={styles.selectedSkillTagSecondary}>
+                                {skill}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSkill(index, 'secondary', skill)}
+                                  style={styles.removeSkillBtnSecondary}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="text"
+                            value={res.secondarySkillInput || ''}
+                            onChange={(e) => handleSkillInputChange(index, 'secondary', e.target.value)}
+                            onKeyDown={(e) => handleSkillKeyDown(index, 'secondary', e)}
+                            style={styles.modalInput}
+                            placeholder="Type skill and press comma or Enter..."
+                          />
+
+                          {showSecondarySuggestions && (
+                            <div style={styles.suggestionsDropdown}>
+                              {secondarySuggestions.map((skill) => (
+                                <div
+                                  key={skill.id}
+                                  onMouseDown={() => handleSelectSkill(index, 'secondary', skill.skill_name)}
+                                  style={styles.suggestionItem}
+                                >
+                                  {skill.skill_name}
+                                </div>
+                              ))}
+                              {isLoadingSkills && (
+                                <div style={styles.suggestionItem}>Loading skills...</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span style={styles.inputHelp}>Nice-to-have skills. Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add.</span>
+                      </div>
+
+                      <div style={styles.formRow}>
+                        <div style={{ ...styles.formGroup, flex: 1 }}>
+                          <label style={styles.formLabel}>Start Date <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                          <input
+                            type="date"
+                            value={res.startDate}
+                            onChange={(e) => handleResourceChange(index, 'startDate', e.target.value)}
+                            style={styles.modalInput}
+                            required
+                          />
+                        </div>
+                        <div style={{ ...styles.formGroup, flex: 1 }}>
+                          <label style={styles.formLabel}>End Date <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                          <input
+                            type="date"
+                            value={res.endDate}
+                            onChange={(e) => handleResourceChange(index, 'endDate', e.target.value)}
+                            style={styles.modalInput}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div style={styles.formGroup}>
+                        <label style={styles.formLabel}>Justification / Requirements</label>
+                        <textarea
+                          value={res.justification}
+                          onChange={(e) => handleResourceChange(index, 'justification', e.target.value)}
+                          style={styles.modalTextarea}
+                          placeholder="Why do you need this resource? Provide details about the work they will be doing..."
                         />
                       </div>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <input 
-                          type="number" 
-                          min="1"
-                          value={res.quantity} 
-                          onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)} 
-                          style={styles.modalInput} 
-                          required
-                        />
-                      </div>
                     </div>
-
-                    <div style={styles.formGroup}>
-                      <label style={styles.formLabel}>Required Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                      <input 
-                        type="text" 
-                        value={res.skills} 
-                        onChange={(e) => handleResourceChange(index, 'skills', e.target.value)} 
-                        style={styles.modalInput} 
-                        placeholder="e.g., High-Voltage Wiring, Circuit Calibration, LOTO Protocol"
-                        required
-                      />
-                      <span style={styles.inputHelp}>Separate multiple skills with commas</span>
-                    </div>
-
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>Start Date <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <input 
-                          type="date" 
-                          value={res.startDate} 
-                          onChange={(e) => handleResourceChange(index, 'startDate', e.target.value)} 
-                          style={styles.modalInput} 
-                          required
-                        />
-                      </div>
-                      <div style={{ ...styles.formGroup, flex: 1 }}>
-                        <label style={styles.formLabel}>End Date <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                        <input 
-                          type="date" 
-                          value={res.endDate} 
-                          onChange={(e) => handleResourceChange(index, 'endDate', e.target.value)} 
-                          style={styles.modalInput} 
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <div style={styles.formGroup}>
-                      <label style={styles.formLabel}>Justification / Requirements</label>
-                      <textarea 
-                        value={res.justification} 
-                        onChange={(e) => handleResourceChange(index, 'justification', e.target.value)} 
-                        style={styles.modalTextarea} 
-                        placeholder="Why do you need this resource? Provide details about the work they will be doing..."
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 <button type="button" onClick={handleAddResource} style={styles.addResourceBtn}>
                   + Add Another Resource
@@ -653,17 +908,30 @@ const styles = {
     padding: '40px 0',
     color: 'var(--color-text-muted)',
   },
+  skillsGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
   skillsWrapper: {
     display: 'flex',
     flexWrap: 'wrap',
     gap: '4px',
   },
-  skillTag: {
+  skillTagPrimary: {
     fontSize: '10px',
     padding: '2px 6px',
     borderRadius: '4px',
     background: 'var(--color-primary-light)',
     color: 'var(--color-primary)',
+    fontWeight: '600',
+  },
+  skillTagSecondary: {
+    fontSize: '10px',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    background: 'rgba(148, 163, 184, 0.15)',
+    color: 'var(--color-text-muted)',
     fontWeight: '600',
   },
   statusBadge: {
@@ -842,5 +1110,76 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '700',
-  }
+  },
+  // Autocomplete styles
+  suggestionsDropdown: {
+    position: 'absolute',
+    top: 'calc(100% + 4px)',
+    left: 0,
+    right: 0,
+    background: 'var(--color-bg-card)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '8px',
+    maxHeight: '200px',
+    overflowY: 'auto',
+    zIndex: 1000,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+  },
+  suggestionItem: {
+    padding: '8px 12px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  selectedSkillsContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+    marginBottom: '8px',
+  },
+  selectedSkillTag: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    fontSize: '12px',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+    fontWeight: '600',
+  },
+  removeSkillBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-primary)',
+    cursor: 'pointer',
+    fontSize: '14px',
+    padding: '0 2px',
+    display: 'flex',
+    alignItems: 'center',
+    fontWeight: 'bold',
+  },
+  selectedSkillTagSecondary: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    fontSize: '12px',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    background: 'rgba(148, 163, 184, 0.15)',
+    color: 'var(--color-text-muted)',
+    fontWeight: '600',
+  },
+  removeSkillBtnSecondary: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    fontSize: '14px',
+    padding: '0 2px',
+    display: 'flex',
+    alignItems: 'center',
+    fontWeight: 'bold',
+  },
 };
