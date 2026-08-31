@@ -48,6 +48,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     lastName: '',
     email: '',
     phone: '',
+    location: '',
     experience: '',
     education: '',
     skills: '',
@@ -152,6 +153,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
       lastName: '',
       email: applicantEmail || '',
       phone: '',
+      location: '',
       experience: '',
       education: '',
       skills: '',
@@ -192,6 +194,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
       fd.append('last_name', applyForm.lastName);
       fd.append('email', applyForm.email);
       fd.append('phone', applyForm.phone);
+      fd.append('location', applyForm.location);
       fd.append('position_applied', selectedPosting.title);
       fd.append('department', selectedPosting.department);
       fd.append('experience', applyForm.experience);
@@ -535,6 +538,17 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                         onChange={(e) => setApplyForm({ ...applyForm, phone: e.target.value })}
                         style={styles.input}
                         placeholder="+63 XXX XXX XXXX"
+                      />
+                    </div>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Location / Address *</label>
+                      <input
+                        type="text"
+                        required
+                        value={applyForm.location}
+                        onChange={(e) => setApplyForm({ ...applyForm, location: e.target.value })}
+                        style={styles.input}
+                        placeholder="e.g. Quezon City, Manila"
                       />
                     </div>
                   </div>
