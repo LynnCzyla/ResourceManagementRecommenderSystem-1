@@ -5,21 +5,18 @@ const { verifyToken } = require('../Middleware/auth');
 
 console.log('✅ RM Router initializing...');
 
-// ✅ TEST ROUTE (NO AUTH REQUIRED)
 router.get('/test', (req, res) => {
     res.json({ 
         success: true, 
         message: 'RM Router is working!',
         timestamp: new Date().toISOString(),
-        routes: ['/dashboard', '/projects', '/employees', '/requirements', '/assignments', '/recommendations', '/reports']
+        routes: ['/dashboard', '/projects', '/employees', '/requirements', '/assignments', '/recommendations', '/reports', '/feedback-report']
     });
 });
 
-// Apply auth middleware to ALL RM routes
 router.use(verifyToken);
 console.log('✅ Auth middleware applied');
 
-// Import routes with debug logs
 console.log('📦 Loading Dashboard route...');
 const dashboardRoutes = require('./Dashboard');
 console.log('✅ Dashboard route loaded');
@@ -51,7 +48,10 @@ console.log('📦 Loading Reports route...');
 const reportsRoutes = require('./Reports');
 console.log('✅ Reports route loaded');
 
-// Register routes
+console.log('📦 Loading Feedback Report route...');
+const feedbackReportRoutes = require('./feedbackReport');
+console.log('✅ feedbackReport route loaded');
+
 console.log('🔗 Registering routes...');
 router.use('/dashboard', dashboardRoutes);
 router.use('/projects', projectsRoutes);
@@ -61,6 +61,7 @@ router.use('/employees', employeesRoutes);
 router.use('/recommendations', recommendationsRoutes);
 router.use('/resource-requests', resourceRequestsRoutes);
 router.use('/reports', reportsRoutes);
+router.use('/feedback-report', feedbackReportRoutes);
 console.log('✅ All routes registered');
 
 console.log('✅ RM Routes registered with auth middleware');
