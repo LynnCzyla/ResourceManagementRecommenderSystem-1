@@ -266,7 +266,7 @@ function App() {
 
           const { data: profileData } = await supabase
             .from('profiles')
-            .select('role, first_name, middle_name, last_name, avatar_url, employee_id')
+            .select('role, first_name, middle_name, last_name, avatar_url, employee_id, branch_id, branches:profiles_branch_id_fkey ( name )')
             .eq('id', session.user.id)
             .single();
 
@@ -287,6 +287,8 @@ function App() {
             first_name: profileData?.first_name,
             last_name: profileData?.last_name,
             middle_name: profileData?.middle_name,
+            branch_id: profileData?.branch_id || null,
+            branch_name: profileData?.branches?.name || '',
           };
 
           localStorage.setItem('token', session.access_token);
@@ -333,7 +335,7 @@ function App() {
           try {
             const { data: freshProfile } = await supabase
               .from('profiles')
-              .select('avatar_url, first_name, middle_name, last_name')
+              .select('avatar_url, first_name, middle_name, last_name, branch_id, branches:profiles_branch_id_fkey ( name )')
               .eq('id', userData.id)
               .single();
 
@@ -346,6 +348,8 @@ function App() {
               userData.middle_name = freshProfile.middle_name;
               userData.last_name = freshProfile.last_name;
             }
+            userData.branch_id = freshProfile?.branch_id || null;
+            userData.branch_name = freshProfile?.branches?.name || '';
           } catch (_) {
             console.log('Could not refresh profile data, using cached version');
           }
@@ -414,7 +418,7 @@ function App() {
     try {
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('role, first_name, middle_name, last_name, avatar_url, employee_id')
+        .select('role, first_name, middle_name, last_name, avatar_url, employee_id, branch_id, branches:profiles_branch_id_fkey ( name )')
         .eq('id', userProfile.id)
         .single();
 
@@ -430,6 +434,8 @@ function App() {
           last_name: profileData.last_name,
           middle_name: profileData.middle_name,
           role: profileData.role || userProfile.role,
+          branch_id: profileData.branch_id,
+          branch_name: profileData.branches?.name || '',
         };
       }
     } catch (err) {
