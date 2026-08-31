@@ -434,3 +434,25 @@ export function resendFeedbackRequest(id) {
     skipCache: true
   });
 }
+
+// ── Performance / PM Evaluation (360 feedback) ──────────────────────────
+
+export function getEmployeeClientFeedback(profileId, projectId, signal) {
+  const params = new URLSearchParams();
+  if (profileId) params.set('profileId', profileId);
+  if (projectId) params.set('projectId', projectId);
+  return pm(`/performance/client-feedback?${params.toString()}`, { signal });
+}
+
+export function submitPmEvaluation(payload) {
+  clearCacheForEndpoints(['/performance']);
+  return pm('/performance/evaluations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    skipCache: true,
+  });
+}
+
+export function getPmClientFeedback(signal) {
+  return pm('/performance/my-client-feedback', { signal });
+}
