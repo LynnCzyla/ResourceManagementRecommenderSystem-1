@@ -164,7 +164,18 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('first_name, middle_name, last_name, contact_number, department_id, avatar_url')
+        .select(`
+          first_name, 
+          middle_name, 
+          last_name, 
+          contact_number, 
+          department_id, 
+          avatar_url,
+          role,
+          departments ( department_name ),
+          positions ( position_name ),
+          branches:profiles_branch_id_fkey ( name )
+        `)
         .eq('id', user.id)
         .single();
 
@@ -176,6 +187,10 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
           email: user.email || '',
           contact_number: profile.contact_number || '',
           department_id: profile.department_id || '',
+          role: profile.role || 'Employee',
+          position_name: profile.positions?.position_name || 'N/A',
+          department_name: profile.departments?.department_name || 'N/A',
+          branch_name: profile.branches?.name || 'N/A',
         });
 
         if (profile.avatar_url) {
@@ -606,16 +621,43 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.label}>DEPARTMENT</label>
-                <select
-                  value={profileForm.department_id}
-                  onChange={(e) => setProfileForm(f => ({ ...f, department_id: e.target.value }))}
+                <input
+                  type="text"
+                  value={profileForm.department_name}
                   style={styles.input}
-                >
-                  <option value="">— Select department —</option>
-                  {departments.map(d => (
-                    <option key={d.id} value={d.id}>{d.department_name}</option>
-                  ))}
-                </select>
+                  disabled
+                />
+              </div>
+            </div>
+
+            {/* Read-only Role + Position + Branch details */}
+            <div style={styles.threeCol}>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>ROLE</label>
+                <input
+                  type="text"
+                  value={profileForm.role}
+                  style={styles.input}
+                  disabled
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>POSITION</label>
+                <input
+                  type="text"
+                  value={profileForm.position_name}
+                  style={styles.input}
+                  disabled
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>ASSIGNED BRANCH</label>
+                <input
+                  type="text"
+                  value={profileForm.branch_name}
+                  style={styles.input}
+                  disabled
+                />
               </div>
             </div>
 
