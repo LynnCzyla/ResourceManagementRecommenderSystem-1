@@ -42,11 +42,11 @@ async function findPositionIdByName(roleName) {
   return data && data.length > 0 ? data[0].id : null;
 }
 
-// requirement_skills stores the skill as plain text (column `skills`) —
-// there is no skill_id foreign key on this table. We still upsert into the
-// master `skills` table so the skill exists for autocomplete/reporting
-// elsewhere, but the link to the requirement is just the text value.
-async function attachSkillsToRequirement(requirementId, skillNames = []) {
+// requirement_skills stores the skill as plain text (column `skills`) plus
+// a `skill_type` ('Primary' | 'Secondary'). We still upsert into the master
+// `skills` table so the skill exists for autocomplete/reporting elsewhere,
+// but the link to the requirement is the text value + type.
+async function attachSkillsToRequirement(requirementId, skillNames = [], skillType = 'Primary') {
   for (const rawName of skillNames) {
     const name = rawName.trim();
     if (!name) continue;
@@ -54,6 +54,7 @@ async function attachSkillsToRequirement(requirementId, skillNames = []) {
     await supabase.from('requirement_skills').insert({
       requirement_id: requirementId,
       skills: name,
+      skill_type: skillType,
     });
   }
 }
@@ -61,9 +62,20 @@ async function attachSkillsToRequirement(requirementId, skillNames = []) {
 // Transform a joined project row into the shape the PM tabs expect.
 function transformProject(row) {
   const requirements = row.project_resource_requirements || [];
+
   const manpowerNeeded = requirements.reduce((sum, r) => sum + (r.quantity_needed || 0), 0);
-  const allSkills = requirements.flatMap(r =>
-    (r.requirement_skills || []).map(rs => rs.skills).filter(Boolean)
+
+  const allPrimarySkills = requirements.flatMap(r =>
+    (r.requirement_skills || [])
+      .filter(rs => (rs.skill_type || 'Primary') === 'Primary')
+      .map(rs => rs.skills)
+      .filter(Boolean)
+  );
+  const allSecondarySkills = requirements.flatMap(r =>
+    (r.requirement_skills || [])
+      .filter(rs => rs.skill_type === 'Secondary')
+      .map(rs => rs.skills)
+      .filter(Boolean)
   );
 
   return {
@@ -78,18 +90,34 @@ function transformProject(row) {
     status: row.status,
     createdBy: row.created_by,
     manpowerNeeded,
-    requiredSkills: [...new Set(allSkills)],
-    resources: requirements.map(r => ({
-      id: r.id,
-      role: r.positions?.position_name || r.role_title || '',
-      quantity: r.quantity_needed,
-      assignment: r.assignment_type,
-      justification: r.justification,
-      startDate: r.start_date,
-      endDate: r.end_date,
-      status: r.status,
-      skills: (r.requirement_skills || []).map(rs => rs.skills).filter(Boolean),
-    })),
+    // ✅ kept for backward compatibility with any code still reading `requiredSkills`
+    requiredSkills: [...new Set([...allPrimarySkills, ...allSecondarySkills])],
+    requiredPrimarySkills: [...new Set(allPrimarySkills)],
+    requiredSecondarySkills: [...new Set(allSecondarySkills)],
+    resources: requirements.map(r => {
+      const skillRows = r.requirement_skills || [];
+      const primarySkills = skillRows
+        .filter(rs => (rs.skill_type || 'Primary') === 'Primary')
+        .map(rs => rs.skills)
+        .filter(Boolean);
+      const secondarySkills = skillRows
+        .filter(rs => rs.skill_type === 'Secondary')
+        .map(rs => rs.skills)
+        .filter(Boolean);
+      return {
+        id: r.id,
+        role: r.positions?.position_name || r.role_title || '',
+        quantity: r.quantity_needed,
+        assignment: r.assignment_type,
+        justification: r.justification,
+        startDate: r.start_date,
+        endDate: r.end_date,
+        status: r.status,
+        skills: [...primarySkills, ...secondarySkills],
+        primarySkills,
+        secondarySkills,
+      };
+    }),
   };
 }
 
@@ -117,7 +145,8 @@ const PROJECT_SELECT = `
     positions ( id, position_name ),
     requirement_skills (
       id,
-      skills
+      skills,
+      skill_type
     )
   )
 `;
@@ -215,6 +244,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Start date and end date are required' });
     }
 
+    // ✅ Validate every resource has at least one primary skill
+    for (const resource of resources) {
+      const hasPrimary = resource.primarySkills && resource.primarySkills.trim().length > 0;
+      if (!hasPrimary) {
+        return res.status(400).json({
+          success: false,
+          message: 'Each resource requirement must include at least one primary skill'
+        });
+      }
+    }
+
     const { data: project, error: projectError } = await supabase
       .from('projects')
       .insert({
@@ -253,10 +293,15 @@ router.post('/', async (req, res) => {
 
       if (reqError) throw reqError;
 
-      const skillNames = resource.skills
-        ? resource.skills.split(',').map(s => s.trim()).filter(Boolean)
+      const primarySkillNames = resource.primarySkills
+        ? resource.primarySkills.split(',').map(s => s.trim()).filter(Boolean)
         : [];
-      await attachSkillsToRequirement(requirement.id, skillNames);
+      const secondarySkillNames = resource.secondarySkills
+        ? resource.secondarySkills.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+      await attachSkillsToRequirement(requirement.id, primarySkillNames, 'Primary');
+      await attachSkillsToRequirement(requirement.id, secondarySkillNames, 'Secondary');
     }
 
     const { data: fullProject, error: fetchError } = await supabase
