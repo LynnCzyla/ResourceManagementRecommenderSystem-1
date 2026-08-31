@@ -22,6 +22,12 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionDuration, setSessionDuration] = useState('00:00');
 
+  // ── Department filter (Total Departments stat) ──────────────────────────────
+  const [departments, setDepartments] = useState([]);
+  const [selectedDeptId, setSelectedDeptId] = useState('all');
+  const [deptPositionCount, setDeptPositionCount] = useState(null);
+  const [loadingDeptFilter, setLoadingDeptFilter] = useState(false);
+
   useEffect(() => {
     const startTime = Date.now();
     const timer = setInterval(() => {
@@ -78,9 +84,60 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       }
     };
 
+    const fetchDepartments = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const res = await fetch('http://localhost:5000/api/admin/departments', { headers });
+        const json = await res.json();
+
+        if (json.success) {
+          setDepartments(json.data || []);
+        }
+      } catch (err) {
+        console.error('Error fetching departments:', err);
+      }
+    };
+
     fetchDashboardStats();
     fetchActivity();
+    fetchDepartments();
   }, []);
+
+  // ── Handle department filter change ─────────────────────────────────────────
+  const handleDepartmentFilterChange = async (deptId) => {
+    setSelectedDeptId(deptId);
+
+    if (deptId === 'all') {
+      setDeptPositionCount(null);
+      return;
+    }
+
+    try {
+      setLoadingDeptFilter(true);
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const res = await fetch(`http://localhost:5000/api/admin/positions?dept_id=${deptId}`, { headers });
+      const json = await res.json();
+
+      if (json.success) {
+        setDeptPositionCount((json.data || []).length);
+      } else {
+        setDeptPositionCount(null);
+      }
+    } catch (err) {
+      console.error('Error fetching positions for department:', err);
+      setDeptPositionCount(null);
+    } finally {
+      setLoadingDeptFilter(false);
+    }
+  };
+
+  const selectedDeptName = selectedDeptId === 'all'
+    ? null
+    : departments.find((d) => String(d.id) === String(selectedDeptId))?.department_name || null;
 
   // Build cumulative stroke-dasharray/dashoffset for each donut segment.
   let cumulative = 0;
@@ -199,7 +256,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
               </div>
             </div>
 
-            <div style={styles.statusItem}>
+            <div style={{ ...styles.statusItem, alignItems: 'flex-start' }}>
               <div style={{ ...styles.statusIcon, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -207,9 +264,32 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
               </div>
-              <div>
-                <div style={styles.statusLabel}>Total Departments</div>
+              <div style={{ width: '100%' }}>
+                <div style={styles.statusLabel}>
+                  Total Departments {branchInfo ? `(${branchInfo.name})` : ''}
+                </div>
                 <div style={styles.statusValue}>{statusInfo.totalDepartments}</div>
+
+                <select
+                  value={selectedDeptId}
+                  onChange={(e) => handleDepartmentFilterChange(e.target.value)}
+                  style={styles.deptFilterSelect}
+                >
+                  <option value="all">Filter by department…</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.department_name}
+                    </option>
+                  ))}
+                </select>
+
+                {selectedDeptId !== 'all' && (
+                  <div style={styles.deptFilterResult}>
+                    {loadingDeptFilter
+                      ? 'Loading…'
+                      : `${deptPositionCount ?? 0} position${deptPositionCount === 1 ? '' : 's'} in ${selectedDeptName || 'this department'}`}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -593,5 +673,22 @@ const styles = {
     fontSize: '16px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+  },
+  deptFilterSelect: {
+    marginTop: '8px',
+    width: '100%',
+    padding: '6px 8px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card)',
+    color: 'var(--color-text-primary)',
+    fontSize: '12px',
+    outline: 'none',
+  },
+  deptFilterResult: {
+    marginTop: '6px',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-primary)',
   },
 };
