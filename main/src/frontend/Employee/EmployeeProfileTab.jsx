@@ -92,12 +92,16 @@ export default function EmployeeProfileTab() {
   };
 
   // Form states
+  // ✅ department / role / branch are read-only — they're managed by the
+  // PM/Admin side, not editable here. They're still loaded into this object
+  // so the disabled inputs below can display the employee's current values.
   const [profileForm, setProfileForm] = useState({
     firstName: '',
     lastName: '',
     email: '',
     department: '',
-    role: ''
+    role: '',
+    branch: ''
   });
   const [departments, setDepartments] = useState([]);
   const [profilePicture, setProfilePicture] = useState('');
@@ -227,7 +231,7 @@ export default function EmployeeProfileTab() {
 
       // Fetch departments list
       try {
-        const deptRes = await axios.get(`${API_URL}/admin/departments`);
+        const deptRes = await axios.get(`${API_URL}/admin/departments`, { headers: authHeader });
         if (deptRes.data.success) {
           setDepartments(deptRes.data.data || []);
         }
@@ -257,8 +261,11 @@ export default function EmployeeProfileTab() {
           firstName: d.first_name || '',
           lastName: d.last_name || '',
           email: d.email || user?.email || '',
+          // ✅ read-only fields — populated for display only, never sent
+          // back as edits from this screen.
           department: d.department || '',
-          role: d.role || ''
+          role: d.role || '',
+          branch: d.branch || d.branch_name || d.site || ''
         });
         setProfilePicture(d.avatar_url || '');
       } else {
@@ -267,7 +274,8 @@ export default function EmployeeProfileTab() {
           lastName: user?.user_metadata?.last_name || '',
           email: user?.email || '',
           department: '',
-          role: ''
+          role: '',
+          branch: ''
         });
       }
   
@@ -303,7 +311,8 @@ export default function EmployeeProfileTab() {
           lastName: user?.user_metadata?.last_name || '',
           email: user?.email || '',
           department: '',
-          role: ''
+          role: '',
+          branch: ''
         });
       } else {
         setError(`Failed to load employee data: ${err.response?.data?.error || err.message}`);
@@ -622,13 +631,10 @@ const handleCertUpload = async (e) => {
   };
 
   const validateProfileForm = () => {
-    const { firstName, lastName, email, role } = profileForm;
+    const { firstName, lastName, email } = profileForm;
 
     if (!firstName.trim() || !lastName.trim()) {
       return 'First name and last name are required.';
-    }
-    if (!role.trim()) {
-      return 'Role title is required.';
     }
     if (email && email.trim() !== '') {
       const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -686,13 +692,13 @@ const handleCertUpload = async (e) => {
       }
 
       const authHeader = await getAuthHeader();
+      // ✅ department / role / branch are read-only on this screen — they are
+      // NOT sent as edits here, only echoed back from what's already on file.
       const response = await axios.put(`${API_URL}/employee/profile`, {
         employeeId,
         first_name: profileForm.firstName.trim(),
         last_name: profileForm.lastName.trim(),
         email: profileForm.email.trim(),
-        department: profileForm.department,
-        role: profileForm.role.trim(),
         avatar_url: newAvatarUrl || null
       }, { headers: authHeader });
 
@@ -843,6 +849,13 @@ const handleCertUpload = async (e) => {
   );
   const IconLock = () => (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  );
+
+  // Small inline lock icon used next to read-only field labels below.
+  const IconLockSmall = () => (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}>
       <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
     </svg>
   );
@@ -1028,23 +1041,47 @@ const handleCertUpload = async (e) => {
                   <label style={styles.formLabel}>Email Address</label>
                   <input type="email" value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} style={styles.formInput} />
                 </div>
+
+                {/* ✅ Read-only — set by your PM/Admin, not editable here */}
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Department</label>
-                  <select 
-                    value={profileForm.department} 
-                    onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })} 
-                    style={styles.formInput}
-                  >
-                    <option value="">-- Select Department --</option>
-                    {departments.map(d => (
-                      <option key={d.id} value={d.department_name}>{d.department_name}</option>
-                    ))}
-                  </select>
+                  <label style={styles.formLabelLocked}>
+                    <IconLockSmall /> Department
+                  </label>
+                  <input
+                    type="text"
+                    value={profileForm.department || '—'}
+                    style={styles.formInputDisabled}
+                    disabled
+                    readOnly
+                  />
                 </div>
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Role Title</label>
-                  <input type="text" value={profileForm.role} onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })} style={styles.formInput} required />
+                  <label style={styles.formLabelLocked}>
+                    <IconLockSmall /> Role / Position
+                  </label>
+                  <input
+                    type="text"
+                    value={profileForm.role || '—'}
+                    style={styles.formInputDisabled}
+                    disabled
+                    readOnly
+                  />
                 </div>
+                <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+                  <label style={styles.formLabelLocked}>
+                    <IconLockSmall /> Branch
+                  </label>
+                  <input
+                    type="text"
+                    value={profileForm.branch || '—'}
+                    style={styles.formInputDisabled}
+                    disabled
+                    readOnly
+                  />
+                </div>
+                <p style={{ ...styles.lockedFieldsNote, gridColumn: '1 / -1' }}>
+                  Department, Role/Position, and Branch are managed by your Project Manager or Admin and can't be changed from here.
+                </p>
               </div>
               <button type="submit" style={styles.saveBtn} disabled={profileSaving}>
                 {profileSaving ? 'Saving...' : 'Update Profile Info'}
@@ -1206,10 +1243,34 @@ const styles = {
   twoColForm: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' },
   formGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
   formLabel: { fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', color: 'var(--color-text-secondary)' },
+  // ✅ Label style for read-only fields — small lock icon + muted color so
+  // it's visually obvious these can't be edited before the user even taps in.
+  formLabelLocked: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    fontSize: '11px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-muted)',
+  },
   formInput: {
     padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--color-border)',
     background: 'var(--color-bg-root)', color: 'var(--color-text-primary)',
     fontSize: '14px', outline: 'none',
+  },
+  // ✅ Disabled/read-only variant — same shape as formInput but visually
+  // muted and with a not-allowed cursor so it reads as locked at a glance.
+  formInputDisabled: {
+    padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card-hover)', color: 'var(--color-text-secondary)',
+    fontSize: '14px', outline: 'none', cursor: 'not-allowed',
+  },
+  lockedFieldsNote: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+    margin: 0,
   },
   saveBtn: {
     alignSelf: 'flex-start',
