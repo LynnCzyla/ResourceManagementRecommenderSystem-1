@@ -38,7 +38,8 @@ async function findPositionIdByName(roleName) {
   return data && data.length > 0 ? data[0].id : null;
 }
 
-async function attachSkillsToRequirement(requirementId, skillNames = []) {
+// ✅ skillType is 'Primary' or 'Secondary'
+async function attachSkillsToRequirement(requirementId, skillNames = [], skillType = 'Primary') {
   for (const rawName of skillNames) {
     const name = rawName.trim();
     if (!name) continue;
@@ -46,12 +47,21 @@ async function attachSkillsToRequirement(requirementId, skillNames = []) {
     await supabase.from('requirement_skills').insert({
       requirement_id: requirementId,
       skills: name,
+      skill_type: skillType,
     });
   }
 }
 
 function transformRequest(row) {
-  const skills = (row.requirement_skills || []).map(rs => rs.skills).filter(Boolean);
+  const allSkillRows = row.requirement_skills || [];
+  const primarySkills = allSkillRows
+    .filter(rs => (rs.skill_type || 'Primary') === 'Primary')
+    .map(rs => rs.skills)
+    .filter(Boolean);
+  const secondarySkills = allSkillRows
+    .filter(rs => rs.skill_type === 'Secondary')
+    .map(rs => rs.skills)
+    .filter(Boolean);
 
   let duration = null;
   if (row.start_date && row.end_date) {
@@ -66,7 +76,10 @@ function transformRequest(row) {
     projectId: row.project_id,
     projectName: row.projects?.project_name || 'Unknown Project',
     role: row.positions?.position_name || row.role_title || '',
-    skills,
+    // ✅ kept for backward compatibility with any code still reading `skills`
+    skills: [...primarySkills, ...secondarySkills],
+    primarySkills,
+    secondarySkills,
     timeline: row.assignment_type,
     duration,
     startDate: row.start_date,
@@ -86,7 +99,8 @@ const REQUEST_SELECT = `
   positions ( id, position_name ),
   requirement_skills (
     id,
-    skills
+    skills,
+    skill_type
   )
 `;
 
@@ -131,7 +145,7 @@ router.get('/', async (req, res) => {
 
       // ✅ Filter by projects owned by this PM
       query = query.in('project_id', projectIds);
-      
+
       console.log(`🔍 Filtering by ${projectIds.length} projects owned by PM`);
     }
 
@@ -164,7 +178,7 @@ router.get('/', async (req, res) => {
 
       // ✅ Filter by projects in this branch
       query = query.in('project_id', projectIds);
-      
+
       console.log(`🔍 Filtering by ${projectIds.length} projects in branch`);
     }
 
@@ -243,6 +257,17 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // ✅ Validate every resource has at least one primary skill
+    for (const resource of resources) {
+      const hasPrimary = resource.primarySkills && resource.primarySkills.trim().length > 0;
+      if (!hasPrimary) {
+        return res.status(400).json({
+          success: false,
+          message: 'Each resource requirement must include at least one primary skill'
+        });
+      }
+    }
+
     const createdIds = [];
 
     for (const resource of resources) {
@@ -267,10 +292,15 @@ router.post('/', async (req, res) => {
 
       if (reqError) throw reqError;
 
-      const skillNames = resource.skills
-        ? resource.skills.split(',').map(s => s.trim()).filter(Boolean)
+      const primarySkillNames = resource.primarySkills
+        ? resource.primarySkills.split(',').map(s => s.trim()).filter(Boolean)
         : [];
-      await attachSkillsToRequirement(requirement.id, skillNames);
+      const secondarySkillNames = resource.secondarySkills
+        ? resource.secondarySkills.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+      await attachSkillsToRequirement(requirement.id, primarySkillNames, 'Primary');
+      await attachSkillsToRequirement(requirement.id, secondarySkillNames, 'Secondary');
 
       createdIds.push(requirement.id);
     }
@@ -342,7 +372,7 @@ router.patch('/:id/status', async (req, res) => {
     // RM can update (approve/reject) if they are in the same branch
     // Super Admin can update anything
     let hasPermission = isSuperAdmin;
-    
+
     if (userRole === 'Project Manager') {
       hasPermission = isProjectOwner || isRequester;
     } else if (userRole === 'Resource Manager') {
@@ -353,14 +383,14 @@ router.patch('/:id/status', async (req, res) => {
         .select('created_by')
         .eq('id', existing.project_id)
         .single();
-      
+
       if (project) {
         const { data: projectOwner } = await supabase
           .from('profiles')
           .select('branch_id')
           .eq('id', project.created_by)
           .single();
-        
+
         const userBranchId = req.user?.branch_id;
         hasPermission = projectOwner?.branch_id === userBranchId;
       }
