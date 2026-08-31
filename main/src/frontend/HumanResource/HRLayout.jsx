@@ -10,7 +10,7 @@ import HRHiredEmployeesTab from './HRHiredEmployeesTab';
 import HRResourceRequestsTab from './HRResourceRequestsTab';
 import ProfileSettings from '../ProfileSettings';
 
-function PHClock() {
+function PHClock({ user }) {
   const [phTime, setPhTime] = useState('');
 
   useEffect(() => {
@@ -34,6 +34,20 @@ function PHClock() {
 
   return (
     <div style={styles.phClockContainer}>
+      {user?.role !== 'Super Admin' && user?.branch_name && (
+        <span style={{ 
+          marginRight: '12px', 
+          fontWeight: '700', 
+          fontSize: '12px', 
+          color: '#ffffff', 
+          backgroundColor: '#8b5cf6', 
+          padding: '2px 8px', 
+          borderRadius: '4px',
+          letterSpacing: '0.5px'
+        }}>
+          {user.branch_name}
+        </span>
+      )}
       <span style={styles.phClockLabel}>UTC+8 / GMT+8:</span>
       <span style={styles.phClockTime}>{phTime}</span>
     </div>
@@ -327,7 +341,7 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
         <header style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <span style={styles.topbarTitle}>HR Portal</span>
-            <PHClock />
+            <PHClock user={user} />
           </div>
           
           <div style={styles.topbarRight}>
