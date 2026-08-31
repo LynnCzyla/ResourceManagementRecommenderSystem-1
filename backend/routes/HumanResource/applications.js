@@ -53,7 +53,7 @@ router.post('/', async (req, res) => {
     const {
       job_posting_id, applicant_user_id, first_name, middle_name, last_name,
       email, phone, position_applied, department, experience, education,
-      skills, cover_letter, resume_path,
+      skills, cover_letter, resume_path, location,
     } = req.body;
 
     if (!first_name?.trim() || !last_name?.trim() || !email?.trim() || !position_applied?.trim()) {
@@ -79,6 +79,7 @@ router.post('/', async (req, res) => {
         education: education?.trim() || null,
         skills: skills?.trim() || null,
         cover_letter: cover_letter?.trim() || null,
+        location: location?.trim() || null,
         resume_path: resume_path || null,
         status: 'Pending',
       })
