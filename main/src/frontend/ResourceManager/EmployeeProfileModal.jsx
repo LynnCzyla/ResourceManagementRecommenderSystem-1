@@ -254,7 +254,7 @@ const EmployeeProfileModal = ({
                   <div style={modalStyles.skillList}>
                     {missingSkills.length > 0 ? (
                       missingSkills.map((skill, i) => (
-                        <span key={i} style={modalStyles.missingSkill}>{skill}</span>
+                        <span key={i} style={modalStyles.missingSkill}>{skill.skill}</span>
                       ))
                     ) : (
                       <span style={modalStyles.noSkills}>No missing skills</span>
