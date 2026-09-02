@@ -1,17 +1,4 @@
-// src/api/hrClient.js
-//
-// Shared axios instance for every HR tab. This fixes the 401 Unauthorized
-// errors on /api/hr/* — those routes are protected by verifyToken on the
-// backend (see Index.js: router.use(verifyToken)), but the individual tab
-// components were calling axios.get(...) directly with no Authorization
-// header at all, so every request was rejected before it even reached the
-// route handlers.
-//
-// IMPORTANT: adjust TOKEN_KEY / USER_KEY below to match whatever your
-// login flow actually uses in localStorage (check App.jsx / your login
-// component for the exact localStorage.setItem(...) calls). This file
-// tries a few common variants automatically so it works out of the box,
-// but you should pin it down to the real key once you confirm it.
+// D:\ResourceManagementRecommenderSystem\main\src\frontend\HumanResource\Hrclient.js
 
 import axios from 'axios';
 

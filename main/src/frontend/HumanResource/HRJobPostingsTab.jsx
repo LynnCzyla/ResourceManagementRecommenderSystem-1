@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
 
-const ADMIN_API = 'http://localhost:5000/api/admin';
-
 // Maps a job_postings row (with joined departments/positions) coming back from the
 // API into the flat shape this component's UI was built around.
 const mapPosting = (row) => ({
@@ -69,14 +67,45 @@ export default function HRJobPostingsTab() {
   const [selectedPosting, setSelectedPosting] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-
+  const [userBranch, setUserBranch] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
     loadJobPostings();
     loadDepartments();
     loadResourceRequests();
+    fetchUserBranch();
   }, []);
+
+  // ✅ Fetch user's branch from my-branch endpoint
+  const fetchUserBranch = async () => {
+    try {
+      console.log('🔍 Fetching user branch from /branches/my-branch...');
+      const res = await hrClient.get('/branches/my-branch');
+      console.log('📋 Branch response:', res.data);
+      
+      if (res.data?.success && res.data.data) {
+        const branch = res.data.data;
+        setUserBranch(branch);
+        
+        // Auto-fill location
+        const locationValue = branch.location || branch.name || '';
+        console.log('📍 Setting location to:', locationValue);
+        
+        setFormData(prev => ({
+          ...prev,
+          location: locationValue
+        }));
+      } else {
+        console.warn('⚠️ No branch data received:', res.data);
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch user branch:', err);
+      if (err.response?.data?.error === 'User has no branch assigned') {
+        console.warn('⚠️ User has no branch assigned');
+      }
+    }
+  };
 
   const loadJobPostings = async () => {
     try {
@@ -95,11 +124,18 @@ export default function HRJobPostingsTab() {
 
   const loadDepartments = async () => {
     try {
-      const res = await fetch(`${ADMIN_API}/departments`);
-      const data = await res.json();
-      if (data.success) setDepartments(data.data);
+      const res = await hrClient.get('/departments');
+      const data = res.data;
+      if (data.success) setDepartments(data.data || []);
     } catch (err) {
       console.error('Failed to load departments', err);
+      try {
+        const fallbackRes = await fetch('http://localhost:5000/api/hr/departments');
+        const fallbackData = await fallbackRes.json();
+        if (fallbackData.success) setDepartments(fallbackData.data || []);
+      } catch (fallbackErr) {
+        console.error('Fallback also failed:', fallbackErr);
+      }
     }
   };
 
@@ -123,7 +159,6 @@ export default function HRJobPostingsTab() {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-success)',
-      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
     });
   };
 
@@ -137,7 +172,6 @@ export default function HRJobPostingsTab() {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-danger)',
-      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
     });
   };
 
@@ -154,26 +188,22 @@ export default function HRJobPostingsTab() {
       background: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-warning)',
-      customClass: {
-        popup: 'swal-custom-popup',
-        confirmButton: 'swal-custom-confirm',
-        cancelButton: 'swal-custom-cancel'
-      }
     });
   };
 
-  // Prefills the form from a selected RM resource request. Everything stays
-  // editable afterward — this only sets initial values.
   const handleSelectResourceRequest = (requestId) => {
     if (!requestId) {
-      setFormData((prev) => ({ ...prev, sourceRequestId: '' }));
+      setFormData((prev) => ({ 
+        ...prev, 
+        sourceRequestId: '',
+        location: userBranch?.location || userBranch?.name || prev.location 
+      }));
       return;
     }
 
     const req = resourceRequests.find((r) => String(r.id) === String(requestId));
     if (!req) return;
 
-    // Try to match the request's free-text department name to a real department id.
     const matchedDept = departments.find(
       (d) => d.department_name?.toLowerCase().trim() === req.departmentName?.toLowerCase().trim()
     );
@@ -183,6 +213,7 @@ export default function HRJobPostingsTab() {
       sourceRequestId: requestId,
       title: req.positionTitle || prev.title,
       department_id: matchedDept ? String(matchedDept.id) : prev.department_id,
+      location: prev.location || userBranch?.location || userBranch?.name || '',
       requirements: req.requiredSkills
         ? `Required skills: ${req.requiredSkills}\nExperience level: ${req.experienceLevel || 'N/A'}`
         : prev.requirements,
@@ -258,7 +289,6 @@ export default function HRJobPostingsTab() {
       loadResourceRequests();
       showSuccessAlert('Job posting deleted successfully!');
     } catch (err) {
-      // Backend refuses to delete postings that already have applications on file.
       showErrorAlert(err.response?.data?.error || 'Failed to delete job posting');
       console.error(err);
     }
@@ -270,7 +300,7 @@ export default function HRJobPostingsTab() {
       title: posting.title,
       description: posting.description || '',
       department_id: posting.department_id || '',
-      location: posting.location,
+      location: posting.location || userBranch?.location || userBranch?.name || '',
       employmentType: posting.employmentType,
       salaryMin: posting.salaryMin,
       salaryMax: posting.salaryMax,
@@ -285,11 +315,39 @@ export default function HRJobPostingsTab() {
   };
 
   const resetForm = () => {
-    setFormData(emptyForm);
+    setFormData({
+      ...emptyForm,
+      location: userBranch?.location || userBranch?.name || '',
+    });
     setSelectedPosting(null);
   };
 
-  const filteredPostings = jobPostings.filter(posting => {
+  // ✅ Open create modal with auto-filled location
+  const openCreateModal = () => {
+    console.log('📋 Opening create modal, userBranch:', userBranch);
+    
+    // Reset form first
+    setFormData({
+      ...emptyForm,
+      location: userBranch?.location || userBranch?.name || '',
+    });
+    
+    // If location is still empty, try to get from localStorage user
+    const locationValue = userBranch?.location || userBranch?.name || '';
+    if (locationValue) {
+      setFormData(prev => ({
+        ...prev,
+        location: locationValue
+      }));
+      console.log('📍 Location auto-filled:', locationValue);
+    } else {
+      console.warn('⚠️ No location available from branch');
+    }
+    
+    setShowCreateModal(true);
+  };
+
+  const filteredPostings = jobPostings.filter((posting) => {
     const matchesSearch = 
       posting.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -298,7 +356,6 @@ export default function HRJobPostingsTab() {
     return matchesSearch && matchesStatus;
   });
 
-  // Shared dropdown + end date fields used by both Create and Edit forms.
   const renderResourceRequestField = () => (
     <div style={styles.formGroup}>
       <label style={styles.formLabel}>Create From Resource Request (optional)</label>
@@ -358,7 +415,13 @@ export default function HRJobPostingsTab() {
             value={formData.location}
             onChange={(e) => setFormData({ ...formData, location: e.target.value })}
             style={styles.formInput}
+            placeholder="Auto-filled from your branch"
           />
+          {!formData.location && (
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+              Location will be auto-filled from your branch
+            </span>
+          )}
         </div>
       </div>
       <div style={styles.formRow}>
@@ -502,7 +565,7 @@ export default function HRJobPostingsTab() {
             <option value="Active">Active</option>
             <option value="Closed">Closed</option>
           </select>
-          <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn}>
+          <button onClick={openCreateModal} style={styles.createBtn}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -531,7 +594,7 @@ export default function HRJobPostingsTab() {
               {filteredPostings.length === 0 ? (
                 <tr><td colSpan="10" style={styles.emptyRow}>No job postings found.</td></tr>
               ) : (
-                filteredPostings.map(posting => (
+                filteredPostings.map((posting) => (
                   <tr key={posting.id} style={styles.tableRow}>
                     <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{posting.title}</td>
                     <td style={styles.td}>{posting.department}</td>
