@@ -10,6 +10,11 @@ class RecommendationEngine {
             'Medium': 2,
             'Low': 1
         };
+        // ✅ NEW: primary requirements count more than secondary ones
+        this.SKILL_TYPE_WEIGHTS = {
+            primary: 2,
+            secondary: 1
+        };
         this.cache = new Map();
         
         // ============ ALIAS CACHE ============
@@ -17,6 +22,13 @@ class RecommendationEngine {
         this._masterAliases = null;      // master → [aliases]
         this._aliasCacheTime = null;
         this._aliasCacheTTL = 300000;    // 5 minutes
+    }
+
+    /**
+     * ✅ NEW: consistent normalization used everywhere skills are compared.
+     */
+    _normalize(str) {
+        return (str || '').toLowerCase().trim().replace(/\s+/g, ' ');
     }
 
     /**
@@ -82,7 +94,7 @@ class RecommendationEngine {
             }
         }
     
-        // 2. Get required skills
+        // 2. Get required skills (now returns [{ skill, skill_type }, ...])
         const requiredSkills = requirementId 
             ? await this._getRequiredSkills(requirementId)
             : await this._getRequiredSkillsForProject(projectId);
@@ -172,166 +184,402 @@ class RecommendationEngine {
 
     /**
      * Calculate scores for a single employee
+     * ✅ REWRITTEN: real ordered matching tiers (EXACT → ALIAS → COMPONENT → PARTIAL),
+     * primary/secondary weighted scoring, and matchDetails-driven missingSkills.
      */
     async _calculateScore(employee, requiredSkills) {
-        // Step 1: Get employee skills
         const employeeSkills = await this._getEmployeeSkills(employee.id);
-        console.log(`📋 ${employee.first_name} - Skills:`, employeeSkills);
-        
-        // Step 2: Get employee skill components
-        const employeeComponents = await this._getEmployeeSkillComponents(employee.id);
+
+        console.log(
+            `📋 ${employee.first_name} - Skills:`,
+            employeeSkills
+        );
+
+        const employeeComponents =
+            await this._getEmployeeSkillComponents(employee.id);
+
         if (employeeComponents.length > 0) {
-            console.log(`📋 ${employee.first_name} - Components:`, employeeComponents);
+            console.log(
+                `📋 ${employee.first_name} - Components:`,
+                employeeComponents
+            );
         }
-        
-        // Step 3: Load alias mappings
+
         const aliasMap = await this._getAliasMap();
         const masterAliases = await this._getMasterAliases();
-        
-        // Step 4: Build expanded skill sets
-        const expandedSkills = new Set();
-        const matchSources = {};
-        
-        // 4a: Add all employee skills
-        employeeSkills.forEach(s => {
-            const normalized = s.toLowerCase().trim();
-            expandedSkills.add(normalized);
-            matchSources[normalized] = 'skill';
-        });
-        
-        // 4b: Add skill components
-        employeeComponents.forEach(c => {
-            const normalized = c.toLowerCase().trim();
-            expandedSkills.add(normalized);
-            matchSources[normalized] = 'component';
-        });
-        
-        // 4c: Add aliases and masters for skills
-        const normalizedEmployee = employeeSkills.map(s => s.toLowerCase().trim());
-        for (const empSkill of normalizedEmployee) {
-            if (aliasMap[empSkill]) {
-                const master = aliasMap[empSkill];
-                expandedSkills.add(master);
-                matchSources[master] = 'alias';
-                console.log(`   🔄 Alias: "${empSkill}" → Master: "${master}"`);
+
+        const normalizedEmployeeSkills =
+            employeeSkills.map(skill => this._normalize(skill));
+
+        const normalizedComponents =
+            employeeComponents.map(component =>
+                this._normalize(component)
+            );
+
+        // 🔍 TEMPORARY DEBUG: same logic as before, but now returns WHY a
+        // relationship was considered aliased instead of just true/false,
+        // so we can see the exact DB relationship behind each alias match.
+        // Priority order and match outcome are UNCHANGED — this only adds
+        // visibility.
+        const isAliasRelated = (empSkill, reqSkill) => {
+            if (!empSkill || !reqSkill) return null;
+
+            // Employee skill is an alias of requirement's master
+            if (aliasMap[empSkill] === reqSkill) {
+                return {
+                    related: true,
+                    reason: `alias → master: "${empSkill}" is an alias whose master is "${reqSkill}"`
+                };
             }
-            if (masterAliases[empSkill]) {
-                masterAliases[empSkill].forEach(alias => {
-                    expandedSkills.add(alias);
-                    matchSources[alias] = 'alias';
-                });
-                console.log(`   🔄 Master: "${empSkill}" → Aliases: ${masterAliases[empSkill].join(', ')}`);
+
+            // Requirement is an alias of employee skill's master
+            if (aliasMap[reqSkill] === empSkill) {
+                return {
+                    related: true,
+                    reason: `alias → master: "${reqSkill}" is an alias whose master is "${empSkill}"`
+                };
             }
-        }
-        
-        // 4d: Also expand components with aliases
-        const normalizedComponents = employeeComponents.map(c => c.toLowerCase().trim());
-        for (const comp of normalizedComponents) {
-            if (aliasMap[comp]) {
-                const master = aliasMap[comp];
-                expandedSkills.add(master);
-                matchSources[master] = 'alias_component';
+
+            // Employee skill is a master and requirement is one of its aliases
+            if (
+                masterAliases[empSkill] &&
+                masterAliases[empSkill].includes(reqSkill)
+            ) {
+                return {
+                    related: true,
+                    reason: `master → alias: "${empSkill}" is a master; "${reqSkill}" is listed as one of its aliases`
+                };
             }
-            if (masterAliases[comp]) {
-                masterAliases[comp].forEach(alias => {
-                    expandedSkills.add(alias);
-                    matchSources[alias] = 'alias_component';
-                });
+
+            // Requirement is a master and employee skill is one of its aliases
+            if (
+                masterAliases[reqSkill] &&
+                masterAliases[reqSkill].includes(empSkill)
+            ) {
+                return {
+                    related: true,
+                    reason: `master → alias: "${reqSkill}" is a master; "${empSkill}" is listed as one of its aliases`
+                };
             }
-        }
-        
-        // Step 5: Find matches
-        const matchedSkills = [];
-        const usedSkills = new Set();
+
+            return null;
+        };
+
+        console.log(
+            `📋 Requirement Analysis for ${employee.first_name} ${employee.last_name}`
+        );
+
         const matchDetails = [];
-        
-        for (const reqSkill of requiredSkills) {
-            const reqLower = reqSkill.toLowerCase().trim();
-            let found = false;
-            
-            // Try exact match
-            for (const empSkill of expandedSkills) {
-                if (!usedSkills.has(empSkill) && empSkill === reqLower) {
-                    const originalSkill = employeeSkills.find(s => 
-                        s.toLowerCase().trim() === empSkill
-                    ) || employeeComponents.find(c => 
-                        c.toLowerCase().trim() === empSkill
-                    ) || reqSkill;
-                    
-                    matchedSkills.push(originalSkill);
-                    usedSkills.add(empSkill);
-                    found = true;
-                    const source = matchSources[empSkill] || 'exact';
-                    matchDetails.push({ reqSkill, matched: originalSkill, source });
-                    console.log(`   ✅ Matched: "${reqSkill}" → "${originalSkill}" (via ${source})`);
+
+        let matchedWeight = 0;
+        let totalWeight = 0;
+
+        let primaryMatched = 0;
+        let primaryTotal = 0;
+
+        let secondaryMatched = 0;
+        let secondaryTotal = 0;
+
+        for (const [idx, req] of requiredSkills.entries()) {
+            const reqSkill = req.skill;
+
+            const skillType =
+                req.skill_type === 'secondary'
+                    ? 'secondary'
+                    : 'primary';
+
+            const reqLower = this._normalize(reqSkill);
+
+            const weight =
+                this.SKILL_TYPE_WEIGHTS[skillType] || 1;
+
+            totalWeight += weight;
+
+            if (skillType === 'primary') {
+                primaryTotal++;
+            } else {
+                secondaryTotal++;
+            }
+
+            let matchType = null;
+            let matchedEmpSkill = null;
+
+            // ==========================================
+            // TIER 1 — EXACT MATCH
+            // ORIGINAL EMPLOYEE SKILLS ONLY
+            // ==========================================
+
+            for (const empSkill of normalizedEmployeeSkills) {
+                if (empSkill === reqLower) {
+                    matchType = 'exact';
+                    matchedEmpSkill = empSkill;
                     break;
                 }
             }
-            
-            // If no match, try partial match
-            if (!found) {
-                for (const empSkill of expandedSkills) {
-                    if (!usedSkills.has(empSkill) && 
-                        (empSkill.includes(reqLower) || reqLower.includes(empSkill))) {
-                        const originalSkill = employeeSkills.find(s => 
-                            s.toLowerCase().trim() === empSkill
-                        ) || employeeComponents.find(c => 
-                            c.toLowerCase().trim() === empSkill
-                        ) || reqSkill;
-                        
-                        matchedSkills.push(originalSkill);
-                        usedSkills.add(empSkill);
-                        found = true;
-                        const source = matchSources[empSkill] || 'partial';
-                        matchDetails.push({ reqSkill, matched: originalSkill, source });
-                        console.log(`   ✅ Partial match: "${reqSkill}" → "${originalSkill}" (via ${source})`);
+
+            // ==========================================
+            // TIER 2 — ALIAS MATCH
+            // EMPLOYEE SKILLS FIRST
+            // ==========================================
+
+            let aliasReason = null;
+
+            if (!matchType) {
+                for (const empSkill of normalizedEmployeeSkills) {
+                    const aliasResult = isAliasRelated(
+                        empSkill,
+                        reqLower
+                    );
+                    if (aliasResult) {
+                        matchType = 'alias';
+                        matchedEmpSkill = empSkill;
+                        aliasReason = aliasResult.reason;
                         break;
                     }
                 }
             }
-            
-            if (!found) {
-                console.log(`   ❌ No match for: "${reqSkill}"`);
+
+            // ==========================================
+            // TIER 2B — ALIAS MATCH THROUGH COMPONENT
+            // ==========================================
+
+            if (!matchType) {
+                for (const component of normalizedComponents) {
+                    const aliasResult = isAliasRelated(
+                        component,
+                        reqLower
+                    );
+                    if (aliasResult) {
+                        matchType = 'alias';
+                        matchedEmpSkill = component;
+                        aliasReason = `component alias — ${aliasResult.reason}`;
+                        break;
+                    }
+                }
+            }
+
+            // ==========================================
+            // TIER 3 — COMPONENT EXACT MATCH
+            // ==========================================
+
+            if (!matchType) {
+                for (const component of normalizedComponents) {
+                    if (component === reqLower) {
+                        matchType = 'component';
+                        matchedEmpSkill = component;
+                        break;
+                    }
+                }
+            }
+
+            // ==========================================
+            // TIER 4 — PARTIAL MATCH
+            // ==========================================
+
+            if (!matchType) {
+                const partialCandidates = [
+                    ...normalizedEmployeeSkills,
+                    ...normalizedComponents
+                ];
+
+                for (const skill of partialCandidates) {
+                    if (
+                        skill.includes(reqLower) ||
+                        reqLower.includes(skill)
+                    ) {
+                        matchType = 'partial';
+                        matchedEmpSkill = skill;
+                        break;
+                    }
+                }
+            }
+
+            const matched = Boolean(matchType);
+
+            let originalMatchedSkill = null;
+
+            if (matched) {
+                originalMatchedSkill =
+                    employeeSkills.find(
+                        skill =>
+                            this._normalize(skill) ===
+                            matchedEmpSkill
+                    ) ||
+                    employeeComponents.find(
+                        component =>
+                            this._normalize(component) ===
+                            matchedEmpSkill
+                    ) ||
+                    matchedEmpSkill;
+
+                matchedWeight += weight;
+
+                if (skillType === 'primary') {
+                    primaryMatched++;
+                } else {
+                    secondaryMatched++;
+                }
+            }
+
+            matchDetails.push({
+                reqSkill,
+                skill_type: skillType,
+                matched_employee_skill:
+                    originalMatchedSkill,
+                match_type:
+                    matchType || 'none',
+                matched,
+                // 🔍 TEMPORARY DEBUG: only populated for match_type === 'alias'
+                alias_reason: matchType === 'alias' ? aliasReason : null
+            });
+
+            console.log(
+                `\n${idx + 1}. Requirement: "${reqSkill}" | Type: ${skillType.toUpperCase()}`
+            );
+
+            if (matched) {
+                const labelMap = {
+                    exact: 'EXACT MATCH',
+                    alias: 'ALIAS MATCH',
+                    component: 'COMPONENT MATCH',
+                    partial: 'PARTIAL MATCH'
+                };
+
+                console.log(
+                    `   Employee Skill: "${originalMatchedSkill}" → ✅ ${labelMap[matchType]}`
+                );
+
+                if (matchType === 'alias' && aliasReason) {
+                    console.log(`   Alias reason: ${aliasReason}`);
+                }
+            } else if (skillType === 'primary') {
+                console.log(
+                    `   ❌ Missing PRIMARY skill: "${reqSkill}"`
+                );
+            } else {
+                console.log(
+                    `   ⚠️ Missing SECONDARY skill: "${reqSkill}"`
+                );
             }
         }
-        
-        const matchingScore = requiredSkills.length > 0 
-            ? matchedSkills.length / requiredSkills.length 
-            : 0;
-        
-        console.log(`📊 ${employee.first_name}: ${matchedSkills.length}/${requiredSkills.length} skills matched (${Math.round(matchingScore * 100)}%)`);
-        
-        // Step 6: Calculate other scores
-        const workload = await this._getWorkloadScore(employee.id);
-        const availabilityFactor = this._calculateAvailability(workload);
-        const historicalPerformance = await this._getHistoricalPerformance(employee.id);
-        const recommendationScore = matchingScore * availabilityFactor * historicalPerformance;
 
-        const missingSkills = requiredSkills.filter(req => 
-            !matchedSkills.some(matched => 
-                matched.toLowerCase().trim() === req.toLowerCase().trim()
-            )
+        const matchedSkills = matchDetails
+            .filter(detail => detail.matched)
+            .map(detail =>
+                detail.matched_employee_skill
+            );
+
+        // ✅ FIX: missing skills derived from matchDetails (match_type === 'none'),
+        // never from re-comparing strings against matchedSkills.
+        const missingSkills = matchDetails
+            .filter(detail => !detail.matched)
+            .map(detail => ({
+                skill: detail.reqSkill,
+                skill_type: detail.skill_type
+            }));
+
+        const matchingScore =
+            totalWeight > 0
+                ? matchedWeight / totalWeight
+                : 0;
+
+        console.log(
+            `\n📊 ${employee.first_name} ${employee.last_name}:`
         );
+
+        console.log(
+            `   Primary: ${primaryMatched}/${primaryTotal} matched`
+        );
+
+        console.log(
+            `   Secondary: ${secondaryMatched}/${secondaryTotal} matched`
+        );
+
+        console.log(
+            `   Overall: ${matchedSkills.length}/${requiredSkills.length} matched (weighted score: ${Math.round(matchingScore * 100)}%)`
+        );
+
+        console.table(matchDetails);
+
+        // ==========================================
+        // EXISTING RECOMMENDATION CALCULATION
+        // UNCHANGED
+        // ==========================================
+
+        const workload =
+            await this._getWorkloadScore(employee.id);
+
+        const availabilityFactor =
+            this._calculateAvailability(workload);
+
+        const historicalPerformance =
+            await this._getHistoricalPerformance(employee.id);
+
+        const recommendationScore =
+            matchingScore *
+            availabilityFactor *
+            historicalPerformance;
 
         return {
             profileId: employee.id,
             employeeId: employee.employee_id,
-            name: `${employee.first_name} ${employee.last_name}`,
+
+            name:
+                `${employee.first_name} ${employee.last_name}`,
+
             firstName: employee.first_name,
             lastName: employee.last_name,
-            department: employee.department || null,
-            role: employee.role || null,
-            branchId: employee.branch_id || null,
-            matchingScore: Math.round(matchingScore * 1000) / 1000,
+
+            department:
+                employee.department || null,
+
+            role:
+                employee.role || null,
+
+            branchId:
+                employee.branch_id || null,
+
+            matchingScore:
+                Math.round(
+                    matchingScore * 1000
+                ) / 1000,
+
             workloadScore: workload,
-            availabilityFactor: Math.round(availabilityFactor * 1000) / 1000,
-            historicalPerformance: Math.round(historicalPerformance * 1000) / 1000,
-            recommendationScore: Math.round(recommendationScore * 1000) / 1000,
+
+            availabilityFactor:
+                Math.round(
+                    availabilityFactor * 1000
+                ) / 1000,
+
+            historicalPerformance:
+                Math.round(
+                    historicalPerformance * 1000
+                ) / 1000,
+
+            recommendationScore:
+                Math.round(
+                    recommendationScore * 1000
+                ) / 1000,
+
             matchedSkills,
+
             missingSkills,
-            skillMatchCount: `${matchedSkills.length}/${requiredSkills.length}`,
-            matchDetails: matchDetails,
-            status: this._getRecommendationStatus(recommendationScore)
+
+            primarySkillMatchCount:
+                `${primaryMatched}/${primaryTotal}`,
+
+            secondarySkillMatchCount:
+                `${secondaryMatched}/${secondaryTotal}`,
+
+            skillMatchCount:
+                `${matchedSkills.length}/${requiredSkills.length}`,
+
+            matchDetails,
+
+            status:
+                this._getRecommendationStatus(
+                    recommendationScore
+                )
         };
     }
 
@@ -432,12 +680,37 @@ class RecommendationEngine {
 
             const aliasMap = {};
             const masterAliases = {};
+
+            // 🔍 TEMPORARY DEBUG: dump every raw skill_aliases row touching
+            // "client technical communication and support" (either side),
+            // so we can see the exact master/alias pairing in the DB instead
+            // of inferring it. Safe to delete once root cause is confirmed.
+            const DEBUG_SKILL = 'client technical communication and support';
+            const debugRows = [];
             
             (data || []).forEach(item => {
                 const masterName = item.master?.skill_name?.toLowerCase().trim();
                 const aliasName = item.alias?.skill_name?.toLowerCase().trim();
                 
                 if (masterName && aliasName) {
+                    if (masterName === DEBUG_SKILL || aliasName === DEBUG_SKILL) {
+                        debugRows.push({
+                            row_id: item.id,
+                            master_skill_id: item.master_skill_id,
+                            master_skill_name: masterName,
+                            alias_skill_id: item.alias_skill_id,
+                            alias_skill_name: aliasName
+                        });
+                    }
+
+                    if (aliasMap[aliasName] && aliasMap[aliasName] !== masterName) {
+                        // A single alias name pointing to more than one master
+                        // is itself a data-quality smell worth knowing about.
+                        console.warn(
+                            `⚠️ Alias "${aliasName}" already mapped to master "${aliasMap[aliasName]}", now also mapped to "${masterName}" — only the last one wins in aliasMap (masterAliases still records both).`
+                        );
+                    }
+
                     aliasMap[aliasName] = masterName;
                     if (!masterAliases[masterName]) {
                         masterAliases[masterName] = [];
@@ -447,6 +720,11 @@ class RecommendationEngine {
                     }
                 }
             });
+
+            if (debugRows.length > 0) {
+                console.log(`🔍 DEBUG — raw skill_aliases rows touching "${DEBUG_SKILL}":`);
+                console.table(debugRows);
+            }
 
             this._aliasMap = aliasMap;
             this._masterAliases = masterAliases;
@@ -555,13 +833,17 @@ class RecommendationEngine {
         }
     }
 
+    /**
+     * ✅ REWRITTEN: no longer pre-maps requirements to alias masters.
+     * Returns [{ skill, skill_type }] preserving the ORIGINAL requirement text.
+     */
     async _getRequiredSkills(requirementId) {
         console.log(`📋 Getting required skills for requirement ${requirementId}`);
-        
+
         try {
             const { data, error } = await supabase
                 .from('requirement_skills')
-                .select('skills')
+                .select('skills, skill_type')
                 .eq('requirement_id', requirementId);
 
             if (error) {
@@ -574,38 +856,66 @@ class RecommendationEngine {
                 return [];
             }
 
-            const aliasMap = await this._getAliasMap();
-
             const allSkills = [];
+
             data.forEach(item => {
-                if (item.skills) {
-                    let skillValue = typeof item.skills === 'string' ? item.skills.trim() : item.skills;
-                    
-                    const lowerSkill = skillValue.toLowerCase().trim();
-                    if (aliasMap[lowerSkill]) {
-                        const mappedSkill = aliasMap[lowerSkill];
-                        console.log(`   📌 Mapping alias "${skillValue}" → Master "${mappedSkill}"`);
-                        skillValue = mappedSkill;
-                    }
-                    
-                    if (skillValue) {
-                        allSkills.push(skillValue);
-                    }
+                if (!item.skills) return;
+
+                const skillValue =
+                    typeof item.skills === 'string'
+                        ? item.skills.trim()
+                        : item.skills;
+
+                const skillType =
+                    (item.skill_type || 'primary')
+                        .toLowerCase()
+                        .trim();
+
+                if (skillValue) {
+                    allSkills.push({
+                        skill: skillValue,
+                        skill_type: skillType === 'secondary'
+                            ? 'secondary'
+                            : 'primary'
+                    });
                 }
             });
 
-            const uniqueSkills = [...new Set(allSkills.filter(Boolean))];
-            console.log(`📋 Found ${uniqueSkills.length} skills for requirement ${requirementId}:`, uniqueSkills);
+            // Remove duplicate requirement skills while preserving the first
+            // occurrence and its skill_type.
+            const seen = new Set();
+            const uniqueSkills = [];
+
+            for (const item of allSkills) {
+                const key = this._normalize(item.skill);
+
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    uniqueSkills.push(item);
+                }
+            }
+
+            console.log(
+                `📋 Found ${uniqueSkills.length} skills for requirement ${requirementId}:`,
+                uniqueSkills.map(
+                    s => `${s.skill} [${s.skill_type}]`
+                )
+            );
+
             return uniqueSkills;
+
         } catch (error) {
             console.error('❌ Error in _getRequiredSkills:', error);
             return [];
         }
     }
 
+    /**
+     * ✅ REWRITTEN (legacy path): also retrieves and preserves skill_type.
+     */
     async _getRequiredSkillsForProject(projectId) {
         console.log(`📋 Getting required skills for project ${projectId} (legacy method)`);
-        
+
         try {
             const { data: requirements, error: reqError } = await supabase
                 .from('project_resource_requirements')
@@ -617,9 +927,10 @@ class RecommendationEngine {
             }
 
             const requirementIds = requirements.map(r => r.id);
+
             const { data: skillsData, error: skillsError } = await supabase
                 .from('requirement_skills')
-                .select('skills')
+                .select('skills, skill_type')
                 .in('requirement_id', requirementIds);
 
             if (skillsError || !skillsData) {
@@ -627,23 +938,72 @@ class RecommendationEngine {
             }
 
             const allSkills = [];
+
             skillsData.forEach(item => {
-                if (item.skills) {
-                    if (typeof item.skills === 'string' && item.skills.includes(',')) {
-                        const skillsArray = item.skills.split(',').map(s => s.trim());
-                        allSkills.push(...skillsArray);
-                    } else {
-                        const skillValue = typeof item.skills === 'string' ? item.skills.trim() : item.skills;
-                        if (skillValue) {
-                            allSkills.push(skillValue);
-                        }
+                if (!item.skills) return;
+
+                const skillType =
+                    (item.skill_type || 'primary')
+                        .toLowerCase()
+                        .trim() === 'secondary'
+                        ? 'secondary'
+                        : 'primary';
+
+                if (
+                    typeof item.skills === 'string' &&
+                    item.skills.includes(',')
+                ) {
+                    item.skills
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(Boolean)
+                        .forEach(skill => {
+                            allSkills.push({
+                                skill,
+                                skill_type: skillType
+                            });
+                        });
+                } else {
+                    const skillValue =
+                        typeof item.skills === 'string'
+                            ? item.skills.trim()
+                            : item.skills;
+
+                    if (skillValue) {
+                        allSkills.push({
+                            skill: skillValue,
+                            skill_type: skillType
+                        });
                     }
                 }
             });
 
-            return [...new Set(allSkills.filter(Boolean))];
+            const seen = new Set();
+            const uniqueSkills = [];
+
+            for (const item of allSkills) {
+                const key = this._normalize(item.skill);
+
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    uniqueSkills.push(item);
+                }
+            }
+
+            console.log(
+                `📋 Found ${uniqueSkills.length} project skills:`,
+                uniqueSkills.map(
+                    s => `${s.skill} [${s.skill_type}]`
+                )
+            );
+
+            return uniqueSkills;
+
         } catch (error) {
-            console.error('❌ Error in _getRequiredSkillsForProject:', error);
+            console.error(
+                '❌ Error in _getRequiredSkillsForProject:',
+                error
+            );
             return [];
         }
     }
