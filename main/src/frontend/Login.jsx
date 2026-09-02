@@ -227,7 +227,6 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
         </div>
 
         <h2 style={styles.title}>Resource Management Recommender System</h2>
-        <p style={styles.subtitle}>Admin Portal</p>
 
         {error && (
           <div style={styles.errorAlert}>

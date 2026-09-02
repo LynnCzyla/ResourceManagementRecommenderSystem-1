@@ -162,6 +162,8 @@ router.post('/', async (req, res) => {
 
     console.log(`📋 Creating resource request for user ${userId}`);
     console.log(`🏢 User branch: ${userBranchId}`);
+    console.log(`📋 Department value: ${department} (${typeof department})`);
+    console.log(`📋 Position value: ${position} (${typeof position})`);
 
     // Validate required fields
     if (!requestTitle || !department || !position || !reason || !startDate || !endDate) {
@@ -179,13 +181,49 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Create the request (branch is determined by the user's branch via requested_by)
+    // ✅ Resolve department name if an ID was sent
+    let departmentName = department;
+    if (!isNaN(parseInt(department))) {
+      console.log(`🔍 Resolving department ID: ${department}`);
+      const { data: dept, error: deptError } = await supabase
+        .from('departments')
+        .select('department_name')
+        .eq('id', parseInt(department))
+        .single();
+      
+      if (!deptError && dept) {
+        departmentName = dept.department_name;
+        console.log(`✅ Department resolved: ${departmentName}`);
+      } else {
+        console.warn(`⚠️ Department ID ${department} not found, using original value`);
+      }
+    }
+
+    // ✅ Resolve position name if an ID was sent
+    let positionName = position;
+    if (!isNaN(parseInt(position))) {
+      console.log(`🔍 Resolving position ID: ${position}`);
+      const { data: pos, error: posError } = await supabase
+        .from('positions')
+        .select('position_name')
+        .eq('id', parseInt(position))
+        .single();
+      
+      if (!posError && pos) {
+        positionName = pos.position_name;
+        console.log(`✅ Position resolved: ${positionName}`);
+      } else {
+        console.warn(`⚠️ Position ID ${position} not found, using original value`);
+      }
+    }
+
+    // Create the request with resolved names
     const { data, error } = await supabase
       .from('hr_resource_requests')
       .insert({
         request_title: requestTitle,
-        department_name: department,
-        position_title: position,
+        department_name: departmentName,
+        position_title: positionName,
         quantity_needed: Number(quantity) || 1,
         required_skills: requiredSkills || null,
         experience_level: experienceLevel || 'Junior',

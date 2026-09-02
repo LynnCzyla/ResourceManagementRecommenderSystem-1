@@ -5,14 +5,128 @@ const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 const { sendInterviewEmail } = require('../../utils/mailer');
 
-// GET /api/hr/interviews — list all scheduled interviews, with the
-// applicant's name/email/position joined in via job_applications so the
-// table doesn't need a second round-trip per row.
+// Helper to check if user has HR or Admin role
+const hasHrOrAdminRole = (user) => {
+  const role = user?.role;
+  const isSuperAdmin = user?.is_super_admin || false;
+  
+  if (isSuperAdmin) return true;
+  if (role === 'Human Resources') return true;
+  if (role === 'Admin') return true;
+  return false;
+};
+
+// Transform interview data helper
+const transformInterview = (item) => {
+  if (!item) return null;
+  return {
+    ...item,
+    applicant_name: item.job_applications ? 
+      `${item.job_applications.first_name || ''} ${item.job_applications.last_name || ''}`.trim() : 
+      'Unknown',
+    applicant_email: item.job_applications?.email || 'N/A',
+    applicant_phone: item.job_applications?.phone || 'N/A',
+    position: item.job_applications?.position_applied || 'N/A',
+    department: item.job_applications?.department || 'N/A',
+    branch_id: item.job_applications?.branch_id || null,
+    branch_name: item.job_applications?.branches?.name || 'N/A',
+    created_by_name: item.profiles ? 
+      `${item.profiles.first_name || ''} ${item.profiles.last_name || ''}`.trim() : 
+      'Unknown'
+  };
+};
+
+// GET /api/hr/interviews — list all interviews with branch filtering
 router.get('/', async (req, res) => {
   try {
     const { status } = req.query;
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
 
+    console.log(`📋 Fetching interviews for: ${userId}`);
+    console.log(`👤 Role: ${userRole}`);
+    console.log(`🏢 User Branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
+
+    // Check if user has permission
+    if (!hasHrOrAdminRole(req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Human Resources, Admin, or Super Admin role required.'
+      });
+    }
+
+    // ✅ Build query with joins
     let query = supabase
+      .from('interviews')
+      .select(`
+        *,
+        job_applications!inner (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone,
+          position_applied,
+          department,
+          branch_id,
+          branches:branch_id (
+            id,
+            name,
+            location
+          )
+        ),
+        profiles:created_by (
+          id,
+          first_name,
+          last_name,
+          branch_id
+        )
+      `)
+      .order('interview_date', { ascending: false });
+
+    // ✅ Filter by branch for non-super admins using the inner join
+    if (!isSuperAdmin && userBranchId) {
+      query = query.eq('job_applications.branch_id', userBranchId);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('❌ Error fetching interviews:', error);
+      throw error;
+    }
+
+    // Transform data
+    const transformedData = (data || []).map(transformInterview);
+    console.log(`✅ Found ${transformedData.length} interviews`);
+
+    res.status(200).json({ success: true, data: transformedData || [] });
+  } catch (error) {
+    console.error('Error fetching interviews:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch interviews.' });
+  }
+});
+
+// GET /api/hr/interviews/:id — Get single interview with branch check
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+
+    if (!hasHrOrAdminRole(req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Human Resources, Admin, or Super Admin role required.'
+      });
+    }
+
+    const { data, error } = await supabase
       .from('interviews')
       .select(`
         *,
@@ -21,48 +135,49 @@ router.get('/', async (req, res) => {
           first_name,
           last_name,
           email,
+          phone,
           position_applied,
-          department
+          department,
+          branch_id,
+          branches:branch_id (
+            id,
+            name,
+            location
+          )
+        ),
+        profiles:created_by (
+          id,
+          first_name,
+          last_name,
+          branch_id
         )
       `)
-      .order('interview_date', { ascending: true });
-
-    if (status) query = query.eq('status', status);
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    res.status(200).json({ success: true, data: data || [] });
-  } catch (error) {
-    console.error('Error fetching interviews:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch interviews.' });
-  }
-});
-
-// GET /api/hr/interviews/:id
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data, error } = await supabase
-      .from('interviews')
-      .select(`*, job_applications ( id, first_name, last_name, email, position_applied, department )`)
       .eq('id', id)
       .single();
 
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, error: 'Interview not found.' });
 
-    res.status(200).json({ success: true, data });
+    // Check branch access
+    if (!isSuperAdmin) {
+      const interviewBranchId = data.job_applications?.branch_id;
+      if (!interviewBranchId || interviewBranchId !== userBranchId) {
+        return res.status(403).json({
+          success: false,
+          error: 'You do not have permission to view this interview'
+        });
+      }
+    }
+
+    const transformedData = transformInterview(data);
+    res.status(200).json({ success: true, data: transformedData });
   } catch (error) {
     console.error('Error fetching interview:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch interview.' });
   }
 });
 
-// POST /api/hr/interviews
-// Creates the interview row, flips the linked application's status to
-// "Interview Scheduled", and sends the invitation email automatically —
-// no manual "open Gmail and click send" step.
+// POST /api/hr/interviews — Create interview with branch check
 router.post('/', async (req, res) => {
   try {
     const {
@@ -75,6 +190,20 @@ router.post('/', async (req, res) => {
       notes,
     } = req.body;
 
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userId = req.user?.id;
+
+    console.log(`📋 Creating interview for application: ${application_id}`);
+    console.log(`👤 User Branch: ${userBranchId}`);
+
+    if (!hasHrOrAdminRole(req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Human Resources, Admin, or Super Admin role required.'
+      });
+    }
+
     if (!application_id || !interview_date || !interview_time || !interviewer || !location) {
       return res.status(400).json({
         success: false,
@@ -82,16 +211,29 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Look up the application so we know who to email and what position.
+    // Look up the application to verify branch access
     const { data: application, error: appError } = await supabase
       .from('job_applications')
-      .select('*')
+      .select('*, branches:branch_id (id, name, location)')
       .eq('id', application_id)
       .single();
 
     if (appError) throw appError;
     if (!application) {
       return res.status(404).json({ success: false, error: 'Application not found.' });
+    }
+
+    console.log(`📋 Application branch_id: ${application.branch_id}`);
+
+    // Check branch access
+    if (!isSuperAdmin) {
+      const appBranchId = application.branch_id;
+      if (!appBranchId || appBranchId !== userBranchId) {
+        return res.status(403).json({
+          success: false,
+          error: 'You do not have permission to schedule interviews for this application'
+        });
+      }
     }
 
     const { data: interview, error: interviewError } = await supabase
@@ -104,22 +246,25 @@ router.post('/', async (req, res) => {
         interview_type: interview_type || 'Initial Screening',
         location,
         notes: notes || null,
-        created_by: req.user?.id || null,
+        created_by: userId || null,
       })
       .select()
       .single();
 
     if (interviewError) throw interviewError;
 
+    // Update application status
     const { error: statusError } = await supabase
       .from('job_applications')
-      .update({ status: 'Interview Scheduled' })
+      .update({ 
+        status: 'Interview Scheduled',
+        notes: notes || application.notes
+      })
       .eq('id', application_id);
 
     if (statusError) throw statusError;
 
-    // Send the invitation email now — this replaces the old frontend
-    // window.open(gmailUrl) approach, which required a manual click.
+    // Send invitation email
     try {
       await sendInterviewEmail({
         to: application.email,
@@ -133,9 +278,6 @@ router.post('/', async (req, res) => {
         notes,
       });
     } catch (emailErr) {
-      // The interview is already scheduled at this point — don't fail the
-      // whole request over an email problem, but do surface it so HR knows
-      // to follow up manually.
       console.error('Failed to send interview invitation email:', emailErr);
       await logAuditEvent({
         req,
@@ -165,20 +307,71 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/hr/interviews/:id/status — mark Completed / Hired / Rejected / Cancelled
+// PUT /api/hr/interviews/:id/status — mark Completed / Hired / Rejected / Cancelled with branch check
 router.put('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, notes } = req.body;
+
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userId = req.user?.id;
+
+    console.log(`📋 Updating interview ${id} status to: ${status}`);
+
+    if (!hasHrOrAdminRole(req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Human Resources, Admin, or Super Admin role required.'
+      });
+    }
 
     const validStatuses = ['Scheduled', 'Completed', 'Hired', 'Rejected', 'Cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, error: 'Invalid status value.' });
     }
 
+    // Get interview with application info for branch check
+    const { data: interviewData, error: fetchError } = await supabase
+      .from('interviews')
+      .select(`
+        *,
+        job_applications (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone,
+          position_applied,
+          department,
+          branch_id
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !interviewData) {
+      return res.status(404).json({ success: false, error: 'Interview not found.' });
+    }
+
+    // Check branch access
+    if (!isSuperAdmin) {
+      const interviewBranchId = interviewData.job_applications?.branch_id;
+      if (!interviewBranchId || interviewBranchId !== userBranchId) {
+        return res.status(403).json({
+          success: false,
+          error: 'You do not have permission to update this interview'
+        });
+      }
+    }
+
+    // Update interview status
     const { data, error } = await supabase
       .from('interviews')
-      .update({ status, notes: notes ?? undefined })
+      .update({ 
+        status, 
+        notes: notes || interviewData.notes 
+      })
       .eq('id', id)
       .select(`
         *,
@@ -189,7 +382,8 @@ router.put('/:id/status', async (req, res) => {
           email,
           phone,
           position_applied,
-          department
+          department,
+          branch_id
         )
       `)
       .single();
@@ -197,28 +391,28 @@ router.put('/:id/status', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, error: 'Interview not found.' });
 
-    // When marked as Hired, update job_applications and sync with hired_employees table
+    // Handle status changes
     if (status === 'Hired') {
+      // Update application status
       if (data.application_id) {
         await supabase
           .from('job_applications')
-          .update({ status: 'Hired' })
+          .update({ 
+            status: 'Hired',
+            reviewed_by: userId
+          })
           .eq('id', data.application_id);
       }
 
-      // Check if employee is already inserted into hired_employees
-      let filterStr = `interview_id.eq.${id}`;
-      if (data.application_id) {
-        filterStr += `,application_id.eq.${data.application_id}`;
-      }
+      // Check if employee is already in hired_employees
+      const app = data.job_applications || {};
       const { data: existingHire } = await supabase
         .from('hired_employees')
         .select('id')
-        .or(filterStr)
+        .eq('interview_id', id)
         .maybeSingle();
 
       if (!existingHire) {
-        const app = data.job_applications || {};
         const fullName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Hired Candidate';
         await supabase
           .from('hired_employees')
@@ -228,18 +422,27 @@ router.put('/:id/status', async (req, res) => {
             name: fullName,
             email: app.email || '',
             phone: app.phone || null,
+            position_id: null,
+            department_id: null,
             hire_date: new Date().toISOString().slice(0, 10),
             status: 'Onboarding',
           });
+        console.log(`✅ Created hired_employee record for ${fullName}`);
       }
     } else if (status === 'Rejected') {
+      // Update application status
       if (data.application_id) {
         await supabase
           .from('job_applications')
-          .update({ status: 'Rejected', notes: notes ?? null })
+          .update({ 
+            status: 'Rejected',
+            notes: notes || null,
+            reviewed_by: userId
+          })
           .eq('id', data.application_id);
       }
 
+      // Send rejection email
       const app = data.job_applications || {};
       if (app.email) {
         const { sendRejectionEmail } = require('../../utils/mailer');
@@ -254,6 +457,17 @@ router.put('/:id/status', async (req, res) => {
           console.error('Failed to send interview rejection email:', mailErr);
         }
       }
+    } else if (status === 'Completed') {
+      // Just update application notes
+      if (data.application_id) {
+        await supabase
+          .from('job_applications')
+          .update({ 
+            notes: notes || null,
+            reviewed_by: userId
+          })
+          .eq('id', data.application_id);
+      }
     }
 
     await logAuditEvent({
@@ -262,6 +476,8 @@ router.put('/:id/status', async (req, res) => {
       systemCategory: 'HR - Interviews',
       logDescription: `Set interview ${id} status to ${status}`,
     });
+
+    console.log(`✅ Interview ${id} updated to ${status}`);
 
     res.status(200).json({ success: true, message: 'Interview status updated.', data });
   } catch (error) {
