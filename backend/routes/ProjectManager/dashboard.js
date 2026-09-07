@@ -44,15 +44,17 @@ router.get('/dashboard', async (req, res) => {
     if (projectIds.length > 0) {
       const { data, error } = await supabase
         .from('project_assignments')
-        .select('profile_id, project_id')
+        .select('profile_id, project_id, status')
         .in('project_id', projectIds);
       
       if (error) throw error;
       assignments = data || [];
     }
 
-    // ✅ Step 4: Get unique team members
-    const uniqueTeamMemberIds = [...new Set(assignments.map(a => a.profile_id))];
+    // ✅ Step 4: Get unique active team members (assigned to active projects)
+    const activeProjectIds = projects.filter(p => p.status === 'Active').map(p => p.id);
+    const activeAssignments = assignments.filter(a => activeProjectIds.includes(a.project_id) && a.status === 'Assigned');
+    const uniqueTeamMemberIds = [...new Set(activeAssignments.map(a => a.profile_id))];
 
     // ✅ Step 5: Get team member details (with branch filtering)
     let teamMembers = [];
@@ -98,8 +100,8 @@ router.get('/dashboard', async (req, res) => {
     };
 
     const requirementsByStatus = {
-      Open: requirements.filter(r => r.status === 'Open').length,
-      Fulfilled: requirements.filter(r => r.status === 'Fulfilled').length,
+      Open: requirements.filter(r => ['Open', 'Pending'].includes(r.status)).length,
+      Fulfilled: requirements.filter(r => ['Fulfilled', 'Filled', 'Completed'].includes(r.status)).length,
       'In Progress': requirements.filter(r => r.status === 'In Progress').length,
     };
 
