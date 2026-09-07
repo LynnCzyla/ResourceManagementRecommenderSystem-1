@@ -63,8 +63,8 @@ function App() {
   const logoutTimerRef = useRef(null);
   const forceLogoutTimerRef = useRef(null);
   const refreshTimeoutRef = useRef(null);
-  const authListenerRef = useRef(null); // ✅ Track auth listener
-  const initializedRef = useRef(false); // ✅ Prevent double init
+  const authListenerRef = useRef(null);
+  const initializedRef = useRef(false);
 
   const showTimeoutUpdateNotification = (newTimeout) => {
     if (isLoggedIn) {
@@ -203,11 +203,10 @@ function App() {
     document.body.classList.toggle('dark-theme', isDark);
   }, [isDark]);
 
-  // ✅ SINGLE AUTH LISTENER - FIXED
+  // SINGLE AUTH LISTENER
   useEffect(() => {
     let cancelled = false;
 
-    // ✅ Prevent double initialization in Strict Mode
     if (initializedRef.current) {
       console.log('⚠️ Auth already initialized, skipping');
       return () => {};
@@ -231,7 +230,6 @@ function App() {
       return () => { cancelled = true; };
     }
 
-    // ✅ Only ONE auth listener
     console.log('🔐 Setting up auth listener...');
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔄 Auth state changed:', event);
@@ -262,7 +260,6 @@ function App() {
         console.log('✅ User signed in');
         localStorage.setItem('loginTime', Date.now().toString());
         userActivityRef.current = Date.now();
-        // ✅ User will be set by checkSession or handleLogin
       }
 
       if (event === 'TOKEN_REFRESHED' && session) {
@@ -320,7 +317,6 @@ function App() {
           return;
         }
 
-        // Fallback to localStorage
         const storedUser = localStorage.getItem('user');
         const token = localStorage.getItem('token');
         const loginTime = localStorage.getItem('loginTime');
@@ -347,7 +343,6 @@ function App() {
             }
           }
 
-          // Re-fetch latest avatar_url from DB
           try {
             const { data: freshProfile } = await supabase
               .from('profiles')
@@ -404,7 +399,7 @@ function App() {
         authListenerRef.current = null;
       }
     };
-  }, [sessionTimeout]); // ✅ Only runs once
+  }, [sessionTimeout]);
 
   const toggleTheme = () => setIsDark(!isDark);
 
@@ -491,15 +486,6 @@ function App() {
     );
   }
 
-  // ────────────────────────────────────────────────────────────────
-  // FIX: key={currentUser.id} on every layout below forces React to
-  // fully destroy and recreate the layout tree (and every tab's
-  // useEffect fetch) whenever the logged-in user's identity changes,
-  // instead of silently reusing a stale mounted instance across a
-  // logout/login cycle that doesn't trigger a true hard page reload.
-  // This is what was causing Applications/Onboarding/Archived to show
-  // stale/empty data after logging back in without a full reload.
-  // ────────────────────────────────────────────────────────────────
   const renderLayout = () => {
     if (!currentUser) return null;
     const role = currentUser.role;
@@ -544,7 +530,10 @@ function App() {
   return (
     <>
       <Routes>
+        {/* ✅ Public routes - no authentication required */}
+        <Route path="/applicant-portal" element={<ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />} />
         <Route path="/feedback/:token" element={<ClientFeedbackPage />} />
+        {/* ✅ Catch-all route for everything else */}
         <Route path="*" element={mainAppContent} />
       </Routes>
 

@@ -1,27 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 
+// ✅ Use the correct public applicant API endpoint
 const API = 'http://localhost:5000/api/applicant';
-
-// Maps a job_postings row (with joined departments/positions) coming back
-// from the API into the flat shape this component's UI was built around.
-const mapPosting = (row) => ({
-  id: row.id,
-  title: row.title,
-  department: row.departments?.department_name || '',
-  department_id: row.department_id,
-  position_id: row.position_id,
-  location: row.location || '',
-  employmentType: row.employment_type || 'Full-time',
-  salaryMin: row.salary_min ?? '',
-  salaryMax: row.salary_max ?? '',
-  status: row.status,
-  postedDate: row.posted_date ? new Date(row.posted_date).toISOString().split('T')[0] : '',
-  description: row.description || '',
-  requirements: row.requirements || '',
-  responsibilities: row.responsibilities || '',
-  benefits: row.benefits || '',
-});
+const SUPER_ADMIN_API = 'http://localhost:5000/api/superadmin';
 
 export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [jobPostings, setJobPostings] = useState([]);
@@ -29,17 +11,16 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [locationFilter, setLocationFilter] = useState('All');
+  
+  // Branch filter
+  const [branchFilter, setBranchFilter] = useState('All');
+  const [branches, setBranches] = useState([]);
+
   const [selectedPosting, setSelectedPosting] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Applicant's own contact info, used both to submit applications and to
-  // look up "My Applications" by email. Ideally this would come from a
-  // logged-in applicant account instead of being retyped — tell me if you
-  // have applicant auth and I'll wire this to the session user instead.
   const [applicantEmail, setApplicantEmail] = useState('');
 
   const [applyForm, setApplyForm] = useState({
@@ -56,32 +37,98 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     resume: null,
   });
 
-  useEffect(() => {
-    if (showMyApplications) {
-      loadMyApplications();
-    } else {
-      loadJobPostings();
+  // Fetch branches for filter
+  const fetchBranches = async () => {
+    try {
+      // ✅ Use the correct superadmin endpoint
+      const res = await fetch(`${SUPER_ADMIN_API}/branches?limit=100`);
+      const data = await res.json();
+      if (data.success) {
+        setBranches(data.data || []);
+      } else {
+        // Fallback: use hardcoded branches
+        setBranches([
+          { id: '1', name: 'WEA-PHIL', location: 'Manila' },
+          { id: '2', name: 'WEA-SGP', location: 'Singapore' },
+          { id: '3', name: 'WEA-THA', location: 'Thailand' },
+          { id: '4', name: 'WEA-IDN', location: 'Indonesia' },
+        ]);
+      }
+    } catch (err) {
+      console.error('Error fetching branches:', err);
+      // Fallback: use hardcoded branches
+      setBranches([
+        { id: '1', name: 'WEA-PHIL', location: 'Manila' },
+        { id: '2', name: 'WEA-SGP', location: 'Singapore' },
+        { id: '3', name: 'WEA-THA', location: 'Thailand' },
+        { id: '4', name: 'WEA-IDN', location: 'Indonesia' },
+      ]);
     }
-  }, [showMyApplications]);
+  };
 
+  // ✅ Load all active job postings (public endpoint - no auth required)
   const loadJobPostings = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API}/job-postings`);
+      
+      // ✅ Use the correct public applicant endpoint - NO "hr" in the path!
+      const url = `${API}/job-postings`;
+      
+      console.log('📡 Fetching job postings from:', url);
+      
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const data = await res.json();
+      
       if (data.success) {
-        setJobPostings(data.data.map(mapPosting));
+        let postings = data.data.map(mapPosting);
+        
+        // ✅ Apply branch filter on client side
+        if (branchFilter !== 'All') {
+          postings = postings.filter(p => {
+            // Match by branch_id if available, otherwise by branch name
+            const branch = branches.find(b => b.id === branchFilter);
+            return p.branch_id === branchFilter || p.branch === branch?.name;
+          });
+        }
+        
+        setJobPostings(postings);
       } else {
         setError(data.error || 'Failed to load job postings');
       }
     } catch (err) {
-      setError('Could not connect to the server.');
-      console.error(err);
+      console.error('Error loading job postings:', err);
+      setError('Could not connect to the server. Please try again later.');
     } finally {
       setLoading(false);
     }
   };
+
+  // Maps a job posting row
+  const mapPosting = (row) => ({
+    id: row.id,
+    title: row.title,
+    department: row.departments?.department_name || row.department || '',
+    department_id: row.department_id,
+    position_id: row.position_id,
+    location: row.location || '',
+    branch: row.branch_name || row.profiles?.branches?.name || '',
+    branch_id: row.branch_id || row.profiles?.branch_id || '',
+    employmentType: row.employment_type || 'Full-time',
+    salaryMin: row.salary_min ?? '',
+    salaryMax: row.salary_max ?? '',
+    status: row.status,
+    postedDate: row.posted_date ? new Date(row.posted_date).toISOString().split('T')[0] : '',
+    description: row.description || '',
+    requirements: row.requirements || '',
+    responsibilities: row.responsibilities || '',
+    benefits: row.benefits || '',
+  });
 
   const loadMyApplications = async () => {
     if (!applicantEmail) {
@@ -98,7 +145,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
           data.data.map((app) => ({
             id: app.id,
             jobTitle: app.job_postings?.title || app.position_applied,
-            department: app.job_postings?.departments?.department_name || app.department || '—',
+            department: app.department || app.job_postings?.departments?.department_name || '—',
             appliedDate: app.applied_date ? new Date(app.applied_date).toISOString().split('T')[0] : '',
             status: app.status,
           }))
@@ -110,6 +157,22 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
       setLoading(false);
     }
   };
+
+  // Re-fetch when branch filter changes
+  useEffect(() => {
+    if (!showMyApplications) {
+      loadJobPostings();
+    }
+  }, [branchFilter]);
+
+  useEffect(() => {
+    fetchBranches();
+    if (showMyApplications) {
+      loadMyApplications();
+    } else {
+      loadJobPostings();
+    }
+  }, [showMyApplications]);
 
   const showSuccessAlert = (message, title = 'Success!') => {
     Swal.fire({
@@ -172,7 +235,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
         setApplyForm({ ...applyForm, resume: null });
         return;
       }
-      const maxSize = 5 * 1024 * 1024; // 5MB
+      const maxSize = 5 * 1024 * 1024;
       if (file.size > maxSize) {
         showErrorAlert('File size exceeds the 5MB limit.', 'File Too Large');
         e.target.value = null;
@@ -224,19 +287,15 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     }
   };
 
+  // Filtered job postings by search
   const filteredPostings = jobPostings.filter(posting => {
     const matchesSearch = 
       posting.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      posting.location?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesDepartment = departmentFilter === 'All' || posting.department === departmentFilter;
-    const matchesLocation = locationFilter === 'All' || posting.location === locationFilter;
+      posting.branch?.toLowerCase().includes(searchQuery.toLowerCase());
     const isActive = posting.status === 'Active';
-    return matchesSearch && matchesDepartment && matchesLocation && isActive;
+    return matchesSearch && isActive;
   });
-
-  const departments = [...new Set(jobPostings.map(p => p.department).filter(Boolean))];
-  const locations = [...new Set(jobPostings.map(p => p.location).filter(Boolean))];
 
   if (loading) {
     return <div style={styles.loading}>Loading...</div>;
@@ -327,7 +386,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     );
   }
 
-  // Show Job Postings view
+  // Show Job Postings view with Branch filter
   return (
     <div style={styles.container}>
       {error && <div style={styles.errorBanner}>{error}</div>}
@@ -340,31 +399,24 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
           </svg>
           <input
             type="text"
-            placeholder="Job title, keywords, or company"
+            placeholder="Job title, keywords, or branch"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={styles.searchInput}
           />
         </div>
+        
         <div style={styles.filters}>
           <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
             style={styles.filterSelect}
           >
-            <option value="All">All Departments</option>
-            {departments.map(dept => (
-              <option key={dept} value={dept}>{dept}</option>
-            ))}
-          </select>
-          <select
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            style={styles.filterSelect}
-          >
-            <option value="All">All Locations</option>
-            {locations.map(loc => (
-              <option key={loc} value={loc}>{loc}</option>
+            <option value="All">All Branches</option>
+            {branches.map(branch => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name} {branch.location ? `(${branch.location})` : ''}
+              </option>
             ))}
           </select>
         </div>
@@ -392,7 +444,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                   <div style={styles.jobMeta}>
                     <span style={styles.jobMetaItem}>{posting.department}</span>
                     <span style={styles.jobMetaSeparator}>•</span>
-                    <span style={styles.jobMetaItem}>{posting.location}</span>
+                    <span style={styles.jobMetaItem}>{posting.branch || 'N/A'}</span>
                     <span style={styles.jobMetaSeparator}>•</span>
                     <span style={styles.jobMetaItem}>{posting.employmentType}</span>
                   </div>
@@ -408,7 +460,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                   View Details
                 </button>
                 <button onClick={() => handleApply(posting)} style={styles.applyBtn}>
-                 Apply
+                  Apply
                 </button>
               </div>
             </div>
@@ -433,8 +485,8 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                     <span style={styles.detailValue}>{selectedPosting.department}</span>
                   </div>
                   <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Location:</span>
-                    <span style={styles.detailValue}>{selectedPosting.location}</span>
+                    <span style={styles.detailLabel}>Branch:</span>
+                    <span style={styles.detailValue}>{selectedPosting.branch || 'N/A'}</span>
                   </div>
                   <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Employment Type:</span>
@@ -486,6 +538,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
             </div>
             <div style={styles.modalBody}>
               <form onSubmit={handleApplicationSubmit} style={styles.form}>
+                {/* Form fields - same as before */}
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Personal Information</h4>
                   <div style={styles.formGrid}>
@@ -1056,3 +1109,4 @@ const styles = {
     color: 'var(--color-text-secondary)',
   },
 };
+
