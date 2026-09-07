@@ -20,7 +20,16 @@ router.get('/assignments', verifyToken, async (req, res) => {
 
     if (error) throw error;
 
-    const formattedAssignments = (data || []).map(row => {
+    // Filter to only active assignments on active projects
+    const activeAssignments = (data || []).filter(row => {
+      const proj = row.projects;
+      if (!proj) return false;
+      const isProjectActive = proj.status === 'Active';
+      const isAssignmentActive = row.status !== 'Completed' && row.status !== 'Inactive';
+      return isProjectActive && isAssignmentActive;
+    });
+
+    const formattedAssignments = activeAssignments.map(row => {
       const proj = row.projects || {};
       const pmProfile = proj.profiles || {};
       const pmName = [pmProfile.first_name, pmProfile.last_name].filter(Boolean).join(' ') || 'Lynn Czyla M. Alpuerto';
@@ -52,7 +61,7 @@ router.get('/tasks', verifyToken, async (req, res) => {
       .from('project_tasks')
       .select(`
         *,
-        projects ( id, project_name ),
+        projects ( id, project_name, status ),
         profiles!project_tasks_profile_id_fkey ( id, first_name, last_name )
       `)
       .eq('profile_id', userId)
@@ -63,7 +72,14 @@ router.get('/tasks', verifyToken, async (req, res) => {
       throw error;
     }
 
-    const formattedTasks = (data || []).map(row => {
+    // Only active/in-progress tasks on active projects belong in the active list
+    const activeTasks = (data || []).filter(row => {
+      const isTaskActive = row.status !== 'Completed' && row.status !== 'Completed-Hidden';
+      const isProjectActive = !row.projects || row.projects.status === 'Active';
+      return isTaskActive && isProjectActive;
+    });
+
+    const formattedTasks = activeTasks.map(row => {
       const profile = row.profiles || {};
       return {
         id: row.id,
@@ -115,7 +131,7 @@ router.put('/tasks/:id', verifyToken, async (req, res) => {
 router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { week, percentage, description } = req.body;
+    const { week, percentage, description, startDate, endDate } = req.body;
 
     if (percentage === undefined || percentage === null) {
       return res.status(400).json({ success: false, error: 'Percentage is required' });
@@ -141,12 +157,17 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
       });
     }
 
+    const logDate = endDate || startDate || new Date().toISOString().split('T')[0];
+    const logWeek = week || (startDate && endDate ? `${startDate} to ${endDate}` : null);
+
     const newLog = {
       id: Date.now(),
-      week: week || null,
+      week: logWeek,
+      startDate: startDate || null,
+      endDate: endDate || null,
       percentage: newPercentageVal,
       description: description || '',
-      date: new Date().toISOString().split('T')[0]
+      date: logDate
     };
 
     const updatedLogs = [...logs, newLog];
@@ -163,10 +184,38 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
       .from('project_tasks')
       .update(updatePayload)
       .eq('id', id)
-      .select()
+      .select('*, projects(project_name), profiles:profiles!project_tasks_profile_id_fkey(first_name, last_name)')
       .single();
 
     if (updateError) throw updateError;
+
+    // ✅ Also insert into public.project_report table
+    try {
+      const profile = data.profiles;
+      const employeeName = profile
+        ? [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim()
+        : 'Unassigned';
+
+      const reportDesc = (description || '').trim() || data.description || '';
+
+      const { error: reportInsertErr } = await supabase.from('project_report').insert({
+        task_id: data.id,
+        project_id: data.project_id,
+        employee_id: data.profile_id || req.user?.id || null,
+        task_title: data.title,
+        task_description: reportDesc,
+        employee_name: employeeName,
+        project_name: data.projects?.project_name || 'Unnamed Project',
+        percentage: finalTotalPercentage,
+        log_date: logDate,
+      });
+
+      if (reportInsertErr) {
+        console.error('Non-fatal error inserting into project_report from employee:', reportInsertErr);
+      }
+    } catch (reportInsertErr) {
+      console.error('Non-fatal error inserting into project_report from employee:', reportInsertErr);
+    }
 
     res.json({ success: true, message: 'Progress logged successfully', data });
   } catch (error) {
