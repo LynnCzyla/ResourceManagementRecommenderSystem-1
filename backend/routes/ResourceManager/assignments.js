@@ -163,15 +163,20 @@ router.post('/', async (req, res) => {
             if (!reqError && requirement) {
                 const quantityNeeded = requirement?.quantity_needed || 1;
 
-                // Auto-approve if fully assigned
+                // Mark requirement as Filled if fully assigned
                 if (assignedCount >= quantityNeeded) {
-                    await supabase
+                    const { error: updateReqErr } = await supabase
                         .from('project_resource_requirements')
                         .update({ 
-                            status: 'Approved',
-                            updated_at: new Date().toISOString()
+                            status: 'Filled'
                         })
                         .eq('id', requirement_id);
+
+                    if (updateReqErr) {
+                        console.error('❌ Error updating requirement status to Filled:', updateReqErr);
+                    } else {
+                        console.log(`✅ Requirement ${requirement_id} marked as Filled`);
+                    }
                 }
             }
         }
