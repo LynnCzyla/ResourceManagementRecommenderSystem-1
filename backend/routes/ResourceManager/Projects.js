@@ -29,6 +29,33 @@ const clearProjectsCache = (branchId = null) => {
 // Statuses that mean "not started yet"
 const NOT_STARTED_STATUSES = ['Pending', 'Pending Approval', 'Inactive'];
 
+// Extract project rating and comment from formatted project_feedback string
+function extractProjectRatingAndFeedback(rawFeedback, responses = []) {
+  let rating = null;
+  let feedback = (rawFeedback || '').trim();
+
+  if (feedback) {
+    const match = feedback.match(/^\[Rating:\s*([1-5](?:\.\d+)?)\/5\]\s*([\s\S]*)$/);
+    if (match) {
+      rating = parseFloat(match[1]);
+      feedback = match[2].trim();
+    }
+  }
+
+  // Fallback: If no explicit rating tag was extracted, compute average of employee ratings
+  if (rating === null && responses && responses.length > 0) {
+    const validRatings = responses
+      .map(r => Number(r.rating))
+      .filter(r => !isNaN(r) && r > 0);
+    if (validRatings.length > 0) {
+      const avg = validRatings.reduce((sum, r) => sum + r, 0) / validRatings.length;
+      rating = Math.round(avg * 10) / 10;
+    }
+  }
+
+  return { rating, feedback };
+}
+
 /**
  * GET /api/rm/projects
  * Powers RMProjectsTab.jsx - WITH BRANCH FILTERING VIA created_by
@@ -123,7 +150,7 @@ router.get('/', async (req, res) => {
           assigned_role,
           status
         `)
-        .eq('status', 'Assigned')
+        .in('status', ['Assigned', 'Completed'])
     ]);
 
     if (projectsResult.error) throw projectsResult.error;
@@ -202,6 +229,61 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // ✅ Fetch client feedback for projects
+    const projectIds = projects.map(p => p.id);
+    let feedbackMap = {};
+    if (projectIds.length > 0) {
+      try {
+        const { data: feedbackData, error: feedbackError } = await supabase
+          .from('feedback_requests')
+          .select(`
+            id,
+            project_id,
+            client_name,
+            client_email,
+            status,
+            completed_at,
+            feedback_responses (
+              id,
+              profile_id,
+              rating,
+              project_feedback,
+              deliverables_feedback,
+              additional_comments
+            )
+          `)
+          .in('project_id', projectIds)
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false });
+
+        if (!feedbackError && feedbackData) {
+          for (const reqRow of feedbackData) {
+            if (!feedbackMap[reqRow.project_id]) {
+              const responses = reqRow.feedback_responses || [];
+              const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+              const extracted = extractProjectRatingAndFeedback(
+                primaryResponse.project_feedback,
+                responses
+              );
+
+              feedbackMap[reqRow.project_id] = {
+                requestId: reqRow.id,
+                clientName: reqRow.client_name,
+                clientEmail: reqRow.client_email,
+                completedAt: reqRow.completed_at,
+                rating: extracted.rating,
+                projectFeedback: extracted.feedback,
+                deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+                additionalComments: primaryResponse.additional_comments || null,
+              };
+            }
+          }
+        }
+      } catch (fbErr) {
+        console.error('Non-fatal error fetching feedback for projects in RM:', fbErr);
+      }
+    }
+
     // ✅ Process projects
     const result = [];
     const toActivate = [];
@@ -210,7 +292,10 @@ router.get('/', async (req, res) => {
       const requiredSkills = [...new Set(projectSkills)];
 
       const projectAssignments = assignmentsByProject.get(proj.id) || [];
-      const assignedEmployees = projectAssignments.map((a) => {
+      const relevantAssignments = proj.status === 'Completed'
+        ? projectAssignments
+        : projectAssignments.filter(a => a.status === 'Assigned');
+      const assignedEmployees = relevantAssignments.map((a) => {
         const profile = profileById.get(a.profile_id);
         return {
           employeeId: a.profile_id,
@@ -218,6 +303,7 @@ router.get('/', async (req, res) => {
             ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown'
             : 'Unknown',
           role: a.assigned_role,
+          status: a.status,
           avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(
             profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown' : 'Unknown'
           )}`,
@@ -238,11 +324,20 @@ router.get('/', async (req, res) => {
         toActivate.push(proj.id);
       }
 
+      const rawDesc = proj.project_description || '';
+      const isRestored = rawDesc.includes('<!-- RESTORED -->') || rawDesc.includes('[RESTORED]');
+      const cleanDescription = rawDesc
+        .replace(/<!--\s*RESTORED\s*-->/gi, '')
+        .replace(/\[RESTORED\]/gi, '')
+        .trim();
+
       result.push({
         id: proj.id,
         code: proj.project_code,
         name: proj.project_name,
-        description: proj.project_description,
+        description: cleanDescription,
+        rawDescription: rawDesc,
+        isRestored,
         status,
         startDate: proj.start_date,
         endDate: proj.end_date,
@@ -253,6 +348,7 @@ router.get('/', async (req, res) => {
         skillsCount: requiredSkills.length,
         createdBy: proj.created_by,
         createdByName: createdByName,
+        clientFeedback: feedbackMap[proj.id] || null,
       });
     }
 
@@ -523,6 +619,296 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
   } catch (err) {
     console.error('❌ RM project remove member error:', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/rm/projects/:id/history-details — comprehensive details for project history view
+ */
+router.get('/:id/history-details', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Fetch Project
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        project_name,
+        project_description,
+        team_size,
+        duration_days,
+        start_date,
+        end_date,
+        priority,
+        status,
+        created_by,
+        created_at,
+        updated_at
+      `)
+      .eq('id', id)
+      .single();
+
+    if (projectError || !project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // 2. Fetch Client Feedback
+    const { data: feedbackRequests, error: feedbackError } = await supabase
+      .from('feedback_requests')
+      .select(`
+        id,
+        client_name,
+        client_email,
+        completed_at,
+        status,
+        feedback_responses (
+          id,
+          profile_id,
+          rating,
+          technical_skills_rating,
+          communication_rating,
+          timeliness_rating,
+          quality_of_work_rating,
+          teamwork_rating,
+          problem_solving_rating,
+          strengths,
+          areas_for_improvement,
+          would_recommend,
+          project_feedback,
+          deliverables_feedback,
+          additional_comments
+        )
+      `)
+      .eq('project_id', id)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false });
+
+    let clientFeedback = null;
+    const employeeFeedbackMap = {};
+
+    if (!feedbackError && feedbackRequests && feedbackRequests.length > 0) {
+      const latestReq = feedbackRequests[0];
+      const responses = latestReq.feedback_responses || [];
+      const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+      const extracted = extractProjectRatingAndFeedback(primaryResponse.project_feedback, responses);
+
+      clientFeedback = {
+        requestId: latestReq.id,
+        clientName: latestReq.client_name,
+        clientEmail: latestReq.client_email,
+        completedAt: latestReq.completed_at,
+        rating: extracted.rating,
+        projectFeedback: extracted.feedback,
+        deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+        additionalComments: primaryResponse.additional_comments || null,
+      };
+
+      for (const resp of responses) {
+        employeeFeedbackMap[resp.profile_id] = {
+          rating: resp.rating,
+          strengths: resp.strengths,
+          areasForImprovement: resp.areas_for_improvement,
+          wouldRecommend: resp.would_recommend,
+          technicalSkillsRating: resp.technical_skills_rating,
+          communicationRating: resp.communication_rating,
+          timelinessRating: resp.timeliness_rating,
+          qualityOfWorkRating: resp.quality_of_work_rating,
+          teamworkRating: resp.teamwork_rating,
+          problemSolvingRating: resp.problem_solving_rating,
+        };
+      }
+    }
+
+    // 3. Fetch Project Assignments
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('project_assignments')
+      .select('id, profile_id, assigned_role, start_date, end_date, status, assigned_at')
+      .eq('project_id', id);
+
+    if (assignmentsError) throw assignmentsError;
+
+    // 4. Fetch Project Tasks
+    const { data: rawTasks, error: tasksError } = await supabase
+      .from('project_tasks')
+      .select(`
+        id,
+        project_id,
+        profile_id,
+        title,
+        description,
+        priority,
+        status,
+        due_date,
+        progress_logs,
+        created_at
+      `)
+      .eq('project_id', id)
+      .order('created_at', { ascending: true });
+
+    if (tasksError) throw tasksError;
+
+    // Collect all profile IDs
+    const profileIdSet = new Set();
+    (assignments || []).forEach(a => a.profile_id && profileIdSet.add(a.profile_id));
+    (rawTasks || []).forEach(t => t.profile_id && profileIdSet.add(t.profile_id));
+    if (project.created_by) profileIdSet.add(project.created_by);
+    (feedbackRequests || []).forEach(fr => {
+      (fr.employee_ids || []).forEach(eid => eid && profileIdSet.add(eid));
+      (fr.feedback_responses || []).forEach(r => r.profile_id && profileIdSet.add(r.profile_id));
+    });
+
+    const profileIds = Array.from(profileIdSet);
+    let profileMap = {};
+
+    if (profileIds.length > 0) {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          first_name,
+          middle_name,
+          last_name,
+          employee_id,
+          role,
+          avatar_url,
+          departments ( id, department_name ),
+          positions ( id, position_name )
+        `)
+        .in('id', profileIds);
+
+      if (!profilesError && profiles) {
+        profiles.forEach(p => { profileMap[p.id] = p; });
+      }
+    }
+
+    const tasks = (rawTasks || []).map(t => {
+      const logs = Array.isArray(t.progress_logs) ? t.progress_logs : [];
+      const totalProgress = logs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
+      const isCompleted = t.status === 'Completed' || totalProgress >= 100;
+      const assignedEmp = t.profile_id ? profileMap[t.profile_id] : null;
+      const assignedName = assignedEmp
+        ? [assignedEmp.first_name, assignedEmp.last_name].filter(Boolean).join(' ').trim()
+        : 'Unassigned';
+
+      return {
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        priority: t.priority,
+        status: t.status,
+        dueDate: t.due_date,
+        profileId: t.profile_id,
+        assignedTo: assignedName,
+        totalProgress: Math.min(100, totalProgress),
+        isCompleted,
+        progressLogs: logs,
+      };
+    });
+
+    const assignmentMap = {};
+    (assignments || []).forEach(a => {
+      if (a.profile_id && !assignmentMap[a.profile_id]) {
+        assignmentMap[a.profile_id] = a;
+      }
+    });
+
+    const employeeIdsToDisplay = Array.from(profileIdSet).filter(pid => {
+      return (
+        assignmentMap[pid] ||
+        tasks.some(t => t.profileId === pid) ||
+        employeeFeedbackMap[pid]
+      );
+    });
+
+    const employees = employeeIdsToDisplay.map(pid => {
+      const p = profileMap[pid] || {};
+      const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim()
+        || [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(' ').trim()
+        || (p.employee_id ? `Employee (${p.employee_id})` : 'Employee');
+      const assignment = assignmentMap[pid];
+      const empTasks = tasks.filter(t => t.profileId === pid);
+      const completedTasks = empTasks.filter(t => t.isCompleted).length;
+      const pendingTasks = empTasks.filter(t => !t.isCompleted).length;
+      const totalTasks = empTasks.length;
+      const fb = employeeFeedbackMap[pid] || null;
+
+      let role = p.positions?.position_name;
+      if (!role) {
+        if (assignment?.assigned_role && assignment.assigned_role !== 'Employee' && assignment.assigned_role !== 'Team Member') {
+          role = assignment.assigned_role;
+        } else if (p.role && p.role !== 'Employee' && p.role !== 'Team Member') {
+          role = p.role;
+        } else {
+          role = assignment?.assigned_role || p.role || 'Team Member';
+        }
+      } else if (assignment?.assigned_role && assignment.assigned_role !== 'Employee' && assignment.assigned_role !== 'Team Member') {
+        role = assignment.assigned_role;
+      }
+
+      return {
+        id: pid,
+        name,
+        employeeId: p.employee_id || '',
+        role: role || 'Team Member',
+        department: p.departments?.department_name || '',
+        avatar: p.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
+        assignedAt: assignment?.assigned_at || null,
+        assignmentStatus: assignment?.status || 'Assigned',
+        clientRating: fb?.rating || null,
+        clientStrengths: fb?.strengths || null,
+        clientImprovements: fb?.areasForImprovement || null,
+        wouldRecommend: fb?.wouldRecommend ?? null,
+        totalTasks,
+        completedTasks,
+        pendingTasks,
+        completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+        tasks: empTasks,
+      };
+    });
+
+    const totalTasksCount = tasks.length;
+    const completedTasksCount = tasks.filter(t => t.isCompleted).length;
+    const pendingTasksCount = totalTasksCount - completedTasksCount;
+    const overallCompletionRate = totalTasksCount > 0
+      ? Math.round((completedTasksCount / totalTasksCount) * 100)
+      : 100;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        project: {
+          id: project.id,
+          name: project.project_name,
+          description: project.project_description,
+          status: project.status,
+          priority: project.priority,
+          startDate: project.start_date,
+          endDate: project.end_date,
+          durationDays: project.duration_days,
+          teamSize: project.team_size,
+          createdAt: project.created_at,
+          updatedAt: project.updated_at,
+        },
+        clientFeedback,
+        summary: {
+          totalTeamMembers: employees.length,
+          totalTasks: totalTasksCount,
+          completedTasks: completedTasksCount,
+          pendingTasks: pendingTasksCount,
+          completionPercentage: overallCompletionRate,
+        },
+        employees,
+        tasks,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching project history details for RM:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch project history details',
+      error: error.message,
+    });
   }
 });
 
