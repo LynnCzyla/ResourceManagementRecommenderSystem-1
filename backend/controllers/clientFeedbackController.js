@@ -219,7 +219,7 @@ const submitFeedbackResponses = async (req, res) => {
       });
     }
 
-    const { responses, deliverablesFeedback, projectFeedback, additionalComments } = req.body;
+    const { responses, projectRating, deliverablesFeedback, projectFeedback, additionalComments } = req.body;
 
     if (!Array.isArray(responses) || responses.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one employee rating is required' });
@@ -271,6 +271,10 @@ const submitFeedbackResponses = async (req, res) => {
       }
     }
 
+    const formattedProjectFeedback = projectRating
+      ? `[Rating: ${projectRating}/5] ${projectFeedback || ''}`.trim()
+      : (projectFeedback || null);
+
     const rowsToInsert = responses.map(r => {
       const record = {
         feedback_request_id: row.id,
@@ -279,7 +283,7 @@ const submitFeedbackResponses = async (req, res) => {
         areas_for_improvement: r.areasForImprovement || null,
         would_recommend: typeof r.wouldRecommend === 'boolean' ? r.wouldRecommend : null,
         deliverables_feedback: deliverablesFeedback || null,
-        project_feedback: projectFeedback || null,
+        project_feedback: formattedProjectFeedback,
         additional_comments: additionalComments || null,
       };
       for (const field of RATING_FIELDS) {
