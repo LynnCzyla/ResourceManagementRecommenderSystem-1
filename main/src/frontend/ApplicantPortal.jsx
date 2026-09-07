@@ -1,18 +1,50 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import ApplicantLayout from './Applicant/ApplicantLayout';
 
 export default function ApplicantPortal({ isDark, toggleTheme }) {
-  const [showPortal, setShowPortal] = useState(true);
+  // ✅ Check if we should show the landing page or the portal
+  const [showPortal, setShowPortal] = useState(() => {
+    // Check sessionStorage for the enter flag
+    const hasEntered = sessionStorage.getItem('applicant_portal_entered') === 'true';
+    const params = new URLSearchParams(window.location.search);
+    const hasEnterParam = params.get('enter') === 'true';
+    
+    // If either flag is true, show the portal directly
+    return !(hasEntered || hasEnterParam);
+  });
 
   const handleEnterPortal = () => {
-    setShowPortal(false);
+    // ✅ Store flag in sessionStorage so it persists across refreshes
+    sessionStorage.setItem('applicant_portal_entered', 'true');
+    // Open in a new tab
+    window.open('/applicant-portal?enter=true', '_blank');
   };
 
   const handleBackToLanding = () => {
-    setShowPortal(true);
+    // Clear the flag when exiting
+    sessionStorage.removeItem('applicant_portal_entered');
+    // Close the tab or go back
+    if (window.opener) {
+      window.close();
+    } else {
+      window.location.href = '/';
+    }
   };
 
+  // Check URL params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('enter') === 'true') {
+      // Store in sessionStorage so it persists after refresh
+      sessionStorage.setItem('applicant_portal_entered', 'true');
+      setShowPortal(false);
+      // Clean up the URL but keep the flag in sessionStorage
+      window.history.replaceState(null, '', '/applicant-portal');
+    }
+  }, []);
+
+  // If in the portal view, show the ApplicantLayout
   if (!showPortal) {
     return (
       <ApplicantLayout 
@@ -24,6 +56,7 @@ export default function ApplicantPortal({ isDark, toggleTheme }) {
     );
   }
 
+  // Show the landing page
   return (
     <div style={styles.container}>
       <div style={{ ...styles.blob, ...styles.blob1 }}></div>

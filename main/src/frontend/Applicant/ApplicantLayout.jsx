@@ -27,9 +27,6 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
           >
             {showMyApplications ? '← Back to Jobs' : 'My Applications'}
           </button>
-          <button onClick={onLogout} style={styles.logoutButton}>
-            Exit
-          </button>
           <div style={styles.themeToggle}>
             <span style={{ display: 'flex', alignItems: 'center', color: 'var(--color-text-secondary)', marginRight: '6px' }}>
               {isDark ? (
