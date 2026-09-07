@@ -149,6 +149,18 @@ export async function fetchProjects() {
   }
 }
 
+export async function fetchProjectHistoryDetails(projectId) {
+  console.log(`📋 Fetching project history details for ${projectId}...`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/projects/${projectId}/history-details`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Project history details fetch error:', error);
+    throw error;
+  }
+}
+
 export async function assignEmployeeToProject(projectId, { employeeId, role }) {
   console.log(`📋 Assigning employee ${employeeId} to project ${projectId}...`);
   try {
