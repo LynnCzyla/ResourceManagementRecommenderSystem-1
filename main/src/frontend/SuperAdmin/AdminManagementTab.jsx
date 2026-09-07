@@ -1,7 +1,47 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Swal from 'sweetalert2';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/superadmin`;
+
+// Cache helper functions - with versioning for smart refresh
+const CACHE_KEY = 'admin_management_cache';
+const CACHE_VERSION_KEY = 'admin_management_cache_version';
+
+// Track cache version - increment this when you want to force refresh all users
+let cacheVersion = 1;
+
+const getCachedData = () => {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      const data = JSON.parse(cached);
+      // Check if cache version matches
+      const storedVersion = localStorage.getItem(CACHE_VERSION_KEY);
+      if (storedVersion && parseInt(storedVersion) === cacheVersion) {
+        return data;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedData = (data) => {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    localStorage.setItem(CACHE_VERSION_KEY, String(cacheVersion));
+  } catch {
+    // Ignore cache errors
+  }
+};
+
+// Force clear all cache
+export const clearAdminCache = () => {
+  cacheVersion++;
+  localStorage.setItem(CACHE_VERSION_KEY, String(cacheVersion));
+  localStorage.removeItem(CACHE_KEY);
+};
 
 const emptyForm = {
   employee_id: '',
@@ -19,32 +59,35 @@ const generateEmployeeId = (branchName, existingIds = []) => {
   if (!branchName) return '';
   
   // Extract location from branch name
-  // Examples: "WEA-PHIL" → "PHIL", "WEA-Singapore" → "Singapore"
-  const parts = branchName.split('-');
   let location = '';
   
-  if (parts.length > 1) {
-    // If branch name has hyphen (e.g., WEA-PHIL)
-    location = parts.slice(1).join('-');
-  } else {
-    // If no hyphen, use the whole name
-    location = branchName;
+  // Remove "WEA-" prefix if it exists
+  let cleanName = branchName;
+  if (branchName.toUpperCase().startsWith('WEA-')) {
+    cleanName = branchName.substring(4);
   }
   
-  // Clean location name: remove special chars, keep letters and spaces
-  location = location.replace(/[^a-zA-Z\s]/g, '').trim();
+  // Clean the location name - keep only letters and convert to uppercase
+  location = cleanName.replace(/[^a-zA-Z]/g, '').toUpperCase();
   
-  // If location is empty, use a default
+  // If location is empty, use the original name
   if (!location) {
-    location = 'Branch';
+    location = branchName.replace(/[^a-zA-Z]/g, '').toUpperCase();
   }
   
-  // Find highest number for this location
+  // If still empty, use a default
+  if (!location) {
+    location = 'BRANCH';
+  }
+  
   let highest = 0;
   const prefix = `WEA-${location}-`;
   
+  console.log('🔍 Generating ID for location:', location);
+  console.log('📦 Existing IDs:', existingIds);
+  
   existingIds.forEach(id => {
-    if (id.startsWith(prefix)) {
+    if (id && id.startsWith(prefix)) {
       const numPart = id.replace(prefix, '');
       const num = parseInt(numPart, 10);
       if (!isNaN(num) && num > highest) {
@@ -53,20 +96,26 @@ const generateEmployeeId = (branchName, existingIds = []) => {
     }
   });
   
-  // Generate next number (padded to 3 digits)
   const nextNumber = highest + 1;
   const paddedNumber = String(nextNumber).padStart(3, '0');
+  const newId = `WEA-${location}-${paddedNumber}`;
   
-  return `WEA-${location}-${paddedNumber}`;
+  console.log('✅ Generated new ID:', newId);
+  console.log('📊 Highest found:', highest);
+  
+  return newId;
 };
 
 export default function AdminManagementTab() {
   const [admins, setAdmins] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [lockFilter, setLockFilter] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -76,6 +125,13 @@ export default function AdminManagementTab() {
   const [generatedId, setGeneratedId] = useState('');
   const [generatingId, setGeneratingId] = useState(false);
   const [allEmployeeIds, setAllEmployeeIds] = useState([]);
+
+  // Refs for caching and preventing duplicate requests
+  const isMounted = useRef(true);
+  const fetchInProgress = useRef(false);
+  const initialLoadComplete = useRef(false);
+  const currentFilters = useRef({ searchQuery: '', statusFilter: '', lockFilter: '', branchFilter: '' });
+  const backgroundRefreshTimeout = useRef(null);
 
   // ============================================
   // ALERT HELPERS
@@ -124,7 +180,7 @@ export default function AdminManagementTab() {
   };
 
   // ============================================
-  // DATA LOADING
+  // DATA LOADING WITH SMART CACHE
   // ============================================
 
   const loadBranches = useCallback(async () => {
@@ -132,7 +188,9 @@ export default function AdminManagementTab() {
       const res = await fetch(`${API_BASE}/branches?limit=100`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load branches');
-      setBranches(json.data || []);
+      if (isMounted.current) {
+        setBranches(json.data || []);
+      }
     } catch (err) {
       showErrorAlert(err.message, 'Failed to load branches');
     }
@@ -140,48 +198,197 @@ export default function AdminManagementTab() {
 
   const loadAllEmployeeIds = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/admins?limit=1000`);
+      const res = await fetch(`${API_BASE}/accounts?limit=999999`);
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to load employee IDs');
       
-      const ids = json.data.map(admin => admin.employee_id).filter(Boolean);
-      setAllEmployeeIds(ids);
+      if (!json.success) {
+        console.error('Failed to load accounts:', json.error);
+        const adminRes = await fetch(`${API_BASE}/admins?limit=999999`);
+        const adminJson = await adminRes.json();
+        if (adminJson.success) {
+          const ids = adminJson.data.map(admin => admin.employee_id).filter(Boolean);
+          console.log('📦 Loaded employee IDs from admins (fallback):', ids);
+          if (isMounted.current) {
+            setAllEmployeeIds(ids);
+          }
+        }
+        return;
+      }
+      
+      const ids = json.data.map(profile => profile.employee_id).filter(Boolean);
+      console.log(`📦 Loaded ${ids.length} employee IDs from accounts`);
+      console.log('📋 Employee IDs:', ids);
+      
+      if (isMounted.current) {
+        setAllEmployeeIds(ids);
+      }
     } catch (err) {
       console.error('Error loading employee IDs:', err);
+      try {
+        const adminRes = await fetch(`${API_BASE}/admins?limit=999999`);
+        const adminJson = await adminRes.json();
+        if (adminJson.success) {
+          const ids = adminJson.data.map(admin => admin.employee_id).filter(Boolean);
+          console.log('📦 Loaded employee IDs from admins (fallback):', ids);
+          if (isMounted.current) {
+            setAllEmployeeIds(ids);
+          }
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback also failed:', fallbackErr);
+      }
     }
   }, []);
 
-  const loadAdmins = useCallback(async (page = pagination.page) => {
-    setLoading(true);
+  const loadAdmins = useCallback(async (page = 1, forceRefresh = false, silent = false) => {
+    if (fetchInProgress.current) return;
+    
+    const filtersChanged = 
+      currentFilters.current.searchQuery !== searchQuery ||
+      currentFilters.current.statusFilter !== statusFilter ||
+      currentFilters.current.lockFilter !== lockFilter ||
+      currentFilters.current.branchFilter !== branchFilter;
+
+    if (initialLoadComplete.current && !filtersChanged && !forceRefresh) {
+      console.log('✅ Admin data already loaded, skipping fetch');
+      return;
+    }
+
+    currentFilters.current = { searchQuery, statusFilter, lockFilter, branchFilter };
+
+    if (!forceRefresh) {
+      const cachedData = getCachedData();
+      if (cachedData && 
+          cachedData.filters && 
+          cachedData.filters.searchQuery === searchQuery &&
+          cachedData.filters.statusFilter === statusFilter &&
+          cachedData.filters.lockFilter === lockFilter &&
+          cachedData.filters.branchFilter === branchFilter) {
+        console.log('📦 Loading admin data from cache');
+        if (isMounted.current) {
+          setAdmins(cachedData.admins);
+          setPagination(cachedData.pagination);
+          setLoading(false);
+          initialLoadComplete.current = true;
+          
+          if (backgroundRefreshTimeout.current) {
+            clearTimeout(backgroundRefreshTimeout.current);
+          }
+          backgroundRefreshTimeout.current = setTimeout(() => {
+            if (isMounted.current && !fetchInProgress.current) {
+              console.log('🔄 Background refresh: fetching fresh data');
+              loadAdmins(pagination.page, true, true);
+            }
+          }, 5000);
+          return;
+        }
+      }
+    }
+
+    fetchInProgress.current = true;
+    if (!silent) {
+      setLoading(true);
+    }
+    
     try {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(pagination.limit),
       });
+      
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
       if (statusFilter) params.set('status', statusFilter);
+      if (lockFilter !== '') params.set('locked', lockFilter);
+      if (branchFilter) params.set('branch_id', branchFilter);
 
       const res = await fetch(`${API_BASE}/admins?${params.toString()}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load admins');
-      setAdmins(json.data);
-      setPagination(json.pagination);
+      
+      if (isMounted.current) {
+        setAdmins(json.data);
+        setPagination(json.pagination);
+        initialLoadComplete.current = true;
+        
+        setCachedData({
+          admins: json.data,
+          pagination: json.pagination,
+          filters: { searchQuery, statusFilter, lockFilter, branchFilter }
+        });
+        
+        if (backgroundRefreshTimeout.current) {
+          clearTimeout(backgroundRefreshTimeout.current);
+          backgroundRefreshTimeout.current = null;
+        }
+      }
     } catch (err) {
-      showErrorAlert(err.message, 'Failed to load admins');
+      if (isMounted.current) {
+        const cachedData = getCachedData();
+        if (cachedData && cachedData.admins) {
+          console.log('📦 Loading cached data as fallback');
+          setAdmins(cachedData.admins);
+          setPagination(cachedData.pagination);
+          if (!silent && !cachedData.admins.length) {
+            showErrorAlert(err.message, 'Failed to load admins');
+          }
+        } else if (!silent) {
+          showErrorAlert(err.message, 'Failed to load admins');
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
+      fetchInProgress.current = false;
     }
-  }, [searchQuery, statusFilter, pagination.page, pagination.limit]);
+  }, [searchQuery, statusFilter, lockFilter, branchFilter, pagination.limit]);
 
+  // Initial load
   useEffect(() => {
-    loadBranches();
-    loadAllEmployeeIds();
-  }, [loadBranches, loadAllEmployeeIds]);
+    const initialize = async () => {
+      await loadBranches();
+      await loadAllEmployeeIds();
+      
+      const cachedData = getCachedData();
+      if (cachedData && cachedData.admins) {
+        console.log('📦 Loading cached data on mount');
+        setAdmins(cachedData.admins);
+        setPagination(cachedData.pagination);
+        setLoading(false);
+        initialLoadComplete.current = true;
+        currentFilters.current = cachedData.filters || { searchQuery: '', statusFilter: '', lockFilter: '', branchFilter: '' };
+        
+        setTimeout(() => {
+          if (isMounted.current && !fetchInProgress.current) {
+            console.log('🔄 Initial background refresh');
+            loadAdmins(1, true, true);
+          }
+        }, 1000);
+      } else {
+        loadAdmins(1);
+      }
+    };
 
+    initialize();
+
+    return () => {
+      isMounted.current = false;
+      if (backgroundRefreshTimeout.current) {
+        clearTimeout(backgroundRefreshTimeout.current);
+      }
+    };
+  }, []);
+
+  // Load admins when filters change
   useEffect(() => {
-    const timer = setTimeout(() => loadAdmins(1), 300);
+    const timer = setTimeout(() => {
+      if (initialLoadComplete.current) {
+        loadAdmins(1);
+      }
+    }, 300);
     return () => clearTimeout(timer);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, lockFilter, branchFilter]);
 
   // ============================================
   // AUTO-GENERATE EMPLOYEE ID
@@ -204,11 +411,15 @@ export default function AdminManagementTab() {
 
     setGeneratingId(true);
     
-    // Generate ID based on branch name
+    if (allEmployeeIds.length === 0) {
+      loadAllEmployeeIds();
+    }
+    
     const newId = generateEmployeeId(branch.name, allEmployeeIds);
+    console.log('🎯 Generated ID for branch:', branch.name, '->', newId);
+    
     setGeneratedId(newId);
     setFormData(prev => ({ ...prev, employee_id: newId }));
-    
     setGeneratingId(false);
   };
 
@@ -219,8 +430,23 @@ export default function AdminManagementTab() {
   const handleCreate = async (e) => {
     e.preventDefault();
 
+    if (!formData.first_name.trim()) {
+      showErrorAlert('First name is required.', 'Validation Error');
+      return;
+    }
+
+    if (!formData.last_name.trim()) {
+      showErrorAlert('Last name is required.', 'Validation Error');
+      return;
+    }
+
+    if (!formData.email.trim()) {
+      showErrorAlert('Email address is required.', 'Validation Error');
+      return;
+    }
+
     if (!formData.branch_id) {
-      showErrorAlert('Please select a branch for this admin.', 'Branch Required');
+      showErrorAlert('Branch is required. Admin must be assigned to a branch.', 'Validation Error');
       return;
     }
 
@@ -237,8 +463,11 @@ export default function AdminManagementTab() {
       setShowCreateModal(false);
       setFormData(emptyForm);
       setGeneratedId('');
-      loadAdmins(1);
-      loadAllEmployeeIds();
+      
+      localStorage.removeItem(CACHE_KEY);
+      initialLoadComplete.current = false;
+      await loadAdmins(1, true);
+      await loadAllEmployeeIds();
 
       Swal.fire({
         title: 'Admin Created!',
@@ -249,7 +478,7 @@ export default function AdminManagementTab() {
         color: 'var(--color-text-primary)',
       });
     } catch (err) {
-      showErrorAlert(err.message, 'Failed to create admin');
+      showErrorAlert(err.message, 'Failed to create admin account');
     } finally {
       setSubmitting(false);
     }
@@ -257,6 +486,27 @@ export default function AdminManagementTab() {
 
   const handleEdit = async (e) => {
     e.preventDefault();
+
+    if (!formData.first_name.trim()) {
+      showErrorAlert('First name is required.', 'Validation Error');
+      return;
+    }
+
+    if (!formData.last_name.trim()) {
+      showErrorAlert('Last name is required.', 'Validation Error');
+      return;
+    }
+
+    if (!formData.email.trim()) {
+      showErrorAlert('Email address is required.', 'Validation Error');
+      return;
+    }
+
+    if (!formData.branch_id) {
+      showErrorAlert('Branch is required. Admin must be assigned to a branch.', 'Validation Error');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch(`${API_BASE}/admins/${selectedAdmin.id}`, {
@@ -270,7 +520,11 @@ export default function AdminManagementTab() {
       setShowEditModal(false);
       setSelectedAdmin(null);
       setFormData(emptyForm);
-      loadAdmins();
+      
+      localStorage.removeItem(CACHE_KEY);
+      initialLoadComplete.current = false;
+      await loadAdmins(pagination.page, true);
+      
       showSuccessAlert('Admin account updated successfully!');
     } catch (err) {
       showErrorAlert(err.message, 'Failed to update admin');
@@ -291,8 +545,12 @@ export default function AdminManagementTab() {
       const res = await fetch(`${API_BASE}/admins/${admin.id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to delete admin');
-      loadAdmins();
-      loadAllEmployeeIds();
+      
+      localStorage.removeItem(CACHE_KEY);
+      initialLoadComplete.current = false;
+      await loadAdmins(pagination.page, true);
+      await loadAllEmployeeIds();
+      
       showSuccessAlert('Admin account deleted successfully!');
     } catch (err) {
       showErrorAlert(err.message, 'Failed to delete admin');
@@ -304,7 +562,8 @@ export default function AdminManagementTab() {
   // ============================================
 
   const handleToggleStatus = async (admin) => {
-    const newStatus = admin.status === 'Active' ? 'Inactive' : 'Active';
+    // ✅ Changed from "Inactive" to "Deactivated"
+    const newStatus = admin.status === 'Active' ? 'Deactivated' : 'Active';
     const result = await showConfirmationAlert(
       `${newStatus} Admin Account`,
       `Are you sure you want to ${newStatus.toLowerCase()} ${admin.first_name} ${admin.last_name}?`,
@@ -320,7 +579,11 @@ export default function AdminManagementTab() {
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to update status');
-      loadAdmins();
+      
+      localStorage.removeItem(CACHE_KEY);
+      initialLoadComplete.current = false;
+      await loadAdmins(pagination.page, true);
+      
       showSuccessAlert(`Account ${newStatus.toLowerCase()}d successfully!`);
     } catch (err) {
       showErrorAlert(err.message, 'Failed to update status');
@@ -329,7 +592,6 @@ export default function AdminManagementTab() {
 
   const handleLockAccount = async (admin) => {
     if (admin.locked) {
-      // Unlock
       const result = await showConfirmationAlert(
         'Unlock Account',
         `Are you sure you want to unlock ${admin.first_name} ${admin.last_name}'s account?`,
@@ -344,13 +606,16 @@ export default function AdminManagementTab() {
         });
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'Failed to unlock account');
-        loadAdmins();
+        
+        localStorage.removeItem(CACHE_KEY);
+        initialLoadComplete.current = false;
+        await loadAdmins(pagination.page, true);
+        
         showSuccessAlert('Account unlocked successfully!');
       } catch (err) {
         showErrorAlert(err.message, 'Failed to unlock account');
       }
     } else {
-      // Lock
       const result = await showConfirmationAlert(
         'Lock Account',
         `Are you sure you want to lock ${admin.first_name} ${admin.last_name}'s account? They will not be able to login.`,
@@ -365,7 +630,11 @@ export default function AdminManagementTab() {
         });
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'Failed to lock account');
-        loadAdmins();
+        
+        localStorage.removeItem(CACHE_KEY);
+        initialLoadComplete.current = false;
+        await loadAdmins(pagination.page, true);
+        
         showSuccessAlert('Account locked successfully!');
       } catch (err) {
         showErrorAlert(err.message, 'Failed to lock account');
@@ -398,6 +667,13 @@ export default function AdminManagementTab() {
     loadAdmins(page);
   };
 
+  const clearFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('');
+    setLockFilter('');
+    setBranchFilter('');
+  };
+
   // ============================================
   // RENDER
   // ============================================
@@ -405,11 +681,12 @@ export default function AdminManagementTab() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Admin Management</h1>
-        <p style={styles.subtitle}>Create, manage, and monitor admin accounts across all branches</p>
+        <div>
+          <h1 style={styles.title}>Admin Management</h1>
+          <p style={styles.subtitle}>Create, manage, and monitor admin accounts across all branches</p>
+        </div>
       </div>
 
-      {/* Controls */}
       <div style={styles.controls}>
         <div style={styles.searchWrapper}>
           <svg style={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -418,13 +695,14 @@ export default function AdminManagementTab() {
           </svg>
           <input
             type="text"
-            placeholder="Search admins..."
+            placeholder="Search by name, employee ID, or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={styles.searchInput}
           />
         </div>
 
+        {/* ✅ Changed from "Inactive" to "Deactivated" */}
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -432,8 +710,37 @@ export default function AdminManagementTab() {
         >
           <option value="">All Status</option>
           <option value="Active">Active</option>
-          <option value="Inactive">Inactive</option>
+          <option value="Deactivated">Deactivated</option>
         </select>
+
+        <select
+          value={lockFilter}
+          onChange={(e) => setLockFilter(e.target.value)}
+          style={styles.filterSelect}
+        >
+          <option value="">All Lock States</option>
+          <option value="true">Locked</option>
+          <option value="false">Unlocked</option>
+        </select>
+
+        <select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          style={styles.filterSelect}
+        >
+          <option value="">All Branches</option>
+          {branches.map(b => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+
+        {(searchQuery || statusFilter || lockFilter || branchFilter) && (
+          <button onClick={clearFilters} style={styles.clearFiltersBtn}>
+            ✕ Clear Filters
+          </button>
+        )}
 
         <button
           onClick={() => { setFormData(emptyForm); setGeneratedId(''); setShowCreateModal(true); }}
@@ -447,7 +754,6 @@ export default function AdminManagementTab() {
         </button>
       </div>
 
-      {/* Table */}
       <div style={styles.tableContainer}>
         <table style={styles.table}>
           <thead>
@@ -455,6 +761,7 @@ export default function AdminManagementTab() {
               <th style={styles.tableHeaderCell}>Employee ID</th>
               <th style={styles.tableHeaderCell}>Name</th>
               <th style={styles.tableHeaderCell}>Email</th>
+              <th style={styles.tableHeaderCell}>Role</th>
               <th style={styles.tableHeaderCell}>Branch</th>
               <th style={styles.tableHeaderCell}>Status</th>
               <th style={styles.tableHeaderCell}>Locked</th>
@@ -463,9 +770,26 @@ export default function AdminManagementTab() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="7" style={styles.emptyCell}>Loading...</td></tr>
+              <tr><td colSpan="8" style={styles.emptyCell}>Loading...</td></tr>
             ) : admins.length === 0 ? (
-              <tr><td colSpan="7" style={styles.emptyCell}>No admin accounts found</td></tr>
+              <tr>
+                <td colSpan="8" style={styles.emptyCell}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '20px 0' }}>
+                    <span style={{ fontSize: '28px' }}>🔍</span>
+                    <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text-primary)' }}>No accounts found</span>
+                    <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                      {searchQuery || statusFilter || lockFilter || branchFilter 
+                        ? 'Try adjusting your search or filters' 
+                        : 'No admin accounts have been created yet'}
+                    </span>
+                    {(searchQuery || statusFilter || lockFilter || branchFilter) && (
+                      <button onClick={clearFilters} style={styles.clearFiltersSmallBtn}>
+                        Clear all filters
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
             ) : (
               admins.map(admin => (
                 <tr key={admin.id} style={styles.tableRow}>
@@ -478,6 +802,25 @@ export default function AdminManagementTab() {
                     </span>
                   </td>
                   <td style={styles.tableCell}>{admin.email}</td>
+                  <td style={styles.tableCell}>
+                    <span style={{
+                      ...styles.roleBadge,
+                      backgroundColor: admin.role === 'Super Admin' ? 'rgba(239, 68, 68, 0.15)' : 
+                                      admin.role === 'Admin' ? 'rgba(245, 158, 11, 0.15)' :
+                                      admin.role === 'Human Resources' ? 'rgba(139, 92, 246, 0.15)' :
+                                      admin.role === 'Project Manager' ? 'rgba(59, 130, 246, 0.15)' :
+                                      admin.role === 'Resource Manager' ? 'rgba(16, 185, 129, 0.15)' :
+                                      'rgba(107, 114, 128, 0.15)',
+                      color: admin.role === 'Super Admin' ? '#ef4444' : 
+                             admin.role === 'Admin' ? '#f59e0b' :
+                             admin.role === 'Human Resources' ? '#8b5cf6' :
+                             admin.role === 'Project Manager' ? '#3b82f6' :
+                             admin.role === 'Resource Manager' ? '#22c55e' :
+                             '#6b7280',
+                    }}>
+                      {admin.role || 'Employee'}
+                    </span>
+                  </td>
                   <td style={styles.tableCell}>
                     <span style={styles.branchBadge}>
                       {admin.branch?.name || '—'}
@@ -658,7 +1001,7 @@ export default function AdminManagementTab() {
                     {generatingId && <span style={styles.loadingDot}>⏳</span>}
                   </div>
                   <span style={styles.helperText}>
-                    Auto-generated based on branch: <strong>WEA-{formData.branch_id ? branches.find(b => b.id === formData.branch_id)?.name?.split('-')[1] || 'Location' : '...'}-XXX</strong>
+                    Auto-generated based on branch
                   </span>
                 </div>
 
@@ -856,7 +1199,6 @@ export default function AdminManagementTab() {
                     onChange={(e) => {
                       const newBranchId = e.target.value;
                       setFormData({ ...formData, branch_id: newBranchId });
-                      // Update employee ID preview when branch changes
                       const branch = branches.find(b => b.id === newBranchId);
                       if (branch) {
                         const newId = generateEmployeeId(branch.name, allEmployeeIds);
@@ -936,7 +1278,11 @@ const styles = {
     margin: '0 auto',
   },
   header: {
-    marginBottom: '8px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: '12px',
   },
   title: {
     fontSize: '28px',
@@ -986,6 +1332,27 @@ const styles = {
     color: 'var(--color-text-primary)',
     fontSize: '14px',
     minWidth: '140px',
+  },
+  clearFiltersBtn: {
+    padding: '8px 16px',
+    background: 'transparent',
+    border: '1px solid var(--color-danger)',
+    borderRadius: 'var(--radius-md)',
+    color: 'var(--color-danger)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  clearFiltersSmallBtn: {
+    padding: '6px 14px',
+    background: 'transparent',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--color-text-secondary)',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   },
   createBtn: {
     display: 'flex',
@@ -1050,6 +1417,13 @@ const styles = {
     fontWeight: '600',
     fontSize: '14px',
   },
+  roleBadge: {
+    padding: '4px 10px',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: '600',
+    display: 'inline-block',
+  },
   branchBadge: {
     display: 'inline-block',
     padding: '2px 10px',
@@ -1070,12 +1444,14 @@ const styles = {
     borderRadius: '20px',
     fontSize: '11px',
     fontWeight: '600',
+    display: 'inline-block',
   },
   lockBadge: {
     padding: '4px 12px',
     borderRadius: '20px',
     fontSize: '11px',
     fontWeight: '600',
+    display: 'inline-block',
   },
   failedAttempts: {
     display: 'block',

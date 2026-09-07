@@ -49,6 +49,26 @@ const getUserIdByEmail = async (email) => {
   }
 };
 
+const getUserProfile = async (userId) => {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('role, status, first_name, middle_name, last_name, employee_id')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      console.error('Error fetching user profile:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    return null;
+  }
+};
+
 const isUserAdmin = async (userId) => {
   try {
     const { data, error } = await supabase
@@ -265,6 +285,28 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // ✅ CHECK: Get user profile to check status
+    const profile = await getUserProfile(userId);
+    console.log("📋 Profile:", profile);
+
+    // ✅ CHECK: If account is Inactive, deny login
+    if (profile && (profile.status === 'Inactive' || profile.status === 'Deactivated')) {
+      console.log(`❌ Account is Inactive/Deactivated for: ${email}`);
+      
+      await logAuditEvent({
+        userId,
+        action: 'Failed Login',
+        systemCategory: 'Auth',
+        logDescription: `Login attempt on INACTIVE account for ${email}`,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated. Please contact an administrator.',
+        inactive: true
+      });
+    }
+
     const attempts = await getUserLoginAttempts(userId);
     console.log("Attempts Record:", attempts);
     console.log("================================");
@@ -337,17 +379,29 @@ router.post('/login', async (req, res) => {
       await resetLoginAttempts(authUserId);
     }
 
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('role, first_name, middle_name, last_name, employee_id')
-      .eq('id', authUserId)
-      .single();
-
-    if (profileError && profileError.code !== 'PGRST116') {
-      console.warn('Profile fetch warning:', profileError);
-    }
+    // ✅ Get fresh profile data
+    const profileData = await getUserProfile(authUserId);
 
     const userRole = profileData?.role || 'Employee';
+    const userStatus = profileData?.status || 'Active';
+
+    // ✅ Double-check status again after auth (safety check)
+    if (userStatus === 'Inactive') {
+      console.log(`❌ Account is Inactive/Deactivated for: ${email} (post-auth check)`);
+      
+      await logAuditEvent({
+        userId: authUserId,
+        action: 'Failed Login',
+        systemCategory: 'Auth',
+        logDescription: `Login attempt on INACTIVE account for ${email} (post-auth)`,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated. Please contact an administrator.',
+        inactive: true
+      });
+    }
 
     const user = {
       id: authData.user.id,
@@ -356,6 +410,7 @@ router.post('/login', async (req, res) => {
         authData.user.email,
       email: authData.user.email,
       role: userRole,
+      status: userStatus,
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
       employee_id: profileData?.employee_id,
       profile: profileData || {},
@@ -373,15 +428,13 @@ router.post('/login', async (req, res) => {
       logDescription: `User signed in successfully: ${email}`,
     });
 
-    // Custom JWT with role embedded — signed HS256 with SUPABASE_JWT_SECRET.
-    // verifyToken (auth.js) reads the token's alg header and verifies HS256
-    // tokens against this same secret, so this stays in sync with the
-    // middleware.
+    // Custom JWT with role embedded
     const token = jwt.sign(
       {
         sub: authData.user.id,
         email: authData.user.email,
-        role: userRole
+        role: userRole,
+        status: userStatus
       },
       process.env.SUPABASE_JWT_SECRET,
       { expiresIn: '24h' }

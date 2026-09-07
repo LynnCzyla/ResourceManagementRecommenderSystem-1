@@ -1,0 +1,6329 @@
+{
+  "backed_up_at": "2026-09-03T17:53:08.407228",
+  "alias_rows": [
+    {
+      "id": 42,
+      "master_skill_id": 895,
+      "alias_skill_id": 938,
+      "similarity": 0.8664717220831375
+    },
+    {
+      "id": 2493,
+      "master_skill_id": 1066,
+      "alias_skill_id": 889,
+      "similarity": 0.88216073632181
+    },
+    {
+      "id": 44,
+      "master_skill_id": 915,
+      "alias_skill_id": 933,
+      "similarity": 0.9004969973398863
+    },
+    {
+      "id": 2487,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2707,
+      "similarity": 0.9517420065926756
+    },
+    {
+      "id": 99,
+      "master_skill_id": 1231,
+      "alias_skill_id": 1073,
+      "similarity": 0.9378689529377711
+    },
+    {
+      "id": 106,
+      "master_skill_id": 910,
+      "alias_skill_id": 912,
+      "similarity": 0.9548293037104663
+    },
+    {
+      "id": 29,
+      "master_skill_id": 889,
+      "alias_skill_id": 890,
+      "similarity": 0.8537777179586717
+    },
+    {
+      "id": 25,
+      "master_skill_id": 941,
+      "alias_skill_id": 1104,
+      "similarity": 0.9488681042955338
+    },
+    {
+      "id": 98,
+      "master_skill_id": 897,
+      "alias_skill_id": 892,
+      "similarity": 0.8665433030769677
+    },
+    {
+      "id": 28,
+      "master_skill_id": 941,
+      "alias_skill_id": 940,
+      "similarity": 1.0000000289859015
+    },
+    {
+      "id": 96,
+      "master_skill_id": 897,
+      "alias_skill_id": 938,
+      "similarity": 0.8163780192093174
+    },
+    {
+      "id": 27,
+      "master_skill_id": 941,
+      "alias_skill_id": 1108,
+      "similarity": 0.9180644907589679
+    },
+    {
+      "id": 113,
+      "master_skill_id": 1066,
+      "alias_skill_id": 881,
+      "similarity": 0.7863564749059896
+    },
+    {
+      "id": 95,
+      "master_skill_id": 897,
+      "alias_skill_id": 895,
+      "similarity": 0.8960257182873951
+    },
+    {
+      "id": 40,
+      "master_skill_id": 926,
+      "alias_skill_id": 917,
+      "similarity": 0.8638193548896171
+    },
+    {
+      "id": 18,
+      "master_skill_id": 904,
+      "alias_skill_id": 901,
+      "similarity": 0.8247330535633365
+    },
+    {
+      "id": 2502,
+      "master_skill_id": 5932,
+      "alias_skill_id": 897,
+      "similarity": 0.9560456608791705
+    },
+    {
+      "id": 3275,
+      "master_skill_id": 2705,
+      "alias_skill_id": 7708,
+      "similarity": 0.9467807067704365
+    },
+    {
+      "id": 133,
+      "master_skill_id": 1106,
+      "alias_skill_id": 1104,
+      "similarity": 0.9722757858488227
+    },
+    {
+      "id": 31,
+      "master_skill_id": 889,
+      "alias_skill_id": 896,
+      "similarity": 0.9476806214189069
+    },
+    {
+      "id": 30,
+      "master_skill_id": 889,
+      "alias_skill_id": 925,
+      "similarity": 0.8876740460572811
+    },
+    {
+      "id": 3220,
+      "master_skill_id": 7289,
+      "alias_skill_id": 909,
+      "similarity": 0.9220156149189697
+    },
+    {
+      "id": 3242,
+      "master_skill_id": 2711,
+      "alias_skill_id": 7642,
+      "similarity": 0.9467769481784101
+    },
+    {
+      "id": 23,
+      "master_skill_id": 934,
+      "alias_skill_id": 936,
+      "similarity": 0.9362276873423098
+    },
+    {
+      "id": 43,
+      "master_skill_id": 915,
+      "alias_skill_id": 918,
+      "similarity": 0.8627662823492662
+    },
+    {
+      "id": 3256,
+      "master_skill_id": 945,
+      "alias_skill_id": 7670,
+      "similarity": 0.9474213981129344
+    },
+    {
+      "id": 3218,
+      "master_skill_id": 7289,
+      "alias_skill_id": 7594,
+      "similarity": 0.9219891202789475
+    },
+    {
+      "id": 3244,
+      "master_skill_id": 887,
+      "alias_skill_id": 7646,
+      "similarity": 0.9108856234925496
+    },
+    {
+      "id": 3228,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7614,
+      "similarity": 0.9714065653801112
+    },
+    {
+      "id": 41,
+      "master_skill_id": 1135,
+      "alias_skill_id": 1136,
+      "similarity": 0.8619737440190415
+    },
+    {
+      "id": 97,
+      "master_skill_id": 897,
+      "alias_skill_id": 1241,
+      "similarity": 0.9523457533511388
+    },
+    {
+      "id": 13,
+      "master_skill_id": 907,
+      "alias_skill_id": 908,
+      "similarity": 0.9080161789014177
+    },
+    {
+      "id": 14,
+      "master_skill_id": 907,
+      "alias_skill_id": 906,
+      "similarity": 0.7967135506204324
+    },
+    {
+      "id": 2523,
+      "master_skill_id": 5942,
+      "alias_skill_id": 887,
+      "similarity": 0.8478731880977377
+    },
+    {
+      "id": 2034,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2839,
+      "similarity": 0.8291115141220808
+    },
+    {
+      "id": 22,
+      "master_skill_id": 934,
+      "alias_skill_id": 937,
+      "similarity": 0.9508149787507763
+    },
+    {
+      "id": 3176,
+      "master_skill_id": 6760,
+      "alias_skill_id": 901,
+      "similarity": 0.7796210965914967
+    },
+    {
+      "id": 3178,
+      "master_skill_id": 6760,
+      "alias_skill_id": 888,
+      "similarity": 0.8435557531609936
+    },
+    {
+      "id": 3180,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1231,
+      "similarity": 0.9038161183902431
+    },
+    {
+      "id": 3198,
+      "master_skill_id": 6760,
+      "alias_skill_id": 5942,
+      "similarity": 0.8294428215517905
+    },
+    {
+      "id": 3188,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7534,
+      "similarity": 0.8122614993898534
+    },
+    {
+      "id": 101,
+      "master_skill_id": 1231,
+      "alias_skill_id": 935,
+      "similarity": 0.9112461997639452
+    },
+    {
+      "id": 24,
+      "master_skill_id": 934,
+      "alias_skill_id": 946,
+      "similarity": 0.9002126026861899
+    },
+    {
+      "id": 3190,
+      "master_skill_id": 6760,
+      "alias_skill_id": 6759,
+      "similarity": 0.8699197076435489
+    },
+    {
+      "id": 3192,
+      "master_skill_id": 6760,
+      "alias_skill_id": 891,
+      "similarity": 0.8562011363582669
+    },
+    {
+      "id": 3194,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7546,
+      "similarity": 0.8425463453349578
+    },
+    {
+      "id": 3232,
+      "master_skill_id": 7396,
+      "alias_skill_id": 7622,
+      "similarity": 0.9224237984882948
+    },
+    {
+      "id": 3174,
+      "master_skill_id": 6760,
+      "alias_skill_id": 6008,
+      "similarity": 0.8575193267236418
+    },
+    {
+      "id": 3200,
+      "master_skill_id": 6760,
+      "alias_skill_id": 935,
+      "similarity": 0.8410521180843128
+    },
+    {
+      "id": 35,
+      "master_skill_id": 887,
+      "alias_skill_id": 912,
+      "similarity": 0.8612924113454127
+    },
+    {
+      "id": 15,
+      "master_skill_id": 907,
+      "alias_skill_id": 881,
+      "similarity": 0.8841159244390908
+    },
+    {
+      "id": 16,
+      "master_skill_id": 907,
+      "alias_skill_id": 909,
+      "similarity": 0.9747140687777465
+    },
+    {
+      "id": 20,
+      "master_skill_id": 904,
+      "alias_skill_id": 935,
+      "similarity": 0.9193613202156108
+    },
+    {
+      "id": 21,
+      "master_skill_id": 904,
+      "alias_skill_id": 899,
+      "similarity": 0.9605028057147841
+    },
+    {
+      "id": 3267,
+      "master_skill_id": 2704,
+      "alias_skill_id": 7692,
+      "similarity": 0.8665336670571517
+    },
+    {
+      "id": 3208,
+      "master_skill_id": 2702,
+      "alias_skill_id": 7574,
+      "similarity": 0.9592398402462595
+    },
+    {
+      "id": 3210,
+      "master_skill_id": 2702,
+      "alias_skill_id": 2710,
+      "similarity": 0.92650143442437
+    },
+    {
+      "id": 33,
+      "master_skill_id": 947,
+      "alias_skill_id": 943,
+      "similarity": 0.9261188347047368
+    },
+    {
+      "id": 10,
+      "master_skill_id": 1073,
+      "alias_skill_id": 888,
+      "similarity": 0.8562450612370975
+    },
+    {
+      "id": 3214,
+      "master_skill_id": 7289,
+      "alias_skill_id": 7586,
+      "similarity": 0.8543345011871399
+    },
+    {
+      "id": 3216,
+      "master_skill_id": 7289,
+      "alias_skill_id": 881,
+      "similarity": 0.844438604523109
+    },
+    {
+      "id": 3222,
+      "master_skill_id": 7288,
+      "alias_skill_id": 7602,
+      "similarity": 0.8551338741618438
+    },
+    {
+      "id": 3224,
+      "master_skill_id": 5932,
+      "alias_skill_id": 1066,
+      "similarity": 0.8644341983966584
+    },
+    {
+      "id": 3226,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2723,
+      "similarity": 0.825503570069702
+    },
+    {
+      "id": 37,
+      "master_skill_id": 926,
+      "alias_skill_id": 939,
+      "similarity": 0.8901219767099793
+    },
+    {
+      "id": 3230,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2706,
+      "similarity": 0.8630261626066447
+    },
+    {
+      "id": 3184,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7526,
+      "similarity": 0.8037041917852614
+    },
+    {
+      "id": 3234,
+      "master_skill_id": 7396,
+      "alias_skill_id": 949,
+      "similarity": 0.8545165377897235
+    },
+    {
+      "id": 107,
+      "master_skill_id": 1278,
+      "alias_skill_id": 946,
+      "similarity": 0.8680198225440479
+    },
+    {
+      "id": 38,
+      "master_skill_id": 926,
+      "alias_skill_id": 913,
+      "similarity": 0.8909909590466849
+    },
+    {
+      "id": 3196,
+      "master_skill_id": 6760,
+      "alias_skill_id": 904,
+      "similarity": 0.8350069935376554
+    },
+    {
+      "id": 34,
+      "master_skill_id": 887,
+      "alias_skill_id": 883,
+      "similarity": 0.9141583852227227
+    },
+    {
+      "id": 3246,
+      "master_skill_id": 887,
+      "alias_skill_id": 884,
+      "similarity": 0.8278489805367707
+    },
+    {
+      "id": 3259,
+      "master_skill_id": 6857,
+      "alias_skill_id": 7676,
+      "similarity": 0.7766691229080532
+    },
+    {
+      "id": 3261,
+      "master_skill_id": 6857,
+      "alias_skill_id": 7680,
+      "similarity": 0.778110079553558
+    },
+    {
+      "id": 3238,
+      "master_skill_id": 2711,
+      "alias_skill_id": 4258,
+      "similarity": 0.9244337337357713
+    },
+    {
+      "id": 3273,
+      "master_skill_id": 2705,
+      "alias_skill_id": 2837,
+      "similarity": 0.8610842635133529
+    },
+    {
+      "id": 19,
+      "master_skill_id": 904,
+      "alias_skill_id": 900,
+      "similarity": 0.8696119929873104
+    },
+    {
+      "id": 39,
+      "master_skill_id": 926,
+      "alias_skill_id": 916,
+      "similarity": 0.9040592900375931
+    },
+    {
+      "id": 2490,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2729,
+      "similarity": 0.8758854778456134
+    },
+    {
+      "id": 115,
+      "master_skill_id": 1066,
+      "alias_skill_id": 907,
+      "similarity": 0.8306859338807737
+    },
+    {
+      "id": 3163,
+      "master_skill_id": 2709,
+      "alias_skill_id": 905,
+      "similarity": 0.8335136438557237
+    },
+    {
+      "id": 3165,
+      "master_skill_id": 2709,
+      "alias_skill_id": 1278,
+      "similarity": 0.931857612821961
+    },
+    {
+      "id": 3167,
+      "master_skill_id": 2709,
+      "alias_skill_id": 6079,
+      "similarity": 0.8049013212194107
+    },
+    {
+      "id": 3169,
+      "master_skill_id": 2709,
+      "alias_skill_id": 1530,
+      "similarity": 0.9082312294207748
+    },
+    {
+      "id": 3171,
+      "master_skill_id": 2709,
+      "alias_skill_id": 1825,
+      "similarity": 0.9147251873586402
+    },
+    {
+      "id": 2528,
+      "master_skill_id": 5942,
+      "alias_skill_id": 6035,
+      "similarity": 0.8429090037706202
+    },
+    {
+      "id": 2552,
+      "master_skill_id": 899,
+      "alias_skill_id": 901,
+      "similarity": 0.8520247969385226
+    },
+    {
+      "id": 3173,
+      "master_skill_id": 2709,
+      "alias_skill_id": 934,
+      "similarity": 0.8822630245481273
+    },
+    {
+      "id": 3302,
+      "master_skill_id": 946,
+      "alias_skill_id": 905,
+      "similarity": 0.7888023409260093
+    },
+    {
+      "id": 3304,
+      "master_skill_id": 946,
+      "alias_skill_id": 2709,
+      "similarity": 0.8496239427916478
+    },
+    {
+      "id": 3306,
+      "master_skill_id": 946,
+      "alias_skill_id": 6079,
+      "similarity": 0.8125996123684915
+    },
+    {
+      "id": 3308,
+      "master_skill_id": 946,
+      "alias_skill_id": 1530,
+      "similarity": 0.8223681904764675
+    },
+    {
+      "id": 3310,
+      "master_skill_id": 946,
+      "alias_skill_id": 1825,
+      "similarity": 0.8516791051698972
+    },
+    {
+      "id": 3266,
+      "master_skill_id": 926,
+      "alias_skill_id": 7690,
+      "similarity": 0.8935953055999317
+    },
+    {
+      "id": 3282,
+      "master_skill_id": 920,
+      "alias_skill_id": 7722,
+      "similarity": 0.8950532443829982
+    },
+    {
+      "id": 3241,
+      "master_skill_id": 2711,
+      "alias_skill_id": 7640,
+      "similarity": 0.8217260363749689
+    },
+    {
+      "id": 3183,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7524,
+      "similarity": 0.7855346653435167
+    },
+    {
+      "id": 3185,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7528,
+      "similarity": 0.7882837794557253
+    },
+    {
+      "id": 3187,
+      "master_skill_id": 6760,
+      "alias_skill_id": 923,
+      "similarity": 0.7732849420381616
+    },
+    {
+      "id": 3189,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7536,
+      "similarity": 0.7501969132953187
+    },
+    {
+      "id": 3191,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2852,
+      "similarity": 0.8271629680456123
+    },
+    {
+      "id": 3195,
+      "master_skill_id": 6760,
+      "alias_skill_id": 5931,
+      "similarity": 0.8366247564069382
+    },
+    {
+      "id": 3197,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7330,
+      "similarity": 0.8330956321900096
+    },
+    {
+      "id": 3199,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1271,
+      "similarity": 0.8425463453349578
+    },
+    {
+      "id": 3240,
+      "master_skill_id": 2711,
+      "alias_skill_id": 7638,
+      "similarity": 0.8549148015188811
+    },
+    {
+      "id": 3298,
+      "master_skill_id": 7753,
+      "alias_skill_id": 7754,
+      "similarity": 0.9080126902117228
+    },
+    {
+      "id": 3209,
+      "master_skill_id": 2702,
+      "alias_skill_id": 2836,
+      "similarity": 0.9208243247762408
+    },
+    {
+      "id": 4385,
+      "master_skill_id": 7356,
+      "alias_skill_id": 883,
+      "similarity": 0.8886525286923244
+    },
+    {
+      "id": 4389,
+      "master_skill_id": 7356,
+      "alias_skill_id": 910,
+      "similarity": 0.8233985454526178
+    },
+    {
+      "id": 3219,
+      "master_skill_id": 7289,
+      "alias_skill_id": 906,
+      "similarity": 0.7327258464186399
+    },
+    {
+      "id": 3221,
+      "master_skill_id": 7290,
+      "alias_skill_id": 7600,
+      "similarity": 0.8798651982599277
+    },
+    {
+      "id": 3223,
+      "master_skill_id": 5932,
+      "alias_skill_id": 6758,
+      "similarity": 0.8689502931407825
+    },
+    {
+      "id": 3225,
+      "master_skill_id": 5932,
+      "alias_skill_id": 925,
+      "similarity": 0.8300298689316526
+    },
+    {
+      "id": 3227,
+      "master_skill_id": 5932,
+      "alias_skill_id": 890,
+      "similarity": 0.8448842980169621
+    },
+    {
+      "id": 3229,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7616,
+      "similarity": 0.8145078848027351
+    },
+    {
+      "id": 3231,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7620,
+      "similarity": 0.7811771929960284
+    },
+    {
+      "id": 3233,
+      "master_skill_id": 7396,
+      "alias_skill_id": 7624,
+      "similarity": 0.8315876506108224
+    },
+    {
+      "id": 4367,
+      "master_skill_id": 1073,
+      "alias_skill_id": 7534,
+      "similarity": 0.8338826832133358
+    },
+    {
+      "id": 4393,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7642,
+      "similarity": 0.8373469646773943
+    },
+    {
+      "id": 3249,
+      "master_skill_id": 6035,
+      "alias_skill_id": 6859,
+      "similarity": 0.9394223466615911
+    },
+    {
+      "id": 3262,
+      "master_skill_id": 2755,
+      "alias_skill_id": 7682,
+      "similarity": 0.8601797554131343
+    },
+    {
+      "id": 4445,
+      "master_skill_id": 8952,
+      "alias_skill_id": 9220,
+      "similarity": 0.8807108383479276
+    },
+    {
+      "id": 3258,
+      "master_skill_id": 6857,
+      "alias_skill_id": 898,
+      "similarity": 0.9198863693138749
+    },
+    {
+      "id": 3260,
+      "master_skill_id": 6857,
+      "alias_skill_id": 7678,
+      "similarity": 0.8550789056047161
+    },
+    {
+      "id": 3217,
+      "master_skill_id": 7289,
+      "alias_skill_id": 907,
+      "similarity": 0.9462041881776277
+    },
+    {
+      "id": 3201,
+      "master_skill_id": 1241,
+      "alias_skill_id": 7560,
+      "similarity": 0.9155700961707675
+    },
+    {
+      "id": 3274,
+      "master_skill_id": 2705,
+      "alias_skill_id": 2839,
+      "similarity": 0.9271296416846238
+    },
+    {
+      "id": 4451,
+      "master_skill_id": 6079,
+      "alias_skill_id": 8330,
+      "similarity": 0.8935124290719978
+    },
+    {
+      "id": 3276,
+      "master_skill_id": 2705,
+      "alias_skill_id": 7710,
+      "similarity": 0.8558430912372906
+    },
+    {
+      "id": 3278,
+      "master_skill_id": 882,
+      "alias_skill_id": 7714,
+      "similarity": 0.8588509241187144
+    },
+    {
+      "id": 3280,
+      "master_skill_id": 882,
+      "alias_skill_id": 7718,
+      "similarity": 0.7993903386103118
+    },
+    {
+      "id": 4164,
+      "master_skill_id": 7646,
+      "alias_skill_id": 883,
+      "similarity": 0.9556051990118078
+    },
+    {
+      "id": 3251,
+      "master_skill_id": 915,
+      "alias_skill_id": 7660,
+      "similarity": 0.9391789042800289
+    },
+    {
+      "id": 4443,
+      "master_skill_id": 8952,
+      "alias_skill_id": 7744,
+      "similarity": 0.8974661447900548
+    },
+    {
+      "id": 4184,
+      "master_skill_id": 7726,
+      "alias_skill_id": 924,
+      "similarity": 0.9172220436755163
+    },
+    {
+      "id": 36,
+      "master_skill_id": 887,
+      "alias_skill_id": 910,
+      "similarity": 0.8732402649878883
+    },
+    {
+      "id": 3245,
+      "master_skill_id": 887,
+      "alias_skill_id": 7648,
+      "similarity": 0.8226144010658465
+    },
+    {
+      "id": 4379,
+      "master_skill_id": 7356,
+      "alias_skill_id": 949,
+      "similarity": 0.878922108663148
+    },
+    {
+      "id": 4381,
+      "master_skill_id": 7356,
+      "alias_skill_id": 2836,
+      "similarity": 0.8554587228653212
+    },
+    {
+      "id": 108,
+      "master_skill_id": 1278,
+      "alias_skill_id": 937,
+      "similarity": 0.9122992633505232
+    },
+    {
+      "id": 4455,
+      "master_skill_id": 909,
+      "alias_skill_id": 9116,
+      "similarity": 0.92909663771142
+    },
+    {
+      "id": 3253,
+      "master_skill_id": 915,
+      "alias_skill_id": 7664,
+      "similarity": 0.8802102467270854
+    },
+    {
+      "id": 4383,
+      "master_skill_id": 7356,
+      "alias_skill_id": 1066,
+      "similarity": 0.9394795925572927
+    },
+    {
+      "id": 3288,
+      "master_skill_id": 7733,
+      "alias_skill_id": 7734,
+      "similarity": 0.8627275963835491
+    },
+    {
+      "id": 3177,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7512,
+      "similarity": 0.7575908181121906
+    },
+    {
+      "id": 3175,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2779,
+      "similarity": 0.7734564017298442
+    },
+    {
+      "id": 3181,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2729,
+      "similarity": 0.7815349503030754
+    },
+    {
+      "id": 3179,
+      "master_skill_id": 6760,
+      "alias_skill_id": 5946,
+      "similarity": 0.8460621813190631
+    },
+    {
+      "id": 4471,
+      "master_skill_id": 2755,
+      "alias_skill_id": 929,
+      "similarity": 0.7737275973100803
+    },
+    {
+      "id": 4387,
+      "master_skill_id": 7356,
+      "alias_skill_id": 7708,
+      "similarity": 0.850109428285693
+    },
+    {
+      "id": 3239,
+      "master_skill_id": 2711,
+      "alias_skill_id": 7636,
+      "similarity": 0.8191251464933903
+    },
+    {
+      "id": 4349,
+      "master_skill_id": 915,
+      "alias_skill_id": 888,
+      "similarity": 0.8023302816208486
+    },
+    {
+      "id": 4351,
+      "master_skill_id": 915,
+      "alias_skill_id": 7528,
+      "similarity": 0.8252002368456431
+    },
+    {
+      "id": 4355,
+      "master_skill_id": 915,
+      "alias_skill_id": 6008,
+      "similarity": 0.8457246647249201
+    },
+    {
+      "id": 4357,
+      "master_skill_id": 915,
+      "alias_skill_id": 6761,
+      "similarity": 0.8303147640237439
+    },
+    {
+      "id": 4361,
+      "master_skill_id": 915,
+      "alias_skill_id": 7670,
+      "similarity": 0.7969082043280655
+    },
+    {
+      "id": 4363,
+      "master_skill_id": 915,
+      "alias_skill_id": 8041,
+      "similarity": 0.8223515194201341
+    },
+    {
+      "id": 4365,
+      "master_skill_id": 916,
+      "alias_skill_id": 7664,
+      "similarity": 0.806171906307545
+    },
+    {
+      "id": 3286,
+      "master_skill_id": 6761,
+      "alias_skill_id": 924,
+      "similarity": 0.8136453334384744
+    },
+    {
+      "id": 3284,
+      "master_skill_id": 6761,
+      "alias_skill_id": 7726,
+      "similarity": 0.8758077469549905
+    },
+    {
+      "id": 3268,
+      "master_skill_id": 2355,
+      "alias_skill_id": 7694,
+      "similarity": 0.8810339771309872
+    },
+    {
+      "id": 4397,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7742,
+      "similarity": 0.8829776629581346
+    },
+    {
+      "id": 4403,
+      "master_skill_id": 2704,
+      "alias_skill_id": 5931,
+      "similarity": 0.8938615168670406
+    },
+    {
+      "id": 4409,
+      "master_skill_id": 2709,
+      "alias_skill_id": 7512,
+      "similarity": 0.9046872948477882
+    },
+    {
+      "id": 4411,
+      "master_skill_id": 2709,
+      "alias_skill_id": 890,
+      "similarity": 0.8201064625623922
+    },
+    {
+      "id": 4413,
+      "master_skill_id": 2709,
+      "alias_skill_id": 7620,
+      "similarity": 0.8226991940179422
+    },
+    {
+      "id": 4415,
+      "master_skill_id": 2709,
+      "alias_skill_id": 2723,
+      "similarity": 0.9110138465388773
+    },
+    {
+      "id": 4417,
+      "master_skill_id": 2709,
+      "alias_skill_id": 7616,
+      "similarity": 0.8581319671949322
+    },
+    {
+      "id": 4419,
+      "master_skill_id": 2709,
+      "alias_skill_id": 925,
+      "similarity": 0.8706435174408229
+    },
+    {
+      "id": 3296,
+      "master_skill_id": 7747,
+      "alias_skill_id": 902,
+      "similarity": 0.7912574179922245
+    },
+    {
+      "id": 3257,
+      "master_skill_id": 2708,
+      "alias_skill_id": 7672,
+      "similarity": 0.9417957027835095
+    },
+    {
+      "id": 3300,
+      "master_skill_id": 950,
+      "alias_skill_id": 7758,
+      "similarity": 0.8211291701214619
+    },
+    {
+      "id": 3215,
+      "master_skill_id": 7289,
+      "alias_skill_id": 908,
+      "similarity": 0.8687064602136342
+    },
+    {
+      "id": 4463,
+      "master_skill_id": 7290,
+      "alias_skill_id": 937,
+      "similarity": 0.8016524999223038
+    },
+    {
+      "id": 3292,
+      "master_skill_id": 2712,
+      "alias_skill_id": 7742,
+      "similarity": 0.8818200328311935
+    },
+    {
+      "id": 4473,
+      "master_skill_id": 7756,
+      "alias_skill_id": 934,
+      "similarity": 0.8636725024290182
+    },
+    {
+      "id": 4475,
+      "master_skill_id": 2703,
+      "alias_skill_id": 921,
+      "similarity": 0.827798547631268
+    },
+    {
+      "id": 3207,
+      "master_skill_id": 2702,
+      "alias_skill_id": 7572,
+      "similarity": 0.8600999779201379
+    },
+    {
+      "id": 3237,
+      "master_skill_id": 947,
+      "alias_skill_id": 7632,
+      "similarity": 0.8891400980344568
+    },
+    {
+      "id": 4373,
+      "master_skill_id": 1073,
+      "alias_skill_id": 7624,
+      "similarity": 0.830794549428511
+    },
+    {
+      "id": 2840,
+      "master_skill_id": 1073,
+      "alias_skill_id": 6827,
+      "similarity": 0.8276730666304958
+    },
+    {
+      "id": 2224,
+      "master_skill_id": 2837,
+      "alias_skill_id": 2836,
+      "similarity": 0.8724137610345474
+    },
+    {
+      "id": 130,
+      "master_skill_id": 1106,
+      "alias_skill_id": 1108,
+      "similarity": 0.9999999608520209
+    },
+    {
+      "id": 3301,
+      "master_skill_id": 946,
+      "alias_skill_id": 936,
+      "similarity": 0.874460010536546
+    },
+    {
+      "id": 2550,
+      "master_skill_id": 899,
+      "alias_skill_id": 902,
+      "similarity": 0.9408914894360968
+    },
+    {
+      "id": 3303,
+      "master_skill_id": 946,
+      "alias_skill_id": 1278,
+      "similarity": 0.8680198225440479
+    },
+    {
+      "id": 2556,
+      "master_skill_id": 2704,
+      "alias_skill_id": 1530,
+      "similarity": 0.8817756242836292
+    },
+    {
+      "id": 2553,
+      "master_skill_id": 6079,
+      "alias_skill_id": 934,
+      "similarity": 0.8619925783971867
+    },
+    {
+      "id": 2858,
+      "master_skill_id": 1135,
+      "alias_skill_id": 2839,
+      "similarity": 0.8473938901757179
+    },
+    {
+      "id": 3305,
+      "master_skill_id": 946,
+      "alias_skill_id": 903,
+      "similarity": 0.8284902983094579
+    },
+    {
+      "id": 3307,
+      "master_skill_id": 946,
+      "alias_skill_id": 7356,
+      "similarity": 0.8211126428847977
+    },
+    {
+      "id": 123,
+      "master_skill_id": 915,
+      "alias_skill_id": 916,
+      "similarity": 0.8193109657362796
+    },
+    {
+      "id": 2855,
+      "master_skill_id": 6079,
+      "alias_skill_id": 6857,
+      "similarity": 0.8675774562367768
+    },
+    {
+      "id": 3309,
+      "master_skill_id": 946,
+      "alias_skill_id": 937,
+      "similarity": 0.8835592632683104
+    },
+    {
+      "id": 3311,
+      "master_skill_id": 946,
+      "alias_skill_id": 7502,
+      "similarity": 0.8763308463893557
+    },
+    {
+      "id": 4185,
+      "master_skill_id": 7678,
+      "alias_skill_id": 8174,
+      "similarity": 0.8570490090669846
+    },
+    {
+      "id": 109,
+      "master_skill_id": 1278,
+      "alias_skill_id": 934,
+      "similarity": 0.9348273595412129
+    },
+    {
+      "id": 3293,
+      "master_skill_id": 7743,
+      "alias_skill_id": 7744,
+      "similarity": 0.9628726993679736
+    },
+    {
+      "id": 2206,
+      "master_skill_id": 1231,
+      "alias_skill_id": 2704,
+      "similarity": 0.8247128936753346
+    },
+    {
+      "id": 3299,
+      "master_skill_id": 7755,
+      "alias_skill_id": 7756,
+      "similarity": 0.8572145308711482
+    },
+    {
+      "id": 3277,
+      "master_skill_id": 2705,
+      "alias_skill_id": 2747,
+      "similarity": 0.9458553242647142
+    },
+    {
+      "id": 4380,
+      "master_skill_id": 7356,
+      "alias_skill_id": 2779,
+      "similarity": 0.8562451984946765
+    },
+    {
+      "id": 4386,
+      "master_skill_id": 7356,
+      "alias_skill_id": 8266,
+      "similarity": 0.7940104507535225
+    },
+    {
+      "id": 4350,
+      "master_skill_id": 915,
+      "alias_skill_id": 5946,
+      "similarity": 0.8513802982220561
+    },
+    {
+      "id": 4352,
+      "master_skill_id": 915,
+      "alias_skill_id": 5942,
+      "similarity": 0.8360927158341903
+    },
+    {
+      "id": 4354,
+      "master_skill_id": 915,
+      "alias_skill_id": 920,
+      "similarity": 0.8169250576260677
+    },
+    {
+      "id": 4356,
+      "master_skill_id": 915,
+      "alias_skill_id": 8130,
+      "similarity": 0.7776607299441588
+    },
+    {
+      "id": 4358,
+      "master_skill_id": 915,
+      "alias_skill_id": 8302,
+      "similarity": 0.8043722048537345
+    },
+    {
+      "id": 4360,
+      "master_skill_id": 915,
+      "alias_skill_id": 7289,
+      "similarity": 0.8002123323826001
+    },
+    {
+      "id": 4362,
+      "master_skill_id": 915,
+      "alias_skill_id": 7310,
+      "similarity": 0.8039387705123263
+    },
+    {
+      "id": 4364,
+      "master_skill_id": 916,
+      "alias_skill_id": 918,
+      "similarity": 0.8822846055203077
+    },
+    {
+      "id": 4398,
+      "master_skill_id": 2707,
+      "alias_skill_id": 9002,
+      "similarity": 0.8831351689415045
+    },
+    {
+      "id": 4406,
+      "master_skill_id": 2704,
+      "alias_skill_id": 7396,
+      "similarity": 0.8287255805234144
+    },
+    {
+      "id": 4408,
+      "master_skill_id": 2709,
+      "alias_skill_id": 7526,
+      "similarity": 0.8991781260430635
+    },
+    {
+      "id": 4410,
+      "master_skill_id": 2709,
+      "alias_skill_id": 889,
+      "similarity": 0.8846515619166903
+    },
+    {
+      "id": 4412,
+      "master_skill_id": 2709,
+      "alias_skill_id": 2706,
+      "similarity": 0.9009748392377978
+    },
+    {
+      "id": 4414,
+      "master_skill_id": 2709,
+      "alias_skill_id": 7755,
+      "similarity": 0.9205467709179052
+    },
+    {
+      "id": 4416,
+      "master_skill_id": 2709,
+      "alias_skill_id": 896,
+      "similarity": 0.8460228315938845
+    },
+    {
+      "id": 4418,
+      "master_skill_id": 2709,
+      "alias_skill_id": 6758,
+      "similarity": 0.8858467200635589
+    },
+    {
+      "id": 4440,
+      "master_skill_id": 933,
+      "alias_skill_id": 7660,
+      "similarity": 0.8511779302551534
+    },
+    {
+      "id": 4450,
+      "master_skill_id": 6079,
+      "alias_skill_id": 7733,
+      "similarity": 0.8250694377740526
+    },
+    {
+      "id": 4452,
+      "master_skill_id": 6079,
+      "alias_skill_id": 7288,
+      "similarity": 0.8490170961513128
+    },
+    {
+      "id": 4456,
+      "master_skill_id": 909,
+      "alias_skill_id": 7594,
+      "similarity": 0.8802609609591421
+    },
+    {
+      "id": 4460,
+      "master_skill_id": 909,
+      "alias_skill_id": 7586,
+      "similarity": 0.9112937087550169
+    },
+    {
+      "id": 4462,
+      "master_skill_id": 7290,
+      "alias_skill_id": 905,
+      "similarity": 0.8373297949828803
+    },
+    {
+      "id": 4464,
+      "master_skill_id": 7290,
+      "alias_skill_id": 936,
+      "similarity": 0.8064945630702938
+    },
+    {
+      "id": 4472,
+      "master_skill_id": 2755,
+      "alias_skill_id": 8214,
+      "similarity": 0.7885915580013447
+    },
+    {
+      "id": 4474,
+      "master_skill_id": 2703,
+      "alias_skill_id": 6857,
+      "similarity": 0.8501276437943872
+    },
+    {
+      "id": 4488,
+      "master_skill_id": 1825,
+      "alias_skill_id": 7502,
+      "similarity": 0.8175466902347271
+    },
+    {
+      "id": 4378,
+      "master_skill_id": 7356,
+      "alias_skill_id": 887,
+      "similarity": 0.8659280085842295
+    },
+    {
+      "id": 4384,
+      "master_skill_id": 7356,
+      "alias_skill_id": 912,
+      "similarity": 0.8017187369941792
+    },
+    {
+      "id": 4382,
+      "master_skill_id": 7356,
+      "alias_skill_id": 7646,
+      "similarity": 0.8794610906369
+    },
+    {
+      "id": 4388,
+      "master_skill_id": 7356,
+      "alias_skill_id": 882,
+      "similarity": 0.928461843675398
+    },
+    {
+      "id": 4480,
+      "master_skill_id": 8042,
+      "alias_skill_id": 10136,
+      "similarity": 0.9419272988672343
+    },
+    {
+      "id": 3287,
+      "master_skill_id": 6761,
+      "alias_skill_id": 7732,
+      "similarity": 0.868104812194729
+    },
+    {
+      "id": 4444,
+      "master_skill_id": 8952,
+      "alias_skill_id": 6759,
+      "similarity": 0.9293064484063418
+    },
+    {
+      "id": 3295,
+      "master_skill_id": 7747,
+      "alias_skill_id": 899,
+      "similarity": 0.8176046384756729
+    },
+    {
+      "id": 3297,
+      "master_skill_id": 7747,
+      "alias_skill_id": 900,
+      "similarity": 0.7930779907735104
+    },
+    {
+      "id": 4390,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7710,
+      "similarity": 0.8626706329988605
+    },
+    {
+      "id": 4394,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2837,
+      "similarity": 0.8533936021070164
+    },
+    {
+      "id": 2838,
+      "master_skill_id": 1073,
+      "alias_skill_id": 5931,
+      "similarity": 0.8399133566001413
+    },
+    {
+      "id": 2177,
+      "master_skill_id": 1231,
+      "alias_skill_id": 2729,
+      "similarity": 0.8105221744368216
+    },
+    {
+      "id": 3486,
+      "master_skill_id": 7356,
+      "alias_skill_id": 922,
+      "similarity": 0.8719074015574471
+    },
+    {
+      "id": 2548,
+      "master_skill_id": 899,
+      "alias_skill_id": 904,
+      "similarity": 0.9605028057147841
+    },
+    {
+      "id": 2551,
+      "master_skill_id": 899,
+      "alias_skill_id": 935,
+      "similarity": 0.8737842960620479
+    },
+    {
+      "id": 131,
+      "master_skill_id": 1106,
+      "alias_skill_id": 940,
+      "similarity": 0.9180644907589679
+    },
+    {
+      "id": 2557,
+      "master_skill_id": 6008,
+      "alias_skill_id": 1073,
+      "similarity": 0.8526433225255454
+    },
+    {
+      "id": 2554,
+      "master_skill_id": 6079,
+      "alias_skill_id": 946,
+      "similarity": 0.8125996123684915
+    },
+    {
+      "id": 117,
+      "master_skill_id": 882,
+      "alias_skill_id": 948,
+      "similarity": 0.9162928159500479
+    },
+    {
+      "id": 3525,
+      "master_skill_id": 7288,
+      "alias_skill_id": 8214,
+      "similarity": 0.867359393990127
+    },
+    {
+      "id": 3440,
+      "master_skill_id": 7290,
+      "alias_skill_id": 904,
+      "similarity": 0.7982717686074797
+    },
+    {
+      "id": 3442,
+      "master_skill_id": 7290,
+      "alias_skill_id": 900,
+      "similarity": 0.6663969433180147
+    },
+    {
+      "id": 3521,
+      "master_skill_id": 7288,
+      "alias_skill_id": 1060,
+      "similarity": 0.9221542269604295
+    },
+    {
+      "id": 3444,
+      "master_skill_id": 7290,
+      "alias_skill_id": 902,
+      "similarity": 0.695282489005054
+    },
+    {
+      "id": 3484,
+      "master_skill_id": 5932,
+      "alias_skill_id": 1231,
+      "similarity": 0.8433898460420853
+    },
+    {
+      "id": 3446,
+      "master_skill_id": 7290,
+      "alias_skill_id": 903,
+      "similarity": 0.8823255403516551
+    },
+    {
+      "id": 3448,
+      "master_skill_id": 7290,
+      "alias_skill_id": 899,
+      "similarity": 0.7072778608091256
+    },
+    {
+      "id": 3450,
+      "master_skill_id": 7290,
+      "alias_skill_id": 1271,
+      "similarity": 0.7613164613299073
+    },
+    {
+      "id": 3452,
+      "master_skill_id": 2710,
+      "alias_skill_id": 891,
+      "similarity": 0.8736829577800748
+    },
+    {
+      "id": 3454,
+      "master_skill_id": 2710,
+      "alias_skill_id": 889,
+      "similarity": 0.8621138025172297
+    },
+    {
+      "id": 3456,
+      "master_skill_id": 2710,
+      "alias_skill_id": 5946,
+      "similarity": 0.9357039964203284
+    },
+    {
+      "id": 3458,
+      "master_skill_id": 2710,
+      "alias_skill_id": 5942,
+      "similarity": 0.8788371030300824
+    },
+    {
+      "id": 3462,
+      "master_skill_id": 2710,
+      "alias_skill_id": 1066,
+      "similarity": 0.8945074219347292
+    },
+    {
+      "id": 3464,
+      "master_skill_id": 2710,
+      "alias_skill_id": 7572,
+      "similarity": 0.9243311215730263
+    },
+    {
+      "id": 3466,
+      "master_skill_id": 2710,
+      "alias_skill_id": 2723,
+      "similarity": 0.8961478157690629
+    },
+    {
+      "id": 3476,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7678,
+      "similarity": 0.7575889356759327
+    },
+    {
+      "id": 3478,
+      "master_skill_id": 5932,
+      "alias_skill_id": 6857,
+      "similarity": 0.8130239972765239
+    },
+    {
+      "id": 3488,
+      "master_skill_id": 2747,
+      "alias_skill_id": 895,
+      "similarity": 0.8353868739952007
+    },
+    {
+      "id": 3490,
+      "master_skill_id": 2747,
+      "alias_skill_id": 938,
+      "similarity": 0.7802508575201551
+    },
+    {
+      "id": 3492,
+      "master_skill_id": 2747,
+      "alias_skill_id": 1135,
+      "similarity": 0.8032436829040136
+    },
+    {
+      "id": 3496,
+      "master_skill_id": 2747,
+      "alias_skill_id": 1136,
+      "similarity": 0.8031949636370386
+    },
+    {
+      "id": 3498,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7560,
+      "similarity": 0.8184007091376587
+    },
+    {
+      "id": 3505,
+      "master_skill_id": 7289,
+      "alias_skill_id": 8174,
+      "similarity": 0.8358612259970336
+    },
+    {
+      "id": 3507,
+      "master_skill_id": 2706,
+      "alias_skill_id": 7620,
+      "similarity": 0.878274907244202
+    },
+    {
+      "id": 3509,
+      "master_skill_id": 2706,
+      "alias_skill_id": 6758,
+      "similarity": 0.9262381107077386
+    },
+    {
+      "id": 3511,
+      "master_skill_id": 2706,
+      "alias_skill_id": 7616,
+      "similarity": 0.9580213567979442
+    },
+    {
+      "id": 3523,
+      "master_skill_id": 7288,
+      "alias_skill_id": 1825,
+      "similarity": 0.9474732942215147
+    },
+    {
+      "id": 3533,
+      "master_skill_id": 888,
+      "alias_skill_id": 937,
+      "similarity": 0.8116500859484022
+    },
+    {
+      "id": 3535,
+      "master_skill_id": 2389,
+      "alias_skill_id": 943,
+      "similarity": 0.7777238996860201
+    },
+    {
+      "id": 3545,
+      "master_skill_id": 6079,
+      "alias_skill_id": 7528,
+      "similarity": 0.8639583495296662
+    },
+    {
+      "id": 3569,
+      "master_skill_id": 2704,
+      "alias_skill_id": 8302,
+      "similarity": 0.79631588522505
+    },
+    {
+      "id": 3577,
+      "master_skill_id": 2712,
+      "alias_skill_id": 6761,
+      "similarity": 0.9213990834812197
+    },
+    {
+      "id": 3581,
+      "master_skill_id": 7310,
+      "alias_skill_id": 7670,
+      "similarity": 0.7760466644968217
+    },
+    {
+      "id": 3583,
+      "master_skill_id": 946,
+      "alias_skill_id": 8330,
+      "similarity": 0.8841065287479916
+    },
+    {
+      "id": 3585,
+      "master_skill_id": 1278,
+      "alias_skill_id": 2701,
+      "similarity": 0.9743281970305615
+    },
+    {
+      "id": 3551,
+      "master_skill_id": 882,
+      "alias_skill_id": 8266,
+      "similarity": 0.9171021617024674
+    },
+    {
+      "id": 3537,
+      "master_skill_id": 2389,
+      "alias_skill_id": 947,
+      "similarity": 0.8258772865679387
+    },
+    {
+      "id": 110,
+      "master_skill_id": 1278,
+      "alias_skill_id": 936,
+      "similarity": 0.9125090168060858
+    },
+    {
+      "id": 3472,
+      "master_skill_id": 8042,
+      "alias_skill_id": 8108,
+      "similarity": 0.9693716624929805
+    },
+    {
+      "id": 3468,
+      "master_skill_id": 8042,
+      "alias_skill_id": 1104,
+      "similarity": 0.8927354270715143
+    },
+    {
+      "id": 3529,
+      "master_skill_id": 7288,
+      "alias_skill_id": 7734,
+      "similarity": 0.860718185535716
+    },
+    {
+      "id": 3470,
+      "master_skill_id": 8042,
+      "alias_skill_id": 941,
+      "similarity": 0.91804767777917
+    },
+    {
+      "id": 3482,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7676,
+      "similarity": 0.9264183396345278
+    },
+    {
+      "id": 3549,
+      "master_skill_id": 1073,
+      "alias_skill_id": 7744,
+      "similarity": 0.8876375789555184
+    },
+    {
+      "id": 3547,
+      "master_skill_id": 1073,
+      "alias_skill_id": 6759,
+      "similarity": 0.9540009152774634
+    },
+    {
+      "id": 3561,
+      "master_skill_id": 8041,
+      "alias_skill_id": 8286,
+      "similarity": 0.8672568726288694
+    },
+    {
+      "id": 3494,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7708,
+      "similarity": 0.9141048872458865
+    },
+    {
+      "id": 2853,
+      "master_skill_id": 6079,
+      "alias_skill_id": 6035,
+      "similarity": 0.8581395812224533
+    },
+    {
+      "id": 2856,
+      "master_skill_id": 6079,
+      "alias_skill_id": 6859,
+      "similarity": 0.8889000239582595
+    },
+    {
+      "id": 124,
+      "master_skill_id": 915,
+      "alias_skill_id": 917,
+      "similarity": 0.8990521312102998
+    },
+    {
+      "id": 3460,
+      "master_skill_id": 2710,
+      "alias_skill_id": 7574,
+      "similarity": 0.9041443200592743
+    },
+    {
+      "id": 3565,
+      "master_skill_id": 2704,
+      "alias_skill_id": 7524,
+      "similarity": 0.8586709590937108
+    },
+    {
+      "id": 3567,
+      "master_skill_id": 2704,
+      "alias_skill_id": 7622,
+      "similarity": 0.8453463963755821
+    },
+    {
+      "id": 3575,
+      "master_skill_id": 2712,
+      "alias_skill_id": 924,
+      "similarity": 0.7878997757043308
+    },
+    {
+      "id": 3474,
+      "master_skill_id": 5932,
+      "alias_skill_id": 898,
+      "similarity": 0.906427531532679
+    },
+    {
+      "id": 3579,
+      "master_skill_id": 2703,
+      "alias_skill_id": 7714,
+      "similarity": 0.9129270419406093
+    },
+    {
+      "id": 4477,
+      "master_skill_id": 2703,
+      "alias_skill_id": 7718,
+      "similarity": 0.9539522756110195
+    },
+    {
+      "id": 4493,
+      "master_skill_id": 6827,
+      "alias_skill_id": 892,
+      "similarity": 0.8781422316516628
+    },
+    {
+      "id": 2246,
+      "master_skill_id": 894,
+      "alias_skill_id": 5618,
+      "similarity": 0.8770983846365421
+    },
+    {
+      "id": 270,
+      "master_skill_id": 881,
+      "alias_skill_id": 907,
+      "similarity": 0.8841159244390908
+    },
+    {
+      "id": 269,
+      "master_skill_id": 881,
+      "alias_skill_id": 906,
+      "similarity": 0.8250368050539232
+    },
+    {
+      "id": 268,
+      "master_skill_id": 881,
+      "alias_skill_id": 909,
+      "similarity": 0.9025877442110638
+    },
+    {
+      "id": 139,
+      "master_skill_id": 903,
+      "alias_skill_id": 901,
+      "similarity": 0.8432845091826559
+    },
+    {
+      "id": 142,
+      "master_skill_id": 903,
+      "alias_skill_id": 902,
+      "similarity": 0.8474705296614421
+    },
+    {
+      "id": 143,
+      "master_skill_id": 903,
+      "alias_skill_id": 899,
+      "similarity": 0.8446846476390881
+    },
+    {
+      "id": 3473,
+      "master_skill_id": 8042,
+      "alias_skill_id": 940,
+      "similarity": 0.91804767777917
+    },
+    {
+      "id": 156,
+      "master_skill_id": 1241,
+      "alias_skill_id": 895,
+      "similarity": 0.9064460317119628
+    },
+    {
+      "id": 3485,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7624,
+      "similarity": 0.9049253065032785
+    },
+    {
+      "id": 251,
+      "master_skill_id": 935,
+      "alias_skill_id": 901,
+      "similarity": 0.9560830984599019
+    },
+    {
+      "id": 285,
+      "master_skill_id": 1073,
+      "alias_skill_id": 1530,
+      "similarity": 0.8882598326639028
+    },
+    {
+      "id": 135,
+      "master_skill_id": 1108,
+      "alias_skill_id": 941,
+      "similarity": 0.9180644907589679
+    },
+    {
+      "id": 136,
+      "master_skill_id": 1108,
+      "alias_skill_id": 1106,
+      "similarity": 0.9999999608520209
+    },
+    {
+      "id": 159,
+      "master_skill_id": 1241,
+      "alias_skill_id": 938,
+      "similarity": 0.8141605761465694
+    },
+    {
+      "id": 111,
+      "master_skill_id": 947,
+      "alias_skill_id": 1060,
+      "similarity": 0.8593686381131096
+    },
+    {
+      "id": 157,
+      "master_skill_id": 1241,
+      "alias_skill_id": 892,
+      "similarity": 0.8947290576823916
+    },
+    {
+      "id": 172,
+      "master_skill_id": 934,
+      "alias_skill_id": 905,
+      "similarity": 0.8482800235736012
+    },
+    {
+      "id": 144,
+      "master_skill_id": 903,
+      "alias_skill_id": 1231,
+      "similarity": 0.9289293051918207
+    },
+    {
+      "id": 392,
+      "master_skill_id": 1823,
+      "alias_skill_id": 944,
+      "similarity": 1.0
+    },
+    {
+      "id": 283,
+      "master_skill_id": 1073,
+      "alias_skill_id": 1231,
+      "similarity": 0.9378689529377711
+    },
+    {
+      "id": 140,
+      "master_skill_id": 903,
+      "alias_skill_id": 935,
+      "similarity": 0.9346131165794288
+    },
+    {
+      "id": 176,
+      "master_skill_id": 939,
+      "alias_skill_id": 913,
+      "similarity": 0.9271932480676257
+    },
+    {
+      "id": 3441,
+      "master_skill_id": 7290,
+      "alias_skill_id": 7747,
+      "similarity": 0.7990300309950861
+    },
+    {
+      "id": 145,
+      "master_skill_id": 903,
+      "alias_skill_id": 900,
+      "similarity": 0.8138406469205867
+    },
+    {
+      "id": 141,
+      "master_skill_id": 903,
+      "alias_skill_id": 1271,
+      "similarity": 0.8943240426184326
+    },
+    {
+      "id": 393,
+      "master_skill_id": 917,
+      "alias_skill_id": 913,
+      "similarity": 0.8740190159554144
+    },
+    {
+      "id": 284,
+      "master_skill_id": 1073,
+      "alias_skill_id": 906,
+      "similarity": 0.5498597968607682
+    },
+    {
+      "id": 257,
+      "master_skill_id": 1073,
+      "alias_skill_id": 1271,
+      "similarity": 0.8892293347463485
+    },
+    {
+      "id": 403,
+      "master_skill_id": 936,
+      "alias_skill_id": 905,
+      "similarity": 0.8509235618837276
+    },
+    {
+      "id": 3443,
+      "master_skill_id": 7290,
+      "alias_skill_id": 935,
+      "similarity": 0.7656140176833702
+    },
+    {
+      "id": 3495,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2839,
+      "similarity": 0.9078187337679533
+    },
+    {
+      "id": 3445,
+      "master_skill_id": 7290,
+      "alias_skill_id": 1530,
+      "similarity": 0.8394254345220333
+    },
+    {
+      "id": 3487,
+      "master_skill_id": 2747,
+      "alias_skill_id": 892,
+      "similarity": 0.8715722030161919
+    },
+    {
+      "id": 260,
+      "master_skill_id": 936,
+      "alias_skill_id": 934,
+      "similarity": 0.9362276873423098
+    },
+    {
+      "id": 150,
+      "master_skill_id": 1073,
+      "alias_skill_id": 908,
+      "similarity": 0.728696435144342
+    },
+    {
+      "id": 3465,
+      "master_skill_id": 2710,
+      "alias_skill_id": 8094,
+      "similarity": 0.8915827455339632
+    },
+    {
+      "id": 147,
+      "master_skill_id": 1073,
+      "alias_skill_id": 907,
+      "similarity": 0.8339311463250264
+    },
+    {
+      "id": 258,
+      "master_skill_id": 936,
+      "alias_skill_id": 937,
+      "similarity": 0.9584174623528112
+    },
+    {
+      "id": 3469,
+      "master_skill_id": 8042,
+      "alias_skill_id": 1106,
+      "similarity": 0.9251268243317244
+    },
+    {
+      "id": 250,
+      "master_skill_id": 935,
+      "alias_skill_id": 900,
+      "similarity": 0.8822537661486457
+    },
+    {
+      "id": 3449,
+      "master_skill_id": 7290,
+      "alias_skill_id": 6008,
+      "similarity": 0.7951526816244485
+    },
+    {
+      "id": 3451,
+      "master_skill_id": 2710,
+      "alias_skill_id": 7526,
+      "similarity": 0.8613062728537827
+    },
+    {
+      "id": 3453,
+      "master_skill_id": 2710,
+      "alias_skill_id": 7512,
+      "similarity": 0.8910439310412708
+    },
+    {
+      "id": 3455,
+      "master_skill_id": 2710,
+      "alias_skill_id": 2709,
+      "similarity": 0.9120545701364859
+    },
+    {
+      "id": 259,
+      "master_skill_id": 936,
+      "alias_skill_id": 946,
+      "similarity": 0.874460010536546
+    },
+    {
+      "id": 3457,
+      "master_skill_id": 2710,
+      "alias_skill_id": 2779,
+      "similarity": 0.8786219981848232
+    },
+    {
+      "id": 3459,
+      "master_skill_id": 2710,
+      "alias_skill_id": 2836,
+      "similarity": 0.9030295005908973
+    },
+    {
+      "id": 3461,
+      "master_skill_id": 2710,
+      "alias_skill_id": 2707,
+      "similarity": 0.9317427713937475
+    },
+    {
+      "id": 3463,
+      "master_skill_id": 2710,
+      "alias_skill_id": 6827,
+      "similarity": 0.8659177359638277
+    },
+    {
+      "id": 3467,
+      "master_skill_id": 2710,
+      "alias_skill_id": 2702,
+      "similarity": 0.92650143442437
+    },
+    {
+      "id": 3475,
+      "master_skill_id": 5932,
+      "alias_skill_id": 949,
+      "similarity": 0.8189076589115891
+    },
+    {
+      "id": 148,
+      "master_skill_id": 1073,
+      "alias_skill_id": 881,
+      "similarity": 0.793401796253297
+    },
+    {
+      "id": 263,
+      "master_skill_id": 925,
+      "alias_skill_id": 949,
+      "similarity": 0.9325376059361687
+    },
+    {
+      "id": 3481,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7680,
+      "similarity": 0.9571024661720886
+    },
+    {
+      "id": 3483,
+      "master_skill_id": 5932,
+      "alias_skill_id": 8130,
+      "similarity": 0.7693518654659457
+    },
+    {
+      "id": 253,
+      "master_skill_id": 935,
+      "alias_skill_id": 904,
+      "similarity": 0.9193613202156108
+    },
+    {
+      "id": 262,
+      "master_skill_id": 925,
+      "alias_skill_id": 889,
+      "similarity": 0.8876740460572811
+    },
+    {
+      "id": 151,
+      "master_skill_id": 1073,
+      "alias_skill_id": 891,
+      "similarity": 0.8770443150117205
+    },
+    {
+      "id": 320,
+      "master_skill_id": 888,
+      "alias_skill_id": 901,
+      "similarity": 0.7534263902435256
+    },
+    {
+      "id": 321,
+      "master_skill_id": 888,
+      "alias_skill_id": 935,
+      "similarity": 0.8330318468285492
+    },
+    {
+      "id": 264,
+      "master_skill_id": 925,
+      "alias_skill_id": 890,
+      "similarity": 0.8746049937562506
+    },
+    {
+      "id": 158,
+      "master_skill_id": 1241,
+      "alias_skill_id": 897,
+      "similarity": 0.9523457533511388
+    },
+    {
+      "id": 3489,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7570,
+      "similarity": 0.8257205439005546
+    },
+    {
+      "id": 379,
+      "master_skill_id": 891,
+      "alias_skill_id": 886,
+      "similarity": 0.9240365664100403
+    },
+    {
+      "id": 3491,
+      "master_skill_id": 2747,
+      "alias_skill_id": 1241,
+      "similarity": 0.9027354102144307
+    },
+    {
+      "id": 289,
+      "master_skill_id": 1073,
+      "alias_skill_id": 903,
+      "similarity": 0.8899911503083309
+    },
+    {
+      "id": 146,
+      "master_skill_id": 1073,
+      "alias_skill_id": 909,
+      "similarity": 0.8423989408342722
+    },
+    {
+      "id": 304,
+      "master_skill_id": 886,
+      "alias_skill_id": 924,
+      "similarity": 0.8600989610641896
+    },
+    {
+      "id": 267,
+      "master_skill_id": 881,
+      "alias_skill_id": 908,
+      "similarity": 0.8712235913389675
+    },
+    {
+      "id": 396,
+      "master_skill_id": 917,
+      "alias_skill_id": 926,
+      "similarity": 0.8638193548896171
+    },
+    {
+      "id": 407,
+      "master_skill_id": 882,
+      "alias_skill_id": 887,
+      "similarity": 0.9413001482945164
+    },
+    {
+      "id": 3447,
+      "master_skill_id": 7290,
+      "alias_skill_id": 7594,
+      "similarity": 0.9363773479127104
+    },
+    {
+      "id": 177,
+      "master_skill_id": 939,
+      "alias_skill_id": 926,
+      "similarity": 0.8901219767099793
+    },
+    {
+      "id": 3471,
+      "master_skill_id": 8042,
+      "alias_skill_id": 2408,
+      "similarity": 0.941716615173703
+    },
+    {
+      "id": 3493,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7718,
+      "similarity": 0.8575700519194053
+    },
+    {
+      "id": 4530,
+      "master_skill_id": 2779,
+      "alias_skill_id": 887,
+      "similarity": 0.8576926138502744
+    },
+    {
+      "id": 4532,
+      "master_skill_id": 2779,
+      "alias_skill_id": 7356,
+      "similarity": 0.8562451984946765
+    },
+    {
+      "id": 4534,
+      "master_skill_id": 2779,
+      "alias_skill_id": 7646,
+      "similarity": 0.8810704974207764
+    },
+    {
+      "id": 4536,
+      "master_skill_id": 2779,
+      "alias_skill_id": 912,
+      "similarity": 0.7542778430250003
+    },
+    {
+      "id": 391,
+      "master_skill_id": 891,
+      "alias_skill_id": 897,
+      "similarity": 0.933457228503716
+    },
+    {
+      "id": 4538,
+      "master_skill_id": 2779,
+      "alias_skill_id": 8266,
+      "similarity": 0.8397120983737012
+    },
+    {
+      "id": 406,
+      "master_skill_id": 882,
+      "alias_skill_id": 898,
+      "similarity": 0.796912189507783
+    },
+    {
+      "id": 4540,
+      "master_skill_id": 2779,
+      "alias_skill_id": 882,
+      "similarity": 0.8750710259055393
+    },
+    {
+      "id": 394,
+      "master_skill_id": 917,
+      "alias_skill_id": 916,
+      "similarity": 0.9330509944397888
+    },
+    {
+      "id": 324,
+      "master_skill_id": 899,
+      "alias_skill_id": 900,
+      "similarity": 0.8950990648608018
+    },
+    {
+      "id": 277,
+      "master_skill_id": 1135,
+      "alias_skill_id": 923,
+      "similarity": 0.8721175168555536
+    },
+    {
+      "id": 254,
+      "master_skill_id": 935,
+      "alias_skill_id": 902,
+      "similarity": 0.9283036862598908
+    },
+    {
+      "id": 317,
+      "master_skill_id": 888,
+      "alias_skill_id": 1271,
+      "similarity": 0.8621931607847447
+    },
+    {
+      "id": 265,
+      "master_skill_id": 925,
+      "alias_skill_id": 896,
+      "similarity": 0.8638466931304254
+    },
+    {
+      "id": 179,
+      "master_skill_id": 920,
+      "alias_skill_id": 1423,
+      "similarity": 0.8539194637975094
+    },
+    {
+      "id": 279,
+      "master_skill_id": 1135,
+      "alias_skill_id": 892,
+      "similarity": 0.874232573757682
+    },
+    {
+      "id": 382,
+      "master_skill_id": 891,
+      "alias_skill_id": 1530,
+      "similarity": 0.894381204173422
+    },
+    {
+      "id": 395,
+      "master_skill_id": 917,
+      "alias_skill_id": 939,
+      "similarity": 0.9446371377080307
+    },
+    {
+      "id": 390,
+      "master_skill_id": 891,
+      "alias_skill_id": 888,
+      "similarity": 0.9085396996691635
+    },
+    {
+      "id": 252,
+      "master_skill_id": 935,
+      "alias_skill_id": 899,
+      "similarity": 0.8737842960620479
+    },
+    {
+      "id": 381,
+      "master_skill_id": 891,
+      "alias_skill_id": 903,
+      "similarity": 0.9175386030232177
+    },
+    {
+      "id": 118,
+      "master_skill_id": 882,
+      "alias_skill_id": 949,
+      "similarity": 0.8697327734959082
+    },
+    {
+      "id": 3506,
+      "master_skill_id": 7289,
+      "alias_skill_id": 7396,
+      "similarity": 0.826352532910436
+    },
+    {
+      "id": 3522,
+      "master_skill_id": 7288,
+      "alias_skill_id": 2755,
+      "similarity": 0.9203308067227878
+    },
+    {
+      "id": 3526,
+      "master_skill_id": 7288,
+      "alias_skill_id": 6859,
+      "similarity": 0.8616647796945593
+    },
+    {
+      "id": 3532,
+      "master_skill_id": 888,
+      "alias_skill_id": 936,
+      "similarity": 0.8351304771680687
+    },
+    {
+      "id": 2667,
+      "master_skill_id": 2704,
+      "alias_skill_id": 5942,
+      "similarity": 0.8599136668232936
+    },
+    {
+      "id": 2872,
+      "master_skill_id": 2704,
+      "alias_skill_id": 6759,
+      "similarity": 0.8199477028350767
+    },
+    {
+      "id": 3568,
+      "master_skill_id": 2704,
+      "alias_skill_id": 7534,
+      "similarity": 0.8352968954282481
+    },
+    {
+      "id": 3578,
+      "master_skill_id": 2703,
+      "alias_skill_id": 2705,
+      "similarity": 0.928957085938555
+    },
+    {
+      "id": 3586,
+      "master_skill_id": 1278,
+      "alias_skill_id": 7742,
+      "similarity": 0.909936071295229
+    },
+    {
+      "id": 3514,
+      "master_skill_id": 881,
+      "alias_skill_id": 7586,
+      "similarity": 0.8922590288551528
+    },
+    {
+      "id": 3582,
+      "master_skill_id": 2837,
+      "alias_skill_id": 7710,
+      "similarity": 0.9097569962325996
+    },
+    {
+      "id": 3550,
+      "master_skill_id": 933,
+      "alias_skill_id": 8264,
+      "similarity": 0.8612400936284148
+    },
+    {
+      "id": 3580,
+      "master_skill_id": 7310,
+      "alias_skill_id": 7330,
+      "similarity": 0.8716606504374512
+    },
+    {
+      "id": 4531,
+      "master_skill_id": 2779,
+      "alias_skill_id": 949,
+      "similarity": 0.9434183898654336
+    },
+    {
+      "id": 3530,
+      "master_skill_id": 7288,
+      "alias_skill_id": 7682,
+      "similarity": 0.9163811955617334
+    },
+    {
+      "id": 3534,
+      "master_skill_id": 2389,
+      "alias_skill_id": 7632,
+      "similarity": 0.8904078399950522
+    },
+    {
+      "id": 4533,
+      "master_skill_id": 2779,
+      "alias_skill_id": 2836,
+      "similarity": 0.9153197094363335
+    },
+    {
+      "id": 4535,
+      "master_skill_id": 2779,
+      "alias_skill_id": 1066,
+      "similarity": 0.8880316178410689
+    },
+    {
+      "id": 4537,
+      "master_skill_id": 2779,
+      "alias_skill_id": 883,
+      "similarity": 0.8483969252748322
+    },
+    {
+      "id": 4539,
+      "master_skill_id": 2779,
+      "alias_skill_id": 7708,
+      "similarity": 0.8893047616452316
+    },
+    {
+      "id": 4541,
+      "master_skill_id": 2779,
+      "alias_skill_id": 910,
+      "similarity": 0.7867549790490962
+    },
+    {
+      "id": 3570,
+      "master_skill_id": 2704,
+      "alias_skill_id": 7536,
+      "similarity": 0.7879885626976414
+    },
+    {
+      "id": 3574,
+      "master_skill_id": 2712,
+      "alias_skill_id": 7732,
+      "similarity": 0.829256608122267
+    },
+    {
+      "id": 3576,
+      "master_skill_id": 2712,
+      "alias_skill_id": 7726,
+      "similarity": 0.8419736589293136
+    },
+    {
+      "id": 3213,
+      "master_skill_id": 6827,
+      "alias_skill_id": 7439,
+      "similarity": 0.8856594627910933
+    },
+    {
+      "id": 3546,
+      "master_skill_id": 1073,
+      "alias_skill_id": 7743,
+      "similarity": 0.9476330534327703
+    },
+    {
+      "id": 3548,
+      "master_skill_id": 1073,
+      "alias_skill_id": 7546,
+      "similarity": 0.8892293347463485
+    },
+    {
+      "id": 3528,
+      "master_skill_id": 7288,
+      "alias_skill_id": 939,
+      "similarity": 0.8517443498197681
+    },
+    {
+      "id": 3524,
+      "master_skill_id": 7288,
+      "alias_skill_id": 7733,
+      "similarity": 0.9475944367789588
+    },
+    {
+      "id": 3562,
+      "master_skill_id": 8041,
+      "alias_skill_id": 945,
+      "similarity": 0.9612383269734285
+    },
+    {
+      "id": 3497,
+      "master_skill_id": 2747,
+      "alias_skill_id": 948,
+      "similarity": 0.9478989992274409
+    },
+    {
+      "id": 4395,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2701,
+      "similarity": 0.9462291758372641
+    },
+    {
+      "id": 3590,
+      "master_skill_id": 903,
+      "alias_skill_id": 6008,
+      "similarity": 0.9158939507676346
+    },
+    {
+      "id": 2259,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2837,
+      "similarity": 0.7936339112632917
+    },
+    {
+      "id": 3595,
+      "master_skill_id": 903,
+      "alias_skill_id": 7546,
+      "similarity": 0.8943240426184326
+    },
+    {
+      "id": 2925,
+      "master_skill_id": 6761,
+      "alias_skill_id": 945,
+      "similarity": 0.8661112265125733
+    },
+    {
+      "id": 2283,
+      "master_skill_id": 2704,
+      "alias_skill_id": 909,
+      "similarity": 0.8283658506915612
+    },
+    {
+      "id": 2937,
+      "master_skill_id": 6008,
+      "alias_skill_id": 904,
+      "similarity": 0.8818091558743373
+    },
+    {
+      "id": 2940,
+      "master_skill_id": 6008,
+      "alias_skill_id": 900,
+      "similarity": 0.8291158708584399
+    },
+    {
+      "id": 4655,
+      "master_skill_id": 7289,
+      "alias_skill_id": 905,
+      "similarity": 0.8254678588334481
+    },
+    {
+      "id": 4657,
+      "master_skill_id": 7289,
+      "alias_skill_id": 903,
+      "similarity": 0.8511839914047699
+    },
+    {
+      "id": 4683,
+      "master_skill_id": 1073,
+      "alias_skill_id": 902,
+      "similarity": 0.7668911509679237
+    },
+    {
+      "id": 4698,
+      "master_skill_id": 2852,
+      "alias_skill_id": 7622,
+      "similarity": 0.867786345114044
+    },
+    {
+      "id": 4700,
+      "master_skill_id": 2852,
+      "alias_skill_id": 7396,
+      "similarity": 0.8479997813665248
+    },
+    {
+      "id": 2910,
+      "master_skill_id": 6761,
+      "alias_skill_id": 5946,
+      "similarity": 0.9223298763657646
+    },
+    {
+      "id": 4704,
+      "master_skill_id": 2852,
+      "alias_skill_id": 5931,
+      "similarity": 0.8682244583384408
+    },
+    {
+      "id": 2919,
+      "master_skill_id": 6761,
+      "alias_skill_id": 886,
+      "similarity": 0.9171527437281416
+    },
+    {
+      "id": 4728,
+      "master_skill_id": 8041,
+      "alias_skill_id": 920,
+      "similarity": 0.844611921683111
+    },
+    {
+      "id": 4734,
+      "master_skill_id": 2723,
+      "alias_skill_id": 2709,
+      "similarity": 0.9110138465388773
+    },
+    {
+      "id": 4736,
+      "master_skill_id": 2723,
+      "alias_skill_id": 7616,
+      "similarity": 0.9163365134891904
+    },
+    {
+      "id": 2928,
+      "master_skill_id": 6761,
+      "alias_skill_id": 2747,
+      "similarity": 0.9250073360697031
+    },
+    {
+      "id": 2931,
+      "master_skill_id": 6761,
+      "alias_skill_id": 2712,
+      "similarity": 0.9213990834812197
+    },
+    {
+      "id": 4738,
+      "master_skill_id": 2723,
+      "alias_skill_id": 925,
+      "similarity": 0.910517706543165
+    },
+    {
+      "id": 637,
+      "master_skill_id": 1231,
+      "alias_skill_id": 901,
+      "similarity": 0.8689022929156646
+    },
+    {
+      "id": 4740,
+      "master_skill_id": 2723,
+      "alias_skill_id": 2706,
+      "similarity": 0.931886066610676
+    },
+    {
+      "id": 4742,
+      "master_skill_id": 2723,
+      "alias_skill_id": 2779,
+      "similarity": 0.9088491011644458
+    },
+    {
+      "id": 4744,
+      "master_skill_id": 2723,
+      "alias_skill_id": 1278,
+      "similarity": 0.92218848452575
+    },
+    {
+      "id": 4746,
+      "master_skill_id": 2723,
+      "alias_skill_id": 934,
+      "similarity": 0.867495862202349
+    },
+    {
+      "id": 4748,
+      "master_skill_id": 2723,
+      "alias_skill_id": 896,
+      "similarity": 0.9117809585205837
+    },
+    {
+      "id": 3600,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7714,
+      "similarity": 0.8393980203666501
+    },
+    {
+      "id": 3599,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2836,
+      "similarity": 0.8895212528702132
+    },
+    {
+      "id": 2307,
+      "master_skill_id": 5618,
+      "alias_skill_id": 894,
+      "similarity": 0.8770983846365421
+    },
+    {
+      "id": 3602,
+      "master_skill_id": 2747,
+      "alias_skill_id": 7614,
+      "similarity": 0.885652975864939
+    },
+    {
+      "id": 2674,
+      "master_skill_id": 2704,
+      "alias_skill_id": 6008,
+      "similarity": 0.8067390830672738
+    },
+    {
+      "id": 2288,
+      "master_skill_id": 2704,
+      "alias_skill_id": 881,
+      "similarity": 0.6996065365527828
+    },
+    {
+      "id": 2294,
+      "master_skill_id": 2704,
+      "alias_skill_id": 1231,
+      "similarity": 0.8247128936753346
+    },
+    {
+      "id": 2668,
+      "master_skill_id": 2704,
+      "alias_skill_id": 888,
+      "similarity": 0.8414692218996295
+    },
+    {
+      "id": 416,
+      "master_skill_id": 1231,
+      "alias_skill_id": 885,
+      "similarity": 0.8772314213669125
+    },
+    {
+      "id": 2938,
+      "master_skill_id": 6008,
+      "alias_skill_id": 902,
+      "similarity": 0.8342199404435313
+    },
+    {
+      "id": 2941,
+      "master_skill_id": 6008,
+      "alias_skill_id": 899,
+      "similarity": 0.8410584646687703
+    },
+    {
+      "id": 3063,
+      "master_skill_id": 905,
+      "alias_skill_id": 888,
+      "similarity": 0.9124899547954012
+    },
+    {
+      "id": 3698,
+      "master_skill_id": 6759,
+      "alias_skill_id": 7743,
+      "similarity": 0.9414736789874493
+    },
+    {
+      "id": 3709,
+      "master_skill_id": 881,
+      "alias_skill_id": 7594,
+      "similarity": 0.8699042299291933
+    },
+    {
+      "id": 3722,
+      "master_skill_id": 2712,
+      "alias_skill_id": 888,
+      "similarity": 0.7788220446982502
+    },
+    {
+      "id": 3729,
+      "master_skill_id": 7396,
+      "alias_skill_id": 7534,
+      "similarity": 0.8715397876907549
+    },
+    {
+      "id": 3731,
+      "master_skill_id": 7396,
+      "alias_skill_id": 8626,
+      "similarity": 0.8590226914999125
+    },
+    {
+      "id": 3749,
+      "master_skill_id": 892,
+      "alias_skill_id": 7718,
+      "similarity": 0.8570385267604556
+    },
+    {
+      "id": 3750,
+      "master_skill_id": 892,
+      "alias_skill_id": 2836,
+      "similarity": 0.8335792805340441
+    },
+    {
+      "id": 3751,
+      "master_skill_id": 892,
+      "alias_skill_id": 7714,
+      "similarity": 0.7669220651025493
+    },
+    {
+      "id": 3753,
+      "master_skill_id": 892,
+      "alias_skill_id": 7614,
+      "similarity": 0.8701205690998204
+    },
+    {
+      "id": 3754,
+      "master_skill_id": 892,
+      "alias_skill_id": 2747,
+      "similarity": 0.8715722030161919
+    },
+    {
+      "id": 3755,
+      "master_skill_id": 892,
+      "alias_skill_id": 6857,
+      "similarity": 0.8493509227399475
+    },
+    {
+      "id": 3756,
+      "master_skill_id": 892,
+      "alias_skill_id": 7708,
+      "similarity": 0.8798665272653017
+    },
+    {
+      "id": 3757,
+      "master_skill_id": 892,
+      "alias_skill_id": 2703,
+      "similarity": 0.8468133415075222
+    },
+    {
+      "id": 3758,
+      "master_skill_id": 892,
+      "alias_skill_id": 2705,
+      "similarity": 0.8401380578051433
+    },
+    {
+      "id": 3759,
+      "master_skill_id": 892,
+      "alias_skill_id": 948,
+      "similarity": 0.8690196493908212
+    },
+    {
+      "id": 3610,
+      "master_skill_id": 1278,
+      "alias_skill_id": 905,
+      "similarity": 0.8429269083127492
+    },
+    {
+      "id": 3612,
+      "master_skill_id": 1278,
+      "alias_skill_id": 2709,
+      "similarity": 0.931857612821961
+    },
+    {
+      "id": 3614,
+      "master_skill_id": 1278,
+      "alias_skill_id": 2755,
+      "similarity": 0.9121669147891724
+    },
+    {
+      "id": 3615,
+      "master_skill_id": 1278,
+      "alias_skill_id": 7356,
+      "similarity": 0.9386261000050754
+    },
+    {
+      "id": 3616,
+      "master_skill_id": 1278,
+      "alias_skill_id": 1825,
+      "similarity": 0.9407386746510001
+    },
+    {
+      "id": 3617,
+      "master_skill_id": 1278,
+      "alias_skill_id": 7502,
+      "similarity": 0.834623244463452
+    },
+    {
+      "id": 3619,
+      "master_skill_id": 1278,
+      "alias_skill_id": 6079,
+      "similarity": 0.8328013690816751
+    },
+    {
+      "id": 3620,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7512,
+      "similarity": 0.921168974838046
+    },
+    {
+      "id": 3623,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2702,
+      "similarity": 0.9023169180923469
+    },
+    {
+      "id": 3624,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7526,
+      "similarity": 0.9455267361597444
+    },
+    {
+      "id": 3626,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7574,
+      "similarity": 0.8313455418912755
+    },
+    {
+      "id": 3627,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7572,
+      "similarity": 0.8098311484128136
+    },
+    {
+      "id": 3629,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2710,
+      "similarity": 0.8945074219347292
+    },
+    {
+      "id": 3630,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7616,
+      "similarity": 0.8823277851456173
+    },
+    {
+      "id": 3631,
+      "master_skill_id": 1066,
+      "alias_skill_id": 949,
+      "similarity": 0.8694763430050219
+    },
+    {
+      "id": 3632,
+      "master_skill_id": 1066,
+      "alias_skill_id": 5942,
+      "similarity": 0.8879775323201682
+    },
+    {
+      "id": 3633,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2779,
+      "similarity": 0.8880316178410689
+    },
+    {
+      "id": 3634,
+      "master_skill_id": 1066,
+      "alias_skill_id": 5946,
+      "similarity": 0.9311217902130124
+    },
+    {
+      "id": 3635,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7536,
+      "similarity": 0.8511630090081892
+    },
+    {
+      "id": 3637,
+      "master_skill_id": 1066,
+      "alias_skill_id": 7755,
+      "similarity": 0.8220363855166891
+    },
+    {
+      "id": 3639,
+      "master_skill_id": 1066,
+      "alias_skill_id": 3667,
+      "similarity": 0.803357502669669
+    },
+    {
+      "id": 3652,
+      "master_skill_id": 950,
+      "alias_skill_id": 7636,
+      "similarity": 0.8648432732121014
+    },
+    {
+      "id": 3643,
+      "master_skill_id": 897,
+      "alias_skill_id": 5931,
+      "similarity": 0.9544067974408812
+    },
+    {
+      "id": 3644,
+      "master_skill_id": 897,
+      "alias_skill_id": 891,
+      "similarity": 0.933457228503716
+    },
+    {
+      "id": 3646,
+      "master_skill_id": 897,
+      "alias_skill_id": 898,
+      "similarity": 0.9004152398220473
+    },
+    {
+      "id": 3647,
+      "master_skill_id": 897,
+      "alias_skill_id": 7680,
+      "similarity": 0.924743891795222
+    },
+    {
+      "id": 3648,
+      "master_skill_id": 897,
+      "alias_skill_id": 7624,
+      "similarity": 0.8945999081447857
+    },
+    {
+      "id": 3649,
+      "master_skill_id": 897,
+      "alias_skill_id": 8462,
+      "similarity": 0.891072753472007
+    },
+    {
+      "id": 3650,
+      "master_skill_id": 897,
+      "alias_skill_id": 7676,
+      "similarity": 0.9328097592526091
+    },
+    {
+      "id": 3651,
+      "master_skill_id": 897,
+      "alias_skill_id": 5932,
+      "similarity": 0.9560456608791705
+    },
+    {
+      "id": 3667,
+      "master_skill_id": 929,
+      "alias_skill_id": 7682,
+      "similarity": 0.8595192369430733
+    },
+    {
+      "id": 3653,
+      "master_skill_id": 950,
+      "alias_skill_id": 4258,
+      "similarity": 0.8231489302382349
+    },
+    {
+      "id": 3654,
+      "master_skill_id": 950,
+      "alias_skill_id": 7642,
+      "similarity": 0.8254255676263056
+    },
+    {
+      "id": 3656,
+      "master_skill_id": 907,
+      "alias_skill_id": 7620,
+      "similarity": 0.7959757978490081
+    },
+    {
+      "id": 3657,
+      "master_skill_id": 907,
+      "alias_skill_id": 925,
+      "similarity": 0.7468324252691184
+    },
+    {
+      "id": 3658,
+      "master_skill_id": 907,
+      "alias_skill_id": 6758,
+      "similarity": 0.8747540110124856
+    },
+    {
+      "id": 3660,
+      "master_skill_id": 921,
+      "alias_skill_id": 7528,
+      "similarity": 0.8795554818914424
+    },
+    {
+      "id": 3661,
+      "master_skill_id": 921,
+      "alias_skill_id": 8130,
+      "similarity": 0.9030771877829535
+    },
+    {
+      "id": 3664,
+      "master_skill_id": 882,
+      "alias_skill_id": 7646,
+      "similarity": 0.9422303630839319
+    },
+    {
+      "id": 3607,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2705,
+      "similarity": 0.9458553242647142
+    },
+    {
+      "id": 3699,
+      "master_skill_id": 6759,
+      "alias_skill_id": 7744,
+      "similarity": 0.9136833652599048
+    },
+    {
+      "id": 3668,
+      "master_skill_id": 8041,
+      "alias_skill_id": 8330,
+      "similarity": 0.9621104723754896
+    },
+    {
+      "id": 3677,
+      "master_skill_id": 909,
+      "alias_skill_id": 7310,
+      "similarity": 0.9010679441605545
+    },
+    {
+      "id": 3678,
+      "master_skill_id": 909,
+      "alias_skill_id": 7289,
+      "similarity": 0.9220156149189697
+    },
+    {
+      "id": 3679,
+      "master_skill_id": 909,
+      "alias_skill_id": 7330,
+      "similarity": 0.7934610652920875
+    },
+    {
+      "id": 3680,
+      "master_skill_id": 909,
+      "alias_skill_id": 7290,
+      "similarity": 0.9066179649275115
+    },
+    {
+      "id": 3733,
+      "master_skill_id": 2355,
+      "alias_skill_id": 8630,
+      "similarity": 0.9009551977979314
+    },
+    {
+      "id": 4656,
+      "master_skill_id": 7289,
+      "alias_skill_id": 7290,
+      "similarity": 0.9453135284377604
+    },
+    {
+      "id": 3693,
+      "master_skill_id": 1073,
+      "alias_skill_id": 884,
+      "similarity": 0.7647482469409664
+    },
+    {
+      "id": 3694,
+      "master_skill_id": 1073,
+      "alias_skill_id": 8174,
+      "similarity": 0.8134078243022561
+    },
+    {
+      "id": 3695,
+      "master_skill_id": 1073,
+      "alias_skill_id": 885,
+      "similarity": 0.7943015529544963
+    },
+    {
+      "id": 3696,
+      "master_skill_id": 1073,
+      "alias_skill_id": 8556,
+      "similarity": 0.759008455647129
+    },
+    {
+      "id": 3670,
+      "master_skill_id": 8041,
+      "alias_skill_id": 6859,
+      "similarity": 0.8730017561424934
+    },
+    {
+      "id": 3704,
+      "master_skill_id": 6761,
+      "alias_skill_id": 8572,
+      "similarity": 0.8086551260808797
+    },
+    {
+      "id": 3705,
+      "master_skill_id": 6761,
+      "alias_skill_id": 7722,
+      "similarity": 0.7050545065238526
+    },
+    {
+      "id": 3706,
+      "master_skill_id": 6761,
+      "alias_skill_id": 919,
+      "similarity": 0.6484429307933606
+    },
+    {
+      "id": 3707,
+      "master_skill_id": 6761,
+      "alias_skill_id": 1423,
+      "similarity": 0.8049221527562407
+    },
+    {
+      "id": 4699,
+      "master_skill_id": 2852,
+      "alias_skill_id": 5942,
+      "similarity": 0.8868429349327577
+    },
+    {
+      "id": 3717,
+      "master_skill_id": 2704,
+      "alias_skill_id": 8598,
+      "similarity": 0.962984567074348
+    },
+    {
+      "id": 3724,
+      "master_skill_id": 1060,
+      "alias_skill_id": 8214,
+      "similarity": 0.8904101879989906
+    },
+    {
+      "id": 3606,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2703,
+      "similarity": 0.9186264814813955
+    },
+    {
+      "id": 3732,
+      "master_skill_id": 2701,
+      "alias_skill_id": 7742,
+      "similarity": 0.9426977749028908
+    },
+    {
+      "id": 3603,
+      "master_skill_id": 2747,
+      "alias_skill_id": 6857,
+      "similarity": 0.837884456002501
+    },
+    {
+      "id": 3691,
+      "master_skill_id": 8042,
+      "alias_skill_id": 1108,
+      "similarity": 0.9251268243317244
+    },
+    {
+      "id": 3703,
+      "master_skill_id": 6761,
+      "alias_skill_id": 920,
+      "similarity": 0.8902318475144445
+    },
+    {
+      "id": 3727,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7747,
+      "similarity": 0.9650474205461361
+    },
+    {
+      "id": 3713,
+      "master_skill_id": 2708,
+      "alias_skill_id": 8590,
+      "similarity": 0.8445374250724327
+    },
+    {
+      "id": 3692,
+      "master_skill_id": 1073,
+      "alias_skill_id": 7678,
+      "similarity": 0.8670913845797074
+    },
+    {
+      "id": 3642,
+      "master_skill_id": 895,
+      "alias_skill_id": 7570,
+      "similarity": 0.9562465642586108
+    },
+    {
+      "id": 3641,
+      "master_skill_id": 895,
+      "alias_skill_id": 7560,
+      "similarity": 0.9758519013191856
+    },
+    {
+      "id": 4658,
+      "master_skill_id": 7289,
+      "alias_skill_id": 904,
+      "similarity": 0.7585832549779798
+    },
+    {
+      "id": 4660,
+      "master_skill_id": 7289,
+      "alias_skill_id": 9116,
+      "similarity": 0.8382091653741418
+    },
+    {
+      "id": 4662,
+      "master_skill_id": 7289,
+      "alias_skill_id": 7600,
+      "similarity": 0.9438753471591805
+    },
+    {
+      "id": 3736,
+      "master_skill_id": 947,
+      "alias_skill_id": 8302,
+      "similarity": 0.9046763961956317
+    },
+    {
+      "id": 4701,
+      "master_skill_id": 2852,
+      "alias_skill_id": 7524,
+      "similarity": 0.8764902950430472
+    },
+    {
+      "id": 4703,
+      "master_skill_id": 2852,
+      "alias_skill_id": 2707,
+      "similarity": 0.8653703463514544
+    },
+    {
+      "id": 4705,
+      "master_skill_id": 2852,
+      "alias_skill_id": 949,
+      "similarity": 0.8300429015734785
+    },
+    {
+      "id": 3669,
+      "master_skill_id": 8041,
+      "alias_skill_id": 7670,
+      "similarity": 0.9132406164719871
+    },
+    {
+      "id": 560,
+      "master_skill_id": 1271,
+      "alias_skill_id": 900,
+      "similarity": 0.8407031505630408
+    },
+    {
+      "id": 559,
+      "master_skill_id": 1271,
+      "alias_skill_id": 899,
+      "similarity": 0.8344009341508812
+    },
+    {
+      "id": 436,
+      "master_skill_id": 1231,
+      "alias_skill_id": 881,
+      "similarity": 0.8335804002963761
+    },
+    {
+      "id": 561,
+      "master_skill_id": 1271,
+      "alias_skill_id": 902,
+      "similarity": 0.8506348482623983
+    },
+    {
+      "id": 580,
+      "master_skill_id": 937,
+      "alias_skill_id": 905,
+      "similarity": 0.8635275495214126
+    },
+    {
+      "id": 579,
+      "master_skill_id": 937,
+      "alias_skill_id": 936,
+      "similarity": 0.9584174623528112
+    },
+    {
+      "id": 667,
+      "master_skill_id": 2408,
+      "alias_skill_id": 1108,
+      "similarity": 0.8997683050759296
+    },
+    {
+      "id": 445,
+      "master_skill_id": 1825,
+      "alias_skill_id": 946,
+      "similarity": 0.8516791051698972
+    },
+    {
+      "id": 448,
+      "master_skill_id": 1825,
+      "alias_skill_id": 1278,
+      "similarity": 0.9407386746510001
+    },
+    {
+      "id": 4739,
+      "master_skill_id": 2723,
+      "alias_skill_id": 890,
+      "similarity": 0.8607931466225983
+    },
+    {
+      "id": 479,
+      "master_skill_id": 888,
+      "alias_skill_id": 905,
+      "similarity": 0.9124899547954012
+    },
+    {
+      "id": 700,
+      "master_skill_id": 945,
+      "alias_skill_id": 920,
+      "similarity": 0.8511690812737748
+    },
+    {
+      "id": 738,
+      "master_skill_id": 907,
+      "alias_skill_id": 890,
+      "similarity": 0.8461994578752202
+    },
+    {
+      "id": 676,
+      "master_skill_id": 921,
+      "alias_skill_id": 923,
+      "similarity": 0.858411486074057
+    },
+    {
+      "id": 3849,
+      "master_skill_id": 7743,
+      "alias_skill_id": 6759,
+      "similarity": 0.9414736789874493
+    },
+    {
+      "id": 3859,
+      "master_skill_id": 908,
+      "alias_skill_id": 7586,
+      "similarity": 0.9633577322756107
+    },
+    {
+      "id": 3860,
+      "master_skill_id": 908,
+      "alias_skill_id": 7594,
+      "similarity": 0.8934602442390254
+    },
+    {
+      "id": 3862,
+      "master_skill_id": 908,
+      "alias_skill_id": 881,
+      "similarity": 0.8712235913389675
+    },
+    {
+      "id": 3869,
+      "master_skill_id": 886,
+      "alias_skill_id": 7726,
+      "similarity": 0.9176374176204266
+    },
+    {
+      "id": 434,
+      "master_skill_id": 1231,
+      "alias_skill_id": 906,
+      "similarity": 0.5500769755664638
+    },
+    {
+      "id": 4741,
+      "master_skill_id": 2723,
+      "alias_skill_id": 6758,
+      "similarity": 0.9242047014032028
+    },
+    {
+      "id": 3870,
+      "master_skill_id": 886,
+      "alias_skill_id": 7732,
+      "similarity": 0.9346633575586635
+    },
+    {
+      "id": 3872,
+      "master_skill_id": 886,
+      "alias_skill_id": 888,
+      "similarity": 0.8542731729219498
+    },
+    {
+      "id": 713,
+      "master_skill_id": 1530,
+      "alias_skill_id": 903,
+      "similarity": 0.973434486572623
+    },
+    {
+      "id": 3873,
+      "master_skill_id": 886,
+      "alias_skill_id": 2712,
+      "similarity": 0.8804454614499075
+    },
+    {
+      "id": 552,
+      "master_skill_id": 1825,
+      "alias_skill_id": 1530,
+      "similarity": 0.8741634241184832
+    },
+    {
+      "id": 3880,
+      "master_skill_id": 7622,
+      "alias_skill_id": 7396,
+      "similarity": 0.9224237984882948
+    },
+    {
+      "id": 446,
+      "master_skill_id": 1825,
+      "alias_skill_id": 937,
+      "similarity": 0.908632923235628
+    },
+    {
+      "id": 709,
+      "master_skill_id": 1530,
+      "alias_skill_id": 904,
+      "similarity": 0.8671708734416508
+    },
+    {
+      "id": 3881,
+      "master_skill_id": 7622,
+      "alias_skill_id": 7534,
+      "similarity": 0.9292994218397568
+    },
+    {
+      "id": 557,
+      "master_skill_id": 1825,
+      "alias_skill_id": 903,
+      "similarity": 0.8886247422989746
+    },
+    {
+      "id": 4743,
+      "master_skill_id": 2723,
+      "alias_skill_id": 7526,
+      "similarity": 0.8924268577251052
+    },
+    {
+      "id": 168,
+      "master_skill_id": 915,
+      "alias_skill_id": 923,
+      "similarity": 0.8251107176383539
+    },
+    {
+      "id": 809,
+      "master_skill_id": 2712,
+      "alias_skill_id": 886,
+      "similarity": 0.8804454614499075
+    },
+    {
+      "id": 576,
+      "master_skill_id": 944,
+      "alias_skill_id": 1823,
+      "similarity": 0.7961686186963897
+    },
+    {
+      "id": 3882,
+      "master_skill_id": 7622,
+      "alias_skill_id": 8626,
+      "similarity": 0.7523058824244535
+    },
+    {
+      "id": 573,
+      "master_skill_id": 909,
+      "alias_skill_id": 907,
+      "similarity": 0.9747140687777465
+    },
+    {
+      "id": 4745,
+      "master_skill_id": 2723,
+      "alias_skill_id": 889,
+      "similarity": 0.9084961224939568
+    },
+    {
+      "id": 577,
+      "master_skill_id": 937,
+      "alias_skill_id": 946,
+      "similarity": 0.8835592632683104
+    },
+    {
+      "id": 578,
+      "master_skill_id": 937,
+      "alias_skill_id": 934,
+      "similarity": 0.9508149787507763
+    },
+    {
+      "id": 574,
+      "master_skill_id": 909,
+      "alias_skill_id": 908,
+      "similarity": 0.8839748751249098
+    },
+    {
+      "id": 572,
+      "master_skill_id": 909,
+      "alias_skill_id": 906,
+      "similarity": 0.7676233943272295
+    },
+    {
+      "id": 544,
+      "master_skill_id": 1231,
+      "alias_skill_id": 898,
+      "similarity": 0.8667963006305609
+    },
+    {
+      "id": 638,
+      "master_skill_id": 1231,
+      "alias_skill_id": 888,
+      "similarity": 0.8993463497554731
+    },
+    {
+      "id": 435,
+      "master_skill_id": 1231,
+      "alias_skill_id": 907,
+      "similarity": 0.8392608345753372
+    },
+    {
+      "id": 428,
+      "master_skill_id": 947,
+      "alias_skill_id": 1823,
+      "similarity": 0.8426326923576646
+    },
+    {
+      "id": 4719,
+      "master_skill_id": 4258,
+      "alias_skill_id": 7640,
+      "similarity": 0.9325256782683014
+    },
+    {
+      "id": 558,
+      "master_skill_id": 1271,
+      "alias_skill_id": 901,
+      "similarity": 0.9208378459715499
+    },
+    {
+      "id": 4721,
+      "master_skill_id": 2389,
+      "alias_skill_id": 1060,
+      "similarity": 0.9445061776901272
+    },
+    {
+      "id": 447,
+      "master_skill_id": 1825,
+      "alias_skill_id": 936,
+      "similarity": 0.8914012654604891
+    },
+    {
+      "id": 562,
+      "master_skill_id": 1271,
+      "alias_skill_id": 935,
+      "similarity": 0.9387984580707244
+    },
+    {
+      "id": 443,
+      "master_skill_id": 1825,
+      "alias_skill_id": 934,
+      "similarity": 0.9154268265857256
+    },
+    {
+      "id": 442,
+      "master_skill_id": 1231,
+      "alias_skill_id": 908,
+      "similarity": 0.7302245857707048
+    },
+    {
+      "id": 4729,
+      "master_skill_id": 8041,
+      "alias_skill_id": 5946,
+      "similarity": 0.9016124935690487
+    },
+    {
+      "id": 539,
+      "master_skill_id": 939,
+      "alias_skill_id": 916,
+      "similarity": 0.9010112632268588
+    },
+    {
+      "id": 541,
+      "master_skill_id": 939,
+      "alias_skill_id": 917,
+      "similarity": 0.9446371377080307
+    },
+    {
+      "id": 444,
+      "master_skill_id": 1825,
+      "alias_skill_id": 949,
+      "similarity": 0.8734208694684863
+    },
+    {
+      "id": 4733,
+      "master_skill_id": 2723,
+      "alias_skill_id": 1825,
+      "similarity": 0.8945219637284116
+    },
+    {
+      "id": 665,
+      "master_skill_id": 2408,
+      "alias_skill_id": 1104,
+      "similarity": 0.9005644620090064
+    },
+    {
+      "id": 664,
+      "master_skill_id": 2408,
+      "alias_skill_id": 940,
+      "similarity": 0.9271961623474944
+    },
+    {
+      "id": 666,
+      "master_skill_id": 2408,
+      "alias_skill_id": 1106,
+      "similarity": 0.8997683050759296
+    },
+    {
+      "id": 4735,
+      "master_skill_id": 2723,
+      "alias_skill_id": 2710,
+      "similarity": 0.8961478157690629
+    },
+    {
+      "id": 575,
+      "master_skill_id": 909,
+      "alias_skill_id": 881,
+      "similarity": 0.9025877442110638
+    },
+    {
+      "id": 543,
+      "master_skill_id": 1060,
+      "alias_skill_id": 942,
+      "similarity": 0.8826148467600194
+    },
+    {
+      "id": 653,
+      "master_skill_id": 1060,
+      "alias_skill_id": 2389,
+      "similarity": 0.9445061776901272
+    },
+    {
+      "id": 4737,
+      "master_skill_id": 2723,
+      "alias_skill_id": 2702,
+      "similarity": 0.8823913069120956
+    },
+    {
+      "id": 4747,
+      "master_skill_id": 2723,
+      "alias_skill_id": 7512,
+      "similarity": 0.8860251483267035
+    },
+    {
+      "id": 4749,
+      "master_skill_id": 2723,
+      "alias_skill_id": 7620,
+      "similarity": 0.8963363503139414
+    },
+    {
+      "id": 710,
+      "master_skill_id": 1530,
+      "alias_skill_id": 902,
+      "similarity": 0.8347441070547972
+    },
+    {
+      "id": 715,
+      "master_skill_id": 1530,
+      "alias_skill_id": 900,
+      "similarity": 0.8323300831337239
+    },
+    {
+      "id": 714,
+      "master_skill_id": 1530,
+      "alias_skill_id": 935,
+      "similarity": 0.9350645856281958
+    },
+    {
+      "id": 711,
+      "master_skill_id": 1530,
+      "alias_skill_id": 1271,
+      "similarity": 0.8893826273037853
+    },
+    {
+      "id": 712,
+      "master_skill_id": 1530,
+      "alias_skill_id": 899,
+      "similarity": 0.7926904225523261
+    },
+    {
+      "id": 437,
+      "master_skill_id": 1231,
+      "alias_skill_id": 1530,
+      "similarity": 0.927556845621139
+    },
+    {
+      "id": 421,
+      "master_skill_id": 895,
+      "alias_skill_id": 892,
+      "similarity": 0.8737009849691253
+    },
+    {
+      "id": 739,
+      "master_skill_id": 907,
+      "alias_skill_id": 889,
+      "similarity": 0.752606984900735
+    },
+    {
+      "id": 740,
+      "master_skill_id": 907,
+      "alias_skill_id": 896,
+      "similarity": 0.7259060946424977
+    },
+    {
+      "id": 815,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2747,
+      "similarity": 0.9596560849004883
+    },
+    {
+      "id": 812,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2705,
+      "similarity": 0.8996713234473126
+    },
+    {
+      "id": 800,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2711,
+      "similarity": 0.8887868875632695
+    },
+    {
+      "id": 474,
+      "master_skill_id": 935,
+      "alias_skill_id": 1271,
+      "similarity": 0.9387984580707244
+    },
+    {
+      "id": 3892,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1278,
+      "similarity": 0.8401106219750689
+    },
+    {
+      "id": 3893,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7574,
+      "similarity": 0.7765670587018934
+    },
+    {
+      "id": 4757,
+      "master_skill_id": 2747,
+      "alias_skill_id": 8266,
+      "similarity": 0.7898137889889764
+    },
+    {
+      "id": 4765,
+      "master_skill_id": 2747,
+      "alias_skill_id": 2711,
+      "similarity": 0.8856655221412588
+    },
+    {
+      "id": 2939,
+      "master_skill_id": 6008,
+      "alias_skill_id": 935,
+      "similarity": 0.9114482898915093
+    },
+    {
+      "id": 2942,
+      "master_skill_id": 6008,
+      "alias_skill_id": 1271,
+      "similarity": 0.9056586312630119
+    },
+    {
+      "id": 817,
+      "master_skill_id": 2712,
+      "alias_skill_id": 948,
+      "similarity": 0.8955094404556488
+    },
+    {
+      "id": 2700,
+      "master_skill_id": 920,
+      "alias_skill_id": 945,
+      "similarity": 0.8511690812737748
+    },
+    {
+      "id": 2703,
+      "master_skill_id": 890,
+      "alias_skill_id": 925,
+      "similarity": 0.8746049937562506
+    },
+    {
+      "id": 818,
+      "master_skill_id": 2712,
+      "alias_skill_id": 1278,
+      "similarity": 0.9382418353312659
+    },
+    {
+      "id": 824,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2701,
+      "similarity": 0.9458044924626384
+    },
+    {
+      "id": 2970,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1073,
+      "similarity": 0.894883331533173
+    },
+    {
+      "id": 836,
+      "master_skill_id": 920,
+      "alias_skill_id": 917,
+      "similarity": 0.8348270274851263
+    },
+    {
+      "id": 2955,
+      "master_skill_id": 5942,
+      "alias_skill_id": 889,
+      "similarity": 0.9275229291285245
+    },
+    {
+      "id": 2958,
+      "master_skill_id": 5942,
+      "alias_skill_id": 2729,
+      "similarity": 0.9066670047601777
+    },
+    {
+      "id": 3895,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1825,
+      "similarity": 0.8105230758169403
+    },
+    {
+      "id": 3896,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7622,
+      "similarity": 0.8004796456345299
+    },
+    {
+      "id": 4771,
+      "master_skill_id": 923,
+      "alias_skill_id": 8130,
+      "similarity": 0.9071145735636328
+    },
+    {
+      "id": 2976,
+      "master_skill_id": 898,
+      "alias_skill_id": 2836,
+      "similarity": 0.9128987412175311
+    },
+    {
+      "id": 2964,
+      "master_skill_id": 6760,
+      "alias_skill_id": 909,
+      "similarity": 0.8434905078843751
+    },
+    {
+      "id": 2967,
+      "master_skill_id": 6760,
+      "alias_skill_id": 907,
+      "similarity": 0.8352411410365985
+    },
+    {
+      "id": 3899,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7733,
+      "similarity": 0.7654255307612062
+    },
+    {
+      "id": 3901,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2709,
+      "similarity": 0.8676861483944217
+    },
+    {
+      "id": 3905,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2710,
+      "similarity": 0.8116526382316954
+    },
+    {
+      "id": 3906,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2839,
+      "similarity": 0.7532993919456432
+    },
+    {
+      "id": 3909,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7616,
+      "similarity": 0.7967115487200723
+    },
+    {
+      "id": 3910,
+      "master_skill_id": 6760,
+      "alias_skill_id": 934,
+      "similarity": 0.74400206850424
+    },
+    {
+      "id": 3911,
+      "master_skill_id": 6760,
+      "alias_skill_id": 896,
+      "similarity": 0.7624014120743186
+    },
+    {
+      "id": 3912,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2702,
+      "similarity": 0.8492459661872531
+    },
+    {
+      "id": 3914,
+      "master_skill_id": 6760,
+      "alias_skill_id": 9002,
+      "similarity": 0.7497421328100349
+    },
+    {
+      "id": 3916,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7290,
+      "similarity": 0.8673746839766806
+    },
+    {
+      "id": 3919,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7682,
+      "similarity": 0.7702956629926171
+    },
+    {
+      "id": 3920,
+      "master_skill_id": 6760,
+      "alias_skill_id": 949,
+      "similarity": 0.8148524595098411
+    },
+    {
+      "id": 3922,
+      "master_skill_id": 6760,
+      "alias_skill_id": 3667,
+      "similarity": 0.6779469892065194
+    },
+    {
+      "id": 2683,
+      "master_skill_id": 6079,
+      "alias_skill_id": 937,
+      "similarity": 0.8776896792902316
+    },
+    {
+      "id": 2686,
+      "master_skill_id": 6079,
+      "alias_skill_id": 905,
+      "similarity": 0.7985529715408974
+    },
+    {
+      "id": 3933,
+      "master_skill_id": 2705,
+      "alias_skill_id": 2836,
+      "similarity": 0.9011592033303792
+    },
+    {
+      "id": 3937,
+      "master_skill_id": 2705,
+      "alias_skill_id": 882,
+      "similarity": 0.9026076472507627
+    },
+    {
+      "id": 3939,
+      "master_skill_id": 2705,
+      "alias_skill_id": 7646,
+      "similarity": 0.8175056390237545
+    },
+    {
+      "id": 3942,
+      "master_skill_id": 1241,
+      "alias_skill_id": 7614,
+      "similarity": 0.87951854617571
+    },
+    {
+      "id": 3943,
+      "master_skill_id": 1241,
+      "alias_skill_id": 2747,
+      "similarity": 0.9027354102144307
+    },
+    {
+      "id": 3945,
+      "master_skill_id": 1241,
+      "alias_skill_id": 1135,
+      "similarity": 0.8289241841483818
+    },
+    {
+      "id": 3949,
+      "master_skill_id": 1241,
+      "alias_skill_id": 6827,
+      "similarity": 0.8956935996884108
+    },
+    {
+      "id": 3950,
+      "master_skill_id": 1241,
+      "alias_skill_id": 1136,
+      "similarity": 0.7585340096443695
+    },
+    {
+      "id": 3956,
+      "master_skill_id": 2711,
+      "alias_skill_id": 7710,
+      "similarity": 0.8440524462052096
+    },
+    {
+      "id": 3936,
+      "master_skill_id": 2705,
+      "alias_skill_id": 7718,
+      "similarity": 0.8788054729233229
+    },
+    {
+      "id": 3931,
+      "master_skill_id": 2705,
+      "alias_skill_id": 7714,
+      "similarity": 0.8657510905105603
+    },
+    {
+      "id": 3938,
+      "master_skill_id": 2705,
+      "alias_skill_id": 6857,
+      "similarity": 0.8312445283781446
+    },
+    {
+      "id": 3934,
+      "master_skill_id": 2705,
+      "alias_skill_id": 948,
+      "similarity": 0.9745684574623301
+    },
+    {
+      "id": 3935,
+      "master_skill_id": 2705,
+      "alias_skill_id": 2703,
+      "similarity": 0.928957085938555
+    },
+    {
+      "id": 1041,
+      "master_skill_id": 1823,
+      "alias_skill_id": 943,
+      "similarity": 0.8574036020190093
+    },
+    {
+      "id": 1159,
+      "master_skill_id": 882,
+      "alias_skill_id": 2703,
+      "similarity": 0.8659043471585443
+    },
+    {
+      "id": 1099,
+      "master_skill_id": 2706,
+      "alias_skill_id": 890,
+      "similarity": 0.8887593875686202
+    },
+    {
+      "id": 1104,
+      "master_skill_id": 2706,
+      "alias_skill_id": 925,
+      "similarity": 0.8943575257298523
+    },
+    {
+      "id": 1098,
+      "master_skill_id": 2706,
+      "alias_skill_id": 896,
+      "similarity": 0.852618508046614
+    },
+    {
+      "id": 860,
+      "master_skill_id": 2836,
+      "alias_skill_id": 2837,
+      "similarity": 0.8724137610345474
+    },
+    {
+      "id": 861,
+      "master_skill_id": 2836,
+      "alias_skill_id": 2839,
+      "similarity": 0.8998677572433278
+    },
+    {
+      "id": 862,
+      "master_skill_id": 2836,
+      "alias_skill_id": 949,
+      "similarity": 0.9218978548138922
+    },
+    {
+      "id": 863,
+      "master_skill_id": 2836,
+      "alias_skill_id": 898,
+      "similarity": 0.9128987412175311
+    },
+    {
+      "id": 881,
+      "master_skill_id": 910,
+      "alias_skill_id": 883,
+      "similarity": 0.8677440510324307
+    },
+    {
+      "id": 4774,
+      "master_skill_id": 923,
+      "alias_skill_id": 7439,
+      "similarity": 0.8805749764512372
+    },
+    {
+      "id": 870,
+      "master_skill_id": 1073,
+      "alias_skill_id": 935,
+      "similarity": 0.8513412665124165
+    },
+    {
+      "id": 3958,
+      "master_skill_id": 7310,
+      "alias_skill_id": 909,
+      "similarity": 0.9010679441605545
+    },
+    {
+      "id": 3959,
+      "master_skill_id": 7310,
+      "alias_skill_id": 907,
+      "similarity": 0.9137210148414946
+    },
+    {
+      "id": 3960,
+      "master_skill_id": 7356,
+      "alias_skill_id": 905,
+      "similarity": 0.8616303940603453
+    },
+    {
+      "id": 3961,
+      "master_skill_id": 7356,
+      "alias_skill_id": 936,
+      "similarity": 0.8802564067463631
+    },
+    {
+      "id": 3962,
+      "master_skill_id": 7356,
+      "alias_skill_id": 7594,
+      "similarity": 0.7450664662806323
+    },
+    {
+      "id": 3963,
+      "master_skill_id": 7356,
+      "alias_skill_id": 937,
+      "similarity": 0.8608622414147356
+    },
+    {
+      "id": 3964,
+      "master_skill_id": 7356,
+      "alias_skill_id": 888,
+      "similarity": 0.8705692411524962
+    },
+    {
+      "id": 3965,
+      "master_skill_id": 1530,
+      "alias_skill_id": 933,
+      "similarity": 0.8580127570645977
+    },
+    {
+      "id": 3966,
+      "master_skill_id": 1530,
+      "alias_skill_id": 7502,
+      "similarity": 0.8164434306090893
+    },
+    {
+      "id": 3967,
+      "master_skill_id": 1530,
+      "alias_skill_id": 8264,
+      "similarity": 0.5726070341288237
+    },
+    {
+      "id": 3968,
+      "master_skill_id": 1530,
+      "alias_skill_id": 7660,
+      "similarity": 0.7097869474355738
+    },
+    {
+      "id": 3969,
+      "master_skill_id": 1530,
+      "alias_skill_id": 915,
+      "similarity": 0.8415913395994946
+    },
+    {
+      "id": 3970,
+      "master_skill_id": 8952,
+      "alias_skill_id": 7586,
+      "similarity": 0.8425185781113614
+    },
+    {
+      "id": 3971,
+      "master_skill_id": 8952,
+      "alias_skill_id": 9116,
+      "similarity": 0.8701644827198185
+    },
+    {
+      "id": 3972,
+      "master_skill_id": 8952,
+      "alias_skill_id": 906,
+      "similarity": 0.7263038960471991
+    },
+    {
+      "id": 3973,
+      "master_skill_id": 8952,
+      "alias_skill_id": 881,
+      "similarity": 0.8523509678475065
+    },
+    {
+      "id": 3974,
+      "master_skill_id": 8952,
+      "alias_skill_id": 908,
+      "similarity": 0.8389517266568486
+    },
+    {
+      "id": 3975,
+      "master_skill_id": 1231,
+      "alias_skill_id": 5931,
+      "similarity": 0.8802088779189355
+    },
+    {
+      "id": 3976,
+      "master_skill_id": 1231,
+      "alias_skill_id": 8302,
+      "similarity": 0.8213273771259975
+    },
+    {
+      "id": 3978,
+      "master_skill_id": 1231,
+      "alias_skill_id": 7534,
+      "similarity": 0.8688253589935425
+    },
+    {
+      "id": 3980,
+      "master_skill_id": 1231,
+      "alias_skill_id": 8462,
+      "similarity": 0.826511830130075
+    },
+    {
+      "id": 3981,
+      "master_skill_id": 1231,
+      "alias_skill_id": 7524,
+      "similarity": 0.8224043492943413
+    },
+    {
+      "id": 3982,
+      "master_skill_id": 1231,
+      "alias_skill_id": 7396,
+      "similarity": 0.86680234366163
+    },
+    {
+      "id": 3983,
+      "master_skill_id": 1231,
+      "alias_skill_id": 7676,
+      "similarity": 0.7977385681595528
+    },
+    {
+      "id": 3984,
+      "master_skill_id": 1231,
+      "alias_skill_id": 7624,
+      "similarity": 0.8837859616688674
+    },
+    {
+      "id": 3985,
+      "master_skill_id": 1231,
+      "alias_skill_id": 2852,
+      "similarity": 0.828933136308541
+    },
+    {
+      "id": 1177,
+      "master_skill_id": 896,
+      "alias_skill_id": 889,
+      "similarity": 0.9476806214189069
+    },
+    {
+      "id": 3987,
+      "master_skill_id": 1231,
+      "alias_skill_id": 5932,
+      "similarity": 0.8433898460420853
+    },
+    {
+      "id": 3988,
+      "master_skill_id": 1231,
+      "alias_skill_id": 7680,
+      "similarity": 0.8093233593051121
+    },
+    {
+      "id": 3989,
+      "master_skill_id": 887,
+      "alias_skill_id": 8266,
+      "similarity": 0.9372808955203131
+    },
+    {
+      "id": 3991,
+      "master_skill_id": 7439,
+      "alias_skill_id": 8130,
+      "similarity": 0.8525024341034922
+    },
+    {
+      "id": 3992,
+      "master_skill_id": 6761,
+      "alias_skill_id": 7528,
+      "similarity": 0.9348034381345754
+    },
+    {
+      "id": 1173,
+      "master_skill_id": 896,
+      "alias_skill_id": 890,
+      "similarity": 0.8511381699405796
+    },
+    {
+      "id": 943,
+      "master_skill_id": 935,
+      "alias_skill_id": 1073,
+      "similarity": 0.8513412665124165
+    },
+    {
+      "id": 944,
+      "master_skill_id": 935,
+      "alias_skill_id": 1231,
+      "similarity": 0.9112461997639452
+    },
+    {
+      "id": 946,
+      "master_skill_id": 935,
+      "alias_skill_id": 1530,
+      "similarity": 0.9350645856281958
+    },
+    {
+      "id": 951,
+      "master_skill_id": 935,
+      "alias_skill_id": 903,
+      "similarity": 0.9346131165794288
+    },
+    {
+      "id": 4016,
+      "master_skill_id": 939,
+      "alias_skill_id": 7690,
+      "similarity": 0.8975416477397922
+    },
+    {
+      "id": 882,
+      "master_skill_id": 910,
+      "alias_skill_id": 887,
+      "similarity": 0.8732402649878883
+    },
+    {
+      "id": 1110,
+      "master_skill_id": 2704,
+      "alias_skill_id": 2852,
+      "similarity": 0.9662959961961898
+    },
+    {
+      "id": 3993,
+      "master_skill_id": 6761,
+      "alias_skill_id": 8041,
+      "similarity": 0.8859210449144787
+    },
+    {
+      "id": 3995,
+      "master_skill_id": 6761,
+      "alias_skill_id": 918,
+      "similarity": 0.8082423306555714
+    },
+    {
+      "id": 3997,
+      "master_skill_id": 6761,
+      "alias_skill_id": 6079,
+      "similarity": 0.8329704957465758
+    },
+    {
+      "id": 1097,
+      "master_skill_id": 1530,
+      "alias_skill_id": 901,
+      "similarity": 0.861538328328873
+    },
+    {
+      "id": 3998,
+      "master_skill_id": 6761,
+      "alias_skill_id": 8330,
+      "similarity": 0.8454479629312168
+    },
+    {
+      "id": 1172,
+      "master_skill_id": 896,
+      "alias_skill_id": 2706,
+      "similarity": 0.852618508046614
+    },
+    {
+      "id": 3999,
+      "master_skill_id": 6761,
+      "alias_skill_id": 7670,
+      "similarity": 0.8234835422986192
+    },
+    {
+      "id": 4000,
+      "master_skill_id": 6761,
+      "alias_skill_id": 917,
+      "similarity": 0.867338221060459
+    },
+    {
+      "id": 4001,
+      "master_skill_id": 6761,
+      "alias_skill_id": 921,
+      "similarity": 0.8244629990106915
+    },
+    {
+      "id": 4008,
+      "master_skill_id": 7678,
+      "alias_skill_id": 8556,
+      "similarity": 0.8722762000429151
+    },
+    {
+      "id": 4014,
+      "master_skill_id": 1271,
+      "alias_skill_id": 7546,
+      "similarity": 0.9999999525527686
+    },
+    {
+      "id": 4017,
+      "master_skill_id": 939,
+      "alias_skill_id": 7734,
+      "similarity": 0.9379483574491664
+    },
+    {
+      "id": 4021,
+      "master_skill_id": 6758,
+      "alias_skill_id": 890,
+      "similarity": 0.933291836329598
+    },
+    {
+      "id": 4022,
+      "master_skill_id": 6758,
+      "alias_skill_id": 7620,
+      "similarity": 0.9460714673830449
+    },
+    {
+      "id": 4015,
+      "master_skill_id": 7747,
+      "alias_skill_id": 904,
+      "similarity": 0.8368526807070887
+    },
+    {
+      "id": 4023,
+      "master_skill_id": 1073,
+      "alias_skill_id": 9220,
+      "similarity": 0.8631705134631286
+    },
+    {
+      "id": 875,
+      "master_skill_id": 1073,
+      "alias_skill_id": 901,
+      "similarity": 0.804595445751841
+    },
+    {
+      "id": 4782,
+      "master_skill_id": 7574,
+      "alias_skill_id": 8094,
+      "similarity": 0.8712991774546857
+    },
+    {
+      "id": 1032,
+      "master_skill_id": 2712,
+      "alias_skill_id": 2836,
+      "similarity": 0.8502338906136063
+    },
+    {
+      "id": 1136,
+      "master_skill_id": 917,
+      "alias_skill_id": 918,
+      "similarity": 0.9017762218519374
+    },
+    {
+      "id": 934,
+      "master_skill_id": 2729,
+      "alias_skill_id": 925,
+      "similarity": 0.8557106890006118
+    },
+    {
+      "id": 868,
+      "master_skill_id": 2852,
+      "alias_skill_id": 888,
+      "similarity": 0.8833513051130324
+    },
+    {
+      "id": 1009,
+      "master_skill_id": 913,
+      "alias_skill_id": 926,
+      "similarity": 0.8909909590466849
+    },
+    {
+      "id": 1010,
+      "master_skill_id": 913,
+      "alias_skill_id": 916,
+      "similarity": 0.8970984547187167
+    },
+    {
+      "id": 938,
+      "master_skill_id": 2839,
+      "alias_skill_id": 949,
+      "similarity": 0.9121794744718815
+    },
+    {
+      "id": 1174,
+      "master_skill_id": 896,
+      "alias_skill_id": 1066,
+      "similarity": 0.8733473561322741
+    },
+    {
+      "id": 1111,
+      "master_skill_id": 2704,
+      "alias_skill_id": 891,
+      "similarity": 0.8684721303800164
+    },
+    {
+      "id": 1162,
+      "master_skill_id": 882,
+      "alias_skill_id": 2836,
+      "similarity": 0.8630999774646402
+    },
+    {
+      "id": 4007,
+      "master_skill_id": 7722,
+      "alias_skill_id": 919,
+      "similarity": 0.9350255304844061
+    },
+    {
+      "id": 4790,
+      "master_skill_id": 3667,
+      "alias_skill_id": 7536,
+      "similarity": 0.852754294392107
+    },
+    {
+      "id": 4792,
+      "master_skill_id": 6079,
+      "alias_skill_id": 911,
+      "similarity": 0.6126566351817097
+    },
+    {
+      "id": 1061,
+      "master_skill_id": 945,
+      "alias_skill_id": 917,
+      "similarity": 0.8462139875939602
+    },
+    {
+      "id": 4794,
+      "master_skill_id": 2755,
+      "alias_skill_id": 937,
+      "similarity": 0.878049545864342
+    },
+    {
+      "id": 4800,
+      "master_skill_id": 7756,
+      "alias_skill_id": 7755,
+      "similarity": 0.8572145308711482
+    },
+    {
+      "id": 1071,
+      "master_skill_id": 1073,
+      "alias_skill_id": 2852,
+      "similarity": 0.8192741748429315
+    },
+    {
+      "id": 933,
+      "master_skill_id": 2729,
+      "alias_skill_id": 896,
+      "similarity": 0.8915219142017662
+    },
+    {
+      "id": 1100,
+      "master_skill_id": 2706,
+      "alias_skill_id": 1066,
+      "similarity": 0.9330182383097875
+    },
+    {
+      "id": 1101,
+      "master_skill_id": 2706,
+      "alias_skill_id": 2779,
+      "similarity": 0.8872398599195198
+    },
+    {
+      "id": 1102,
+      "master_skill_id": 2706,
+      "alias_skill_id": 2723,
+      "similarity": 0.931886066610676
+    },
+    {
+      "id": 1103,
+      "master_skill_id": 2706,
+      "alias_skill_id": 889,
+      "similarity": 0.8718169745849412
+    },
+    {
+      "id": 1105,
+      "master_skill_id": 2706,
+      "alias_skill_id": 2729,
+      "similarity": 0.8513593025072731
+    },
+    {
+      "id": 1106,
+      "master_skill_id": 2706,
+      "alias_skill_id": 2707,
+      "similarity": 0.9235774402402743
+    },
+    {
+      "id": 1119,
+      "master_skill_id": 1825,
+      "alias_skill_id": 905,
+      "similarity": 0.8081646972047636
+    },
+    {
+      "id": 1141,
+      "master_skill_id": 917,
+      "alias_skill_id": 920,
+      "similarity": 0.8348270274851263
+    },
+    {
+      "id": 1175,
+      "master_skill_id": 896,
+      "alias_skill_id": 2779,
+      "similarity": 0.9287777386893279
+    },
+    {
+      "id": 1176,
+      "master_skill_id": 896,
+      "alias_skill_id": 2723,
+      "similarity": 0.9117809585205837
+    },
+    {
+      "id": 1137,
+      "master_skill_id": 917,
+      "alias_skill_id": 945,
+      "similarity": 0.8462139875939602
+    },
+    {
+      "id": 1154,
+      "master_skill_id": 2747,
+      "alias_skill_id": 886,
+      "similarity": 0.8767056051439254
+    },
+    {
+      "id": 1157,
+      "master_skill_id": 2747,
+      "alias_skill_id": 924,
+      "similarity": 0.7808555216185538
+    },
+    {
+      "id": 1160,
+      "master_skill_id": 882,
+      "alias_skill_id": 2705,
+      "similarity": 0.9026076472507627
+    },
+    {
+      "id": 1178,
+      "master_skill_id": 896,
+      "alias_skill_id": 925,
+      "similarity": 0.8638466931304254
+    },
+    {
+      "id": 4039,
+      "master_skill_id": 1060,
+      "alias_skill_id": 7632,
+      "similarity": 0.9235832284699768
+    },
+    {
+      "id": 2770,
+      "master_skill_id": 934,
+      "alias_skill_id": 6079,
+      "similarity": 0.8619925783971867
+    },
+    {
+      "id": 3026,
+      "master_skill_id": 935,
+      "alias_skill_id": 6008,
+      "similarity": 0.9114482898915093
+    },
+    {
+      "id": 2957,
+      "master_skill_id": 5942,
+      "alias_skill_id": 2852,
+      "similarity": 0.8868429349327577
+    },
+    {
+      "id": 2960,
+      "master_skill_id": 5942,
+      "alias_skill_id": 896,
+      "similarity": 0.8827091226052617
+    },
+    {
+      "id": 2966,
+      "master_skill_id": 6760,
+      "alias_skill_id": 908,
+      "similarity": 0.7086781207694336
+    },
+    {
+      "id": 2969,
+      "master_skill_id": 6760,
+      "alias_skill_id": 881,
+      "similarity": 0.7334794530443214
+    },
+    {
+      "id": 4027,
+      "master_skill_id": 7732,
+      "alias_skill_id": 7726,
+      "similarity": 0.9509524346812129
+    },
+    {
+      "id": 4028,
+      "master_skill_id": 7732,
+      "alias_skill_id": 924,
+      "similarity": 0.923404812934989
+    },
+    {
+      "id": 4033,
+      "master_skill_id": 910,
+      "alias_skill_id": 7648,
+      "similarity": 0.8537468678504375
+    },
+    {
+      "id": 2975,
+      "master_skill_id": 6827,
+      "alias_skill_id": 1136,
+      "similarity": 0.8552664145973569
+    },
+    {
+      "id": 4952,
+      "master_skill_id": 11081,
+      "alias_skill_id": 893,
+      "similarity": 1.0
+    },
+    {
+      "id": 1179,
+      "master_skill_id": 896,
+      "alias_skill_id": 2729,
+      "similarity": 0.8915219142017662
+    },
+    {
+      "id": 1194,
+      "master_skill_id": 934,
+      "alias_skill_id": 949,
+      "similarity": 0.9154878970470923
+    },
+    {
+      "id": 2974,
+      "master_skill_id": 6827,
+      "alias_skill_id": 1135,
+      "similarity": 0.9084738303351649
+    },
+    {
+      "id": 2466,
+      "master_skill_id": 2711,
+      "alias_skill_id": 2836,
+      "similarity": 0.8692109480958151
+    },
+    {
+      "id": 2469,
+      "master_skill_id": 2711,
+      "alias_skill_id": 2839,
+      "similarity": 0.8575174733409635
+    },
+    {
+      "id": 2777,
+      "master_skill_id": 912,
+      "alias_skill_id": 883,
+      "similarity": 0.8618548574673327
+    },
+    {
+      "id": 2962,
+      "master_skill_id": 6079,
+      "alias_skill_id": 923,
+      "similarity": 0.8345948722112867
+    },
+    {
+      "id": 2965,
+      "master_skill_id": 6760,
+      "alias_skill_id": 906,
+      "similarity": 0.5075706853553404
+    },
+    {
+      "id": 2436,
+      "master_skill_id": 1073,
+      "alias_skill_id": 6008,
+      "similarity": 0.8526433225255454
+    },
+    {
+      "id": 4067,
+      "master_skill_id": 2707,
+      "alias_skill_id": 2779,
+      "similarity": 0.9083760287243612
+    },
+    {
+      "id": 4072,
+      "master_skill_id": 2707,
+      "alias_skill_id": 5942,
+      "similarity": 0.9195840655218495
+    },
+    {
+      "id": 4077,
+      "master_skill_id": 2707,
+      "alias_skill_id": 1066,
+      "similarity": 0.9517420065926756
+    },
+    {
+      "id": 4082,
+      "master_skill_id": 2707,
+      "alias_skill_id": 7536,
+      "similarity": 0.8290898487747458
+    },
+    {
+      "id": 4087,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7524,
+      "similarity": 0.807076733786504
+    },
+    {
+      "id": 4092,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7439,
+      "similarity": 0.7925082884921184
+    },
+    {
+      "id": 4097,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7396,
+      "similarity": 0.7859719902552189
+    },
+    {
+      "id": 4102,
+      "master_skill_id": 5932,
+      "alias_skill_id": 1271,
+      "similarity": 0.764258546068614
+    },
+    {
+      "id": 4107,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7546,
+      "similarity": 0.764258546068614
+    },
+    {
+      "id": 4112,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2836,
+      "similarity": 0.8064355348464978
+    },
+    {
+      "id": 4117,
+      "master_skill_id": 8041,
+      "alias_skill_id": 6761,
+      "similarity": 0.8859210449144787
+    },
+    {
+      "id": 4137,
+      "master_skill_id": 7290,
+      "alias_skill_id": 9116,
+      "similarity": 0.8150784789234227
+    },
+    {
+      "id": 4142,
+      "master_skill_id": 7290,
+      "alias_skill_id": 881,
+      "similarity": 0.8160226234227983
+    },
+    {
+      "id": 4042,
+      "master_skill_id": 915,
+      "alias_skill_id": 7502,
+      "similarity": 0.7524422715617661
+    },
+    {
+      "id": 1180,
+      "master_skill_id": 896,
+      "alias_skill_id": 2707,
+      "similarity": 0.861139070659692
+    },
+    {
+      "id": 1192,
+      "master_skill_id": 934,
+      "alias_skill_id": 1825,
+      "similarity": 0.9154268265857256
+    },
+    {
+      "id": 1298,
+      "master_skill_id": 915,
+      "alias_skill_id": 945,
+      "similarity": 0.8323778563454656
+    },
+    {
+      "id": 1293,
+      "master_skill_id": 908,
+      "alias_skill_id": 906,
+      "similarity": 0.9255024969732165
+    },
+    {
+      "id": 3080,
+      "master_skill_id": 6760,
+      "alias_skill_id": 889,
+      "similarity": 0.8197954140963901
+    },
+    {
+      "id": 3092,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2706,
+      "similarity": 0.8604006148623784
+    },
+    {
+      "id": 3107,
+      "master_skill_id": 6760,
+      "alias_skill_id": 903,
+      "similarity": 0.9173163507776073
+    },
+    {
+      "id": 3068,
+      "master_skill_id": 2711,
+      "alias_skill_id": 2701,
+      "similarity": 0.9133105717622135
+    },
+    {
+      "id": 1287,
+      "master_skill_id": 2389,
+      "alias_skill_id": 942,
+      "similarity": 0.9227286940995606
+    },
+    {
+      "id": 4043,
+      "master_skill_id": 915,
+      "alias_skill_id": 1530,
+      "similarity": 0.8415913395994946
+    },
+    {
+      "id": 1238,
+      "master_skill_id": 891,
+      "alias_skill_id": 2852,
+      "similarity": 0.8587603589831866
+    },
+    {
+      "id": 4048,
+      "master_skill_id": 939,
+      "alias_skill_id": 918,
+      "similarity": 0.8294675717863031
+    },
+    {
+      "id": 1241,
+      "master_skill_id": 891,
+      "alias_skill_id": 2729,
+      "similarity": 0.8336155493276424
+    },
+    {
+      "id": 1242,
+      "master_skill_id": 891,
+      "alias_skill_id": 2704,
+      "similarity": 0.8684721303800164
+    },
+    {
+      "id": 4068,
+      "master_skill_id": 2707,
+      "alias_skill_id": 7755,
+      "similarity": 0.8337773377372969
+    },
+    {
+      "id": 4073,
+      "master_skill_id": 2707,
+      "alias_skill_id": 2706,
+      "similarity": 0.9235774402402743
+    },
+    {
+      "id": 4078,
+      "master_skill_id": 2707,
+      "alias_skill_id": 7620,
+      "similarity": 0.832292080893728
+    },
+    {
+      "id": 4083,
+      "master_skill_id": 2707,
+      "alias_skill_id": 2710,
+      "similarity": 0.9317427713937475
+    },
+    {
+      "id": 4098,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2702,
+      "similarity": 0.852968089423791
+    },
+    {
+      "id": 4103,
+      "master_skill_id": 5932,
+      "alias_skill_id": 886,
+      "similarity": 0.8670852120918553
+    },
+    {
+      "id": 4133,
+      "master_skill_id": 882,
+      "alias_skill_id": 7708,
+      "similarity": 0.8776444321848725
+    },
+    {
+      "id": 4138,
+      "master_skill_id": 7290,
+      "alias_skill_id": 8952,
+      "similarity": 0.8543981662178008
+    },
+    {
+      "id": 4143,
+      "master_skill_id": 7290,
+      "alias_skill_id": 7586,
+      "similarity": 0.8182350880954972
+    },
+    {
+      "id": 939,
+      "master_skill_id": 2839,
+      "alias_skill_id": 2837,
+      "similarity": 0.8924164721256702
+    },
+    {
+      "id": 4123,
+      "master_skill_id": 8041,
+      "alias_skill_id": 7330,
+      "similarity": 0.8921974737401981
+    },
+    {
+      "id": 4053,
+      "master_skill_id": 1241,
+      "alias_skill_id": 9282,
+      "similarity": 0.9242313747092322
+    },
+    {
+      "id": 1384,
+      "master_skill_id": 903,
+      "alias_skill_id": 904,
+      "similarity": 0.9181422510284412
+    },
+    {
+      "id": 1340,
+      "master_skill_id": 1271,
+      "alias_skill_id": 1231,
+      "similarity": 0.9459731219361007
+    },
+    {
+      "id": 1270,
+      "master_skill_id": 887,
+      "alias_skill_id": 2779,
+      "similarity": 0.8576926138502744
+    },
+    {
+      "id": 1275,
+      "master_skill_id": 905,
+      "alias_skill_id": 936,
+      "similarity": 0.8509235618837276
+    },
+    {
+      "id": 1278,
+      "master_skill_id": 905,
+      "alias_skill_id": 937,
+      "similarity": 0.8635275495214126
+    },
+    {
+      "id": 3071,
+      "master_skill_id": 6760,
+      "alias_skill_id": 6758,
+      "similarity": 0.875601601027448
+    },
+    {
+      "id": 1285,
+      "master_skill_id": 892,
+      "alias_skill_id": 938,
+      "similarity": 0.8606592562801612
+    },
+    {
+      "id": 1286,
+      "master_skill_id": 892,
+      "alias_skill_id": 895,
+      "similarity": 0.8737009849691253
+    },
+    {
+      "id": 2446,
+      "master_skill_id": 1073,
+      "alias_skill_id": 2729,
+      "similarity": 0.7701645669608884
+    },
+    {
+      "id": 1272,
+      "master_skill_id": 887,
+      "alias_skill_id": 949,
+      "similarity": 0.854832624038268
+    },
+    {
+      "id": 1408,
+      "master_skill_id": 882,
+      "alias_skill_id": 1530,
+      "similarity": 0.8978240765337725
+    },
+    {
+      "id": 1305,
+      "master_skill_id": 883,
+      "alias_skill_id": 912,
+      "similarity": 0.8618548574673327
+    },
+    {
+      "id": 1304,
+      "master_skill_id": 883,
+      "alias_skill_id": 910,
+      "similarity": 0.8677440510324307
+    },
+    {
+      "id": 2778,
+      "master_skill_id": 912,
+      "alias_skill_id": 910,
+      "similarity": 0.9548293037104663
+    },
+    {
+      "id": 3098,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1530,
+      "similarity": 0.9058372343596196
+    },
+    {
+      "id": 1409,
+      "master_skill_id": 882,
+      "alias_skill_id": 1066,
+      "similarity": 0.9354675020444739
+    },
+    {
+      "id": 1276,
+      "master_skill_id": 905,
+      "alias_skill_id": 946,
+      "similarity": 0.7888023409260093
+    },
+    {
+      "id": 3119,
+      "master_skill_id": 5942,
+      "alias_skill_id": 7396,
+      "similarity": 0.8770995391070104
+    },
+    {
+      "id": 3134,
+      "master_skill_id": 1231,
+      "alias_skill_id": 6008,
+      "similarity": 0.896527798529556
+    },
+    {
+      "id": 2450,
+      "master_skill_id": 6035,
+      "alias_skill_id": 911,
+      "similarity": 0.764109176532164
+    },
+    {
+      "id": 3078,
+      "master_skill_id": 6760,
+      "alias_skill_id": 925,
+      "similarity": 0.8062907966206927
+    },
+    {
+      "id": 1432,
+      "master_skill_id": 2852,
+      "alias_skill_id": 2729,
+      "similarity": 0.8635766339041743
+    },
+    {
+      "id": 3069,
+      "master_skill_id": 2711,
+      "alias_skill_id": 2705,
+      "similarity": 0.9033355073715866
+    },
+    {
+      "id": 3090,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7289,
+      "similarity": 0.8480372457270042
+    },
+    {
+      "id": 3108,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2723,
+      "similarity": 0.8287740778561268
+    },
+    {
+      "id": 3075,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2755,
+      "similarity": 0.8243299315257769
+    },
+    {
+      "id": 2468,
+      "master_skill_id": 2711,
+      "alias_skill_id": 2837,
+      "similarity": 0.8398456164427958
+    },
+    {
+      "id": 4044,
+      "master_skill_id": 915,
+      "alias_skill_id": 8264,
+      "similarity": 0.7219143132571908
+    },
+    {
+      "id": 2405,
+      "master_skill_id": 2712,
+      "alias_skill_id": 5946,
+      "similarity": 0.9178228229879852
+    },
+    {
+      "id": 2779,
+      "master_skill_id": 912,
+      "alias_skill_id": 887,
+      "similarity": 0.8612924113454127
+    },
+    {
+      "id": 3102,
+      "master_skill_id": 6760,
+      "alias_skill_id": 5932,
+      "similarity": 0.8026878399850942
+    },
+    {
+      "id": 3126,
+      "master_skill_id": 5942,
+      "alias_skill_id": 6857,
+      "similarity": 0.8918230725684813
+    },
+    {
+      "id": 3141,
+      "master_skill_id": 7439,
+      "alias_skill_id": 1135,
+      "similarity": 0.8548148558321311
+    },
+    {
+      "id": 3150,
+      "master_skill_id": 6859,
+      "alias_skill_id": 6079,
+      "similarity": 0.8889000239582595
+    },
+    {
+      "id": 4064,
+      "master_skill_id": 2707,
+      "alias_skill_id": 7526,
+      "similarity": 0.9305656305827515
+    },
+    {
+      "id": 4069,
+      "master_skill_id": 2707,
+      "alias_skill_id": 7616,
+      "similarity": 0.8859182761529519
+    },
+    {
+      "id": 4074,
+      "master_skill_id": 2707,
+      "alias_skill_id": 2723,
+      "similarity": 0.9346073318689697
+    },
+    {
+      "id": 4079,
+      "master_skill_id": 2707,
+      "alias_skill_id": 2709,
+      "similarity": 0.9549947887392068
+    },
+    {
+      "id": 4084,
+      "master_skill_id": 2707,
+      "alias_skill_id": 925,
+      "similarity": 0.91784626578262
+    },
+    {
+      "id": 4089,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7534,
+      "similarity": 0.815998546756016
+    },
+    {
+      "id": 4094,
+      "master_skill_id": 5932,
+      "alias_skill_id": 6827,
+      "similarity": 0.8530750348734095
+    },
+    {
+      "id": 4099,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7622,
+      "similarity": 0.7864829611625687
+    },
+    {
+      "id": 4104,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7743,
+      "similarity": 0.6855322311714176
+    },
+    {
+      "id": 4119,
+      "master_skill_id": 8041,
+      "alias_skill_id": 8130,
+      "similarity": 0.8837884970343415
+    },
+    {
+      "id": 4124,
+      "master_skill_id": 7734,
+      "alias_skill_id": 7733,
+      "similarity": 0.8627275963835491
+    },
+    {
+      "id": 4129,
+      "master_skill_id": 2408,
+      "alias_skill_id": 941,
+      "similarity": 0.9271961623474944
+    },
+    {
+      "id": 4134,
+      "master_skill_id": 7290,
+      "alias_skill_id": 909,
+      "similarity": 0.9066179649275115
+    },
+    {
+      "id": 1451,
+      "master_skill_id": 946,
+      "alias_skill_id": 934,
+      "similarity": 0.9002126026861899
+    },
+    {
+      "id": 4120,
+      "master_skill_id": 8041,
+      "alias_skill_id": 7528,
+      "similarity": 0.8747422493010346
+    },
+    {
+      "id": 2472,
+      "master_skill_id": 6079,
+      "alias_skill_id": 921,
+      "similarity": 0.943459807551992
+    },
+    {
+      "id": 1424,
+      "master_skill_id": 3667,
+      "alias_skill_id": 2779,
+      "similarity": 0.830952806458742
+    },
+    {
+      "id": 3097,
+      "master_skill_id": 6760,
+      "alias_skill_id": 2707,
+      "similarity": 0.8531804550196161
+    },
+    {
+      "id": 3073,
+      "master_skill_id": 6760,
+      "alias_skill_id": 7288,
+      "similarity": 0.8424983245343117
+    },
+    {
+      "id": 3106,
+      "master_skill_id": 6760,
+      "alias_skill_id": 1066,
+      "similarity": 0.8512224348817997
+    },
+    {
+      "id": 1436,
+      "master_skill_id": 892,
+      "alias_skill_id": 1135,
+      "similarity": 0.874232573757682
+    },
+    {
+      "id": 1430,
+      "master_skill_id": 2852,
+      "alias_skill_id": 889,
+      "similarity": 0.8685080305270412
+    },
+    {
+      "id": 3142,
+      "master_skill_id": 7439,
+      "alias_skill_id": 923,
+      "similarity": 0.8805749764512372
+    },
+    {
+      "id": 2481,
+      "master_skill_id": 902,
+      "alias_skill_id": 899,
+      "similarity": 0.9408914894360968
+    },
+    {
+      "id": 3079,
+      "master_skill_id": 6760,
+      "alias_skill_id": 890,
+      "similarity": 0.8067117606648315
+    },
+    {
+      "id": 3118,
+      "master_skill_id": 5942,
+      "alias_skill_id": 949,
+      "similarity": 0.9232194745140414
+    },
+    {
+      "id": 3139,
+      "master_skill_id": 2852,
+      "alias_skill_id": 6759,
+      "similarity": 0.820745410369197
+    },
+    {
+      "id": 4055,
+      "master_skill_id": 1241,
+      "alias_skill_id": 7676,
+      "similarity": 0.8363066484622568
+    },
+    {
+      "id": 4065,
+      "master_skill_id": 2707,
+      "alias_skill_id": 896,
+      "similarity": 0.861139070659692
+    },
+    {
+      "id": 4070,
+      "master_skill_id": 2707,
+      "alias_skill_id": 6008,
+      "similarity": 0.8651192981153714
+    },
+    {
+      "id": 4075,
+      "master_skill_id": 2707,
+      "alias_skill_id": 5946,
+      "similarity": 0.9634098979231331
+    },
+    {
+      "id": 4080,
+      "master_skill_id": 2707,
+      "alias_skill_id": 889,
+      "similarity": 0.9044699640264519
+    },
+    {
+      "id": 4090,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2852,
+      "similarity": 0.795170377485882
+    },
+    {
+      "id": 4095,
+      "master_skill_id": 5932,
+      "alias_skill_id": 1073,
+      "similarity": 0.8077184043842148
+    },
+    {
+      "id": 4105,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7574,
+      "similarity": 0.7950137527552109
+    },
+    {
+      "id": 4110,
+      "master_skill_id": 5932,
+      "alias_skill_id": 7289,
+      "similarity": 0.8030339636705018
+    },
+    {
+      "id": 4115,
+      "master_skill_id": 8041,
+      "alias_skill_id": 946,
+      "similarity": 0.8622165037940214
+    },
+    {
+      "id": 4130,
+      "master_skill_id": 2408,
+      "alias_skill_id": 8108,
+      "similarity": 0.91974061084418
+    },
+    {
+      "id": 4135,
+      "master_skill_id": 7290,
+      "alias_skill_id": 907,
+      "similarity": 0.9161444246584757
+    },
+    {
+      "id": 4140,
+      "master_skill_id": 7290,
+      "alias_skill_id": 908,
+      "similarity": 0.8179920640008022
+    },
+    {
+      "id": 4145,
+      "master_skill_id": 944,
+      "alias_skill_id": 943,
+      "similarity": 0.7278035736160648
+    },
+    {
+      "id": 1602,
+      "master_skill_id": 903,
+      "alias_skill_id": 1530,
+      "similarity": 0.973434486572623
+    },
+    {
+      "id": 1504,
+      "master_skill_id": 889,
+      "alias_skill_id": 2852,
+      "similarity": 0.8685080305270412
+    },
+    {
+      "id": 4066,
+      "master_skill_id": 2707,
+      "alias_skill_id": 2729,
+      "similarity": 0.8665644029333682
+    },
+    {
+      "id": 4071,
+      "master_skill_id": 2707,
+      "alias_skill_id": 7512,
+      "similarity": 0.9380021866683089
+    },
+    {
+      "id": 1559,
+      "master_skill_id": 1231,
+      "alias_skill_id": 2836,
+      "similarity": 0.8362530435087078
+    },
+    {
+      "id": 4076,
+      "master_skill_id": 2707,
+      "alias_skill_id": 6758,
+      "similarity": 0.9097718891219561
+    },
+    {
+      "id": 4081,
+      "master_skill_id": 2707,
+      "alias_skill_id": 890,
+      "similarity": 0.8527274578974807
+    },
+    {
+      "id": 4091,
+      "master_skill_id": 5932,
+      "alias_skill_id": 903,
+      "similarity": 0.857809401292623
+    },
+    {
+      "id": 4096,
+      "master_skill_id": 5932,
+      "alias_skill_id": 888,
+      "similarity": 0.8246338070773092
+    },
+    {
+      "id": 4101,
+      "master_skill_id": 5932,
+      "alias_skill_id": 8302,
+      "similarity": 0.8207083153341391
+    },
+    {
+      "id": 4106,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2704,
+      "similarity": 0.8278018696444974
+    },
+    {
+      "id": 4121,
+      "master_skill_id": 8041,
+      "alias_skill_id": 6079,
+      "similarity": 0.8693434807561818
+    },
+    {
+      "id": 4126,
+      "master_skill_id": 2408,
+      "alias_skill_id": 8042,
+      "similarity": 0.941716615173703
+    },
+    {
+      "id": 4136,
+      "master_skill_id": 7290,
+      "alias_skill_id": 906,
+      "similarity": 0.6899654243361406
+    },
+    {
+      "id": 4141,
+      "master_skill_id": 7290,
+      "alias_skill_id": 7310,
+      "similarity": 0.8931613283922658
+    },
+    {
+      "id": 1651,
+      "master_skill_id": 2711,
+      "alias_skill_id": 950,
+      "similarity": 0.8800023223460384
+    },
+    {
+      "id": 1550,
+      "master_skill_id": 1231,
+      "alias_skill_id": 2710,
+      "similarity": 0.8299298051142888
+    },
+    {
+      "id": 1599,
+      "master_skill_id": 903,
+      "alias_skill_id": 933,
+      "similarity": 0.8301789437913325
+    },
+    {
+      "id": 1600,
+      "master_skill_id": 903,
+      "alias_skill_id": 1278,
+      "similarity": 0.9110422659801034
+    },
+    {
+      "id": 1750,
+      "master_skill_id": 1073,
+      "alias_skill_id": 2710,
+      "similarity": 0.8132277695619236
+    },
+    {
+      "id": 1603,
+      "master_skill_id": 903,
+      "alias_skill_id": 1825,
+      "similarity": 0.8886247422989746
+    },
+    {
+      "id": 1604,
+      "master_skill_id": 903,
+      "alias_skill_id": 2709,
+      "similarity": 0.9175681836964251
+    },
+    {
+      "id": 1605,
+      "master_skill_id": 882,
+      "alias_skill_id": 2779,
+      "similarity": 0.8750710259055393
+    },
+    {
+      "id": 4086,
+      "master_skill_id": 5932,
+      "alias_skill_id": 8462,
+      "similarity": 0.9107474085881543
+    },
+    {
+      "id": 1655,
+      "master_skill_id": 923,
+      "alias_skill_id": 1135,
+      "similarity": 0.8721175168555536
+    },
+    {
+      "id": 1653,
+      "master_skill_id": 923,
+      "alias_skill_id": 921,
+      "similarity": 0.858411486074057
+    },
+    {
+      "id": 1628,
+      "master_skill_id": 909,
+      "alias_skill_id": 1073,
+      "similarity": 0.8423989408342722
+    },
+    {
+      "id": 1629,
+      "master_skill_id": 909,
+      "alias_skill_id": 935,
+      "similarity": 0.7671340377996003
+    },
+    {
+      "id": 1630,
+      "master_skill_id": 909,
+      "alias_skill_id": 1271,
+      "similarity": 0.7754571632675765
+    },
+    {
+      "id": 1631,
+      "master_skill_id": 909,
+      "alias_skill_id": 1231,
+      "similarity": 0.85671363748379
+    },
+    {
+      "id": 1632,
+      "master_skill_id": 909,
+      "alias_skill_id": 888,
+      "similarity": 0.8150328205053022
+    },
+    {
+      "id": 1633,
+      "master_skill_id": 909,
+      "alias_skill_id": 891,
+      "similarity": 0.8371829027961741
+    },
+    {
+      "id": 1654,
+      "master_skill_id": 923,
+      "alias_skill_id": 918,
+      "similarity": 0.8835978500596757
+    },
+    {
+      "id": 1652,
+      "master_skill_id": 906,
+      "alias_skill_id": 908,
+      "similarity": 0.9255024969732165
+    },
+    {
+      "id": 1743,
+      "master_skill_id": 884,
+      "alias_skill_id": 912,
+      "similarity": 0.9435493785398764
+    },
+    {
+      "id": 1744,
+      "master_skill_id": 884,
+      "alias_skill_id": 910,
+      "similarity": 0.9112649679872391
+    },
+    {
+      "id": 1437,
+      "master_skill_id": 892,
+      "alias_skill_id": 1136,
+      "similarity": 0.8508496884669173
+    },
+    {
+      "id": 1505,
+      "master_skill_id": 889,
+      "alias_skill_id": 2729,
+      "similarity": 0.8719990673442712
+    },
+    {
+      "id": 1533,
+      "master_skill_id": 1231,
+      "alias_skill_id": 2702,
+      "similarity": 0.8938872652580758
+    },
+    {
+      "id": 1650,
+      "master_skill_id": 2837,
+      "alias_skill_id": 2839,
+      "similarity": 0.8924164721256702
+    },
+    {
+      "id": 1757,
+      "master_skill_id": 1073,
+      "alias_skill_id": 898,
+      "similarity": 0.8228969974583388
+    },
+    {
+      "id": 4161,
+      "master_skill_id": 7646,
+      "alias_skill_id": 910,
+      "similarity": 0.8580865357821613
+    },
+    {
+      "id": 4166,
+      "master_skill_id": 2712,
+      "alias_skill_id": 7710,
+      "similarity": 0.8427528976810512
+    },
+    {
+      "id": 4181,
+      "master_skill_id": 6759,
+      "alias_skill_id": 9220,
+      "similarity": 0.8870560813740608
+    },
+    {
+      "id": 2480,
+      "master_skill_id": 902,
+      "alias_skill_id": 900,
+      "similarity": 0.9217160655674963
+    },
+    {
+      "id": 4192,
+      "master_skill_id": 1825,
+      "alias_skill_id": 2755,
+      "similarity": 0.9509106935855527
+    },
+    {
+      "id": 2491,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2706,
+      "similarity": 0.9330182383097875
+    },
+    {
+      "id": 1769,
+      "master_skill_id": 1073,
+      "alias_skill_id": 2704,
+      "similarity": 0.8142770544770117
+    },
+    {
+      "id": 4162,
+      "master_skill_id": 7646,
+      "alias_skill_id": 949,
+      "similarity": 0.8569123519435226
+    },
+    {
+      "id": 2482,
+      "master_skill_id": 1066,
+      "alias_skill_id": 925,
+      "similarity": 0.8667152007672154
+    },
+    {
+      "id": 2485,
+      "master_skill_id": 1066,
+      "alias_skill_id": 890,
+      "similarity": 0.867377975045879
+    },
+    {
+      "id": 2515,
+      "master_skill_id": 5932,
+      "alias_skill_id": 948,
+      "similarity": 0.8957419174571188
+    },
+    {
+      "id": 1775,
+      "master_skill_id": 1073,
+      "alias_skill_id": 2702,
+      "similarity": 0.8655413467668142
+    },
+    {
+      "id": 2524,
+      "master_skill_id": 5942,
+      "alias_skill_id": 898,
+      "similarity": 0.8613187998079914
+    },
+    {
+      "id": 2521,
+      "master_skill_id": 5942,
+      "alias_skill_id": 2836,
+      "similarity": 0.8878327462392794
+    },
+    {
+      "id": 4183,
+      "master_skill_id": 7726,
+      "alias_skill_id": 7732,
+      "similarity": 0.9509524346812129
+    },
+    {
+      "id": 4193,
+      "master_skill_id": 934,
+      "alias_skill_id": 7756,
+      "similarity": 0.8636725024290182
+    },
+    {
+      "id": 1927,
+      "master_skill_id": 2704,
+      "alias_skill_id": 2729,
+      "similarity": 0.8553201413714706
+    },
+    {
+      "id": 1809,
+      "master_skill_id": 889,
+      "alias_skill_id": 2779,
+      "similarity": 0.9169120981011724
+    },
+    {
+      "id": 1791,
+      "master_skill_id": 892,
+      "alias_skill_id": 2839,
+      "similarity": 0.8947492114471496
+    },
+    {
+      "id": 2483,
+      "master_skill_id": 1066,
+      "alias_skill_id": 2723,
+      "similarity": 0.9113686442259646
+    },
+    {
+      "id": 2486,
+      "master_skill_id": 1066,
+      "alias_skill_id": 896,
+      "similarity": 0.8733473561322741
+    },
+    {
+      "id": 1941,
+      "master_skill_id": 882,
+      "alias_skill_id": 883,
+      "similarity": 0.9274333880184429
+    },
+    {
+      "id": 1940,
+      "master_skill_id": 882,
+      "alias_skill_id": 912,
+      "similarity": 0.8275184964988941
+    },
+    {
+      "id": 1767,
+      "master_skill_id": 1073,
+      "alias_skill_id": 2836,
+      "similarity": 0.802435896846516
+    },
+    {
+      "id": 1939,
+      "master_skill_id": 882,
+      "alias_skill_id": 910,
+      "similarity": 0.8443054236896926
+    },
+    {
+      "id": 2525,
+      "master_skill_id": 5942,
+      "alias_skill_id": 2779,
+      "similarity": 0.9313044717781963
+    },
+    {
+      "id": 2516,
+      "master_skill_id": 5932,
+      "alias_skill_id": 891,
+      "similarity": 0.9389655949237093
+    },
+    {
+      "id": 2498,
+      "master_skill_id": 5932,
+      "alias_skill_id": 5931,
+      "similarity": 0.9602402613043208
+    },
+    {
+      "id": 4163,
+      "master_skill_id": 7646,
+      "alias_skill_id": 912,
+      "similarity": 0.8607547732962758
+    },
+    {
+      "id": 2501,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2703,
+      "similarity": 0.8710177158776777
+    },
+    {
+      "id": 2504,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2747,
+      "similarity": 0.895102951489269
+    },
+    {
+      "id": 2507,
+      "master_skill_id": 5932,
+      "alias_skill_id": 2705,
+      "similarity": 0.8621952600302202
+    },
+    {
+      "id": 2522,
+      "master_skill_id": 5942,
+      "alias_skill_id": 882,
+      "similarity": 0.855362741533912
+    }
+  ],
+  "id_to_name": {
+    "923": "industrial electrical equipment configuration",
+    "7648": "client handling",
+    "5618": "microsoft words",
+    "922": "excellent communication",
+    "891": "manufacturing and quality systems support",
+    "912": "client requirements",
+    "917": "electrical cost estimation and budgeting",
+    "7534": "manufacturing support",
+    "7616": "contractor documentation coordination",
+    "1104": "autocad 2d",
+    "7602": "product drawings documentation",
+    "906": "ups service",
+    "938": "tendering process",
+    "913": "cost optimization opportunities",
+    "934": "technical documentation",
+    "904": "technical sales engineering",
+    "901": "sales support",
+    "1066": "project coordination and client handling",
+    "886": "industrial and manufacturing standards",
+    "7624": "quality systems support",
+    "890": "maintenance coordination",
+    "1106": "auto cad 2d",
+    "918": "electrical costing",
+    "7672": "pdf editing tools",
+    "900": "sales presentations",
+    "914": "cross-functional collaboration",
+    "7636": "certificate tracking",
+    "927": "microsoft excel",
+    "928": "problem-solving skills",
+    "930": "proposal presentations",
+    "931": "solving skills",
+    "932": "strong capability",
+    "889": "industrial project coordination",
+    "7640": "vendor tracking",
+    "933": "technical and commercial bid proposals",
+    "951": "Microsoft Outlook",
+    "909": "ups service support and coordination",
+    "898": "quality management systems",
+    "936": "technical specification development",
+    "897": "quality assurance and process improvement",
+    "957": "IEC 61850",
+    "958": "Relay Testing",
+    "959": "SCADA Integration",
+    "960": "Substation Commissioning",
+    "7546": "aftersales support systems",
+    "962": "Cable Termination",
+    "963": "Multimeter Testing",
+    "964": "Panel Assembly",
+    "966": "test",
+    "1135": "advance industrial motor control",
+    "7682": "application engineering",
+    "7570": "process improvement efficiency",
+    "3667": "project lifecycle documentation flow",
+    "7586": "ups service coordination",
+    "5473": "Microsoft Power Point",
+    "7678": "customer service systems",
+    "948": "document control and management",
+    "7664": "costing structures",
+    "888": "industrial electrical support services",
+    "7632": "lighting application",
+    "1060": "lighting and material application",
+    "7594": "ups technical services engineering",
+    "939": "value engineering and cost optimization",
+    "950": "certificate and expiry tracking",
+    "895": "process improvement methodologies",
+    "945": "electrical drawing and layout preparation",
+    "929": "proposal engineering",
+    "1241": "process improvement and operational efficiency",
+    "947": "lighting design software proficiency",
+    "949": "engineering documentation management",
+    "910": "analyzing client requirements",
+    "921": "electrical system configuration review",
+    "902": "technical sales",
+    "7502": "technical proposals",
+    "7526": "project coordination handling",
+    "894": "microsoft word",
+    "887": "industrial client account management",
+    "935": "technical sales support",
+    "882": "client negotiation and account management",
+    "883": "client relationship management",
+    "911": "bid management tools",
+    "941": "autocad 3d drafting",
+    "916": "electrical cost estimation",
+    "893": "microsoft powerpoint",
+    "903": "technical sales and engineering support",
+    "905": "technical services",
+    "896": "project coordination",
+    "940": "autocad 2d drafting",
+    "899": "sales engineering",
+    "7620": "operations coordination",
+    "885": "customer service",
+    "943": "relux lighting design",
+    "907": "ups service and maintenance coordination",
+    "892": "manufacturing process control",
+    "919": "electrical switchgear",
+    "884": "customer requirements",
+    "7574": "contractor documentation systems",
+    "1108": "auto cad 3d",
+    "1136": "control wiring",
+    "7660": "electrical bid pricing structures",
+    "915": "electrical bid pricing and costing structures",
+    "942": "dialux lighting calculation",
+    "924": "industry standards",
+    "1271": "sales support systems",
+    "944": "multi-cable transit design",
+    "2852": "administrative support for industrial projects",
+    "7758": "expiry tracking",
+    "7718": "version control management",
+    "11081": "microsoft power point",
+    "7528": "electrical installation practices",
+    "6760": "engineering coordination across sales and service teams",
+    "8598": "clerical support for projects",
+    "6035": "basic project management tools",
+    "7330": "electrical installation and commissioning",
+    "2355": "oil and gas planning",
+    "8266": "account management",
+    "2706": "vendor and contractor documentation coordination",
+    "8572": "protection devices",
+    "7694": "gas planning",
+    "7743": "after-sales support systems",
+    "5942": "electrical construction project management support",
+    "7726": "manufacturing standards",
+    "2837": "primary_role document controller",
+    "2723": "project documentation expediting and coordination",
+    "4258": "vendor documentation tracking",
+    "7396": "field service engineering support",
+    "8630": "oil planning",
+    "2712": "compliance with document standards and procedures",
+    "7742": "compliance standardization",
+    "5928": "Emails & Client Communication Systems",
+    "6857": "maintenance management system cmms",
+    "2389": "lighting calculations and simulation",
+    "7754": "safety procedures",
+    "6008": "electrical construction project sales support",
+    "8108": "auto cad 2d support",
+    "2709": "project deliverables and technical reports",
+    "6079": "electrical system basic technical review",
+    "6859": "basic engineering calculation tools",
+    "2408": "electrical drawings using auto cad 2d",
+    "920": "electrical switchgear and protection devices",
+    "7572": "project filing systems",
+    "881": "client handling ups service support",
+    "937": "technical specifications",
+    "7747": "engineering coordination across sales teams",
+    "2710": "project filing and archiving systems",
+    "7690": "cost optimization",
+    "6827": "motor control systems and applications",
+    "2701": "compliance and document standardization",
+    "9282": "operational efficiency",
+    "8286": "layout preparation",
+    "8590": "markup tools",
+    "7524": "construction support",
+    "2747": "document control procedures and standards",
+    "9116": "ups service support assistance",
+    "7714": "revision management",
+    "8952": "ups service support and after-sales assistance",
+    "8626": "field engineering",
+    "7560": "process improvement",
+    "7734": "value engineering optimization",
+    "926": "medium voltage project cost optimization",
+    "7600": "ups systems installation engineering",
+    "8214": "material application",
+    "9220": "after-sales assistance",
+    "7439": "industrial power continuity systems",
+    "7512": "project documentation handling",
+    "2729": "basic project coordination support",
+    "946": "technical drafting",
+    "8174": "service engineering",
+    "8556": "vendor systems",
+    "8330": "basic electrical drafting preparation",
+    "7288": "product knowledge and application engineering",
+    "7710": "document standardization",
+    "8041": "basic electrical drafting and layout preparation",
+    "7722": "electrical switchgear devices",
+    "2707": "engineering and project documentation handling",
+    "7755": "project deliverables reports",
+    "2704": "administrative and clerical support for projects",
+    "8302": "electrical design support",
+    "2703": "version control and revision management",
+    "5931": "quality assurance and construction support",
+    "7536": "project lifecycle support",
+    "7732": "industrial standards",
+    "1823": "multicable transit design",
+    "1530": "technical sales support and negotiation",
+    "6761": "safety standards and electrical installation practices",
+    "8264": "commercial bid proposals",
+    "6759": "project lifecycle and after-sales support",
+    "7744": "after-sales support",
+    "7670": "electrical drawing preparation",
+    "5946": "electrical project documentation and compliance",
+    "1231": "customer service and aftersales support systems",
+    "1825": "product drawings and technical documentation",
+    "2702": "vendor and contractor documentation systems",
+    "925": "interpretation engineering coordination",
+    "6758": "operations and maintenance coordination",
+    "2779": "project documentation management",
+    "1278": "technical compliance and documentation",
+    "7708": "document control management",
+    "2705": "document control and records management",
+    "7642": "contractor document tracking",
+    "1073": "customer service and after-sales support systems",
+    "2711": "vendor and contractor document tracking",
+    "7290": "ups technical services and field engineering",
+    "2352": "Microsoft Office",
+    "2839": "engineering document control",
+    "9002": "engineering handling",
+    "2836": "document management systems",
+    "8130": "basic electrical installation systems",
+    "10136": "3d drawing support",
+    "7692": "administrative projects",
+    "8094": "archiving systems",
+    "7753": "safety standards practices",
+    "2755": "engineering drawings and specifications",
+    "2708": "pdf editing and markup tools",
+    "8042": "auto cad 2d and 3d drawing support",
+    "908": "ups service operations",
+    "7733": "product knowledge engineering",
+    "7622": "engineering support",
+    "7756": "technical reports",
+    "7289": "ups systems installation and service engineering",
+    "8462": "quality assurance support",
+    "7680": "quality assurance coordination",
+    "7310": "ups installation, commissioning and testing",
+    "7676": "quality assurance improvement",
+    "5932": "quality control and quality assurance coordination",
+    "7638": "vendor coordination",
+    "7646": "client negotiation management",
+    "7614": "quality control coordination",
+    "7356": "client technical communication and support",
+    "9255": "d",
+    "9256": "dwa",
+    "1423": "protection relay configuration"
+  }
+}

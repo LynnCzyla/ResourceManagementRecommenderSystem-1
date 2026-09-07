@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'; // Make sure useEffect is imported
+import React, { useState, useEffect } from 'react';
 
 export default function SystemSettingsTab() {
   const [ocrThreshold, setOcrThreshold] = useState(75);
@@ -24,6 +24,7 @@ export default function SystemSettingsTab() {
     minSpecial: 1,
   });
 
+  const [validationErrors, setValidationErrors] = useState({});
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,12 +66,73 @@ export default function SystemSettingsTab() {
     }
   };
 
+  // ✅ Validation function
+  const validateSettings = () => {
+    const errors = {};
+
+    // Session Timeout validation (5-120 minutes)
+    if (!settings.sessionTimeout || settings.sessionTimeout === '') {
+      errors.sessionTimeout = 'Session expiration is required.';
+    } else if (settings.sessionTimeout < 5) {
+      errors.sessionTimeout = 'Session expiration must be at least 5 minutes.';
+    } else if (settings.sessionTimeout > 120) {
+      errors.sessionTimeout = 'Session expiration cannot exceed 120 minutes.';
+    }
+
+    // Max Login Attempts validation (3-10)
+    if (!settings.maxLoginAttempts || settings.maxLoginAttempts === '') {
+      errors.maxLoginAttempts = 'Max login attempts is required.';
+    } else if (settings.maxLoginAttempts < 3) {
+      errors.maxLoginAttempts = 'Max login attempts must be at least 3.';
+    } else if (settings.maxLoginAttempts > 10) {
+      errors.maxLoginAttempts = 'Max login attempts cannot exceed 10.';
+    }
+
+    // Max File Size validation (1-50 MB)
+    if (!settings.maxFileSize || settings.maxFileSize === '') {
+      errors.maxFileSize = 'Max file upload size is required.';
+    } else if (settings.maxFileSize < 1) {
+      errors.maxFileSize = 'Max file size must be at least 1 MB.';
+    } else if (settings.maxFileSize > 50) {
+      errors.maxFileSize = 'Max file size cannot exceed 50 MB.';
+    }
+
+    // Min Password Length validation (8-32)
+    if (!settings.minPasswordLength || settings.minPasswordLength === '') {
+      errors.minPasswordLength = 'Minimum password length is required.';
+    } else if (settings.minPasswordLength < 8) {
+      errors.minPasswordLength = 'Minimum password length must be at least 8 characters.';
+    } else if (settings.minPasswordLength > 32) {
+      errors.minPasswordLength = 'Minimum password length cannot exceed 32 characters.';
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleInputChange = (key, value) => {
+    // Clear validation error for this field when user types
+    if (validationErrors[key]) {
+      setValidationErrors(prev => ({ ...prev, [key]: '' }));
+    }
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // ✅ Validate before submitting
+    if (!validateSettings()) {
+      // Scroll to first error
+      const firstErrorField = Object.keys(validationErrors)[0];
+      const element = document.getElementById(`field-${firstErrorField}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.focus();
+      }
+      return;
+    }
+
     setIsSaving(true);
     setSaveSuccess(false);
     setError(null);
@@ -101,6 +163,7 @@ export default function SystemSettingsTab() {
 
       if (result.success) {
         setSaveSuccess(true);
+        setValidationErrors({});
         setTimeout(() => setSaveSuccess(false), 3000);
       } else {
         setError(result.message || 'Failed to save settings');
@@ -111,6 +174,16 @@ export default function SystemSettingsTab() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // ✅ Helper to check if field has error
+  const hasError = (field) => {
+    return validationErrors && validationErrors[field];
+  };
+
+  // ✅ Helper to get error message
+  const getError = (field) => {
+    return validationErrors && validationErrors[field];
   };
 
   return (
@@ -127,7 +200,7 @@ export default function SystemSettingsTab() {
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
-            System configuration parameters successfully saved and synchronized.
+            Settings saved successfully!
           </div>
         )}
 
@@ -152,41 +225,64 @@ export default function SystemSettingsTab() {
               Security Configuration
             </h3>
 
-            <div style={styles.formGroup}>
-              <label style={styles.formLabel}>Session Expiration (Minutes)</label>
+            <div style={styles.formGroup} id="field-sessionTimeout">
+              <label style={styles.formLabel}>Session Expiration (Minutes) *</label>
               <input
                 type="number"
                 min="5"
                 max="120"
                 value={settings.sessionTimeout}
-                onChange={(e) => handleInputChange('sessionTimeout', parseInt(e.target.value))}
-                style={styles.numberInput}
+                onChange={(e) => handleInputChange('sessionTimeout', e.target.value === '' ? '' : parseInt(e.target.value))}
+                style={{
+                  ...styles.numberInput,
+                  borderColor: hasError('sessionTimeout') ? 'var(--color-danger)' : 'var(--color-border)',
+                }}
+                required
               />
+              {hasError('sessionTimeout') && (
+                <span style={styles.errorText}>{getError('sessionTimeout')}</span>
+              )}
+              <p style={styles.fieldDesc}>Recommended: 30 minutes. Range: 5-120 minutes.</p>
             </div>
 
-            <div style={styles.formGroup}>
-              <label style={styles.formLabel}>Max Login Attempts</label>
+            <div style={styles.formGroup} id="field-maxLoginAttempts">
+              <label style={styles.formLabel}>Max Login Attempts *</label>
               <input
                 type="number"
                 min="3"
                 max="10"
                 value={settings.maxLoginAttempts}
-                onChange={(e) => handleInputChange('maxLoginAttempts', parseInt(e.target.value))}
-                style={styles.numberInput}
+                onChange={(e) => handleInputChange('maxLoginAttempts', e.target.value === '' ? '' : parseInt(e.target.value))}
+                style={{
+                  ...styles.numberInput,
+                  borderColor: hasError('maxLoginAttempts') ? 'var(--color-danger)' : 'var(--color-border)',
+                }}
+                required
               />
-              <p style={styles.fieldDesc}>Number of failed login attempts before account is temporarily locked.</p>
+              {hasError('maxLoginAttempts') && (
+                <span style={styles.errorText}>{getError('maxLoginAttempts')}</span>
+              )}
+              <p style={styles.fieldDesc}>Number of failed login attempts before account is temporarily locked. Range: 3-10.</p>
             </div>
 
-            <div style={styles.formGroup}>
-              <label style={styles.formLabel}>Max File Upload Size (MB)</label>
+            <div style={styles.formGroup} id="field-maxFileSize">
+              <label style={styles.formLabel}>Max File Upload Size (MB) *</label>
               <input
                 type="number"
                 min="1"
                 max="50"
                 value={settings.maxFileSize}
-                onChange={(e) => handleInputChange('maxFileSize', parseInt(e.target.value))}
-                style={styles.numberInput}
+                onChange={(e) => handleInputChange('maxFileSize', e.target.value === '' ? '' : parseInt(e.target.value))}
+                style={{
+                  ...styles.numberInput,
+                  borderColor: hasError('maxFileSize') ? 'var(--color-danger)' : 'var(--color-border)',
+                }}
+                required
               />
+              {hasError('maxFileSize') && (
+                <span style={styles.errorText}>{getError('maxFileSize')}</span>
+              )}
+              <p style={styles.fieldDesc}>Maximum file size allowed for uploads. Range: 1-50 MB.</p>
             </div>
           </div>
 
@@ -200,12 +296,15 @@ export default function SystemSettingsTab() {
             </h3>
             <p style={styles.fieldDesc}>Define the password rules enforced for all user accounts.</p>
 
-            <div style={styles.formGroup}>
-              <label style={styles.formLabel}>Minimum Password Length</label>
+            <div style={styles.formGroup} id="field-minPasswordLength">
+              <label style={styles.formLabel}>Minimum Password Length *</label>
               <div style={styles.counterControl}>
                 <button
                   type="button"
-                  onClick={() => handleInputChange('minPasswordLength', Math.max(8, settings.minPasswordLength - 1))}
+                  onClick={() => {
+                    const newVal = Math.max(8, settings.minPasswordLength - 1);
+                    handleInputChange('minPasswordLength', newVal);
+                  }}
                   style={styles.counterBtn}
                 >
                   -
@@ -213,13 +312,19 @@ export default function SystemSettingsTab() {
                 <span style={styles.counterValue}>{settings.minPasswordLength} chars</span>
                 <button
                   type="button"
-                  onClick={() => handleInputChange('minPasswordLength', Math.min(32, settings.minPasswordLength + 1))}
+                  onClick={() => {
+                    const newVal = Math.min(32, settings.minPasswordLength + 1);
+                    handleInputChange('minPasswordLength', newVal);
+                  }}
                   style={styles.counterBtn}
                 >
                   +
                 </button>
               </div>
-              <p style={styles.fieldDesc}>Recommended: 12 characters or more</p>
+              {hasError('minPasswordLength') && (
+                <span style={styles.errorText}>{getError('minPasswordLength')}</span>
+              )}
+              <p style={styles.fieldDesc}>Recommended: 12 characters or more. Range: 8-32.</p>
             </div>
 
             <div style={styles.formGroup}>
@@ -462,6 +567,12 @@ const styles = {
     marginBottom: '24px',
     fontWeight: '600',
   },
+  errorText: {
+    fontSize: '12px',
+    color: 'var(--color-danger)',
+    marginTop: '4px',
+    display: 'block',
+  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
@@ -501,22 +612,6 @@ const styles = {
     marginBottom: '8px',
     lineHeight: '1.3',
   },
-  slider: {
-    width: '100%',
-    accentColor: 'var(--color-primary)',
-    cursor: 'pointer',
-    height: '6px',
-    borderRadius: '3px',
-    backgroundColor: 'var(--color-border)',
-    outline: 'none',
-  },
-  sliderLabels: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '10px',
-    color: 'var(--color-text-muted)',
-    marginTop: '6px',
-  },
   select: {
     width: '100%',
     padding: '10px 12px',
@@ -540,6 +635,7 @@ const styles = {
     color: 'var(--color-text-primary)',
     fontSize: '14px',
     outline: 'none',
+    transition: 'border-color 0.2s',
   },
   checkboxLabel: {
     display: 'flex',

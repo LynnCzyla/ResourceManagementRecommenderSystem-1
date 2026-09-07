@@ -1,4 +1,4 @@
-// src/App.jsx - FIXED version (+ key={currentUser.id} fix for stale-data-after-relogin bug)
+// src/App.jsx - FIXED version (single auth listener)
 // (+ BrowserRouter/Routes added to support the public /feedback/:token page)
 import React, { useState, useEffect, useRef } from 'react';
 import { Routes, Route } from 'react-router-dom';
@@ -63,6 +63,8 @@ function App() {
   const logoutTimerRef = useRef(null);
   const forceLogoutTimerRef = useRef(null);
   const refreshTimeoutRef = useRef(null);
+  const authListenerRef = useRef(null); // ✅ Track auth listener
+  const initializedRef = useRef(false); // ✅ Prevent double init
 
   const showTimeoutUpdateNotification = (newTimeout) => {
     if (isLoggedIn) {
@@ -87,14 +89,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const THROTTLE_MS = 5000; // only record activity at most once every 5s
+    const THROTTLE_MS = 5000;
 
     const updateActivity = () => {
       const now = Date.now();
-      userActivityRef.current = now; // cheap, fine to do every time
+      userActivityRef.current = now;
 
-      // Throttle the expensive part (localStorage write + log) — mousemove/scroll
-      // can fire dozens of times per second and were blocking the main thread.
       if (now - lastActivityWriteRef.current < THROTTLE_MS) return;
       lastActivityWriteRef.current = now;
 
@@ -203,8 +203,16 @@ function App() {
     document.body.classList.toggle('dark-theme', isDark);
   }, [isDark]);
 
+  // ✅ SINGLE AUTH LISTENER - FIXED
   useEffect(() => {
     let cancelled = false;
+
+    // ✅ Prevent double initialization in Strict Mode
+    if (initializedRef.current) {
+      console.log('⚠️ Auth already initialized, skipping');
+      return () => {};
+    }
+    initializedRef.current = true;
 
     if (BOOT_IS_RECOVERY) {
       console.log('🔑 Recovery mode — establishing session from URL');
@@ -223,6 +231,8 @@ function App() {
       return () => { cancelled = true; };
     }
 
+    // ✅ Only ONE auth listener
+    console.log('🔐 Setting up auth listener...');
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔄 Auth state changed:', event);
 
@@ -248,6 +258,13 @@ function App() {
         return;
       }
 
+      if (event === 'SIGNED_IN' && session) {
+        console.log('✅ User signed in');
+        localStorage.setItem('loginTime', Date.now().toString());
+        userActivityRef.current = Date.now();
+        // ✅ User will be set by checkSession or handleLogin
+      }
+
       if (event === 'TOKEN_REFRESHED' && session) {
         if (cancelled) return;
         console.log('🔄 Token refreshed');
@@ -255,10 +272,11 @@ function App() {
       }
     });
 
+    authListenerRef.current = subscription;
+
     const checkSession = async () => {
       console.log('🔍 App: Checking for existing session...');
       try {
-        // FIRST: Check if Supabase has a live session
         const { data: { session }, error } = await supabase.auth.getSession();
 
         if (session && !error) {
@@ -279,7 +297,6 @@ function App() {
               : session.user.email,
             email: session.user.email,
             role: userRole,
-            // ✅ Use avatar_url from DB, fallback to placeholder
             avatar: profileData?.avatar_url ||
               'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100',
             employee_id: profileData?.employee_id,
@@ -303,14 +320,13 @@ function App() {
           return;
         }
 
-        // SECOND: Fall back to localStorage
+        // Fallback to localStorage
         const storedUser = localStorage.getItem('user');
         const token = localStorage.getItem('token');
         const loginTime = localStorage.getItem('loginTime');
 
         console.log('📦 App: Stored user:', storedUser ? 'Found' : 'Not found');
         console.log('📦 App: Stored token:', token ? 'Found' : 'Not found');
-        console.log('📦 App: Login time:', loginTime);
 
         if (storedUser && token) {
           console.log('📦 App: Found stored user data in localStorage');
@@ -331,7 +347,7 @@ function App() {
             }
           }
 
-          // ✅ Re-fetch latest avatar_url from DB before restoring
+          // Re-fetch latest avatar_url from DB
           try {
             const { data: freshProfile } = await supabase
               .from('profiles')
@@ -359,7 +375,7 @@ function App() {
           setIsLoggedIn(true);
           userActivityRef.current = Date.now();
           localStorage.setItem('loginTime', Date.now().toString());
-          localStorage.setItem('user', JSON.stringify(userData)); // ✅ Update cache with fresh avatar
+          localStorage.setItem('user', JSON.stringify(userData));
           setLoading(false);
           setSessionChecked(true);
           return;
@@ -382,31 +398,13 @@ function App() {
 
     return () => {
       cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, [sessionTimeout]);
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('🔄 App Auth state changed:', event);
-      if (event === 'SIGNED_IN' && session) {
-        console.log('✅ User signed in');
-        localStorage.setItem('loginTime', Date.now().toString());
-        userActivityRef.current = Date.now();
-      } else if (event === 'SIGNED_OUT') {
-        console.log('👋 User signed out');
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        localStorage.removeItem('loginTime');
-        setCurrentUser(null);
-        setIsLoggedIn(false);
-      } else if (event === 'TOKEN_REFRESHED') {
-        console.log('🔄 Token refreshed');
-        if (session) localStorage.setItem('token', session.access_token);
+      console.log('🧹 Cleaning up auth listener...');
+      if (authListenerRef.current) {
+        authListenerRef.current.unsubscribe();
+        authListenerRef.current = null;
       }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+    };
+  }, [sessionTimeout]); // ✅ Only runs once
 
   const toggleTheme = () => setIsDark(!isDark);
 
@@ -522,12 +520,6 @@ function App() {
     }
   };
 
-  // ────────────────────────────────────────────────────────────────
-  // Everything that used to be the top-level return is now rendered
-  // under the "*" (catch-all) route below, completely unchanged.
-  // The only new route is /feedback/:token, which is public and does
-  // not touch isLoggedIn/currentUser/session logic at all.
-  // ────────────────────────────────────────────────────────────────
   const mainAppContent = (
     <>
       {isApplicantPortal ? (

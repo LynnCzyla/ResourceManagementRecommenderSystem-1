@@ -9,7 +9,6 @@ export default function AccountManagementTab() {
   const [error, setError] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
-  // ← UPDATED: Match database values exactly
   const [roleFilter, setRoleFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [lockedFilter, setLockedFilter] = useState('All');
@@ -20,7 +19,20 @@ export default function AccountManagementTab() {
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
   const [branches, setBranches] = useState([]);
 
-  // ← UPDATED: Match database values exactly
+  // Edit Modal states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    email: '',
+    role: '',
+    branch_id: '',
+    status: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+
   const roleOptions = [
     { value: 'All', label: 'All Roles' },
     { value: 'Super Admin', label: 'Super Admin' },
@@ -96,31 +108,35 @@ export default function AccountManagementTab() {
     }
   }, []);
 
-  const fetchAccounts = useCallback(async () => {
+  const fetchAccounts = useCallback(async (pageToFetch = page) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
-      params.set('page', String(page));
+      params.set('page', String(pageToFetch));
       params.set('limit', String(limit));
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
-      if (roleFilter !== 'All') params.set('role', roleFilter); // ← Now matches database
+      if (roleFilter !== 'All') params.set('role', roleFilter);
       if (statusFilter !== 'All') params.set('status', statusFilter);
       if (lockedFilter !== 'All') params.set('locked', lockedFilter === 'Locked' ? 'true' : 'false');
       if (branchFilter !== 'All') params.set('branch_id', branchFilter);
-
-      console.log('Fetching with params:', params.toString()); // Debug
 
       const res = await fetch(`${API_BASE}/accounts?${params.toString()}`, {
         headers: getAuthHeaders(),
       });
       const json = await res.json();
 
-      console.log('Response:', json); // Debug
-
       if (!json.success) throw new Error(json.error || 'Failed to load accounts');
 
-      setAccounts(json.data || []);
+      const mappedAccounts = (json.data || []).map(account => ({
+        ...account,
+        first_name: account.first_name || '',
+        middle_name: account.middle_name || '',
+        last_name: account.last_name || '',
+        name: `${account.first_name || ''}${account.middle_name ? ` ${account.middle_name}` : ''} ${account.last_name || ''}`.trim(),
+      }));
+
+      setAccounts(mappedAccounts);
       setPagination({
         total: json.pagination?.total || 0,
         totalPages: json.pagination?.totalPages || 1,
@@ -138,16 +154,110 @@ export default function AccountManagementTab() {
     loadBranches();
   }, [loadBranches]);
 
+  // When filters change, reset to page 1
   useEffect(() => {
-    fetchAccounts();
-  }, [fetchAccounts]);
-
-  useEffect(() => {
-    setPage(1);
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      fetchAccounts(1);
+    }
   }, [searchQuery, roleFilter, statusFilter, lockedFilter, branchFilter]);
 
+  // When page changes, fetch
+  useEffect(() => {
+    if (page >= 1 && page <= pagination.totalPages) {
+      fetchAccounts(page);
+    }
+  }, [page]);
+
+  // ============================================
+  // EDIT ACCOUNT FUNCTIONALITY
+  // ============================================
+
+  const openEditModal = (account) => {
+    console.log('📝 Opening edit for account:', account);
+    
+    setSelectedAccount(account);
+    setEditFormData({
+      first_name: account.first_name || '',
+      middle_name: account.middle_name || '',
+      last_name: account.last_name || '',
+      email: account.email || '',
+      role: account.role || 'Employee',
+      branch_id: account.branch_id || '',
+      status: account.status || 'Active',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!editFormData.first_name.trim()) {
+      showErrorAlert('First name is required.', 'Validation Error');
+      return;
+    }
+    if (!editFormData.last_name.trim()) {
+      showErrorAlert('Last name is required.', 'Validation Error');
+      return;
+    }
+    if (!editFormData.email.trim()) {
+      showErrorAlert('Email address is required.', 'Validation Error');
+      return;
+    }
+    if (!editFormData.branch_id) {
+      showErrorAlert('Branch is required. User must be assigned to a branch.', 'Validation Error');
+      return;
+    }
+
+    const result = await showConfirmationAlert(
+      'Confirm Changes',
+      `Are you sure you want to update ${editFormData.first_name} ${editFormData.last_name}'s account?`,
+      'Yes, Save Changes'
+    );
+    if (!result.isConfirmed) return;
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/accounts/${selectedAccount.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          first_name: editFormData.first_name.trim(),
+          middle_name: editFormData.middle_name.trim() || null,
+          last_name: editFormData.last_name.trim(),
+          email: editFormData.email.trim(),
+          role: editFormData.role,
+          branch_id: editFormData.branch_id,
+          status: editFormData.status,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to update account');
+
+      setShowEditModal(false);
+      setSelectedAccount(null);
+      setEditFormData({
+        first_name: '',
+        middle_name: '',
+        last_name: '',
+        email: '',
+        role: '',
+        branch_id: '',
+        status: '',
+      });
+      showSuccessAlert('Account updated successfully!');
+      fetchAccounts(page);
+    } catch (err) {
+      showErrorAlert(err.message || 'Failed to update account');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ✅ UPDATED: Changed from 'Inactive' to 'Deactivated'
   const handleToggleStatus = async (accountId, currentStatus) => {
-    const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
+    const newStatus = currentStatus === 'Active' ? 'Deactivated' : 'Active';
     const action = newStatus === 'Active' ? 'Activate' : 'Deactivate';
     
     const result = await showConfirmationAlert(
@@ -167,7 +277,7 @@ export default function AccountManagementTab() {
       if (!json.success) throw new Error(json.error || `Failed to ${action.toLowerCase()} account`);
 
       showSuccessAlert(`Account ${action.toLowerCase()}d successfully!`);
-      fetchAccounts();
+      fetchAccounts(page);
     } catch (err) {
       showErrorAlert(err.message || `Failed to ${action.toLowerCase()} account`);
     }
@@ -197,19 +307,12 @@ export default function AccountManagementTab() {
       if (!json.success) throw new Error(json.error || `Failed to ${action.toLowerCase()} account`);
 
       showSuccessAlert(`Account ${action.toLowerCase()}ed successfully!`);
-      fetchAccounts();
+      fetchAccounts(page);
     } catch (err) {
       showErrorAlert(err.message || `Failed to ${action.toLowerCase()} account`);
     }
   };
 
-  const formatDate = (isoString) => {
-    if (!isoString) return '—';
-    const d = new Date(isoString);
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-  };
-
-  // ← UPDATED: Match database role values for badges
   const getRoleBadgeStyle = (role) => {
     const roleColors = {
       'Super Admin': { bg: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' },
@@ -220,6 +323,16 @@ export default function AccountManagementTab() {
       'Employee': { bg: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' },
     };
     return roleColors[role] || { bg: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' };
+  };
+
+  // Get status badge color
+  const getStatusBadgeStyle = (status) => {
+    if (status === 'Active') {
+      return { backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' };
+    } else if (status === 'Deactivated') {
+      return { backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' };
+    }
+    return { backgroundColor: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' };
   };
 
   return (
@@ -254,6 +367,7 @@ export default function AccountManagementTab() {
           ))}
         </select>
 
+        {/* ✅ UPDATED: Changed from "Inactive" to "Deactivated" */}
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -261,7 +375,7 @@ export default function AccountManagementTab() {
         >
           <option value="All">All Status</option>
           <option value="Active">Active</option>
-          <option value="Inactive">Inactive</option>
+          <option value="Deactivated">Deactivated</option>
         </select>
 
         <select
@@ -318,6 +432,7 @@ export default function AccountManagementTab() {
             ) : (
               accounts.map(account => {
                 const roleStyle = getRoleBadgeStyle(account.role);
+                const statusStyle = getStatusBadgeStyle(account.status);
                 return (
                   <tr key={account.id} style={styles.tableRow}>
                     <td style={styles.tableCell}>
@@ -344,8 +459,8 @@ export default function AccountManagementTab() {
                     <td style={styles.tableCell}>
                       <span style={{
                         ...styles.statusBadge,
-                        backgroundColor: account.status === 'Active' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                        color: account.status === 'Active' ? '#22c55e' : '#ef4444',
+                        backgroundColor: statusStyle.backgroundColor,
+                        color: statusStyle.color,
                       }}>
                         {account.status}
                       </span>
@@ -368,6 +483,17 @@ export default function AccountManagementTab() {
                     </td>
                     <td style={styles.tableCell}>
                       <div style={styles.actionButtons}>
+                        <button
+                          onClick={() => openEditModal(account)}
+                          style={styles.editBtn}
+                          title="Edit Account"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                          </svg>
+                        </button>
+
                         <button
                           onClick={() => handleToggleStatus(account.id, account.status)}
                           style={account.status === 'Active' ? styles.deactivateBtn : styles.activateBtn}
@@ -436,6 +562,143 @@ export default function AccountManagementTab() {
           >
             Next
           </button>
+        </div>
+      )}
+
+      {/* ============================================ */}
+      {/* EDIT MODAL */}
+      {/* ============================================ */}
+      {showEditModal && (
+        <div style={styles.modalOverlay} onClick={() => setShowEditModal(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div>
+                <h2 style={styles.modalTitle}>Edit Account</h2>
+                <p style={styles.modalSubtitle}>Update {selectedAccount?.name}'s account information</p>
+              </div>
+              <button onClick={() => setShowEditModal(false)} style={styles.closeBtn}>×</button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} style={styles.modalForm}>
+              <div style={styles.formSection}>
+                <h4 style={styles.sectionTitle}>Required Information</h4>
+
+                <div style={styles.formRow}>
+                  <div style={{ ...styles.formGroup, flex: 1 }}>
+                    <label style={styles.formLabel}>
+                      First Name <span style={styles.required}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editFormData.first_name}
+                      onChange={(e) => setEditFormData({ ...editFormData, first_name: e.target.value })}
+                      style={styles.formInput}
+                      placeholder="Enter first name"
+                    />
+                  </div>
+                  <div style={{ ...styles.formGroup, flex: 1 }}>
+                    <label style={styles.formLabel}>Middle Name</label>
+                    <input
+                      type="text"
+                      value={editFormData.middle_name}
+                      onChange={(e) => setEditFormData({ ...editFormData, middle_name: e.target.value })}
+                      style={styles.formInput}
+                      placeholder="Enter middle name"
+                    />
+                  </div>
+                  <div style={{ ...styles.formGroup, flex: 1 }}>
+                    <label style={styles.formLabel}>
+                      Last Name <span style={styles.required}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editFormData.last_name}
+                      onChange={(e) => setEditFormData({ ...editFormData, last_name: e.target.value })}
+                      style={styles.formInput}
+                      placeholder="Enter last name"
+                    />
+                  </div>
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Email <span style={styles.required}>*</span>
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={editFormData.email}
+                    onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                    style={styles.formInput}
+                    placeholder="user@company.com"
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Role <span style={styles.required}>*</span>
+                  </label>
+                  <select
+                    required
+                    value={editFormData.role}
+                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value })}
+                    style={styles.formInput}
+                  >
+                    <option value="Super Admin">Super Admin</option>
+                    <option value="Admin">Admin</option>
+                    <option value="Human Resources">Human Resources</option>
+                    <option value="Project Manager">Project Manager</option>
+                    <option value="Resource Manager">Resource Manager</option>
+                    <option value="Employee">Employee</option>
+                  </select>
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Branch <span style={styles.required}>*</span>
+                  </label>
+                  <select
+                    required
+                    value={editFormData.branch_id}
+                    onChange={(e) => setEditFormData({ ...editFormData, branch_id: e.target.value })}
+                    style={styles.formInput}
+                  >
+                    <option value="">Select Branch</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} {b.location ? `(${b.location})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* ✅ UPDATED: Status dropdown with "Deactivated" */}
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Status <span style={styles.required}>*</span>
+                  </label>
+                  <select
+                    required
+                    value={editFormData.status}
+                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
+                    style={styles.formInput}
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Deactivated">Deactivated</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={styles.modalActions}>
+                <button type="button" onClick={() => setShowEditModal(false)} style={styles.cancelBtn}>Cancel</button>
+                <button type="submit" disabled={submitting} style={styles.submitBtn}>
+                  {submitting ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
@@ -592,6 +855,15 @@ const styles = {
     display: 'flex',
     gap: '6px',
   },
+  editBtn: {
+    padding: '6px',
+    background: 'transparent',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
   deactivateBtn: {
     padding: '6px',
     background: 'transparent',
@@ -636,5 +908,142 @@ const styles = {
   pageInfo: {
     fontSize: '14px',
     color: 'var(--color-text-secondary)',
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    backdropFilter: 'blur(4px)',
+  },
+  modal: {
+    background: 'var(--color-bg-card)',
+    borderRadius: 'var(--radius-md)',
+    width: '100%',
+    maxWidth: '600px',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    border: '1px solid var(--color-border)',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: '20px 24px',
+    borderBottom: '1px solid var(--color-border)',
+    position: 'sticky',
+    top: 0,
+    background: 'var(--color-bg-card)',
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    margin: 0,
+  },
+  modalSubtitle: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+    margin: '4px 0 0 0',
+  },
+  closeBtn: {
+    background: 'transparent',
+    border: 'none',
+    fontSize: '28px',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    padding: 0,
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-sm)',
+    transition: 'all 0.2s',
+  },
+  modalForm: {
+    padding: '24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '20px',
+  },
+  formSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px',
+  },
+  sectionTitle: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    margin: '0 0 4px 0',
+  },
+  formRow: {
+    display: 'flex',
+    gap: '12px',
+  },
+  formGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  formLabel: {
+    fontSize: '13px',
+    fontWeight: '500',
+    color: 'var(--color-text-primary)',
+  },
+  required: {
+    color: 'var(--color-danger)',
+  },
+  formInput: {
+    padding: '10px 12px',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '14px',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+    width: '100%',
+  },
+  modalActions: {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'flex-end',
+    paddingTop: '8px',
+    borderTop: '1px solid var(--color-border)',
+    marginTop: '4px',
+  },
+  cancelBtn: {
+    padding: '10px 24px',
+    background: 'transparent',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  submitBtn: {
+    padding: '10px 24px',
+    background: 'var(--color-primary)',
+    border: 'none',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#ffffff',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   },
 };

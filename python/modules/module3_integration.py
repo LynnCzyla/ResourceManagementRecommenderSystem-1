@@ -14,12 +14,21 @@ from modules.module2_nlp import NLPProcessor
 class DocumentProcessor:
     """Complete document processing workflow"""
     
-    def __init__(self, config=None):
+    def __init__(self, config=None, nlp=None):
         self.config = config or {}
         self.ocr = OCRProcessor(config)
-        self.nlp = NLPProcessor(
+        # ============ FIX (duplicate-init bug) ============
+        # runner.py already builds one NLPProcessor (full Supabase fetch +
+        # ML classifier load) and was overriding self.processor.nlp with it
+        # right after construction anyway — meaning the NLPProcessor built
+        # here was always thrown away unused. Accept an already-built
+        # instance via the new `nlp` param; only construct one here if the
+        # caller didn't supply one, so DocumentProcessor still works
+        # standalone for any other caller that doesn't pass nlp.
+        self.nlp = nlp if nlp is not None else NLPProcessor(
             model_name=self.config.get('spacy_model', 'en_core_web_md')
         )
+        # ====================================================
         self.process_log = []
     
     def process_document_complete(self, image_path, employee_id, document_type):
@@ -60,11 +69,22 @@ class DocumentProcessor:
             
             # Prepare database records — reuse the result above instead of re-running
             # extraction a second time (was calling NLP twice on the same document).
+            # ============ FIX (duplicate-pipeline bug) ============
+            # This comment already claimed extraction wasn't re-run, but
+            # prepare_db_records() was calling extract_skills_with_categories()
+            # internally regardless, which re-ran the full candidate
+            # extraction + _learn_from_document() + merge_synonyms_dynamically()
+            # a second time per document (visible as documents_analyzed
+            # incrementing twice and two identical [MERGE STATS] lines per
+            # upload). Passing the already-computed result through actually
+            # makes this comment true.
             nlp_result = self.nlp.prepare_db_records(
                 employee_id,
                 ocr_result['ocr_data']['cleaned_ocr_text'],
-                structured_text
+                structured_text,
+                extracted=nlp_full_result
             )
+            # ========================================================
             
             log_entry['nlp_complete'] = datetime.now().isoformat()
             log_entry['skills_found'] = nlp_result['summary']['total_skills_found']
@@ -97,6 +117,15 @@ class DocumentProcessor:
                     'categorized_skills': nlp_full_result.get('categorized', {}),
                     'auto_approved': nlp_full_result.get('auto_approved', []),
                     'needs_review': nlp_full_result.get('needs_review', []),
+                    # Original ML prediction + confidence per needs-review skill,
+                    # e.g. {"Electrical Design": {"prediction": "Skill", "confidence": 0.82}}.
+                    # Carried unchanged through runner.py/pythonService.js so the
+                    # backend/frontend never has to re-run the model.
+                    'needs_review_predictions': nlp_full_result.get('needs_review_predictions', {}),
+                    # Original ML prediction + confidence per ML-auto-approved
+                    # skill (>= 0.85 confidence). Previously discarded; now
+                    # preserved the same way needs_review_predictions is.
+                    'auto_approved_predictions': nlp_full_result.get('auto_approved_predictions', {}),
                     'prc_license': nlp_full_result.get('licenses', [None])[0] if nlp_full_result.get('licenses') else None,
                     'prc_verified': bool(nlp_full_result.get('licenses'))
                 },

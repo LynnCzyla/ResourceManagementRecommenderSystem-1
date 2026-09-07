@@ -10,6 +10,15 @@ export default function SkillFeedbackModal({
     documentId, 
     employeeId, 
     needsReview = [],      // ← Only pending skills
+    // Original ML prediction/confidence per needs-review skill, e.g.
+    // { "Electrical Design": { prediction: "Skill", confidence: 0.82 } }.
+    // Comes straight from the backend (nlp.needs_review_predictions) -
+    // never regenerated here.
+    needsReviewPredictions = {},
+    // Same idea, for skills the backend ML-auto-approved (>= 0.85
+    // confidence) - previously had no prediction/confidence carried
+    // anywhere; comes from nlp.auto_approved_predictions.
+    autoApprovedPredictions = {},
     autoApproved = [],     // ← Already approved skills
     documentType = 'Resume',
     documentName = '',     // ← Name of the uploaded file, shown next to the title
@@ -44,6 +53,30 @@ export default function SkillFeedbackModal({
     };
 
     const skillKey = (skill) => getSkillName(skill).toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // ============ HELPER: look up the ORIGINAL ML prediction for a skill ============
+    // Case/whitespace-insensitive match against the needsReviewPredictions AND
+    // autoApprovedPredictions props (merged - a skill only ever appears in one
+    // of the two, but the lookup shouldn't care which). Never computes a new
+    // prediction - only reads what the backend already sent.
+    const mlPredictionMap = React.useMemo(() => {
+        const map = new Map();
+        const sources = [needsReviewPredictions, autoApprovedPredictions];
+        for (const source of sources) {
+            if (source && typeof source === 'object') {
+                for (const [name, meta] of Object.entries(source)) {
+                    if (meta && typeof meta === 'object') {
+                        map.set(skillKey(name), {
+                            prediction: meta.prediction ?? null,
+                            confidence: typeof meta.confidence === 'number' ? meta.confidence : null
+                        });
+                    }
+                }
+            }
+        }
+        return map;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [needsReviewPredictions, autoApprovedPredictions]);
 
     // ============ FIX: Only reset/refetch when the modal opens for a NEW document ============
     // The old version watched `needsReview` (an array prop). Arrays are recreated on every
@@ -120,13 +153,29 @@ export default function SkillFeedbackModal({
             const skillsToApprove = nothingToReview
                 ? normalizedAutoApproved
                 : [...new Set([...normalizedAutoApproved, ...approved])];
+
+            // Build skill_predictions ONLY for the skills being submitted, carrying
+            // forward the ORIGINAL ML prediction/confidence unchanged so the backend
+            // can store it separately from the human label. Skills with no known ML
+            // metadata (e.g. auto-approved ones never went through needs-review) are
+            // simply omitted here - the backend stores prediction/confidence as NULL
+            // for those rather than inventing a value.
+            const skillPredictions = {};
+            for (const skillName of [...skillsToApprove, ...rejected]) {
+                const meta = mlPredictionMap.get(skillKey(skillName));
+                if (meta) {
+                    skillPredictions[skillName] = meta;
+                }
+            }
+
             const response = await axios.post(
                 `${API_URL}/employee/skill-feedback`,
                 {
                     documentId,
                     approved_skills: skillsToApprove,
                     rejected_skills: rejected,
-                    document_type: documentType
+                    document_type: documentType,
+                    skill_predictions: skillPredictions
                 },
                 { headers: authHeader }
             );

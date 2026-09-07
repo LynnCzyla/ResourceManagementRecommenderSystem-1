@@ -29,6 +29,16 @@ export default function EmployeeProfileTab() {
   const [pendingSkills, setPendingSkills] = useState([]);
   const [autoApprovedSkills, setAutoApprovedSkills] = useState([]);
   const [needsReviewSkills, setNeedsReviewSkills] = useState([]);
+  // Original ML prediction/confidence per needs-review skill, e.g.
+  // { "Electrical Design": { prediction: "Skill", confidence: 0.82 } }.
+  // Carried from nlp.needs_review_predictions through to SkillFeedbackModal
+  // so it can submit it back unchanged as skill_predictions - the model is
+  // never re-run in React.
+  const [needsReviewPredictions, setNeedsReviewPredictions] = useState({});
+  // Same idea, for skills that were ML-auto-approved (>= 0.85 confidence) -
+  // previously discarded; now carried the same way so those skills also
+  // submit their original prediction/confidence instead of NULL.
+  const [autoApprovedPredictions, setAutoApprovedPredictions] = useState({});
   const [previouslyRejectedSkills, setPreviouslyRejectedSkills] = useState([]);
 
   // Progress states
@@ -359,6 +369,10 @@ export default function EmployeeProfileTab() {
             const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
             const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
             const needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+            const needsReviewPreds = (nlp.needs_review_predictions && typeof nlp.needs_review_predictions === 'object')
+                ? nlp.needs_review_predictions : {};
+            const autoApprovedPreds = (nlp.auto_approved_predictions && typeof nlp.auto_approved_predictions === 'object')
+                ? nlp.auto_approved_predictions : {};
             const previouslyRejected = Array.isArray(nlp.previously_rejected_skills) ? nlp.previously_rejected_skills : [];
             const categorizedSkills = nlp.categorized_skills || {};
             
@@ -406,6 +420,8 @@ export default function EmployeeProfileTab() {
                 // ============ Store for modal ============
                 setAutoApprovedSkills(finalAutoApproved);
                 setNeedsReviewSkills(finalNeedsReview);
+                setNeedsReviewPredictions(needsReviewPreds);
+                setAutoApprovedPredictions(autoApprovedPreds);
                 setPreviouslyRejectedSkills(previouslyRejected);
                 setPendingSkills(finalNeedsReview);
                 
@@ -476,6 +492,10 @@ const handleCertUpload = async (e) => {
           const allSkills = Array.isArray(nlp.skills) ? nlp.skills : [];
           const autoApproved = Array.isArray(nlp.auto_approved) ? nlp.auto_approved : [];
           let needsReview = Array.isArray(nlp.needs_review) ? nlp.needs_review : [];
+          const needsReviewPreds = (nlp.needs_review_predictions && typeof nlp.needs_review_predictions === 'object')
+              ? nlp.needs_review_predictions : {};
+          const autoApprovedPreds = (nlp.auto_approved_predictions && typeof nlp.auto_approved_predictions === 'object')
+              ? nlp.auto_approved_predictions : {};
           const previouslyRejected = Array.isArray(nlp.previously_rejected_skills) ? nlp.previously_rejected_skills : [];
           
           console.log('📊 Certificate skills:', {
@@ -501,6 +521,8 @@ const handleCertUpload = async (e) => {
               // 🔥 CRITICAL FIX: Set BOTH state variables
               setPendingDocumentId(data.documentId);
               setNeedsReviewSkills(needsReview);  // ← THIS WAS MISSING!
+              setNeedsReviewPredictions(needsReviewPreds);
+              setAutoApprovedPredictions(autoApprovedPreds);
               setPendingSkills(needsReview);       // ← Set this too
               setAutoApprovedSkills(autoApproved); // ← And this
               setPreviouslyRejectedSkills(previouslyRejected);
@@ -516,6 +538,8 @@ const handleCertUpload = async (e) => {
                 // view so users can confirm and save once.
                 setPendingDocumentId(data.documentId);
                 setNeedsReviewSkills([]);
+                setNeedsReviewPredictions({});
+                setAutoApprovedPredictions(autoApprovedPreds);
                 setPendingSkills([]);
                 setAutoApprovedSkills(autoApproved);
                 setPreviouslyRejectedSkills(previouslyRejected);
@@ -868,6 +892,8 @@ const handleCertUpload = async (e) => {
           setShowFeedbackModal(false);
           setPendingDocumentId(null);
           setNeedsReviewSkills([]);
+          setNeedsReviewPredictions({});
+          setAutoApprovedPredictions({});
           setPendingSkills([]);
           setAutoApprovedSkills([]);
           setPreviouslyRejectedSkills([]);
@@ -877,6 +903,8 @@ const handleCertUpload = async (e) => {
         employeeId={employeeId}
         // ✅ FIX: Use the separated lists
         needsReview={needsReviewSkills || []}
+        needsReviewPredictions={needsReviewPredictions || {}}
+        autoApprovedPredictions={autoApprovedPredictions || {}}
         autoApproved={autoApprovedSkills || []}                               // ← No auto-approved yet
         previouslyRejected={previouslyRejectedSkills || []}
         documentType={pendingDocumentType}
