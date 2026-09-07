@@ -49,4 +49,8 @@ console.log('📦 Loading Performance route...');
 router.use('/performance', require('./performance'));
 console.log('✅ Performance route loaded');
 
+console.log('📦 Loading Reports route...');
+router.use('/reports', require('./reports'));
+console.log('✅ Reports route loaded');
+
 module.exports = router;
