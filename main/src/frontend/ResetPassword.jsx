@@ -2,15 +2,16 @@
 import React, { useState, useEffect } from 'react';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import { supabase } from '../lib/supabaseClient';
+import { useNavigate } from 'react-router-dom';
 
-export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, initialError = '' }) {
+export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [error, setError] = useState(initialError);
+  const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [passwordRequirements, setPasswordRequirements] = useState(null);
@@ -25,6 +26,8 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
     minNumber: false,
     minSpecial: false,
   });
+
+  const navigate = useNavigate();
 
   // Fetch password requirements from database
   useEffect(() => {
@@ -117,6 +120,47 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
   useEffect(() => {
     const checkSession = async () => {
       try {
+        // Check if there's an error in the URL - if so, redirect to login
+        const hash = window.location.hash;
+        if (hash) {
+          const params = new URLSearchParams(hash.substring(1));
+          const error = params.get('error');
+          const errorCode = params.get('error_code');
+          const errorDescription = params.get('error_description');
+          
+          // Check for expired or invalid token errors
+          if (error === 'access_denied' || 
+              errorCode === 'otp_expired' || 
+              errorCode === 'invalid_grant' ||
+              (errorDescription && (
+                errorDescription.toLowerCase().includes('expired') ||
+                errorDescription.toLowerCase().includes('invalid')
+              ))) {
+            console.log('🔴 Expired or invalid reset link detected - redirecting to login');
+            // Redirect to login where the modal will be shown
+            navigate('/login');
+            return;
+          }
+        }
+
+        // Also check URL search params
+        const searchParams = new URLSearchParams(window.location.search);
+        const errorParam = searchParams.get('error');
+        const errorCodeParam = searchParams.get('error_code');
+        const errorDescParam = searchParams.get('error_description');
+
+        if (errorParam === 'access_denied' || 
+            errorCodeParam === 'otp_expired' || 
+            errorCodeParam === 'invalid_grant' ||
+            (errorDescParam && (
+              errorDescParam.toLowerCase().includes('expired') ||
+              errorDescParam.toLowerCase().includes('invalid')
+            ))) {
+          console.log('🔴 Expired link detected in search params - redirecting to login');
+          navigate('/login');
+          return;
+        }
+
         // Give Supabase time to parse the recovery token from URL
         await new Promise(resolve => setTimeout(resolve, 500));
         
@@ -126,17 +170,18 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
           console.log('✅ Recovery session established');
           setSessionReady(true);
         } else {
-          setError('Recovery link invalid or expired. Please request a new password reset link.');
-          console.error('❌ No recovery session found');
+          console.error('❌ No recovery session found - redirecting to login');
+          // Redirect to login where the modal will be shown
+          navigate('/login');
         }
       } catch (err) {
         console.error('Error checking session:', err);
-        setError('Error validating reset link. Please try again.');
+        navigate('/login');
       }
     };
 
     checkSession();
-  }, []);
+  }, [navigate]);
 
   // Sign out the recovery session THEN go to login
   const handleCancel = async () => {
@@ -182,6 +227,16 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
       });
 
       if (updateError) {
+        // Check if error is about expired token
+        if (updateError.message?.toLowerCase().includes('expired') || 
+            updateError.status === 400 || 
+            updateError.code === 'invalid_grant' ||
+            updateError.message?.toLowerCase().includes('invalid') ||
+            updateError.message?.toLowerCase().includes('token')) {
+          // Redirect to login where the modal will be shown
+          navigate('/login');
+          return;
+        }
         throw new Error(updateError.message);
       }
 
@@ -192,7 +247,17 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme, init
       setSuccess(true);
     } catch (err) {
       console.error('❌ Reset password error:', err);
-      setError(err.message || 'Failed to reset password. Please try again. The link may have expired — request a new one.');
+      const errorMessage = err.message || 'Failed to reset password. Please try again.';
+      
+      // Check for expired-related errors in the caught error
+      if (errorMessage.toLowerCase().includes('expired') || 
+          errorMessage.toLowerCase().includes('invalid') ||
+          errorMessage.toLowerCase().includes('token')) {
+        // Redirect to login where the modal will be shown
+        navigate('/login');
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -702,8 +767,6 @@ const styles = {
     justifyContent: 'center',
     margin: '0 auto 20px',
   },
-
-
 };
 
 // Keyframes

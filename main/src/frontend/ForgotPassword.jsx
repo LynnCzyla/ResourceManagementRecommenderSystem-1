@@ -39,7 +39,7 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
         // Explicit "no account" case from the backend — show a warning
         // instead of the success screen.
         if (result.accountExists === false) {
-          console.log('⚠️ No account exists for:', email);
+          console.log('⚠️ No account.');
           setNoAccount(true);
           setIsLoading(false);
           return;
@@ -123,7 +123,7 @@ export default function ForgotPassword({ onBackToLogin, isDark, toggleTheme }) {
                   <line x1="12" y1="17" x2="12.01" y2="17"></line>
                 </svg>
                 <span>
-                  No account found for <strong style={{ wordBreak: 'break-all' }}>{email}</strong>.
+                  No account found <strong style={{ wordBreak: 'break-all' }}></strong>.
                 </span>
               </div>
             )}

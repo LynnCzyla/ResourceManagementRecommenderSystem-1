@@ -4,6 +4,7 @@ import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import { supabase, getSession } from '../lib/supabaseClient';
 import ForgotPassword from './ForgotPassword';
 import ContactAdmin from './ContactAdmin';
+import ExpiredLinkModal from './ExpiredLinkModal';
 
 export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal }) {
   const [email, setEmail] = useState('');
@@ -16,10 +17,77 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
   const [showContactModal, setShowContactModal] = useState(false);
   const [sessionTimeout, setSessionTimeout] = useState(30);
   const [timeoutLoaded, setTimeoutLoaded] = useState(true);
+  const [showExpiredModal, setShowExpiredModal] = useState(false);
   
   // Login attempts states
   const [isLocked, setIsLocked] = useState(false);
   const [lockMessage, setLockMessage] = useState('');
+
+  // Check for expired link error when component mounts
+  useEffect(() => {
+    const checkForExpiredLink = () => {
+      // Check URL hash for error parameters
+      const hash = window.location.hash;
+      if (hash) {
+        const params = new URLSearchParams(hash.substring(1));
+        const error = params.get('error');
+        const errorCode = params.get('error_code');
+        const errorDescription = params.get('error_description');
+
+        // Check for expired or invalid token errors
+        if (error === 'access_denied' || 
+            errorCode === 'otp_expired' || 
+            errorCode === 'invalid_grant' ||
+            (errorDescription && (
+              errorDescription.toLowerCase().includes('expired') ||
+              errorDescription.toLowerCase().includes('invalid')
+            ))) {
+          console.log('🔴 Expired or invalid reset link detected in hash');
+          setShowExpiredModal(true);
+          
+          // Clean up the URL
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          return true;
+        }
+      }
+
+      // Check URL search params for error parameters
+      const searchParams = new URLSearchParams(window.location.search);
+      const errorParam = searchParams.get('error');
+      const errorCodeParam = searchParams.get('error_code');
+      const errorDescParam = searchParams.get('error_description');
+
+      if (errorParam === 'access_denied' || 
+          errorCodeParam === 'otp_expired' || 
+          errorCodeParam === 'invalid_grant' ||
+          (errorDescParam && (
+            errorDescParam.toLowerCase().includes('expired') ||
+            errorDescParam.toLowerCase().includes('invalid')
+          ))) {
+        console.log('🔴 Expired link detected in search params');
+        setShowExpiredModal(true);
+        // Clean up the URL
+        window.history.replaceState(null, '', window.location.pathname);
+        return true;
+      }
+
+      return false;
+    };
+
+    checkForExpiredLink();
+  }, []);
+
+  // Handle expired modal close
+  const handleExpiredModalClose = () => {
+    setShowExpiredModal(false);
+  };
+
+  // Handle "Request New Link" from expired modal
+  const handleRequestNewLink = () => {
+    setShowExpiredModal(false);
+    // Open forgot password view
+    setView('forgot-password');
+  };
 
   // Check existing session on load
   useEffect(() => {
@@ -181,243 +249,254 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
         }
       }
     } catch (error) {
-      setError('Cannot reach the admin server right now. Please start the backend and try again.');
+      setError('Login failed.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div style={styles.container}>
-      {/* Blobs */}
-      <div style={{ ...styles.blob, ...styles.blob1 }}></div>
-      <div style={{ ...styles.blob, ...styles.blob2 }}></div>
+    <>
+      <div style={styles.container}>
+        {/* Blobs */}
+        <div style={{ ...styles.blob, ...styles.blob1 }}></div>
+        <div style={{ ...styles.blob, ...styles.blob2 }}></div>
 
-      {/* Theme Toggle */}
-      <div style={styles.themeToggleContainer}>
-        <span style={{ display: 'flex', alignItems: 'center', color: 'var(--color-text-secondary)', marginRight: '6px' }}>
-          {isDark ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-          )}
-        </span>
-        <label className="theme-switch" style={styles.switch}>
-          <input type="checkbox" checked={isDark} onChange={toggleTheme} style={styles.switchInput} />
-          <span className="theme-slider" style={styles.switchSlider}></span>
-        </label>
-      </div>
-
-      {/* Login Card */}
-      <div className="glass-card" style={styles.card}>
-        <div style={styles.logoContainer}>
-          <img src={weaLogo} alt="WEA Logo" style={styles.logo} />
+        {/* Theme Toggle */}
+        <div style={styles.themeToggleContainer}>
+          <span style={{ display: 'flex', alignItems: 'center', color: 'var(--color-text-secondary)', marginRight: '6px' }}>
+            {isDark ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+            )}
+          </span>
+          <label className="theme-switch" style={styles.switch}>
+            <input type="checkbox" checked={isDark} onChange={toggleTheme} style={styles.switchInput} />
+            <span className="theme-slider" style={styles.switchSlider}></span>
+          </label>
         </div>
 
-        <h2 style={styles.title}>Resource Management Recommender System</h2>
-
-        {error && (
-          <div style={styles.errorAlert}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
-            {error}
+        {/* Login Card */}
+        <div className="glass-card" style={styles.card}>
+          <div style={styles.logoContainer}>
+            <img src={weaLogo} alt="WEA Logo" style={styles.logo} />
           </div>
-        )}
 
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Email Address</label>
-            <div style={styles.inputWrapper}>
-              <svg style={styles.inputIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                <polyline points="22,6 12,13 2,6"></polyline>
+          <h2 style={styles.title}>Resource Management Recommender System</h2>
+
+          {error && (
+            <div style={styles.errorAlert}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
               </svg>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email"
-                style={styles.input}
-                required
-                disabled={isLoading || isLocked}
-              />
+              {error}
             </div>
-          </div>
+          )}
 
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Password</label>
-            <div style={styles.inputWrapper}>
-              <svg style={styles.inputIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-              </svg>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                style={styles.input}
-                required
-                disabled={isLoading || isLocked}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={styles.eyeBtn}
-                disabled={isLocked}
+          <form onSubmit={handleSubmit} style={styles.form}>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Email Address</label>
+              <div style={styles.inputWrapper}>
+                <svg style={styles.inputIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                  <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  style={styles.input}
+                  required
+                  disabled={isLoading || isLocked}
+                />
+              </div>
+            </div>
+
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Password</label>
+              <div style={styles.inputWrapper}>
+                <svg style={styles.inputIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  style={styles.input}
+                  required
+                  disabled={isLoading || isLocked}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={styles.eyeBtn}
+                  disabled={isLocked}
+                >
+                  {showPassword ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                      <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.optionsRow}>
+              <a
+                href="#"
+                style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600', fontSize: '13px' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setError('');
+                  setView('forgot-password');
+                }}
               >
-                {showPassword ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                  </svg>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                )}
-              </button>
+                Forgot password?
+              </a>
             </div>
-          </div>
 
-          <div style={styles.optionsRow}>
-            <a
-              href="#"
-              style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600', fontSize: '13px' }}
-              onClick={(e) => {
-                e.preventDefault();
-                setError('');
-                setView('forgot-password');
-              }}
-            >
-              Forgot password?
-            </a>
-          </div>
-
-          <button
-            type="submit"
-            style={{
-              ...styles.submitBtn,
-              opacity: isLocked ? 0.5 : 1,
-              cursor: isLocked ? 'not-allowed' : 'pointer'
-            }}
-            disabled={isLoading || isLocked}
-          >
-            {isLoading ? (
-              <span style={styles.spinnerWrapper}>
-                <span style={styles.spinner}></span>
-                Verifying Credentials...
-              </span>
-            ) : isLocked ? (
-              'Account Locked'
-            ) : (
-              'Login'
-            )}
-          </button>
-          <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-            Don't have an account?{' '}
-            <a
-              href="#"
-              style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}
-              onClick={(e) => {
-                e.preventDefault();
-                setShowContactModal(true);
-              }}
-            >
-              Contact Administrator
-            </a>
-          </div>
-
-          <div style={{ marginTop: '12px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-            Looking for job opportunities?{' '}
-            <a
-              href="#"
-              style={{ color: 'var(--color-accent)', textDecoration: 'underline', fontWeight: '600' }}
-              onClick={(e) => {
-                e.preventDefault();
-                onApplicantPortal();
-              }}
-            >
-              Go to Applicant Portal
-            </a>
-          </div>
-
-          <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px dashed var(--color-border)', textAlign: 'center' }}>
-            <a
-              href="https://wea-asia.com/"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="submit"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '8px 16px',
-                borderRadius: '20px',
-                background: 'var(--color-primary-light)',
-                color: 'var(--color-primary)',
-                textDecoration: 'none',
-                fontSize: '12px',
-                fontWeight: '600',
-                letterSpacing: '0.3px',
-                transition: 'all 0.3s ease',
-                border: '1px solid rgba(16, 185, 129, 0.2)',
+                ...styles.submitBtn,
+                opacity: isLocked ? 0.5 : 1,
+                cursor: isLocked ? 'not-allowed' : 'pointer'
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(16, 185, 129, 0.25)';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-                const arrow = e.currentTarget.querySelector('.wea-arrow');
-                if (arrow) arrow.style.transform = 'translateX(3px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--color-primary-light)';
-                e.currentTarget.style.transform = 'translateY(0)';
-                const arrow = e.currentTarget.querySelector('.wea-arrow');
-                if (arrow) arrow.style.transform = 'translateX(0)';
-              }}
+              disabled={isLoading || isLocked}
             >
-              Visit Wholesale Electric Asia (WEA) Website
-              <svg
-                className="wea-arrow"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ marginLeft: '6px', transition: 'transform 0.2s ease' }}
+              {isLoading ? (
+                <span style={styles.spinnerWrapper}>
+                  <span style={styles.spinner}></span>
+                  Verifying Credentials...
+                </span>
+              ) : isLocked ? (
+                'Account Locked'
+              ) : (
+                'Login'
+              )}
+            </button>
+            <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+              Don't have an account?{' '}
+              <a
+                href="#"
+                style={{ color: 'var(--color-primary)', textDecoration: 'underline', fontWeight: '600' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowContactModal(true);
+                }}
               >
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-                <polyline points="12 5 19 12 12 19"></polyline>
-              </svg>
-            </a>
-          </div>
-        </form>
+                Contact Administrator
+              </a>
+            </div>
+
+            <div style={{ marginTop: '12px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+              Looking for job opportunities?{' '}
+              <a
+                href="#"
+                style={{ color: 'var(--color-accent)', textDecoration: 'underline', fontWeight: '600' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onApplicantPortal();
+                }}
+              >
+                Go to Applicant Portal
+              </a>
+            </div>
+
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px dashed var(--color-border)', textAlign: 'center' }}>
+              <a
+                href="https://wea-asia.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  background: 'var(--color-primary-light)',
+                  color: 'var(--color-primary)',
+                  textDecoration: 'none',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  letterSpacing: '0.3px',
+                  transition: 'all 0.3s ease',
+                  border: '1px solid rgba(16, 185, 129, 0.2)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(16, 185, 129, 0.25)';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  const arrow = e.currentTarget.querySelector('.wea-arrow');
+                  if (arrow) arrow.style.transform = 'translateX(3px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--color-primary-light)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  const arrow = e.currentTarget.querySelector('.wea-arrow');
+                  if (arrow) arrow.style.transform = 'translateX(0)';
+                }}
+              >
+                Visit Wholesale Electric Asia (WEA) Website
+                <svg
+                  className="wea-arrow"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ marginLeft: '6px', transition: 'transform 0.2s ease' }}
+                >
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </a>
+            </div>
+          </form>
+        </div>
+
+        {/* Contact Administrator modal */}
+        <ContactAdmin
+          isOpen={showContactModal}
+          onClose={() => setShowContactModal(false)}
+        />
       </div>
 
-      {/* Contact Administrator modal */}
-      <ContactAdmin
-        isOpen={showContactModal}
-        onClose={() => setShowContactModal(false)}
-      />
-    </div>
+      {/* Expired Link Modal */}
+      {showExpiredModal && (
+        <ExpiredLinkModal 
+          onClose={handleExpiredModalClose}
+          onRequestNewLink={handleRequestNewLink}
+          isDark={isDark}
+        />
+      )}
+    </>
   );
 }
 
