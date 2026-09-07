@@ -134,6 +134,53 @@ class PythonService {
     }
 
 
+    async retrainIfNeeded(threshold = 20) {
+        console.log(`🎯 Checking whether ML needs retraining (threshold=${threshold})...`);
+
+        return new Promise((resolve, reject) => {
+            const args = [
+                '-u',
+                path.join(this.scriptPath, 'runner.py'),
+                'retrain_if_needed',
+                String(threshold)
+            ];
+
+            const pythonProcess = spawn(this.pythonPath, args, {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            });
+
+            let stdoutData = '';
+            let stderrData = '';
+
+            pythonProcess.stdout.on('data', (data) => {
+                stdoutData += data.toString();
+            });
+
+            pythonProcess.stderr.on('data', (data) => {
+                stderrData += data.toString();
+                console.log(`🐍 ${data.toString().trim()}`);
+            });
+
+            pythonProcess.on('close', (code) => {
+                if (code !== 0) {
+                    reject(new Error(stderrData || `retrain_if_needed exited with code ${code}`));
+                    return;
+                }
+                try {
+                    const result = JSON.parse(stdoutData);
+                    resolve(result);
+                } catch (e) {
+                    resolve({ success: false, retrained: false, reason: 'parse_error' });
+                }
+            });
+
+            pythonProcess.on('error', (err) => {
+                reject(err);
+            });
+        });
+    }
+
     async cleanupLearnedSkills() {
         console.log('🧹 Cleaning up learned skills...');
         

@@ -1035,7 +1035,28 @@ exports.getPendingFeedback = async (req, res) => {
 // ============ SAVE SKILL FEEDBACK (FIXED: case-insensitive dedup everywhere) ============
 exports.saveSkillFeedback = async (req, res) => {
     try {
-        const { documentId, approved_skills = [], rejected_skills = [], document_type } = req.body;
+        const { documentId, approved_skills = [], rejected_skills = [], document_type, skill_predictions = {} } = req.body;
+
+        // ============ NORMALIZE skill_predictions FOR CASE-INSENSITIVE LOOKUP ============
+        // skill_predictions comes from the frontend as { "<original skill name>": { prediction, confidence } },
+        // carrying the ORIGINAL ML prediction/confidence computed once during document
+        // processing (module2_nlp.py's _is_likely_skill -> nlp.needs_review_predictions).
+        // It must never be regenerated here - only looked up and stored alongside the
+        // human label, which stays a separate column.
+        const predictionByKey = new Map();
+        if (skill_predictions && typeof skill_predictions === 'object') {
+            for (const [skillName, meta] of Object.entries(skill_predictions)) {
+                if (!meta || typeof meta !== 'object') continue;
+                const key = skillKey(skillName);
+                const prediction = typeof meta.prediction === 'string' ? meta.prediction : null;
+                const confidence = typeof meta.confidence === 'number' ? meta.confidence : null;
+                predictionByKey.set(key, { prediction, confidence });
+            }
+        }
+        // If prediction metadata is genuinely unavailable for a skill, this returns
+        // { prediction: null, confidence: null } rather than inventing a value -
+        // Postgres/Supabase will store those as NULL.
+        const getMlMeta = (skillName) => predictionByKey.get(skillKey(skillName)) || { prediction: null, confidence: null };
 
         if (!documentId) {
             return res.status(400).json({ success: false, error: 'Document ID is required' });
@@ -1181,22 +1202,40 @@ exports.saveSkillFeedback = async (req, res) => {
                 (existingFeedback || []).filter(r => r.label === 'Not Skill').map(r => skillKey(r.phrase))
             );
 
+            // Both loops insert reviewed_at = now, since this row is being written
+            // BECAUSE a human (profileData.id) just reviewed it. That's also what
+            // makes it eligible to be counted as "human-reviewed" for the ML
+            // retraining threshold below - a row is only ever human-reviewed once
+            // both reviewed_by and reviewed_at are set, and prior to this fix
+            // reviewed_at was never populated at all.
+            const reviewedAt = new Date().toISOString();
+            let feedbackRowsWritten = 0;
+
             for (const skillRaw of approved_skills) {
                 const skill = normalizeSkill(skillRaw);
                 if (!skill) continue;
                 const key = skillKey(skill);
                 if (existingApprovedKeys.has(key)) continue;
 
+                // The human decision (label='Skill') and the original ML prediction/
+                // confidence are stored in separate columns and must never overwrite
+                // each other - e.g. ML may have predicted "Not Skill" and a human
+                // still approved it; both facts are preserved.
+                const mlMeta = getMlMeta(skill);
                 await supabase
                     .from('feedback_training')
                     .insert({
                         phrase: skill,
                         label: 'Skill',
+                        prediction: mlMeta.prediction,
+                        confidence: mlMeta.confidence,
                         reviewed_by: profileData.id,
+                        reviewed_at: reviewedAt,
                         document_id: documentId,
                         employee_id: profileData.employee_id
                     });
                 existingApprovedKeys.add(key);
+                feedbackRowsWritten++;
             }
 
             for (const skillRaw of rejected_skills) {
@@ -1205,19 +1244,47 @@ exports.saveSkillFeedback = async (req, res) => {
                 const key = skillKey(skill);
                 if (existingRejectedKeys.has(key)) continue;
 
+                const mlMeta = getMlMeta(skill);
                 await supabase
                     .from('feedback_training')
                     .insert({
                         phrase: skill,
                         label: 'Not Skill',
+                        prediction: mlMeta.prediction,
+                        confidence: mlMeta.confidence,
                         reviewed_by: profileData.id,
+                        reviewed_at: reviewedAt,
                         document_id: documentId,
                         employee_id: profileData.employee_id
                     });
                 existingRejectedKeys.add(key);
+                feedbackRowsWritten++;
             }
 
             console.log(`✅ Feedback saved to training table!`);
+
+            // ============ GATED ML RETRAINING ============
+            // Only actually retrains when >= 20 NEW human-reviewed rows have
+            // accumulated since the last successful training; otherwise this is a
+            // fast no-op. This is the only place ML retraining is triggered now -
+            // module2_nlp.py's learn_from_feedback() no longer trains inline on
+            // every submission. Awaited (not fire-and-forget) so a successful
+            // retrain is guaranteed to have persisted to skill_classifier.pkl
+            // before this request completes, and errors don't break feedback
+            // saving (the feedback_training rows above are already committed).
+            if (feedbackRowsWritten > 0) {
+                try {
+                    const retrainResult = await pythonService.retrainIfNeeded(20);
+                    if (retrainResult?.retrained) {
+                        console.log(`🎓 ML retrained automatically: ${retrainResult.total_reviewed_count} human-reviewed rows`);
+                    } else {
+                        console.log(`ℹ️  ML retrain check: ${retrainResult?.reason || 'not needed'} `
+                            + `(${retrainResult?.new_reviewed_count ?? '?'} new reviewed rows)`);
+                    }
+                } catch (retrainError) {
+                    console.error('⚠️ ML retrain check failed:', retrainError.message);
+                }
+            }
         } catch (feedbackError) {
             console.error('⚠️ Error saving feedback to training table:', feedbackError.message);
         }
@@ -1374,41 +1441,52 @@ exports.resetSkillsFromJson = async (req, res) => {
 // ============ RETRAIN ML ============
 exports.retrainML = async (req, res) => {
     try {
-        const { count: totalCount, error: countError } = await supabase
+        // Reporting counts here now match what Python will actually train on
+        // (retrain_ml -> train_and_replace_if_needed only ever uses rows where
+        // reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL) - previously this
+        // counted/reported ALL feedback_training rows including unreviewed ones,
+        // which didn't match what got trained on.
+        const { data: feedbackData, error: fetchError } = await supabase
             .from('feedback_training')
-            .select('*', { count: 'exact', head: true });
+            .select('phrase, label')
+            .not('reviewed_by', 'is', null)
+            .not('reviewed_at', 'is', null)
+            .in('label', ['Skill', 'Not Skill']);
 
-        if (countError) throw countError;
+        if (fetchError) throw fetchError;
+
+        const totalCount = feedbackData?.length || 0;
 
         if (totalCount < 10) {
             return res.status(400).json({
                 success: false,
-                error: `Need at least 10 feedback items. Currently have ${totalCount}.`
+                error: `Need at least 10 human-reviewed feedback items. Currently have ${totalCount}.`
             });
         }
 
-        const { data: feedbackData, error: fetchError } = await supabase
-            .from('feedback_training')
-            .select('phrase, label');
+        console.log(`📊 Manually retraining ML (${totalCount} human-reviewed feedback items available)...`);
 
-        if (fetchError) throw fetchError;
-
-        console.log(`📊 Retraining ML with ${feedbackData.length} feedback items...`);
-
-        const texts = feedbackData.map(row => row.phrase);
         const labels = feedbackData.map(row => row.label === 'Skill' ? 1 : 0);
 
+        // texts/labels are still passed for backward compatibility with the CLI
+        // signature, but runner.py's retrain_ml now ignores them and re-fetches
+        // human-reviewed rows directly from Supabase itself via the same safe
+        // candidate-train/evaluate/replace path the automatic retrain uses -
+        // see runner.py and skill_classifier.train_and_replace_if_needed().
+        const texts = feedbackData.map(row => row.phrase);
         const result = await retrainMLPython(texts, labels);
 
         res.json({
             success: true,
             data: {
-                total_feedback: feedbackData.length,
+                total_feedback: result.total_reviewed_count ?? totalCount,
                 skills: labels.filter(l => l === 1).length,
                 not_skills: labels.filter(l => l === 0).length,
-                retrained: result.success
+                retrained: !!result.retrained
             },
-            message: `✅ ML retrained with ${feedbackData.length} feedback items!`
+            message: result.retrained
+                ? `✅ ML retrained with ${result.total_reviewed_count ?? totalCount} human-reviewed feedback items!`
+                : `ℹ️ Retrain did not run: ${result.reason || result.error || 'unknown reason'}`
         });
 
     } catch (error) {

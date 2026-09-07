@@ -22,6 +22,7 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
   // Login attempts states
   const [isLocked, setIsLocked] = useState(false);
   const [lockMessage, setLockMessage] = useState('');
+  const [isInactive, setIsInactive] = useState(false);
 
   // Check for expired link error when component mounts
   useEffect(() => {
@@ -191,10 +192,10 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
     setError('');
     setIsLoading(true);
     setIsLocked(false);
+    setIsInactive(false);
     setLockMessage('');
 
     try {
-
       // Call backend API for login with attempts tracking
       const response = await fetch('http://localhost:5000/api/auth/login', {
         method: 'POST',
@@ -218,9 +219,9 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
         const loginTime = Date.now();
         localStorage.setItem('user', JSON.stringify(user));
 
-        // 👇 USE THE CUSTOM TOKEN FROM YOUR BACKEND
+        // Use the custom token from your backend
         if (token) {
-          localStorage.setItem('token', token);  // ← Use the custom token
+          localStorage.setItem('token', token);
         } else if (session?.access_token) {
           // Fallback to Supabase token if custom token isn't available
           localStorage.setItem('token', session.access_token);
@@ -244,12 +245,17 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
           setIsLocked(true);
           setLockMessage(data.message || 'Account locked. Please contact an administrator.');
           setError(data.message || 'Account locked. Please contact an administrator.');
+        } else if (data.inactive) {
+          // ✅ Handle inactive/deactivated account
+          setIsInactive(true);
+          setLockMessage(data.message || 'Your account has been deactivated. Please contact an administrator.');
+          setError(data.message || 'Your account has been deactivated. Please contact an administrator.');
         } else {
           setError(data.message || 'Invalid credentials');
         }
       }
     } catch (error) {
-      setError('Login failed.');
+      setError('Login failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -323,7 +329,7 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
                   placeholder="Enter your email"
                   style={styles.input}
                   required
-                  disabled={isLoading || isLocked}
+                  disabled={isLoading || isLocked || isInactive}
                 />
               </div>
             </div>
@@ -342,13 +348,13 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
                   placeholder="Enter your password"
                   style={styles.input}
                   required
-                  disabled={isLoading || isLocked}
+                  disabled={isLoading || isLocked || isInactive}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   style={styles.eyeBtn}
-                  disabled={isLocked}
+                  disabled={isLocked || isInactive}
                 >
                   {showPassword ? (
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -383,10 +389,10 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
               type="submit"
               style={{
                 ...styles.submitBtn,
-                opacity: isLocked ? 0.5 : 1,
-                cursor: isLocked ? 'not-allowed' : 'pointer'
+                opacity: (isLocked || isInactive) ? 0.5 : 1,
+                cursor: (isLocked || isInactive) ? 'not-allowed' : 'pointer'
               }}
-              disabled={isLoading || isLocked}
+              disabled={isLoading || isLocked || isInactive}
             >
               {isLoading ? (
                 <span style={styles.spinnerWrapper}>
@@ -395,6 +401,8 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
                 </span>
               ) : isLocked ? (
                 'Account Locked'
+              ) : isInactive ? (
+                'Account Deactivated'
               ) : (
                 'Login'
               )}

@@ -1,3 +1,5 @@
+#D:\ResourceManagementRecommenderSystem\python\scripts\runner.py
+
 import sys
 import json
 import io
@@ -16,9 +18,20 @@ if sys.stderr.encoding != 'utf-8':
 sys.stdout = sys.stdout.detach()
 sys.stdout = open(sys.stdout.fileno(), 'w', buffering=1)
 
-# Silence prints (they go to stderr)
-#import builtins
-#builtins.print = lambda *a, **k: None
+# ============ STDOUT/STDERR CONTRACT ============
+# pythonService.js spawns this process and does JSON.parse() on stdout, so
+# stdout must contain ONLY the final JSON payload. NLPProcessor (and the
+# modules it imports/constructs: skill_classifier, supabase_client) call
+# print() with no file=, which defaults to stdout, silently corrupting the
+# JSON channel. Save the real, correctly-configured stdout handle above for
+# the final JSON writes, then point sys.stdout at stderr so every print()
+# from here on - including everything inside NLPProcessor.__init__(),
+# OCRProcessor, DocumentProcessor, and any module-level import prints - is
+# diagnostic-only and lands on stderr instead. No log is deleted; only the
+# destination stream changes.
+_REAL_STDOUT = sys.stdout
+sys.stdout = sys.stderr
+# ==================================================
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -27,8 +40,8 @@ try:
     from modules.module2_nlp import NLPProcessor
     from modules.module3_integration import DocumentProcessor
 except ImportError as e:
-    sys.stdout.write(json.dumps({"success": False, "error": f"Import error: {str(e)}"}))
-    sys.stdout.flush()
+    _REAL_STDOUT.write(json.dumps({"success": False, "error": f"Import error: {str(e)}"}))
+    _REAL_STDOUT.flush()
     sys.exit(1)
 
 class Runner:
@@ -42,9 +55,18 @@ class Runner:
         self.ocr = OCRProcessor()
         
         print("[RUNNER] Initializing Document Processor...", file=sys.stderr)
-        self.processor = DocumentProcessor()
-        # Override the processor's NLP with our ML-enabled one
+        # ============ FIX (duplicate-init bug) ============
+        # DocumentProcessor used to always build its own NLPProcessor
+        # internally (full Supabase fetch + ML classifier load), which was
+        # then immediately discarded by the old `self.processor.nlp = self.nlp`
+        # override below. Pass the already-built instance in directly so it's
+        # only ever constructed once per process.
+        self.processor = DocumentProcessor(nlp=self.nlp)
+        # The line below is now a harmless no-op (processor.nlp already IS
+        # self.nlp) - left in place as a defensive no-op rather than removed,
+        # to keep this change minimal and behavior-neutral either way.
         self.processor.nlp = self.nlp
+        # ====================================================
         print("[RUNNER] Document Processor initialized.", file=sys.stderr)
     
     def process_document(self, image_path, employee_id, doc_type):
@@ -149,28 +171,59 @@ class Runner:
             traceback.print_exc(file=sys.stderr)
             return {"success": False, "error": str(e)}
     
-    # ============ RETRAIN ML ============
+    # ============ RETRAIN ML (manual trigger, e.g. an admin "Retrain ML" button) ============
     def retrain_ml(self, texts, labels):
-        """Retrain ML from feedback data"""
+        """Manually force a retrain, ignoring the 20-new-row threshold.
+
+        `texts`/`labels` are accepted for backward compatibility with the
+        existing CLI signature (feedbackController.retrainML still passes
+        them) but are NOT used for training data anymore: this now always
+        re-fetches ONLY human-reviewed rows (reviewed_by IS NOT NULL AND
+        reviewed_at IS NOT NULL) straight from Supabase via
+        SkillClassifier.train_and_replace_if_needed(threshold=0), the same
+        safe candidate-train/evaluate/replace path the automatic
+        ≥20-new-row retrain uses. This also fixes a prior bug where a
+        successful manual retrain trained a new model in memory but never
+        called _save_model(), so it was silently lost when this process
+        exited."""
         try:
             if self.nlp is None:
                 self.nlp = NLPProcessor()
-            
-            print(f"[ML] Retraining with {len(texts)} samples...", file=sys.stderr)
-            
-            if len(texts) < 10:
-                return {"success": False, "error": "Need 10+ samples"}
-            
-            self.nlp.classifier.train(texts, labels)
+
+            print(f"[ML] Manual retrain requested ({len(texts) if texts else 0} legacy args ignored - "
+                  f"using human-reviewed feedback_training rows only)", file=sys.stderr)
+
+            result = self.nlp.classifier.train_and_replace_if_needed(threshold=0)
             self.nlp.use_ml = self.nlp.classifier.is_trained
-            
-            if self.nlp.use_ml:
-                print(f"[ML] Retrained successfully!", file=sys.stderr)
-                self.nlp._save_data()
-                return {"success": True, "samples": len(texts)}
+
+            if result.get('retrained'):
+                print(f"[ML] Retrained successfully! "
+                      f"({result.get('total_reviewed_count', 0)} human-reviewed rows)", file=sys.stderr)
+                return {"success": True, "samples": result.get('total_reviewed_count', 0), **result}
             else:
-                return {"success": False, "error": "Training failed"}
-                
+                return {"success": False, "error": result.get('reason', 'Training failed'), **result}
+
+        except Exception as e:
+            print(f"[ML] Error: {str(e)}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return {"success": False, "error": str(e)}
+
+    # ============ GATED AUTOMATIC RETRAIN ============
+    def retrain_if_needed(self, threshold=20):
+        """Called after feedback is saved. Retrains ONLY when >= `threshold`
+        NEW human-reviewed rows have accumulated since the last successful
+        training. Safe no-op most of the time. See
+        SkillClassifier.train_and_replace_if_needed for the candidate-train/
+        evaluate/replace + concurrency-lock logic."""
+        try:
+            if self.nlp is None:
+                self.nlp = NLPProcessor()
+
+            result = self.nlp.classifier.train_and_replace_if_needed(threshold=threshold)
+            self.nlp.use_ml = self.nlp.classifier.is_trained
+            return {"success": True, **result}
+
         except Exception as e:
             print(f"[ML] Error: {str(e)}", file=sys.stderr)
             import traceback
@@ -183,7 +236,7 @@ class Runner:
             if self.nlp is None:
                 self.nlp = NLPProcessor()
             
-            merged = self.nlp.merge_synonyms_dynamically()
+            merged = self.nlp.merge_synonyms_dynamically(caller='cleanup_learned_skills')
             
             return {
                 "success": True,
@@ -218,8 +271,8 @@ class Runner:
 
 def main():
     if len(sys.argv) < 2:
-        sys.stdout.write(json.dumps({"error": "No command"}))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps({"error": "No command"}))
+        _REAL_STDOUT.flush()
         return
     
     runner = Runner()
@@ -227,36 +280,42 @@ def main():
     
     if cmd == "process_document" and len(sys.argv) >= 5:
         result = runner.process_document(sys.argv[2], sys.argv[3], sys.argv[4])
-        sys.stdout.write(json.dumps(result))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps(result))
+        _REAL_STDOUT.flush()
     
     elif cmd == "learn_feedback" and len(sys.argv) >= 4:
         approved_skills = sys.argv[2]
         rejected_skills = sys.argv[3]
         result = runner.learn_feedback(approved_skills, rejected_skills)
-        sys.stdout.write(json.dumps(result))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps(result))
+        _REAL_STDOUT.flush()
     
     elif cmd == "retrain_ml" and len(sys.argv) >= 4:
         texts = json.loads(sys.argv[2])
         labels = json.loads(sys.argv[3])
         result = runner.retrain_ml(texts, labels)
-        sys.stdout.write(json.dumps(result))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps(result))
+        _REAL_STDOUT.flush()
+    
+    elif cmd == "retrain_if_needed":
+        threshold = int(sys.argv[2]) if len(sys.argv) >= 3 else 20
+        result = runner.retrain_if_needed(threshold)
+        _REAL_STDOUT.write(json.dumps(result))
+        _REAL_STDOUT.flush()
     
     elif cmd == "cleanup_learned_skills":
         result = runner.cleanup_learned_skills()
-        sys.stdout.write(json.dumps(result))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps(result))
+        _REAL_STDOUT.flush()
     
     elif cmd == "ml_status":
         result = runner.get_ml_status()
-        sys.stdout.write(json.dumps(result))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps(result))
+        _REAL_STDOUT.flush()
     
     else:
-        sys.stdout.write(json.dumps({"error": f"Unknown command: {cmd}"}))
-        sys.stdout.flush()
+        _REAL_STDOUT.write(json.dumps({"error": f"Unknown command: {cmd}"}))
+        _REAL_STDOUT.flush()
 
 
 if __name__ == "__main__":

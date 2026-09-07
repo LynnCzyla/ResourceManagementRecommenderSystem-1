@@ -6,9 +6,11 @@ import spacy
 import re
 import json
 import os
-import sys 
+import sys
+import time
 from collections import Counter, defaultdict
 from datetime import datetime
+from difflib import SequenceMatcher
 import hashlib
 from pathlib import Path
 import numpy as np
@@ -20,6 +22,45 @@ from modules.supabase_client import supabase
 
 # ============ FIX: connectors that should never lead a skill phrase ============
 LEADING_CONNECTORS = ('and', 'of', 'for', 'with', 'to', 'in', 'on', 'at')
+
+# ============ FALLBACK (Layer 3) SAFETY CONSTANTS ============
+# Used only when the ML classifier is unavailable/untrained/errors - see
+# _is_likely_skill()'s Layer 3. Not used at all when ML is active, so these
+# never touch the ML thresholds or the KB layer.
+FRAGMENT_CONNECTORS = {
+    'while', 'with', 'and', 'for', 'the', 'of', 'to', 'in', 'on', 'by',
+    'from', 'that', 'this', 'are', 'is', 'as', 'a', 'an'
+}
+JOB_TITLE_ROLE_NOUNS = {
+    'drafter', 'designer', 'engineer', 'manager', 'director', 'supervisor',
+    'technician', 'analyst', 'coordinator', 'specialist', 'officer',
+    'administrator', 'architect', 'consultant', 'developer'
+}
+
+# ============ ALIAS / SYNONYM EQUIVALENCE THRESHOLDS ============
+# These control _should_merge() / is_true_alias() — the decision of whether
+# two skill phrases are the SAME skill (safe to alias) vs merely
+# semantically RELATED (must never be aliased). They are intentionally
+# stricter than plain semantic similarity; see is_true_alias() docstring
+# for the reasoning. Tune based on the [ALIAS] ACCEPTED/REJECTED log lines
+# you see in production — never lower ALIAS_MIN_SEMANTIC_SIMILARITY below
+# ~0.80, that floor is what stops two merely-related phrases with
+# coincidental lexical overlap from being merged.
+ALIAS_FUZZY_TOKEN_MATCH_THRESHOLD = 0.72        # difflib ratio for two tokens to count as "the same word" (handles report/reporting, plural/singular, minor typos)
+ALIAS_MEANINGFUL_OVERLAP_THRESHOLD = 0.65       # fraction of tokens (fuzzy-matched) that must line up between the two phrases
+ALIAS_CORE_OVERLAP_THRESHOLD = 0.50             # fraction of *non-generic* tokens that must line up
+ALIAS_EXTRA_TOKEN_RELATEDNESS_THRESHOLD = 0.55  # how related a single leftover/unmatched token must be to not count as "a new concept"
+ALIAS_MIN_SEMANTIC_SIMILARITY = 0.80            # hard floor for spaCy similarity — dynamic learning may only raise this, never lower it (see _get_merge_threshold)
+
+# Dynamic (corpus-derived) "generic word" detection — words like
+# "management"/"support"/"technical" that show up across many unrelated
+# skills and therefore carry little distinguishing meaning on their own.
+# This is computed from self.learned_skills at runtime (see
+# _get_generic_terms), NOT a hardcoded skill/word list, so it stays true
+# to the "100% dynamic" design of this module.
+GENERIC_TERM_MIN_SKILLS = 15      # don't trust corpus-based generic detection until we've learned at least this many skills
+GENERIC_TERM_DOC_FREQ_RATIO = 0.12  # a token appearing in >=12% of learned skills is a candidate generic term...
+GENERIC_TERM_MIN_COUNT = 4          # ...provided it also appears in at least this many distinct skills (avoids noise at small corpus sizes)
 
 # ============ SUPABASE FACTS CACHE ============
 # Each PDF upload spawns a brand-new Python process (see pythonService.js's
@@ -35,10 +76,28 @@ FACTS_CACHE_TTL_SECONDS = 600  # 10 minutes
 
 class NLPProcessor:
     """100% Dynamic NLP - Learns everything from documents"""
-    
+
+    # ============ DUPLICATE-WORK DIAGNOSTICS (process-lifetime counters) ============
+    # Pure instrumentation, added to answer "how many times was NLPProcessor
+    # constructed / merge_synonyms_dynamically() invoked in this process, and
+    # by whom" without changing any behavior. Reset to 0 each time a fresh
+    # Python process starts (each document upload spawns a new process), so
+    # these counts are always scoped to a single request.
+    _instance_count = 0
+    _merge_invocation_count = 0
+    # ================================================================================
+
     def __init__(self, model_name='en_core_web_md', skill_db_path=None):
         """Initialize with empty learning - everything learned from data"""
-        
+
+        NLPProcessor._instance_count += 1
+        print(f"[NLP-INIT-DIAG] NLPProcessor instance #{NLPProcessor._instance_count} "
+              f"being constructed (pid={os.getpid()})", file=sys.stderr)
+
+        # Not cleared between merges - lets merge_synonyms_dynamically() report
+        # whether the skill set actually changed since the last time it ran.
+        self._last_merge_skillset_signature = None
+
         # Load spaCy model
         try:
             self.nlp = spacy.load(model_name)
@@ -85,11 +144,42 @@ class NLPProcessor:
         self.skill_importance = {}           # Importance scores learned from feedback
         self.merge_history = []              # History of merge decisions
         self.feedback_log = {}               # User feedback log
+
+        # ============ MERGE-RUN PERFORMANCE CACHES ============
+        # merge_synonyms_dynamically() naively compares every skill pair
+        # (O(n^2)): at ~233 learned skills that's ~27k pairs. The dominant
+        # cost was never the O(n^2) Python loop itself — it was calling the
+        # spaCy pipeline (self.nlp(...)) TWICE per pair with no caching, so
+        # the same skill text got re-parsed by spaCy up to n-1 times. These
+        # caches make every per-skill computation (normalization, tokens,
+        # spaCy doc/vector, learned type, learned importance) happen at most
+        # ONCE per skill for the lifetime of this process, no matter how
+        # many pairs that skill is compared against. They are pure functions
+        # of (skill text, self.doc_texts/self.skill_dictionary), so it's
+        # safe to keep them warm across multiple merge runs; call
+        # _clear_merge_run_caches() if doc_texts/skill_dictionary changed
+        # and you need a guaranteed-fresh recompute.
+        self._skill_cache = {}               # skill -> {norm, nospace, tokens, token_set}
+        self._nlp_doc_cache = {}             # skill -> spaCy Doc (or None on failure)
+        self._skill_type_cache = {}          # skill -> learned type string
+        self._skill_importance_cache = {}    # skill -> learned importance float
+        self.last_merge_stats = {}           # diagnostics from the most recent merge_synonyms_dynamically() run
+        self._merge_history_load_attempted = False  # avoids re-reading skill_db_path on every pair when merge_history starts empty
         
         self.classifier = SkillClassifier()
         # ============ SMART ML ACTIVATION ============
-        if self.classifier.is_trained:
-            self.use_ml = True
+        # FIX: self.use_ml was previously only ever assigned when
+        # self.classifier.is_trained was True - with no else branch, so on
+        # a fresh deployment (no skill_classifier.pkl yet, nothing to train
+        # on), self.use_ml was never set at all and the first read of it
+        # anywhere (e.g. `if self.use_ml:` in _is_likely_skill, or
+        # runner.py logging self.nlp.use_ml right after construction)
+        # raised AttributeError. Defaulting to False here is behavior-
+        # neutral for every case that worked before (is_trained True still
+        # sets True) and only changes the previously-broken untrained case
+        # from a crash into the same "no ML available" state _is_likely_skill
+        # already handles via its self.use_ml check.
+        self.use_ml = bool(self.classifier.is_trained)
         # Try to get accuracy from model file
         try:
             with open(self.classifier.model_path, 'rb') as f:
@@ -274,8 +364,26 @@ class NLPProcessor:
             skills_resp = client.table('skills').select('id, skill_name').execute()
             id_to_name = {row['id']: row['skill_name'].lower() for row in skills_resp.data}
 
-            # 2. Aliases (single query — see note above)
-            alias_rows = client.table('skill_aliases').select('master_skill_id, alias_skill_id').execute()
+            # 2. Aliases — fetch ALL rows in pages to avoid Supabase's 1000-row limit
+            alias_rows = []
+            page_size = 1000
+            offset = 0
+
+            while True:
+                response = (
+                    client.table('skill_aliases')
+                    .select('master_skill_id, alias_skill_id')
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                )
+
+                page = response.data or []
+                alias_rows.extend(page)
+
+                if len(page) < page_size:
+                    break
+
+                offset += page_size
 
             # 3. Feedback (approved/rejected) — drives rejection filters
             feedback_resp = client.table('feedback_training').select('phrase, label').execute()
@@ -288,7 +396,7 @@ class NLPProcessor:
                 ],
                 'aliases': [
                     {'master': id_to_name.get(row['master_skill_id']), 'alias': id_to_name.get(row['alias_skill_id'])}
-                    for row in alias_rows.data
+                    for row in alias_rows
                     if id_to_name.get(row['master_skill_id']) and id_to_name.get(row['alias_skill_id'])
                 ],
                 'feedback': [
@@ -504,20 +612,43 @@ class NLPProcessor:
             print(f"[NLP] Error saving skill '{skill_name}' to DB: {e}")
             return None
 
-    def _save_alias_to_db(self, master_name, alias_name, similarity=None):
-        """Persist a master/alias relationship to Supabase."""
+    def _save_alias_to_db(self, master_name, alias_name, similarity=None, verified_equivalent_masters=False):
+        """Persist a master/alias relationship to Supabase.
+
+        NOTE (alias/synonym fix): one alias phrase must not silently end up
+        pointing at two different masters — that's how alias_lookup[alias]
+        used to get clobbered by whichever merge ran last. Before writing,
+        we check Supabase directly for any *other* master already mapped to
+        this alias. If one exists and the caller hasn't already verified
+        (via is_true_alias) that the two masters are themselves equivalent,
+        we log the conflict and refuse the write rather than overwrite it.
+        Callers that HAVE verified the masters are equivalent (see
+        merge_synonyms_dynamically) pass verified_equivalent_masters=True.
+        """
         try:
             client = supabase.get_client()
             if not client:
                 return
             master_id = self._get_or_create_skill_id(master_name)
             alias_id = self._get_or_create_skill_id(alias_name)
-            if master_id and alias_id:
-                client.table('skill_aliases').upsert(
-                    {'master_skill_id': master_id, 'alias_skill_id': alias_id, 'similarity': similarity},
-                    on_conflict='master_skill_id,alias_skill_id'
-                ).execute()
-                self._invalidate_facts_cache()
+            if not (master_id and alias_id):
+                return
+
+            existing = client.table('skill_aliases').select('master_skill_id').eq('alias_skill_id', alias_id).execute()
+            conflicting_masters = {row['master_skill_id'] for row in (existing.data or []) if row['master_skill_id'] != master_id}
+            if conflicting_masters and not verified_equivalent_masters:
+                print(f"[ALIAS] DB CONFLICT — rejected:\n"
+                      f"  \"{alias_name}\" already has a different master in Supabase "
+                      f"(master_skill_id(s)={conflicting_masters})\n"
+                      f"  refusing to also map it to master_skill_id={master_id} (\"{master_name}\") "
+                      f"without verified master equivalence")
+                return
+
+            client.table('skill_aliases').upsert(
+                {'master_skill_id': master_id, 'alias_skill_id': alias_id, 'similarity': similarity},
+                on_conflict='master_skill_id,alias_skill_id'
+            ).execute()
+            self._invalidate_facts_cache()
         except Exception as e:
             print(f"[NLP] Error saving alias '{alias_name}' -> '{master_name}': {e}")
 
@@ -906,7 +1037,18 @@ class NLPProcessor:
             return False
     
     def _build_alias_structure_from_history(self):
-        """Build alias structures from merge history"""
+        """Build alias structures from merge history.
+
+        NOTE (alias/synonym fix): merge_history can contain entries written
+        under the OLD, looser merge logic (before is_true_alias existed).
+        Trusting merge['decision'] blindly would silently resurrect those
+        bad aliases. So every entry is re-validated with is_true_alias()
+        under the CURRENT rules before it's allowed back into
+        skill_aliases/alias_lookup — an entry that was accepted historically
+        but fails the new equivalence check is skipped and logged, not
+        rebuilt. This also enforces the one-master-per-alias rule (never
+        silently overwrite alias_lookup[alias] with a conflicting master).
+        """
         self.skill_aliases = {}
         self.alias_lookup = {}
         
@@ -920,28 +1062,34 @@ class NLPProcessor:
                     # Both exist - check merge history for which was kept
                     master = self._choose_master(skill1, skill2)
                     alias = skill2 if master == skill1 else skill1
-                    
-                    if master not in self.skill_aliases:
-                        self.skill_aliases[master] = []
-                    if alias not in self.skill_aliases[master]:
-                        self.skill_aliases[master].append(alias)
-                    self.alias_lookup[alias] = master
-                    
                 elif skill1 in self.learned_skills:
-                    # skill1 is master
-                    if skill1 not in self.skill_aliases:
-                        self.skill_aliases[skill1] = []
-                    if skill2 not in self.skill_aliases[skill1]:
-                        self.skill_aliases[skill1].append(skill2)
-                    self.alias_lookup[skill2] = skill1
-                    
+                    master, alias = skill1, skill2
                 elif skill2 in self.learned_skills:
-                    # skill2 is master
-                    if skill2 not in self.skill_aliases:
-                        self.skill_aliases[skill2] = []
-                    if skill1 not in self.skill_aliases[skill2]:
-                        self.skill_aliases[skill2].append(skill1)
-                    self.alias_lookup[skill1] = skill2
+                    master, alias = skill2, skill1
+                else:
+                    continue
+
+                accepted, category, reasons, sig = self._evaluate_equivalence(master, alias)
+                if not accepted:
+                    print(f"[ALIAS] Skipped rebuilding stale merge-history entry:\n"
+                          f"  \"{alias}\" <-> \"{master}\"\n"
+                          f"  reason={'; '.join(reasons) if reasons else 'fails current equivalence rules'}")
+                    continue
+
+                existing_master = self.alias_lookup.get(alias)
+                if existing_master and existing_master != master:
+                    masters_equivalent, _, equiv_reasons, _ = self._evaluate_equivalence(existing_master, master)
+                    if not masters_equivalent:
+                        print(f"[ALIAS] CONFLICT while rebuilding — kept \"{existing_master}\" as master for "
+                              f"\"{alias}\", refused reassigning to \"{master}\" "
+                              f"(reason={'; '.join(equiv_reasons)})")
+                        continue
+                    master = existing_master  # masters verified equivalent — keep the one already chosen
+
+                self.skill_aliases.setdefault(master, [])
+                if alias not in self.skill_aliases[master]:
+                    self.skill_aliases[master].append(alias)
+                self.alias_lookup[alias] = master
     
     def get_master_skill(self, skill):
         """
@@ -1138,24 +1286,99 @@ class NLPProcessor:
             base_importance += self.skill_importance.get(skill, 0) * 0.1
         
         return min(base_importance, 1.0)
-    
+
+    # ============ MERGE-RUN PERFORMANCE CACHE HELPERS ============
+    # See the cache attributes set up in __init__. Every helper here is a
+    # memoized wrapper around an existing (expensive, per-skill) computation
+    # — none of them change what gets computed or the values returned, they
+    # just make sure it only happens once per unique skill string.
+
+    def _get_skill_lexical_cache(self, skill):
+        """Cheap, pure-string-processing facts about a skill phrase
+        (normalized text, whitespace-stripped text, meaningful tokens).
+        Computed once per skill and reused across every pair it appears in."""
+        cached = self._skill_cache.get(skill)
+        if cached is not None:
+            return cached
+        norm = self._normalize_skill_text(skill)
+        nospace = re.sub(r'\s+', '', norm)
+        tokens = self._meaningful_tokens(skill)
+        cached = {
+            'norm': norm,
+            'nospace': nospace,
+            'tokens': tokens,
+            'token_set': set(tokens),
+        }
+        self._skill_cache[skill] = cached
+        return cached
+
+    def _get_cached_nlp_doc(self, skill):
+        """The expensive part: running the spaCy pipeline on a skill phrase.
+        Cached per skill so the all-pairs merge parses each unique skill
+        string once instead of once per PAIR it's involved in (this was the
+        actual cause of the 5-minute timeout: ~233 skills naively costs up
+        to ~54k spaCy calls with no caching; with caching it costs ~233)."""
+        if skill in self._nlp_doc_cache:
+            return self._nlp_doc_cache[skill]
+        try:
+            doc = self.nlp(skill)
+        except Exception:
+            doc = None
+        self._nlp_doc_cache[skill] = doc
+        return doc
+
+    def _get_cached_skill_type(self, skill):
+        """_get_skill_type() scans every document in self.doc_texts looking
+        for occurrences of `skill` — also O(n) per call, also wasteful to
+        repeat per pair. Cached per skill per merge run."""
+        if skill not in self._skill_type_cache:
+            self._skill_type_cache[skill] = self._get_skill_type(skill)
+        return self._skill_type_cache[skill]
+
+    def _get_cached_skill_importance(self, skill):
+        """Same rationale as _get_cached_skill_type: _get_skill_importance()
+        scans self.doc_texts; cache per skill per merge run."""
+        if skill not in self._skill_importance_cache:
+            self._skill_importance_cache[skill] = self._get_skill_importance(skill)
+        return self._skill_importance_cache[skill]
+
+    def _clear_merge_run_caches(self):
+        """Drop all merge-run caches. Call this if self.doc_texts or
+        self.skill_dictionary changed since the caches were last populated
+        (e.g. learn_from_data() ingested new documents) and you need
+        guaranteed-fresh per-skill type/importance/lexical values."""
+        self._skill_cache.clear()
+        self._nlp_doc_cache.clear()
+        self._skill_type_cache.clear()
+        self._skill_importance_cache.clear()
+
     # ============ DYNAMIC MERGE THRESHOLDS ============
     
     def _get_merge_threshold(self, skill1, skill2):
         """
-        Dynamically determine merge threshold from data.
-        Learns what threshold to use based on previous merges.
+        Dynamically determine the SEMANTIC SIMILARITY floor required for two
+        skills to be considered equivalent, learned from data.
+
+        IMPORTANT (alias/synonym fix): this used to also LOWER the threshold
+        when two phrases shared a lot of words ("high overlap -> easier to
+        merge"). That's backwards for alias safety — high word overlap is
+        exactly the situation that produces false aliases like
+        'project management' vs 'project documentation management'. Word
+        overlap is now handled as its own, separate signal inside
+        is_true_alias()/_get_equivalence_signals(), never by loosening this
+        semantic floor. This function may now only RAISE the threshold above
+        ALIAS_MIN_SEMANTIC_SIMILARITY, never lower it below that floor.
         """
-        type1 = self._get_skill_type(skill1)
-        type2 = self._get_skill_type(skill2)
+        type1 = self._get_cached_skill_type(skill1)
+        type2 = self._get_cached_skill_type(skill2)
         
         # Get base threshold from learned data
         key = tuple(sorted([type1, type2]))
-        base_threshold = self.type_thresholds.get(key, 0.75)
+        base_threshold = self.type_thresholds.get(key, ALIAS_MIN_SEMANTIC_SIMILARITY)
         
         # Adjust based on skill importance (learned from documents)
-        importance1 = self._get_skill_importance(skill1)
-        importance2 = self._get_skill_importance(skill2)
+        importance1 = self._get_cached_skill_importance(skill1)
+        importance2 = self._get_cached_skill_importance(skill2)
         
         # Important skills (appear in many documents) should be harder to merge
         if importance1 + importance2 > 0.5:
@@ -1167,11 +1390,9 @@ class NLPProcessor:
         if words1 and words2:
             overlap_ratio = len(words1 & words2) / max(len(words1), len(words2))
             
-            # If they share many words, they're likely similar - lower threshold
-            if overlap_ratio > 0.6:
-                base_threshold -= 0.10
-            
-            # If they share no words, they're likely different - raise threshold
+            # If they share no words, they're likely different - raise threshold.
+            # NOTE: the old "share many words -> lower threshold" branch was
+            # removed here — see docstring above.
             if overlap_ratio == 0:
                 base_threshold += 0.15
         
@@ -1181,16 +1402,351 @@ class NLPProcessor:
                 if skill in self.feedback_log.get('rejected', []):
                     base_threshold += 0.10  # Rejected skills are harder to merge
         
-        # Cap at reasonable range
-        return min(max(base_threshold, 0.50), 0.95)
-    
-    def _should_merge(self, skill1, skill2):
-        if skill1 == skill2:
+        # Cap at a reasonable range. The floor is ALIAS_MIN_SEMANTIC_SIMILARITY,
+        # not a low generic number — dynamic learning can only push this up
+        # from there, never down.
+        return min(max(base_threshold, ALIAS_MIN_SEMANTIC_SIMILARITY), 0.97)
+
+    # ============ TRUE-SYNONYM / EQUIVALENCE DETECTION ============
+    # This is the core of the alias/synonym fix. The old system treated
+    # "semantically related" as sufficient evidence for an alias. These
+    # methods separate three concepts explicitly:
+    #   EXACT / EQUIVALENT   -> safe alias candidate (is_true_alias == True)
+    #   SEMANTICALLY RELATED -> NOT an alias (same domain, different skill)
+    #   DIFFERENT            -> NOT an alias
+    # Only EXACT/EQUIVALENT may ever reach _save_alias_to_db().
+
+    def _fuzzy_ratio(self, a, b):
+        """Character-level similarity between two tokens (0..1). Used to
+        catch morphological/format variants (report/reporting, plural/
+        singular, minor typos) without any hardcoded word list."""
+        if a == b:
+            return 1.0
+        return SequenceMatcher(None, a, b).ratio()
+
+    def _meaningful_tokens(self, phrase):
+        """Normalize a phrase and strip connector/stopwords, returning the
+        tokens that actually carry meaning."""
+        norm = self._normalize_skill_text(phrase)
+        stop = set(LEADING_CONNECTORS) | {'the', 'a', 'an'}
+        return [t for t in norm.split() if t not in stop]
+
+    def _best_fuzzy_token_match(self, tokens_a, tokens_b, threshold=ALIAS_FUZZY_TOKEN_MATCH_THRESHOLD):
+        """Greedy best-first bipartite matching between two token lists using
+        _fuzzy_ratio. Returns (matched_pairs, unmatched_a, unmatched_b)."""
+        candidates = []
+        for ia, a in enumerate(tokens_a):
+            for ib, b in enumerate(tokens_b):
+                ratio = self._fuzzy_ratio(a, b)
+                if ratio >= threshold:
+                    candidates.append((ratio, ia, ib))
+        candidates.sort(key=lambda x: x[0], reverse=True)
+
+        used_a, used_b = set(), set()
+        matched = []
+        for ratio, ia, ib in candidates:
+            if ia in used_a or ib in used_b:
+                continue
+            used_a.add(ia)
+            used_b.add(ib)
+            matched.append((tokens_a[ia], tokens_b[ib], ratio))
+
+        unmatched_a = [t for i, t in enumerate(tokens_a) if i not in used_a]
+        unmatched_b = [t for i, t in enumerate(tokens_b) if i not in used_b]
+        return matched, unmatched_a, unmatched_b
+
+    def _get_generic_terms(self):
+        """Dynamically identify tokens that show up across many different
+        learned skills ("management", "support", "technical", ...) and
+        therefore carry little distinguishing meaning on their own. This is
+        computed from self.learned_skills at runtime — NOT a hardcoded word
+        list — so a term like "documentation" only becomes "generic" if the
+        user's own corpus actually shows it that way.
+
+        Requires a minimum corpus size (GENERIC_TERM_MIN_SKILLS) before it
+        trusts itself; below that it returns an empty set and the other
+        equivalence signals (fuzzy overlap, extra-token relatedness) carry
+        the full safety burden instead.
+        """
+        total = len(self.learned_skills)
+        if total < GENERIC_TERM_MIN_SKILLS:
+            return set()
+
+        if getattr(self, '_generic_terms_cache_size', None) == total and hasattr(self, '_generic_terms_cache'):
+            return self._generic_terms_cache
+
+        doc_freq = Counter()
+        for sk in self.learned_skills:
+            for tok in set(self._get_skill_lexical_cache(sk)['tokens']):
+                doc_freq[tok] += 1
+
+        generic = {
+            tok for tok, cnt in doc_freq.items()
+            if cnt >= GENERIC_TERM_MIN_COUNT and (cnt / total) >= GENERIC_TERM_DOC_FREQ_RATIO
+        }
+        self._generic_terms_cache = generic
+        self._generic_terms_cache_size = total
+        return generic
+
+    def _get_equivalence_signals(self, skill1, skill2, compute_similarity=True):
+        """Compute every signal is_true_alias() needs: normalized token
+        overlap, meaningful (fuzzy) token overlap, phrase containment, token
+        count difference, shared core terms, semantic similarity, and
+        whether the difference is purely grammatical/formatting.
+
+        PERFORMANCE: every field except 'similarity' is a cheap, pure
+        string/token computation pulled from the per-skill lexical cache
+        (see _get_skill_lexical_cache) — it costs nothing extra to recompute
+        for a skill that's already been seen elsewhere in this merge run.
+        'similarity' is the one field that runs the spaCy pipeline; pass
+        compute_similarity=False to skip it (the field is then None) when
+        the cheap fields already conclusively decide the outcome. Only
+        _evaluate_equivalence() should pass False — everything else should
+        leave the default so the returned signals are always complete.
+        """
+        cache1 = self._get_skill_lexical_cache(skill1)
+        cache2 = self._get_skill_lexical_cache(skill2)
+
+        norm1 = cache1['norm']
+        norm2 = cache2['norm']
+        nospace1 = cache1['nospace']
+        nospace2 = cache2['nospace']
+        format_only_variation = bool(norm1) and bool(norm2) and nospace1 == nospace2
+
+        raw_tokens1 = norm1.split()
+        raw_tokens2 = norm2.split()
+        raw_union = set(raw_tokens1) | set(raw_tokens2)
+        normalized_token_overlap = (
+            len(set(raw_tokens1) & set(raw_tokens2)) / len(raw_union) if raw_union else 0.0
+        )
+
+        tokens1 = cache1['tokens']
+        tokens2 = cache2['tokens']
+
+        matched, unmatched1, unmatched2 = self._best_fuzzy_token_match(tokens1, tokens2)
+        meaningful_token_overlap = len(matched) / max(len(tokens1), len(tokens2), 1)
+        shorter_len = min(len(tokens1), len(tokens2))
+        shorter_fully_matched = (len(matched) == shorter_len) if shorter_len > 0 else False
+        token_count_diff = abs(len(tokens1) - len(tokens2))
+
+        shorter_tokens, longer_tokens = (tokens1, tokens2) if len(tokens1) <= len(tokens2) else (tokens2, tokens1)
+        phrase_containment = bool(shorter_tokens) and (' '.join(shorter_tokens) in ' '.join(longer_tokens))
+
+        generic_terms = self._get_generic_terms()
+        core1 = [t for t in tokens1 if t not in generic_terms]
+        core2 = [t for t in tokens2 if t not in generic_terms]
+        core_matched, core_unmatched1, core_unmatched2 = self._best_fuzzy_token_match(core1, core2)
+        if core1 or core2:
+            core_overlap = len(core_matched) / max(len(core1), len(core2), 1)
+        else:
+            # Both phrases are entirely generic filler words once the corpus-
+            # wide generic terms are stripped out -> zero distinguishing
+            # evidence they mean the same specific thing. Treat as no
+            # evidence, not as a free pass.
+            core_overlap = 0.0
+
+        # How related is the single leftover/unmatched token (when phrases
+        # differ by exactly one meaningful token) to the rest of the phrase
+        # pair? High relatedness ("writing" next to a matched report/
+        # reporting pair) suggests a wording compression, not a new concept.
+        # Low relatedness ("documentation" next to project/management)
+        # suggests a genuinely distinct concept was added.
+        extra_token_relatedness = None
+        if token_count_diff == 1 and shorter_fully_matched:
+            extra = unmatched1 if len(tokens1) > len(tokens2) else unmatched2
+            if extra:
+                pool = [t for t in (tokens1 + tokens2) if t != extra[0]]
+                ratios = [self._fuzzy_ratio(extra[0], t) for t in pool]
+                extra_token_relatedness = max(ratios) if ratios else 0.0
+
+        similarity = self._calculate_similarity(skill1, skill2) if compute_similarity else None
+
+        return {
+            'tokens1': tokens1,
+            'tokens2': tokens2,
+            'format_only_variation': format_only_variation,
+            'normalized_token_overlap': normalized_token_overlap,
+            'meaningful_token_overlap': meaningful_token_overlap,
+            'shorter_fully_matched': shorter_fully_matched,
+            'token_count_diff': token_count_diff,
+            'phrase_containment': phrase_containment,
+            'core_overlap': core_overlap,
+            'unique_core1': [t for t in core1 if t not in [m[0] for m in core_matched]],
+            'unique_core2': [t for t in core2 if t not in [m[1] for m in core_matched]],
+            'extra_token_relatedness': extra_token_relatedness,
+            'similarity': similarity,
+        }
+
+    def _is_lexically_plausible_alias(self, sig):
+        """Cheap (no spaCy) NECESSARY condition for two skills to possibly be
+        true aliases. This is exactly the non-similarity portion of the
+        accept branches in _evaluate_equivalence() below, so it can never
+        reject a pair that the full check would have accepted (no false
+        negatives, no loosening of alias safety) — it can only reject pairs
+        that the full check would reject too, letting callers skip the
+        expensive semantic-similarity computation (and the rest of
+        _evaluate_equivalence) entirely for those pairs. This is the "cheap
+        pre-filter" that _should_merge()/merge_synonyms_dynamically() run
+        before ever calling _evaluate_equivalence().
+        """
+        if sig['format_only_variation']:
+            return True
+        if sig['tokens1'] and set(sig['tokens1']) == set(sig['tokens2']):
+            return True
+        return (
+            sig['token_count_diff'] <= 1
+            and sig['shorter_fully_matched']
+            and sig['meaningful_token_overlap'] >= ALIAS_MEANINGFUL_OVERLAP_THRESHOLD
+            and sig['core_overlap'] >= ALIAS_CORE_OVERLAP_THRESHOLD
+            and (
+                sig['token_count_diff'] == 0
+                or (sig['extra_token_relatedness'] or 0.0) >= ALIAS_EXTRA_TOKEN_RELATEDNESS_THRESHOLD
+            )
+        )
+
+    def _cheap_rejection_reasons(self, sig):
+        """Shared reason-building for pairs rejected without ever computing
+        semantic similarity (either by the standalone pre-filter or by
+        _evaluate_equivalence's own fast path)."""
+        reasons = []
+        if sig['token_count_diff'] > 1:
+            reasons.append(f"phrase length differs by {sig['token_count_diff']} meaningful tokens")
+        if not sig['shorter_fully_matched']:
+            reasons.append('not every meaningful token in the shorter phrase has an equivalent in the other phrase')
+        if sig['meaningful_token_overlap'] < ALIAS_MEANINGFUL_OVERLAP_THRESHOLD:
+            reasons.append(f"insufficient lexical evidence (meaningful_token_overlap={sig['meaningful_token_overlap']:.2f} "
+                            f"< {ALIAS_MEANINGFUL_OVERLAP_THRESHOLD})")
+        if sig['core_overlap'] < ALIAS_CORE_OVERLAP_THRESHOLD:
+            reasons.append(f"different core terms (core_overlap={sig['core_overlap']:.2f} < {ALIAS_CORE_OVERLAP_THRESHOLD})")
+        if sig['token_count_diff'] == 1 and (sig['extra_token_relatedness'] or 0.0) < ALIAS_EXTRA_TOKEN_RELATEDNESS_THRESHOLD:
+            reasons.append('extra word introduces a distinct concept not present in the other phrase')
+        if not reasons:
+            reasons.append('insufficient lexical/structural overlap for equivalence')
+        reasons.append('rejected by cheap lexical pre-filter (no spaCy semantic check needed)')
+        return reasons
+
+    def _evaluate_equivalence(self, skill1, skill2):
+        """
+        The single source of truth for "are these two skill phrases the SAME
+        skill?" Returns (accepted: bool, category: str, reasons: list[str],
+        signals: dict). category is one of 'EXACT', 'RELATED', 'DIFFERENT'.
+
+        Only 'EXACT' is accepted. This deliberately requires MORE than
+        semantic similarity: a phrase pair must show strong, specific
+        lexical/structural evidence of being the same skill (identical once
+        formatting is stripped, identical token set, or near-identical
+        wording with full coverage of the shorter phrase's tokens and no
+        unrelated concept introduced) — semantic similarity is then used as
+        a floor on top of that, not as the deciding signal by itself.
+
+        PERFORMANCE: the decision logic and thresholds here are UNCHANGED
+        from before — same inputs always produce the same accept/reject
+        outcome. The only change is *when* the expensive spaCy similarity
+        computation runs: it's computed lazily, only for pairs that already
+        satisfy every cheap/lexical necessary condition
+        (_is_lexically_plausible_alias). Pairs that fail those cheap checks
+        are guaranteed to be rejected regardless of similarity (the original
+        near-equivalent branch required all of those checks to pass too), so
+        skipping the spaCy call for them changes nothing about the result.
+        """
+        if not skill1 or not skill2 or skill1 == skill2:
+            return False, 'DIFFERENT', ['identical or empty input'], {}
+
+        # ---- Cheap pass: zero spaCy calls. ----
+        sig = self._get_equivalence_signals(skill1, skill2, compute_similarity=False)
+
+        if not self._is_lexically_plausible_alias(sig):
+            reasons = self._cheap_rejection_reasons(sig)
+            category = 'RELATED' if sig['meaningful_token_overlap'] > 0 else 'DIFFERENT'
+            return False, category, reasons, sig
+
+        # 1) Pure formatting/spacing/punctuation/case variation ("AutoCAD" / "Auto CAD")
+        #    — no spaCy call needed, this is a lexical-only decision. The
+        #    similarity is set to a sentinel 1.0 (not computed via spaCy) —
+        #    formatting variants of the same text are equivalent by
+        #    definition, so this is accurate, not a placeholder guess.
+        if sig['format_only_variation']:
+            sig['similarity'] = 1.0
+            return True, 'EXACT', ['formatting-only variation (identical once spacing/punctuation/case removed)'], sig
+
+        # 2) Identical meaningful token set — reordering, duplication, or
+        #    simple singular/plural-style variation that normalization alone
+        #    already collapses to the same words. Also no spaCy call needed;
+        #    same sentinel rationale as above.
+        if sig['tokens1'] and set(sig['tokens1']) == set(sig['tokens2']):
+            sig['similarity'] = 1.0
+            return True, 'EXACT', ['identical meaningful token set'], sig
+
+        # 3) Near-equivalent wording: every meaningful token in the shorter
+        #    phrase has a close counterpart in the other phrase, the phrases
+        #    differ by at most one token, the shared vocabulary isn't just
+        #    generic filler, and — if there IS one leftover token — it's
+        #    closely related to the matched material rather than a distinct
+        #    new concept. All of that already passed above via
+        #    _is_lexically_plausible_alias(); the only thing left to check
+        #    is the semantic-similarity floor, so this is the ONLY branch
+        #    that ever touches spaCy.
+        required_similarity = self._get_merge_threshold(skill1, skill2)  # dynamic, but floor-clamped, see _get_merge_threshold
+        sig['similarity'] = self._calculate_similarity(skill1, skill2)
+
+        near_equivalent = sig['similarity'] >= required_similarity
+        if near_equivalent:
+            reasons = ['near-equivalent wording: full coverage of the shorter phrase, high lexical + '
+                       'semantic overlap, no unrelated concept introduced']
+            return True, 'EXACT', reasons, sig
+
+        # ---- Not accepted. Classify + explain for logging/diagnostics. ----
+        reasons = [f"semantic similarity insufficient for equivalence (sim={sig['similarity']:.2f} < {required_similarity:.2f})"]
+        category = 'RELATED' if (sig['meaningful_token_overlap'] > 0 or sig['similarity'] >= 0.5) else 'DIFFERENT'
+        return False, category, reasons, sig
+
+    def is_true_alias(self, skill1, skill2):
+        """
+        Public validation gate: True only if skill1 and skill2 represent the
+        SAME skill (safe alias candidate). This is the final check that must
+        pass before anything is written to skill_aliases / Supabase — see
+        _evaluate_equivalence() for the full reasoning and signal breakdown.
+        """
+        accepted, _category, _reasons, _sig = self._evaluate_equivalence(skill1, skill2)
+        return accepted
+
+    def _should_merge(self, skill1, skill2, stats=None):
+        """
+        Decide whether two learned skill phrases should become ALIASES of
+        the same underlying skill.
+
+        IMPORTANT (alias/synonym fix): this used to ask "are these
+        semantically similar?" (plain spaCy vector similarity above a
+        ~0.65-0.75 threshold), which is why merely-related phrases like
+        'client technical communication and support' and 'client
+        relationship management' were being merged as if they were the same
+        skill. It now asks the narrower question "are these the SAME skill,
+        described differently?" via _evaluate_equivalence()/is_true_alias(),
+        which requires strong lexical/structural evidence in addition to
+        semantic similarity. Cheap category-based and lexical pre-filters
+        still run first purely to avoid wasted computation — see the
+        PERFORMANCE note below.
+
+        PERFORMANCE: `stats`, when given a dict (see merge_synonyms_dynamically),
+        gets incremented with pair-level counters so callers can report how
+        many pairs were disposed of cheaply vs. how many needed the full
+        (spaCy-backed) equivalence check.
+        """
+        if not skill1 or not skill2 or skill1 == skill2:
             return False
-        
-        # ============ LOAD EXISTING MERGE HISTORY ============
-        if not hasattr(self, 'merge_history') or len(self.merge_history) == 0:
-            if os.path.exists(self.skill_db_path):
+
+        if stats is not None:
+            stats['total_possible_pairs'] = stats.get('total_possible_pairs', 0) + 1
+
+        # ============ LOAD EXISTING MERGE HISTORY (once) ============
+        # PERFORMANCE: previously this re-checked `len(self.merge_history) == 0`
+        # on every single call, so if there was genuinely no history yet
+        # (e.g. a fresh skill DB) it would open + JSON-parse skill_db_path on
+        # EVERY one of the ~27k pairs. A one-time flag makes the "no history
+        # yet" case cost exactly one failed/empty load instead of thousands.
+        if not getattr(self, '_merge_history_load_attempted', False):
+            self._merge_history_load_attempted = True
+            if not self.merge_history and os.path.exists(self.skill_db_path):
                 try:
                     with open(self.skill_db_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
@@ -1202,83 +1758,117 @@ class NLPProcessor:
                     print(f"[MERGE] Error loading: {e}")
         # =====================================================
 
-        # ============ WORD OVERLAP (moved up so category check can use it) ============
-        # Stopwords ("and", "of", "for"...) inflate overlap without being real
-        # semantic evidence — "Technical Sales And Engineering Support" and
-        # "Document Control And Management" share only "and", which made them
-        # look like 1-word-overlap instead of true zero-overlap.
         STOPWORDS_FOR_OVERLAP = set(LEADING_CONNECTORS)  # and, of, for, with, to, in, on, at
         words1 = set(skill1.lower().split()) - STOPWORDS_FOR_OVERLAP
         words2 = set(skill2.lower().split()) - STOPWORDS_FOR_OVERLAP
         overlap = len(words1 & words2)
-        # ===================================================
 
-        # ============ CATEGORY PROTECTION ============
+        # ============ CATEGORY PROTECTION (cheap pre-filter #1) ============
         cat1 = self.skill_dictionary.get(skill1, 'Other')
         cat2 = self.skill_dictionary.get(skill2, 'Other')
-        
-        # Don't merge if categories are different AND both are known
+
         if cat1 != cat2 and cat1 != 'Other' and cat2 != 'Other':
-            print(f"[SMART] Different categories: '{skill1}' ({cat1}) vs '{skill2}' ({cat2})")
+            reason = f"different known categories ({cat1} vs {cat2})"
+            print(f"[ALIAS] REJECTED:\n  \"{skill1}\" <-> \"{skill2}\"\n  reason={reason}")
+            self._record_merge_decision(skill1, skill2, False, reason=reason)
+            if stats is not None:
+                stats['prefilter_rejected'] = stats.get('prefilter_rejected', 0) + 1
             return False
 
-        # NEW: when either side is still uncategorized ('Other'), the check
-        # above can't protect us. Require real lexical overlap instead of
-        # trusting vector similarity alone.
         if (cat1 == 'Other' or cat2 == 'Other') and overlap == 0:
-            print(f"[SMART] Uncategorized + zero overlap: '{skill1}' <-> '{skill2}' — blocking, insufficient evidence")
+            reason = 'uncategorized + zero raw word overlap — insufficient evidence'
+            print(f"[ALIAS] REJECTED:\n  \"{skill1}\" <-> \"{skill2}\"\n  reason={reason}")
+            self._record_merge_decision(skill1, skill2, False, reason=reason)
+            if stats is not None:
+                stats['prefilter_rejected'] = stats.get('prefilter_rejected', 0) + 1
             return False
         # ===================================================
-        
-        # Calculate similarity
-        similarity = self._calculate_similarity(skill1, skill2)
-        
-        # If they only share 1 word, require higher similarity
-        if overlap == 1 and similarity < 0.85:
-            print(f"[SMART] Only 1 word overlap: '{skill1}' <-> '{skill2}' (sim: {similarity:.2f})")
-            return False
 
-        # NEW: zero shared words = require near-certain similarity. Vector
-        # similarity alone is easy to fool with generic vocabulary overlap
-        # ("management", "support", "technical") when the phrases share no
-        # actual words.
-        if overlap == 0 and similarity < 0.92:
-            print(f"[SMART] Zero word overlap: '{skill1}' <-> '{skill2}' (sim: {similarity:.2f})")
+        # ============ LEXICAL PRE-FILTER (cheap pre-filter #2, no spaCy) ====
+        # Requirement: only pairs with plausible lexical/structural overlap
+        # ever reach _evaluate_equivalence() (and therefore ever risk a
+        # spaCy call). This is a strict subset check of _evaluate_equivalence's
+        # own accept branches (see _is_lexically_plausible_alias docstring),
+        # so it can reject a pair here only if the full check would have
+        # rejected it too — alias safety is unchanged, only wasted work is
+        # skipped. Pairs like "service teams" <-> "electrical construction
+        # project sales support" (zero token overlap) are already caught by
+        # the category filter above; pairs like "client technical
+        # communication and support" <-> "client relationship management"
+        # (share one word but fail full-coverage/core-overlap) are caught
+        # here, before any spaCy call.
+        cheap_sig = self._get_equivalence_signals(skill1, skill2, compute_similarity=False)
+        if not self._is_lexically_plausible_alias(cheap_sig):
+            reasons = self._cheap_rejection_reasons(cheap_sig)
+            reason_text = '; '.join(reasons)
+            print(f"[ALIAS] REJECTED:\n  \"{skill1}\" <-> \"{skill2}\"\n  reason={reason_text}")
+            self._record_merge_decision(skill1, skill2, False, similarity=None, reason=reason_text)
+            if stats is not None:
+                stats['prefilter_rejected'] = stats.get('prefilter_rejected', 0) + 1
             return False
         # ===================================================
-        
-        # ============ DYNAMIC THRESHOLD ============
-        threshold = self._get_merge_threshold(skill1, skill2)
-        
-        # Increase threshold for multi-word skills with low overlap
-        if len(words1) > 2 or len(words2) > 2:
-            overlap_ratio = overlap / max(len(words1), len(words2))
-            if overlap_ratio < 0.4:
-                threshold = max(threshold, 0.85)
-        # ===================================================
-        
-        decision = similarity > threshold
-        
-        # Append new entry
-        self.merge_history.append({
+
+        # ============ AUTHORITATIVE DECISION ============
+        if stats is not None:
+            stats['sent_to_equivalence_check'] = stats.get('sent_to_equivalence_check', 0) + 1
+
+        accepted, category, reasons, sig = self._evaluate_equivalence(skill1, skill2)
+        reason_text = '; '.join(reasons)
+        similarity_val = sig.get('similarity')
+
+        self._record_merge_decision(
+            skill1, skill2, accepted,
+            similarity=similarity_val,
+            threshold=self._get_merge_threshold(skill1, skill2),
+            reason=reason_text,
+        )
+
+        similarity_display = f"{similarity_val:.2f}" if similarity_val is not None else "N/A"
+        if accepted:
+            print(f"[ALIAS] ACCEPTED:\n"
+                  f"  \"{skill1}\" <-> \"{skill2}\"\n"
+                  f"  semantic_similarity={similarity_display}\n"
+                  f"  lexical_similarity={sig.get('meaningful_token_overlap', 0):.2f}\n"
+                  f"  reason={reason_text}")
+        else:
+            print(f"[ALIAS] REJECTED:\n"
+                  f"  \"{skill1}\" <-> \"{skill2}\"\n"
+                  f"  semantic_similarity={similarity_display}\n"
+                  f"  category={category}\n"
+                  f"  reason={reason_text}")
+
+        return accepted
+
+    def _record_merge_decision(self, skill1, skill2, decision, similarity=None, threshold=None, is_alias=False, reason=None):
+        """Shared merge_history append logic (previously duplicated between
+        _should_merge and merge_synonyms_dynamically).
+
+        PERFORMANCE: this used to silently fall back to recomputing
+        similarity (a spaCy call) and threshold for EVERY pair that didn't
+        already have them handy — including pairs rejected by a cheap
+        pre-filter specifically to avoid that spaCy call. It no longer
+        recomputes 'similarity' as a fallback (a cheaply-rejected pair
+        legitimately has no similarity score — it was never computed, and
+        that's the point); it's recorded as None instead. 'threshold' is
+        still safe to fall back on since _get_merge_threshold is cached
+        per-skill (see _get_cached_skill_type/_get_cached_skill_importance)
+        and doesn't touch spaCy.
+        """
+        entry = {
             'skill1': skill1,
             'skill2': skill2,
             'similarity': similarity,
-            'threshold': threshold,
+            'threshold': threshold if threshold is not None else self._get_merge_threshold(skill1, skill2),
             'decision': decision,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        # Keep manageable
+            'timestamp': datetime.now().isoformat(),
+        }
+        if is_alias:
+            entry['is_alias'] = True
+        if reason:
+            entry['reason'] = reason
+        self.merge_history.append(entry)
         if len(self.merge_history) > 1000:
             self.merge_history = self.merge_history[-500:]
-        
-        if decision:
-            print(f"[SMART]  Merging: '{skill1}'  '{skill2}' (sim: {similarity:.2f}, threshold: {threshold:.2f})")
-        else:
-            print(f"[SMART]  Keeping: '{skill1}'  '{skill2}' (sim: {similarity:.2f}, threshold: {threshold:.2f})")
-        
-        return decision
     
     def _choose_master(self, skill1, skill2):
         """
@@ -1329,6 +1919,16 @@ class NLPProcessor:
         """
         Learn thresholds and patterns from existing data.
         Called automatically, no manual tuning needed.
+
+        IMPORTANT (alias/synonym fix): this used to LOWER type_thresholds
+        when a lot of merges were failing ("too many failed merges, make it
+        easier"). That directly weakens synonym safety — a high rejection
+        rate is not evidence the system is too strict, it's often evidence
+        it's working as intended (most skill pairs genuinely are NOT
+        aliases). Learning may now only ever RAISE thresholds in response to
+        merge history (e.g. after a lot of accepted merges, to be more
+        conservative going forward); it may never lower them below
+        ALIAS_MIN_SEMANTIC_SIMILARITY.
         """
         if len(self.learned_skills) < 5:
             return
@@ -1337,17 +1937,16 @@ class NLPProcessor:
         if hasattr(self, 'merge_history') and self.merge_history:
             successful_merges = [m for m in self.merge_history if m.get('decision')]
             failed_merges = [m for m in self.merge_history if not m.get('decision')]
-            
-            # If merges are failing, lower thresholds
-            if len(failed_merges) > len(successful_merges) * 1.5:
-                for key in list(self.type_thresholds.keys()):
-                    self.type_thresholds[key] = max(0.50, self.type_thresholds.get(key, 0.75) - 0.05)
-                print(f"[LEARN] Lowered thresholds (too many failed merges)")
-            
-            # If merges are too aggressive, raise thresholds
+
+            # If merges are too aggressive (a lot of accepted merges relative
+            # to rejections), raise thresholds to be more conservative.
+            # Thresholds are never lowered here — see docstring above.
             if len(successful_merges) > len(failed_merges) * 1.5:
                 for key in list(self.type_thresholds.keys()):
-                    self.type_thresholds[key] = min(0.95, self.type_thresholds.get(key, 0.75) + 0.05)
+                    self.type_thresholds[key] = min(
+                        0.97,
+                        max(ALIAS_MIN_SEMANTIC_SIMILARITY, self.type_thresholds.get(key, ALIAS_MIN_SEMANTIC_SIMILARITY) + 0.05)
+                    )
                 print(f"[LEARN] Raised thresholds (too many successful merges)")
     
     # ============ EXTRACT CANDIDATES ============
@@ -1866,7 +2465,11 @@ class NLPProcessor:
         Layers:
         1. Knowledge Base -> Auto-approve if already known
         2. ML Classifier -> Predict confidence for NEW skills
-        3. Fallback Rules -> Only when ML is OFF or fails
+        3. Fallback Rules -> Only when ML is OFF or fails. Conservative
+           3-way decision (reject / approve / needs_review) - see
+           _fragment_signal()/_looks_like_job_title() below. This layer
+           never sees candidates when ML is active and predicts
+           successfully; the ML thresholds (0.85/0.65/0.40) are untouched.
         """
         if not candidate or len(candidate) < 3:
             return False
@@ -1898,18 +2501,33 @@ class NLPProcessor:
                 result = self.classifier.predict(candidate_lower)
                 is_skill = result['prediction'] == 1
                 confidence = result['confidence']
+                # Carried through to callers for EVERY ML outcome (approve,
+                # needs_review, and reject) so the original ML
+                # prediction/confidence isn't discarded regardless of what
+                # happens to the candidate next. Approved/needs_review
+                # skills carry this through to
+                # nlp.auto_approved_predictions / nlp.needs_review_predictions
+                # -> skill_predictions -> feedback_training.prediction/
+                # confidence. Rejected candidates have no downstream
+                # table/UI to persist this to (they're discarded entirely,
+                # same as before) - the print statements below remain the
+                # only record, same as always.
+                ml_meta = {
+                    'prediction': result.get('label', 'Skill' if is_skill else 'Not Skill'),
+                    'confidence': confidence
+                }
                 
                 if is_skill and confidence >= 0.85:
                     print(f"[ML] '{candidate}' -> High confidence skill ({confidence:.2%})")
                     master = self.get_master_skill(candidate_lower)
                     if master != candidate_lower:
                         print(f"[ML] Normalized: '{candidate}' -> '{master}'")
-                        return master
-                    return candidate
+                        return master, 'auto_approved', ml_meta
+                    return candidate, 'auto_approved', ml_meta
                 
                 elif is_skill and confidence >= 0.65:
                     print(f"[ML] '{candidate}' -> Likely skill ({confidence:.2%}) - needs review")
-                    return candidate, 'needs_review'
+                    return candidate, 'needs_review', ml_meta
                 
                 elif confidence < 0.40:
                     print(f"[ML]  '{candidate}' -> Not skill ({confidence:.2%}) - rejected")
@@ -1917,40 +2535,151 @@ class NLPProcessor:
                 
                 else:
                     print(f"[ML]  '{candidate}' -> Uncertain ({confidence:.2%}) - show for review")
-                    return candidate, 'needs_review'
+                    return candidate, 'needs_review', ml_meta
                     
             except Exception as e:
                 print(f"[ML] Prediction failed: {e}. Using fallback.", file=sys.stderr)
         
         # ============================================================
         # LAYER 3: Fallback Rules (only when ML is OFF or fails)
+        # Conservative reject / approve / needs_review decision. Never
+        # blindly approves a candidate just because doc_count < 3 - that
+        # only widens the length allowance for the auto-approve bucket
+        # slightly (there's no word-frequency history yet to lean on for
+        # the first few documents), everything else below still applies.
         # ============================================================
         doc_count = self.stats.get('documents_analyzed', 0) if hasattr(self, 'stats') else 0
-        
-        if doc_count < 3:
-            if len(words) >= 2:
-                skip_words = ['n/a', 'none', 'page', 'date', 'employee', 'id', 'photo', 
-                            'confidential', 'internal use', 'company logo']
-                if not any(skip in candidate_lower for skip in skip_words):
-                    print(f"[FALLBACK]  '{candidate}' -> Accepted (early document)")
-                    return candidate
+
+        # ---- Step A: fragment / structured-artifact check FIRST, before
+        # any word-frequency evidence is consulted - a sentence fragment or
+        # a raw field-extraction artifact should never be approved just
+        # because some of its individual words happen to look "skill-like"
+        # in the learned word-frequency history. ----
+        fragment_signal = self._fragment_signal(candidate, candidate_lower, words)
+        if fragment_signal == 'reject':
+            print(f"[FALLBACK] '{candidate}' -> Rejected (sentence-fragment/structured-artifact pattern)")
             return False
-        
+        if fragment_signal == 'ambiguous':
+            print(f"[FALLBACK] '{candidate}' -> Needs review (fragment-like pattern, unconfirmed)")
+            return candidate, 'needs_review', None
+
+        # ---- Step B: job-title heuristic (flag only, doesn't decide alone) ----
+        is_job_title_like = self._looks_like_job_title(words)
+
         non_skill_score = sum(1 for w in words if self.non_skill_patterns.get(w, 0) > 3)
         skill_score = sum(1 for w in words if self.skill_candidates.get(w, 0) > 2)
         
         if non_skill_score > 0 and skill_score == 0:
+            print(f"[FALLBACK] '{candidate}' -> Rejected (matches known non-skill word pattern)")
             return False
-        
+
+        if is_job_title_like and skill_score == 0:
+            # Reads like a role/title (e.g. "Senior CAD Drafter", "Lighting
+            # Designer") and nothing in the learned word-frequency data
+            # confirms it's actually a skill - let a human decide instead
+            # of guessing either way.
+            print(f"[FALLBACK] '{candidate}' -> Needs review (job-title-like, unconfirmed)")
+            return candidate, 'needs_review', None
+
         if skill_score > 0:
+            # Positive word-frequency evidence from real learned history
+            # outweighs the generic job-title heuristic.
             print(f"[FALLBACK]  '{candidate}' -> Skill pattern matched")
             return candidate
+
+        # Obvious administrative/form-field junk (unchanged from the
+        # original doc_count<3 branch's skip list, now applied to every
+        # fallback decision rather than only the first few documents).
+        # Matched as whole words/phrases (word-boundary), not substrings -
+        # a naive substring check would false-positive on ordinary words
+        # like "candidate" (contains "id") or "provide" (contains "id").
+        skip_words = ['n/a', 'none', 'page', 'date', 'employee', 'id', 'photo',
+                      'confidential', 'internal use', 'company logo']
+        if any(re.search(r'\b' + re.escape(skip) + r'\b', candidate_lower) for skip in skip_words):
+            print(f"[FALLBACK] '{candidate}' -> Rejected (administrative/form-field term)")
+            return False
         
-        if len(words) >= 2 and len(candidate_lower) < 30:
-            print(f"[FALLBACK]  '{candidate}' -> 2+ words accepted")
+        # Conservative default: only short, clean candidates with no
+        # fragment/job-title signal and no negative evidence get approved
+        # here. The word-count gate (2-5) plus the fragment/job-title
+        # checks above already do the real filtering, so this length check
+        # is just a loose secondary sanity net against pathological
+        # candidates (e.g. a handful of unusually long tokens) rather than
+        # the primary defense - it's wide enough to comfortably fit real
+        # 5-word technical compound terms like "Industrial Electrical
+        # Control System Design" (43 chars). doc_count < 3 widens it
+        # slightly further (no word-frequency history yet to lean on).
+        max_len = 60 if doc_count < 3 else 50
+        if 2 <= len(words) <= 5 and len(candidate_lower) < max_len:
+            print(f"[FALLBACK]  '{candidate}' -> Accepted (short, clean candidate)")
             return candidate
         
+        if len(words) >= 2:
+            print(f"[FALLBACK] '{candidate}' -> Needs review (ambiguous length/pattern)")
+            return candidate, 'needs_review', None
+        
         return False
+
+    def _fragment_signal(self, candidate, candidate_lower, words):
+        """
+        Conservative sentence-fragment / structured-field-artifact
+        detector for Layer 3 fallback only. Returns 'reject', 'ambiguous',
+        or None (no signal). Deliberately generic (no hardcoded phrases) -
+        catches things like a full resume bullet sentence or a raw
+        "field_name field label: value" extraction artifact, while leaving
+        legitimate multi-word technical skill names (e.g. "Industrial
+        Electrical Control System Design") untouched.
+        """
+        n = len(words)
+        if n == 0:
+            return None
+
+        # ---- Tier 1: near-certain structural artifacts -> reject ----
+        if '_' in candidate_lower:
+            return 'reject'
+
+        # Self-repeating field-name + value pattern, e.g.
+        # "primary_role primary role: ..." normalizes (underscore kept,
+        # ':' stripped) to "primary_role primary role senior cad drafter
+        # lighting designer" - expanding '_' back to a space and checking
+        # for an immediate repeat catches this generically.
+        collapsed_words = candidate_lower.replace('_', ' ').split()
+        for k in (1, 2, 3):
+            if len(collapsed_words) >= 2 * k and collapsed_words[:k] == collapsed_words[k:2 * k]:
+                return 'reject'
+
+        if n >= 10:
+            return 'reject'
+
+        connector_count = sum(1 for w in words if w in FRAGMENT_CONNECTORS)
+        if n >= 6 and connector_count >= 2:
+            return 'reject'
+
+        # ---- Tier 2: softer signals -> ambiguous, let a human decide ----
+        raw = candidate.strip()
+        if raw.endswith('.') or ':' in candidate:
+            return 'ambiguous'
+        if n >= 6 and connector_count >= 1:
+            return 'ambiguous'
+
+        return None
+
+    def _looks_like_job_title(self, words):
+        """
+        Heuristic only - flags candidates that read like a role/title
+        (e.g. "Senior CAD Drafter", "Lighting Designer") for Layer 3
+        fallback so they can be routed to needs_review instead of guessed
+        at, rather than automatically becoming a skill. Deliberately
+        narrow: only short phrases (<=4 words) ending in a common role
+        noun trigger this, so legitimate technical phrases that merely
+        contain (but don't end with) a similar word are unaffected, and
+        this never overrides positive word-frequency evidence (skill_score)
+        in the caller.
+        """
+        if not words or len(words) > 4:
+            return False
+        last_word = words[-1].rstrip('.,')
+        return last_word in JOB_TITLE_ROLE_NOUNS
     
     # ============ ANALYZE STATISTICS ============
     
@@ -1992,22 +2721,73 @@ class NLPProcessor:
     
     # ============ DYNAMIC MERGING (UPDATED - KEEPS ALL SKILLS) ============
     
-    def merge_synonyms_dynamically(self):
+    def merge_synonyms_dynamically(self, caller='unknown'):
         """
         100% dynamic merge - stores aliases, never deletes skills.
         All skills remain in learned_skills for employee records.
+
+        PERFORMANCE: this is still an all-pairs comparison (O(n^2) pairs),
+        but each pair is now cheap unless it's a genuinely plausible alias
+        candidate. See _should_merge()'s pre-filters and _evaluate_equivalence()
+        / _get_cached_nlp_doc() for the caching that makes this possible. At
+        ~233 skills (~27k pairs) this used to time out because the same
+        skill text was being re-parsed by spaCy up to n-1 times with no
+        caching (~54k uncached spaCy calls); the same run now costs one
+        spaCy parse per unique skill (~n) plus a cheap similarity lookup
+        only for the small number of pairs that pass the lexical pre-filter.
+        Timing/candidate-funnel stats are collected in `stats` and stored on
+        self.last_merge_stats for diagnostics.
+
+        `caller` is a free-text label identifying which code path triggered
+        this run (e.g. '_learn_from_document', 'learn_from_feedback') -
+        pure diagnostics, logged in [MERGE STATS] and self.last_merge_stats,
+        does not affect the merge decision in any way.
         """
         if len(self.learned_skills) < 3:
             return 0
-        
+
+        NLPProcessor._merge_invocation_count += 1
+        invocation_number = NLPProcessor._merge_invocation_count
+
+        # ============ DIAGNOSTIC ONLY: is this the exact same skill set as last time? ============
+        # Does NOT skip or alter the run - just reports it, so duplicate-work
+        # investigations (like this one) don't have to guess from timing alone
+        # whether two merge runs were genuinely redundant.
+        current_signature = hashlib.md5('|'.join(sorted(self.learned_skills)).encode('utf-8')).hexdigest()
+        skillset_unchanged = (current_signature == self._last_merge_skillset_signature)
+        print(f"[MERGE-DIAG] Invocation #{invocation_number} called by '{caller}' "
+              f"(pid={os.getpid()}) - skill set unchanged since last merge: {skillset_unchanged}",
+              file=sys.stderr)
+        # ============================================================================================
+
+        start_time = time.perf_counter()
+
+        # Fresh per-run caches: doc_texts/skill_dictionary can change inside
+        # learn_from_data() below, so don't trust caches from a previous run.
+        self._clear_merge_run_caches()
+
         # Learn from existing data first
         self.learn_from_data()
-        
+
         skills_list = list(self.learned_skills)
+        n = len(skills_list)
         merged_count = 0
         merged_details = []
         used = set()
-        
+
+        stats = {
+            'skill_count': n,
+            'caller': caller,
+            'invocation_number': invocation_number,
+            'skillset_unchanged_since_last_merge': skillset_unchanged,
+            'total_possible_pairs': 0,       # incremented inside _should_merge
+            'prefilter_rejected': 0,         # incremented inside _should_merge
+            'sent_to_equivalence_check': 0,  # incremented inside _should_merge
+            'aliases_accepted': 0,           # final-validation pass, below
+            'aliases_rejected': 0,           # final-validation pass, below
+            'duration_seconds': None,
+        }
+
         for i in range(len(skills_list)):
             if skills_list[i] in used:
                 continue
@@ -2020,7 +2800,7 @@ class NLPProcessor:
                 if skills_list[j] in used:
                     continue
                 
-                if self._should_merge(master, skills_list[j]):
+                if self._should_merge(master, skills_list[j], stats=stats):
                     group.append(skills_list[j])
                     used.add(skills_list[j])
             
@@ -2037,34 +2817,75 @@ class NLPProcessor:
                 for skill in group:
                     if skill != master:
                         aliases.append(skill)
-                        merged_count += 1
-                        merged_details.append(f"{skill} -> {master} (alias)")
                         
                         # Update dictionary if master doesn't have category
                         if master not in self.skill_dictionary and skill in self.skill_dictionary:
                             self.skill_dictionary[master] = self.skill_dictionary[skill]
-                        
-                        # Add to merge history with alias flag
-                        self.merge_history.append({
-                            'skill1': skill,
-                            'skill2': master,
-                            'similarity': self._calculate_similarity(skill, master),
-                            'threshold': self._get_merge_threshold(skill, master),
-                            'decision': True,
-                            'is_alias': True,
-                            'timestamp': datetime.now().isoformat()
-                        })
                 
-                # Store aliases in knowledge base (in-memory) and persist to Supabase
+                # Store aliases in knowledge base (in-memory) and persist to
+                # Supabase — but ONLY after a final is_true_alias() check
+                # right before the write (requirement: validate immediately
+                # before _save_alias_to_db, regardless of how the pair got
+                # grouped together), and only if it doesn't create a
+                # conflicting alias->master mapping.
                 if aliases and master in self.learned_skills:
-                    if master not in self.skill_aliases:
-                        self.skill_aliases[master] = []
                     for alias in aliases:
-                        if alias not in self.skill_aliases[master]:
-                            self.skill_aliases[master].append(alias)
-                        self.alias_lookup[alias] = master
-                        sim = self._calculate_similarity(alias, master)
-                        self._save_alias_to_db(master, alias, sim)
+                        accepted, category, reasons, sig = self._evaluate_equivalence(master, alias)
+                        reason_text = '; '.join(reasons)
+                        similarity_val = sig.get('similarity')
+                        similarity_display = f"{similarity_val:.2f}" if similarity_val is not None else "N/A"
+
+                        if not accepted:
+                            stats['aliases_rejected'] += 1
+                            print(f"[ALIAS] REJECTED at final validation before save:\n"
+                                  f"  \"{alias}\" <-> \"{master}\"\n"
+                                  f"  semantic_similarity={similarity_display}\n"
+                                  f"  category={category}\n"
+                                  f"  reason={reason_text}")
+                            self._record_merge_decision(alias, master, False, similarity=similarity_val, reason=reason_text)
+                            continue
+
+                        # One alias must not silently belong to multiple
+                        # unrelated masters — check the in-memory lookup too
+                        # (the DB-level check happens again in
+                        # _save_alias_to_db as a second line of defense).
+                        final_master = master
+                        verified_equivalent_masters = False
+                        existing_master = self.alias_lookup.get(alias)
+                        if existing_master and existing_master != master:
+                            masters_equivalent, _, equiv_reasons, _ = self._evaluate_equivalence(existing_master, master)
+                            if not masters_equivalent:
+                                print(f"[ALIAS] CONFLICT — rejected:\n"
+                                      f"  \"{alias}\" already belongs to master \"{existing_master}\"\n"
+                                      f"  refusing to reassign to \"{master}\"\n"
+                                      f"  reason=masters not verified equivalent ({'; '.join(equiv_reasons)})")
+                                continue
+                            final_master = existing_master  # masters verified equivalent — keep the existing canonical master
+                            verified_equivalent_masters = True
+
+                        self.skill_aliases.setdefault(final_master, [])
+                        if alias not in self.skill_aliases[final_master]:
+                            self.skill_aliases[final_master].append(alias)
+                        self.alias_lookup[alias] = final_master
+
+                        merged_count += 1
+                        stats['aliases_accepted'] += 1
+                        merged_details.append(f"{alias} -> {final_master} (alias)")
+                        self._record_merge_decision(
+                            alias, final_master, True,
+                            similarity=similarity_val, is_alias=True, reason=reason_text
+                        )
+
+                        print(f"[ALIAS] ACCEPTED:\n"
+                              f"  \"{alias}\" <-> \"{final_master}\"\n"
+                              f"  semantic_similarity={similarity_display}\n"
+                              f"  lexical_similarity={sig.get('meaningful_token_overlap', 0):.2f}\n"
+                              f"  reason={reason_text}")
+
+                        self._save_alias_to_db(
+                            final_master, alias, similarity_val,
+                            verified_equivalent_masters=verified_equivalent_masters
+                        )
                 
                 # Ensure master is in dictionary
                 if master not in self.skill_dictionary:
@@ -2078,7 +2899,32 @@ class NLPProcessor:
                 print(f"   {detail}")
             if len(merged_details) > 5:
                 print(f"   ... and {len(merged_details) - 5} more")
-        
+
+        stats['duration_seconds'] = round(time.perf_counter() - start_time, 3)
+        total_pairs_math = (n * (n - 1)) // 2
+        pct_prefiltered = (
+            100.0 * stats['prefilter_rejected'] / stats['total_possible_pairs']
+            if stats['total_possible_pairs'] else 0.0
+        )
+        self.last_merge_stats = dict(stats)
+        # Update the signature AFTER this run so the next invocation (in this
+        # same process) can report whether anything actually changed.
+        self._last_merge_skillset_signature = current_signature
+        print(
+            "[MERGE STATS] "
+            f"caller={caller} "
+            f"invocation={invocation_number} "
+            f"skillset_unchanged_since_last_merge={skillset_unchanged} "
+            f"skills={n} "
+            f"possible_pairs={total_pairs_math} "
+            f"pairs_evaluated={stats['total_possible_pairs']} "
+            f"prefilter_rejected={stats['prefilter_rejected']} ({pct_prefiltered:.1f}%) "
+            f"sent_to_equivalence_check={stats['sent_to_equivalence_check']} "
+            f"aliases_accepted={stats['aliases_accepted']} "
+            f"aliases_rejected={stats['aliases_rejected']} "
+            f"duration_seconds={stats['duration_seconds']}"
+        )
+
         return merged_count
     
     # ============ CATEGORY DISCOVERY ============
@@ -2162,15 +3008,33 @@ class NLPProcessor:
     
     def learn_from_feedback(self, approved_skills, rejected_skills,
                              document_id=None, employee_id=None, reviewed_by=None):
-        """Learn from user feedback - writes facts to Supabase, not JSON.
-        document_id/employee_id/reviewed_by are optional but let
-        feedback_training rows carry proper context — pass them through
-        from module3_integration.py's caller when available."""
+        """Learn from user feedback - updates the LOCAL knowledge base
+        (learned_skills / aliases / keyword learning / rejection patterns)
+        in memory and in the ephemeral JSON cache.
+
+        NOTE: this method intentionally does NOT insert rows into the
+        Supabase `feedback_training` table for the approved/rejected
+        skills themselves. feedbackController.js's saveSkillFeedback is
+        the single source of truth for those rows (it has the real
+        reviewed_by/reviewed_at/document_id/employee_id context plus the
+        original ML prediction/confidence via skill_predictions) — writing
+        them again here produced duplicate, context-less rows that could
+        never satisfy the human-reviewed criteria. document_id/employee_id/
+        reviewed_by are still accepted (and still forwarded to
+        _save_component_to_db below) since atomic-component decomposition
+        is a distinct, additive feedback_training write, not a duplicate
+        of the approve/reject event.
+
+        This method also intentionally does NOT retrain the ML classifier
+        inline anymore — retraining now only happens through the gated
+        ≥20-new-human-reviewed-rows mechanism (see skill_classifier.py's
+        train_and_replace() and runner.py's retrain_if_needed), triggered
+        from feedbackController.js after it writes to feedback_training."""
 
         # feedback_log is already populated in memory from _load_data()
         # (queried from Supabase on startup) — no file read needed here.
         
-        # ============ APPEND NEW FEEDBACK ============
+        # ============ APPEND NEW FEEDBACK (local knowledge base only) ============
         for skill in approved_skills:
             if skill not in self.feedback_log.get('approved', []):
                 if 'approved' not in self.feedback_log:
@@ -2184,8 +3048,7 @@ class NLPProcessor:
                         self.learned_skill_keywords.add(word)
                         print(f"[LEARN] Learned skill keyword: '{word}' from '{skill}'")
 
-                self._save_feedback_to_db(skill, 'Skill', document_id, employee_id, reviewed_by)
-                print(f"[FEEDBACK] Approved: {skill}")
+                print(f"[FEEDBACK] Approved (local KB only, feedback_training already written by backend): {skill}")
         
         for skill in rejected_skills:
             if not skill:
@@ -2210,8 +3073,7 @@ class NLPProcessor:
             if any(skill_lower.startswith(c) for c in connectors):
                 self.rejected_fragments[skill_lower] = self.rejected_fragments.get(skill_lower, 0) + 1
 
-            self._save_feedback_to_db(skill, 'Not Skill', document_id, employee_id, reviewed_by)
-            print(f"[FEEDBACK] Rejected: {skill}")
+            print(f"[FEEDBACK] Rejected (local KB only, feedback_training already written by backend): {skill}")
         
         # Don't overwrite categories for existing skills
         for skill in approved_skills:
@@ -2242,24 +3104,21 @@ class NLPProcessor:
                     
         # Re-run merge (this will create aliases, not delete)
         if len(self.learned_skills) > 5:
-            merged = self.merge_synonyms_dynamically()
+            merged = self.merge_synonyms_dynamically(caller='learn_from_feedback')
             if merged > 0:
                 print(f"[NLP] Auto-merged {merged} duplicate skills (kept as aliases)")
         
-        # Train ML — lowered from 10 so the classifier activates sooner
-        # while you're still in the early feedback-gathering phase.
-        total_feedback = len(self.feedback_log.get('approved', [])) + len(self.feedback_log.get('rejected', []))
-        if total_feedback >= 5:
-            print(f"[ML] Training classifier with {total_feedback} feedback items...")
-            try:
-                all_approved = self.feedback_log.get('approved', [])
-                all_rejected = self.feedback_log.get('rejected', [])
-                self.classifier.train_from_feedback(all_approved, all_rejected)
-                self.use_ml = self.classifier.is_trained
-                if self.use_ml:
-                    print("[ML] Classifier trained successfully!")
-            except Exception as e:
-                print(f"[ML] Error: {e}")
+        # ============ NOTE: ML retraining removed from here ============
+        # Retraining used to fire inline on every feedback submission once
+        # total_feedback >= 5, using in-memory feedback_log (not validated
+        # against reviewed_by/reviewed_at, no threshold, no candidate/
+        # evaluate/replace safety, and the trained model was never
+        # persisted to skill_classifier.pkl). That's replaced by the gated
+        # ≥20-new-human-reviewed-rows flow: see runner.py's
+        # "retrain_if_needed" command and skill_classifier.py's
+        # train_and_replace(), invoked by feedbackController.js after it
+        # writes the reviewed row(s) to feedback_training.
+        # =================================================================
         
         self._save_ephemeral_json()
         return len(approved_skills)
@@ -2267,11 +3126,18 @@ class NLPProcessor:
     # ============ SIMILARITY CALCULATION ============
     
     def _calculate_similarity(self, skill1, skill2):
-        """Calculate semantic similarity between two skills using word vectors"""
+        """Calculate semantic similarity between two skills using word vectors.
+
+        PERFORMANCE: uses _get_cached_nlp_doc() so the same skill text is
+        only ever run through the spaCy pipeline once per process, no
+        matter how many pairs it's compared in. The actual similarity()
+        call is a cheap vector op once both docs are cached."""
         try:
-            doc1 = self.nlp(skill1)
-            doc2 = self.nlp(skill2)
-            
+            doc1 = self._get_cached_nlp_doc(skill1)
+            doc2 = self._get_cached_nlp_doc(skill2)
+
+            if doc1 is None or doc2 is None:
+                return 0.0
             if not doc1.vector.any() or not doc2.vector.any():
                 return 0.0
             
@@ -2335,7 +3201,7 @@ class NLPProcessor:
         # Run dynamic merge (keeps all skills, creates aliases)
         if self.stats['documents_analyzed'] > 0 and len(self.learned_skills) > 5:
             print(f"[NLP] Running dynamic merge after {self.stats['documents_analyzed']} documents...")
-            merged = self.merge_synonyms_dynamically()
+            merged = self.merge_synonyms_dynamically(caller='_learn_from_document')
             if merged > 0:
                 print(f"[NLP] Dynamically merged {merged} skills (kept as aliases)!")
         
@@ -2366,18 +3232,52 @@ class NLPProcessor:
         valid_skills = []
         auto_approved = []
         needs_review = []
+        # skill name -> {'prediction': 'Skill'/'Not Skill', 'confidence': float}
+        # Preserves the original ML prediction for each needs-review skill so
+        # it can flow through to the frontend/feedback endpoint unchanged.
+        needs_review_predictions = {}
+        # Same idea, for skills the ML classifier auto-approved (>= 0.85
+        # confidence) - previously discarded entirely; now preserved so
+        # ML-approved skills also carry their original prediction/confidence
+        # through to feedback_training instead of ending up NULL there.
+        auto_approved_predictions = {}
         
         for candidate in candidates:
             result = self._is_likely_skill(candidate)
             
             if isinstance(result, tuple):
-                skill_name, status = result
+                # 3-tuple: (skill_name, status, {prediction, confidence} | None)
+                # status is 'needs_review' or 'auto_approved'.
+                # 2-tuple kept as a defensive fallback in case any other code
+                # path still returns the older shape.
+                if len(result) == 3:
+                    skill_name, status, ml_meta = result
+                else:
+                    skill_name, status = result
+                    ml_meta = None
                 if status == 'needs_review':
                     needs_review.append(skill_name)
                     valid_skills.append(skill_name)
+                    if ml_meta is not None and skill_name not in needs_review_predictions:
+                        needs_review_predictions[skill_name] = {
+                            'prediction': ml_meta.get('prediction'),
+                            'confidence': ml_meta.get('confidence')
+                        }
+                elif status == 'auto_approved':
+                    auto_approved.append(skill_name)
+                    valid_skills.append(skill_name)
+                    if ml_meta is not None and skill_name not in auto_approved_predictions:
+                        auto_approved_predictions[skill_name] = {
+                            'prediction': ml_meta.get('prediction'),
+                            'confidence': ml_meta.get('confidence')
+                        }
             elif result:
                 auto_approved.append(result)
                 valid_skills.append(result)
+                # No ml_meta here - came from the Knowledge Base or a
+                # non-ML fallback pattern match, not an ML prediction, so
+                # there's nothing to preserve (stays NULL downstream,
+                # which is correct - it never had a prediction).
         
         # Learn from this document
         self._learn_from_document(text, valid_skills)
@@ -2391,7 +3291,9 @@ class NLPProcessor:
             'phones': [],
             'skills': sorted(valid_skills),
             'auto_approved': auto_approved,      # ← New: skills auto-approved
-            'needs_review': needs_review  
+            'needs_review': needs_review,
+            'needs_review_predictions': needs_review_predictions,   # ← original ML prediction+confidence per needs-review skill
+            'auto_approved_predictions': auto_approved_predictions  # ← original ML prediction+confidence per ML-auto-approved skill
         }
         
         # NER
@@ -2443,6 +3345,8 @@ class NLPProcessor:
             'categorized': categorized,
             'auto_approved': entities.get('auto_approved', []),    # ← KEY FIX
             'needs_review': entities.get('needs_review', []),      # ← KEY FIX
+            'needs_review_predictions': entities.get('needs_review_predictions', {}),
+            'auto_approved_predictions': entities.get('auto_approved_predictions', {}),
             'total_skills': len(skills),
             'licenses': entities['licenses'],
             'persons': entities['persons'],
@@ -2455,9 +3359,21 @@ class NLPProcessor:
             'documents_analyzed': self.stats['documents_analyzed']
         }
     
-    def prepare_db_records(self, employee_id, text, structured_text=None):
-        """Prepare database records"""
-        extracted = self.extract_skills_with_categories(text, structured_text)
+    def prepare_db_records(self, employee_id, text, structured_text=None, extracted=None):
+        """Prepare database records.
+
+        `extracted`, when supplied, is the ALREADY-COMPUTED return value of
+        extract_skills_with_categories() for this same document/text. This
+        avoids re-running the full extraction pipeline (candidate extraction,
+        _learn_from_document(), and a second merge_synonyms_dynamically()
+        pass) a second time on the same document — previously this method
+        unconditionally recomputed it even when the caller already had the
+        result (see module3_integration.py's process_document_complete),
+        which was the actual cause of duplicate merge invocations per
+        document. Default remains None so any other existing caller that
+        doesn't pass it keeps today's exact behavior.
+        """
+        extracted = extracted if extracted is not None else self.extract_skills_with_categories(text, structured_text)
         
         employee_update = {
             'employee_id': employee_id,

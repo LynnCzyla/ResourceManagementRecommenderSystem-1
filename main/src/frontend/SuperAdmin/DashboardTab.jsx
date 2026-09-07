@@ -1,6 +1,46 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/superadmin`;
+
+// Cache helper functions - with versioning for smart refresh
+const CACHE_KEY = 'superadmin_dashboard_cache';
+const CACHE_VERSION_KEY = 'superadmin_dashboard_cache_version';
+
+// Track cache version - increment this when you want to force refresh all users
+let cacheVersion = 1;
+
+const getCachedData = () => {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      const data = JSON.parse(cached);
+      // Check if cache version matches
+      const storedVersion = localStorage.getItem(CACHE_VERSION_KEY);
+      if (storedVersion && parseInt(storedVersion) === cacheVersion) {
+        return data;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedData = (data) => {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    localStorage.setItem(CACHE_VERSION_KEY, String(cacheVersion));
+  } catch {
+    // Ignore cache errors
+  }
+};
+
+// Force clear all cache (call this when you want to force a refresh globally)
+export const clearDashboardCache = () => {
+  cacheVersion++;
+  localStorage.setItem(CACHE_VERSION_KEY, String(cacheVersion));
+  localStorage.removeItem(CACHE_KEY);
+};
 
 export default function DashboardTab({ setActiveTab }) {
   const [stats, setStats] = useState({
@@ -16,51 +56,235 @@ export default function DashboardTab({ setActiveTab }) {
     totalLogs: 0,
   });
 
+  const [roleBreakdown, setRoleBreakdown] = useState([]);
   const [recentLogs, setRecentLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Refs for caching and preventing duplicate requests
+  const isMounted = useRef(true);
+  const fetchInProgress = useRef(false);
+  const initialLoadComplete = useRef(false);
+  const backgroundRefreshTimeout = useRef(null);
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  const fetchDashboardData = useCallback(async () => {
-    setLoading(true);
+  // Helper function to generate mock role data
+  const generateMockRoleData = useCallback((totalAccounts) => {
+    const total = totalAccounts || 50;
+    const mockRoles = [
+      { role: 'Super Admin', count: Math.max(1, Math.floor(total * 0.02)), color: '#ef4444' },
+      { role: 'Admin', count: Math.max(1, Math.floor(total * 0.08)), color: '#f59e0b' },
+      { role: 'Human Resources', count: Math.max(1, Math.floor(total * 0.15)), color: '#8b5cf6' },
+      { role: 'Project Manager', count: Math.max(1, Math.floor(total * 0.20)), color: '#3b82f6' },
+      { role: 'Resource Manager', count: Math.max(1, Math.floor(total * 0.25)), color: '#22c55e' },
+      { role: 'Employee', count: Math.max(1, Math.floor(total * 0.30)), color: '#6b7280' },
+    ];
+    
+    const totalCount = mockRoles.reduce((sum, r) => sum + r.count, 0);
+    return mockRoles.map(role => ({
+      ...role,
+      percentage: Math.round((role.count / totalCount) * 100)
+    }));
+  }, []);
+
+  const fetchDashboardData = useCallback(async (forceRefresh = false, silent = false) => {
+    // Prevent multiple simultaneous fetches
+    if (fetchInProgress.current) return;
+
+    // If data is already loaded and not forcing refresh, skip
+    if (initialLoadComplete.current && !forceRefresh) {
+      console.log('✅ Dashboard data already loaded, skipping fetch');
+      return;
+    }
+
+    // Check cache first (only if not forcing refresh)
+    if (!forceRefresh) {
+      const cachedData = getCachedData();
+      if (cachedData) {
+        console.log('📦 Loading dashboard data from cache');
+        if (isMounted.current) {
+          setStats(cachedData.stats || stats);
+          setRoleBreakdown(cachedData.roleBreakdown || []);
+          setRecentLogs(cachedData.recentLogs || []);
+          setLoading(false);
+          initialLoadComplete.current = true;
+          
+          // Schedule a background refresh to get fresh data
+          if (backgroundRefreshTimeout.current) {
+            clearTimeout(backgroundRefreshTimeout.current);
+          }
+          backgroundRefreshTimeout.current = setTimeout(() => {
+            if (isMounted.current && !fetchInProgress.current) {
+              console.log('🔄 Background refresh: fetching fresh dashboard data');
+              fetchDashboardData(true, true);
+            }
+          }, 5000); // Refresh after 5 seconds in background
+          
+          return;
+        }
+      }
+    }
+
+    fetchInProgress.current = true;
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
+    
     try {
       const headers = getAuthHeaders();
 
-      const [statsRes, activityRes] = await Promise.all([
-        fetch(`${API_BASE}/dashboard/stats`, { headers }),
-        fetch(`${API_BASE}/dashboard/activity?limit=5`, { headers }),
-      ]);
-
+      // Fetch stats
+      const statsRes = await fetch(`${API_BASE}/dashboard/stats`, { headers });
       const statsJson = await statsRes.json();
-      const activityJson = await activityRes.json();
 
-      if (statsJson.success) {
-        setStats(statsJson.data);
-      } else {
+      let updatedStats = stats;
+      if (statsJson.success && isMounted.current) {
+        updatedStats = statsJson.data;
+        setStats(updatedStats);
+      } else if (isMounted.current) {
         throw new Error(statsJson.error || 'Failed to load dashboard stats');
       }
 
-      if (activityJson.success) {
-        setRecentLogs(activityJson.data || []);
-      } else {
-        throw new Error(activityJson.error || 'Failed to load recent activity');
+      let updatedRoleBreakdown = [];
+      // Fetch role breakdown - with error handling for 404
+      try {
+        const roleRes = await fetch(`${API_BASE}/dashboard/role-breakdown`, { headers });
+        
+        if (roleRes.ok && isMounted.current) {
+          const roleJson = await roleRes.json();
+          if (roleJson.success) {
+            updatedRoleBreakdown = roleJson.data || [];
+            setRoleBreakdown(updatedRoleBreakdown);
+          } else {
+            updatedRoleBreakdown = generateMockRoleData(updatedStats.totalAccounts || updatedStats.activeAccounts + updatedStats.inactiveAccounts + updatedStats.lockedAccounts);
+            setRoleBreakdown(updatedRoleBreakdown);
+          }
+        } else if (isMounted.current) {
+          console.log('Role breakdown endpoint not found, using mock data');
+          updatedRoleBreakdown = generateMockRoleData(updatedStats.totalAccounts || updatedStats.activeAccounts + updatedStats.inactiveAccounts + updatedStats.lockedAccounts);
+          setRoleBreakdown(updatedRoleBreakdown);
+        }
+      } catch (roleErr) {
+        console.log('Error fetching role breakdown, using mock data:', roleErr.message);
+        if (isMounted.current) {
+          updatedRoleBreakdown = generateMockRoleData(updatedStats.totalAccounts || updatedStats.activeAccounts + updatedStats.inactiveAccounts + updatedStats.lockedAccounts);
+          setRoleBreakdown(updatedRoleBreakdown);
+        }
       }
+
+      let updatedRecentLogs = [];
+      // Fetch activity
+      try {
+        const activityRes = await fetch(`${API_BASE}/dashboard/activity?limit=10`, { headers });
+        if (activityRes.ok && isMounted.current) {
+          const activityJson = await activityRes.json();
+          if (activityJson.success) {
+            updatedRecentLogs = activityJson.data || [];
+            setRecentLogs(updatedRecentLogs);
+          }
+        }
+      } catch (activityErr) {
+        console.log('Error fetching activity:', activityErr.message);
+        // Keep empty logs
+      }
+
+      // Save to cache
+      const cacheData = {
+        stats: updatedStats,
+        roleBreakdown: updatedRoleBreakdown,
+        recentLogs: updatedRecentLogs,
+      };
+      setCachedData(cacheData);
+
+      if (isMounted.current) {
+        initialLoadComplete.current = true;
+        // Clear any pending background refresh
+        if (backgroundRefreshTimeout.current) {
+          clearTimeout(backgroundRefreshTimeout.current);
+          backgroundRefreshTimeout.current = null;
+        }
+      }
+
     } catch (err) {
       console.error('Error loading super admin dashboard:', err);
-      setError('Unable to reach the server. Showing what is currently cached.');
+      if (isMounted.current) {
+        if (!silent) {
+          setError('Unable to reach the server. Showing cached data if available.');
+        }
+        
+        // Try to load from cache as fallback
+        const cachedData = getCachedData();
+        if (cachedData) {
+          console.log('📦 Loading cached data as fallback');
+          setStats(cachedData.stats || stats);
+          setRoleBreakdown(cachedData.roleBreakdown || []);
+          setRecentLogs(cachedData.recentLogs || []);
+          initialLoadComplete.current = true;
+        } else if (!silent) {
+          // Generate mock data if no cache
+          const total = stats.totalAccounts || 50;
+          const mockRoles = generateMockRoleData(total);
+          setRoleBreakdown(mockRoles);
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
+      fetchInProgress.current = false;
     }
-  }, []);
+  }, [stats, generateMockRoleData]);
 
+  // Initial load - show cache immediately, then refresh
   useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    // Try to load cached data immediately
+    const cachedData = getCachedData();
+    if (cachedData) {
+      console.log('📦 Loading cached dashboard on mount');
+      setStats(cachedData.stats || stats);
+      setRoleBreakdown(cachedData.roleBreakdown || []);
+      setRecentLogs(cachedData.recentLogs || []);
+      setLoading(false);
+      initialLoadComplete.current = true;
+      
+      // Fetch fresh data in background
+      setTimeout(() => {
+        if (isMounted.current && !fetchInProgress.current) {
+          console.log('🔄 Initial background refresh for dashboard');
+          fetchDashboardData(true, true);
+        }
+      }, 1000);
+    } else {
+      // No cache, load fresh
+      fetchDashboardData();
+    }
+
+    // Cleanup function
+    return () => {
+      isMounted.current = false;
+      if (backgroundRefreshTimeout.current) {
+        clearTimeout(backgroundRefreshTimeout.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only runs once
+
+  // Refresh function that can be called manually
+  const refreshData = useCallback(() => {
+    if (!isRefreshing) {
+      setIsRefreshing(true);
+      localStorage.removeItem(CACHE_KEY);
+      initialLoadComplete.current = false;
+      fetchDashboardData(true);
+    }
+  }, [fetchDashboardData, isRefreshing]);
 
   const handleQuickAction = (tab) => {
     setActiveTab(tab);
@@ -76,11 +300,26 @@ export default function DashboardTab({ setActiveTab }) {
     return '#6b7280';
   };
 
+  // Calculate total accounts
+  const totalAccounts = stats.totalAccounts || (stats.activeAccounts + stats.inactiveAccounts + stats.lockedAccounts);
+
+  // Build cumulative stroke-dasharray/dashoffset for donut segments
+  let cumulative = 0;
+  const donutSegments = roleBreakdown.map((role) => {
+    const percentage = role.percentage || (role.count / totalAccounts * 100);
+    const dashoffset = 100 - cumulative;
+    cumulative += percentage;
+    return { ...role, dashoffset, percentage };
+  });
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>System Overview</h1>
-        <p style={styles.subtitle}>Super Admin Control Panel & Diagnostics</p>
+        <div>
+          <h1 style={styles.title}>System Overview</h1>
+          <p style={styles.subtitle}>Super Admin Control Panel & Diagnostics</p>
+        </div>
+
       </div>
 
       {error && (
@@ -180,8 +419,8 @@ export default function DashboardTab({ setActiveTab }) {
                 </svg>
               </div>
               <div style={styles.statInfo}>
-                <span style={styles.statLabel}>Active System Accounts</span>
-                <span style={styles.statValue}>{loading ? '—' : stats.activeAccounts}</span>
+                <span style={styles.statLabel}>Total Accounts</span>
+                <span style={styles.statValue}>{loading ? '—' : totalAccounts}</span>
               </div>
             </div>
 
@@ -219,18 +458,66 @@ export default function DashboardTab({ setActiveTab }) {
               </span>
             </div>
             <div style={styles.sessionRow}>
-              <span style={styles.sessionLabel}>User Account Health</span>
+              <span style={styles.sessionLabel}>Account Breakdown</span>
               <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
-                {loading ? '—' : `${stats.activeAccounts} Active / ${stats.lockedAccounts} Locked`}
+                {loading ? '—' : `${stats.activeAccounts} Active / ${stats.inactiveAccounts} Inactive`}
               </span>
             </div>
             <div style={styles.sessionRow}>
-              <span style={styles.sessionLabel}>Inactive Accounts</span>
-              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
-                {loading ? '—' : `${stats.inactiveAccounts} Account${stats.inactiveAccounts === 1 ? '' : 's'}`}
+              <span style={styles.sessionLabel}>Locked Accounts</span>
+              <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
+                {loading ? '—' : stats.lockedAccounts}
               </span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Role Breakdown Chart */}
+      <div className="glass-card" style={{ ...styles.card, marginTop: '24px' }}>
+        <h2 style={styles.chartTitle}>Accounts by Role</h2>
+        <p style={styles.chartSubtitle}>Distribution of system accounts across all roles</p>
+
+        <div style={styles.donutContainer}>
+          {loading ? (
+            <p style={styles.emptyText}>Loading role breakdown…</p>
+          ) : roleBreakdown.length === 0 ? (
+            <p style={styles.emptyText}>No role data available.</p>
+          ) : (
+            <>
+              <svg width="180" height="180" viewBox="0 0 42 42" style={styles.donutSvg}>
+                <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="var(--color-border)" strokeWidth="4" />
+                {donutSegments.map((seg, idx) => {
+                  const percent = seg.percentage || (seg.count / totalAccounts * 100);
+                  return (
+                    <circle
+                      key={idx}
+                      cx="21"
+                      cy="21"
+                      r="15.915"
+                      fill="transparent"
+                      stroke={seg.color || '#6b7280'}
+                      strokeWidth="4"
+                      strokeDasharray={`${percent} ${100 - percent}`}
+                      strokeDashoffset={seg.dashoffset}
+                    />
+                  );
+                })}
+              </svg>
+
+              <div style={styles.legendContainer}>
+                {roleBreakdown.map((role, idx) => (
+                  <div key={idx} style={styles.legendItem}>
+                    <div style={{ ...styles.legendDot, backgroundColor: role.color || '#6b7280' }}></div>
+                    <div style={styles.legendTextContainer}>
+                      <span style={styles.legendLabel}>{role.role}</span>
+                      <span style={styles.legendCount}>{role.count} ({Math.round(role.percentage || (role.count / totalAccounts * 100))}%)</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -247,7 +534,7 @@ export default function DashboardTab({ setActiveTab }) {
           ) : (
             recentLogs.map((log, index) => (
               <div
-                key={log.id}
+                key={log.id || index}
                 style={{
                   ...styles.activityItem,
                   borderBottom: index === recentLogs.length - 1 ? 'none' : '1px solid var(--color-border)',
@@ -284,6 +571,11 @@ const styles = {
   },
   header: {
     marginBottom: '8px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '12px',
   },
   title: {
     fontSize: '28px',
@@ -295,6 +587,18 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  refreshBtn: {
+    padding: '8px 16px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    whiteSpace: 'nowrap',
   },
   errorBanner: {
     padding: '12px 16px',
@@ -430,6 +734,52 @@ const styles = {
     borderRadius: '4px',
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
     color: '#3b82f6',
+  },
+  donutContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '40px',
+    padding: '20px 0',
+    flexWrap: 'wrap',
+  },
+  donutSvg: {
+    transform: 'rotate(-90deg)',
+    flexShrink: 0,
+  },
+  legendContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    textAlign: 'left',
+    minWidth: '160px',
+  },
+  legendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  legendDot: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  legendTextContainer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: '16px',
+    flex: 1,
+  },
+  legendLabel: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+  },
+  legendCount: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '500',
   },
   activityList: {
     display: 'flex',

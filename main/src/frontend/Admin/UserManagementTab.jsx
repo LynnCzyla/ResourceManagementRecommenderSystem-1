@@ -45,6 +45,7 @@ const IconCreateAccount = () => (
 export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -57,7 +58,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     middle_name: '',
     last_name: '',
     email: '',
-    role: 'Employee',
+    role: '',
     department_id: '',
     position_id: '',
   });
@@ -75,6 +76,10 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   // ── Contact Requests — real data from Supabase ──────────────────────────────
   const [contactRequests, setContactRequests] = useState([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
+
+  // ── Message Viewer Modal ─────────────────────────────────────────────────────
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [showMessageModal, setShowMessageModal] = useState(false);
 
   // ── Create Accounts — accepted job offers from HR, awaiting a system account ─
   const [hiredEmployeesRaw, setHiredEmployeesRaw] = useState([]);
@@ -134,6 +139,17 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     });
   };
 
+  // ── Message Viewer Functions ──────────────────────────────────────────────────
+  const openMessageModal = (request) => {
+    setSelectedRequest(request);
+    setShowMessageModal(true);
+  };
+
+  const closeMessageModal = () => {
+    setShowMessageModal(false);
+    setSelectedRequest(null);
+  };
+
   // ── Fetch users ──────────────────────────────────────────────────────────────
   const fetchUsers = async () => {
     try {
@@ -159,7 +175,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         }));
         setUsers(transformedUsers);
         setError(null);
-        setCurrentPage(1); // Reset to first page when data changes
+        setCurrentPage(1);
       } else {
         setError(data.error || 'Failed to fetch users');
       }
@@ -397,7 +413,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     }
   };
 
-  // ✅ FIXED: This function now correctly calls lock/unlock instead of status
+  // ── Deactivate/Activate account ─────────────────────────────────────────────
   const handleDeactivateActivate = async (userId) => {
     const user = users.find(u => u.id === userId);
     const isActive = user.status === 'Active';
@@ -441,7 +457,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     }
   };
 
-  // ✅ FIXED: This function now calls the correct lock/unlock endpoints
+  // ── Toggle user status (Lock/Unlock) ─────────────────────────────────────────
   const toggleUserStatus = async (userId) => {
     const user = users.find(u => u.id === userId);
     const isActive = user.status === 'Active';
@@ -506,30 +522,90 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     if (initialSubTab) setSubTab(initialSubTab);
   }, [initialSubTab]);
 
+  // ── Helper function to handle network errors ──────────────────────────────
+  const handleNetworkError = (err) => {
+    console.error('Network error:', err);
+    
+    let errorMessage = 'Unable to connect to the server. ';
+    
+    // Check if it's a network error
+    if (err.message === 'Failed to fetch' || 
+        err.message.includes('NetworkError') || 
+        err.message.includes('fetch failed') ||
+        err.message.includes('network')) {
+      errorMessage = 'Unable to connect to the server. Please check your internet connection and try again.';
+    } else if (err.message.includes('ECONNREFUSED')) {
+      errorMessage = 'Cannot connect to the server. Please ensure the server is running and try again.';
+    } else if (err.message.includes('timeout') || err.message.includes('Timed out')) {
+      errorMessage = 'Request timed out. Please check your internet connection and try again.';
+    } else if (err.name === 'AbortError') {
+      errorMessage = 'Request was cancelled. Please try again.';
+    } else {
+      errorMessage = err.message || 'An unexpected error occurred. Please try again.';
+    }
+    
+    return errorMessage;
+  };
+
   // ── Create user ──────────────────────────────────────────────────────────────
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
+    // Validate role is selected
+    if (!formData.role) {
+      setError('Please select a role for the user.');
+      setLoading(false);
+      return;
+    }
+
+    // Validate required fields
+    if (!formData.first_name.trim() || !formData.last_name.trim()) {
+      setError('First name and last name are required.');
+      setLoading(false);
+      return;
+    }
+
+    if (!formData.email.trim()) {
+      setError('Email address is required.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const headers = getAuthHeaders();
+      
+      // Add a timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       const response = await fetch('http://localhost:5000/api/users/create', {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          first_name: formData.first_name,
-          middle_name: formData.middle_name,
-          last_name: formData.last_name,
-          email: formData.email,
+          first_name: formData.first_name.trim(),
+          middle_name: formData.middle_name.trim() || null,
+          last_name: formData.last_name.trim(),
+          email: formData.email.trim(),
           role: formData.role,
           position_id: formData.position_id || null,
           redirectOrigin: window.location.origin,
         }),
+        signal: controller.signal,
       });
-      const data = await response.json();
+      
+      clearTimeout(timeoutId);
+      
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        // If the response is not JSON, it might be a server error
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
 
-      if (data.success) {
+      if (response.ok && data.success) {
         setShowCreateModal(false);
         resetForm();
         setError(null);
@@ -540,14 +616,15 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           'Account Created!'
         );
       } else {
-        const errorMsg = data.error || 'Failed to create user';
+        const errorMsg = data.error || data.message || 'Failed to create user account.';
         setError(errorMsg);
         showErrorAlert(errorMsg);
       }
     } catch (err) {
       console.error('Error creating user:', err);
-      setError(err.message);
-      showErrorAlert(err.message);
+      const errorMessage = handleNetworkError(err);
+      setError(errorMessage);
+      showErrorAlert(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -556,6 +633,23 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   // ── Edit user ────────────────────────────────────────────────────────────────
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate role is selected
+    if (!formData.role) {
+      setError('Please select a role for the user.');
+      return;
+    }
+
+    // Validate required fields
+    if (!formData.first_name.trim() || !formData.last_name.trim()) {
+      setError('First name and last name are required.');
+      return;
+    }
+
+    if (!formData.email.trim()) {
+      setError('Email address is required.');
+      return;
+    }
 
     const result = await showConfirmationAlert(
       'Confirm Changes',
@@ -569,21 +663,35 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
     try {
       const headers = getAuthHeaders();
+      
+      // Add a timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       const response = await fetch(`http://localhost:5000/api/users/${selectedUser.id}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({
-          first_name: formData.first_name,
-          middle_name: formData.middle_name,
-          last_name: formData.last_name,
+          first_name: formData.first_name.trim(),
+          middle_name: formData.middle_name.trim() || null,
+          last_name: formData.last_name.trim(),
           role: formData.role,
-          email: formData.email,
+          email: formData.email.trim(),
           position_id: formData.position_id || null,
         }),
+        signal: controller.signal,
       });
-      const data = await response.json();
+      
+      clearTimeout(timeoutId);
+      
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
 
-      if (data.success) {
+      if (response.ok && data.success) {
         setShowEditModal(false);
         resetForm();
         setError(null);
@@ -593,14 +701,15 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           'Changes Saved!'
         );
       } else {
-        const errorMsg = data.error || 'Failed to update user';
+        const errorMsg = data.error || data.message || 'Failed to update user account.';
         setError(errorMsg);
         showErrorAlert(errorMsg);
       }
     } catch (err) {
       console.error('Error updating user:', err);
-      setError(err.message);
-      showErrorAlert(err.message);
+      const errorMessage = handleNetworkError(err);
+      setError(errorMessage);
+      showErrorAlert(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -614,7 +723,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       middle_name: user.middle_name || '',
       last_name: user.last_name || '',
       email: user.email || '',
-      role: user.role || 'Employee',
+      role: user.role || '',
       department_id: matchedPosition?.department_id ? String(matchedPosition.department_id) : '',
       position_id: user.position_id ? String(user.position_id) : '',
       password: ''
@@ -623,7 +732,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   };
 
   const resetForm = () => {
-    setFormData({ first_name: '', middle_name: '', last_name: '', email: '', role: 'Employee', department_id: '', position_id: '' });
+    setFormData({ first_name: '', middle_name: '', last_name: '', email: '', role: '', department_id: '', position_id: '' });
     setSelectedUser(null);
     setError(null);
   };
@@ -631,7 +740,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
   // ── Best-effort role guess from the applicant's hired position ───────────────
   const guessRoleFromPosition = (position) => {
     const p = (position || '').toLowerCase();
-    if (p.includes('admin')) return 'Admin';
     if (p.includes('resource manager')) return 'Resource Manager';
     if (p.includes('project manager')) return 'Project Manager';
     if (p.includes('human resource') || p.includes('hr assistant') || p.includes('hr ')) return 'Human Resources';
@@ -644,8 +752,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     const first_name = nameParts[0] || '';
     const last_name = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
 
-    // Best-effort match of the HR record's department/position text to the
-    // actual Department/Position records so the form fields auto-select.
     const matchedDept = departments.find(
       d => (d.department_name || '').trim().toLowerCase() === (candidate.department || '').trim().toLowerCase()
     );
@@ -700,11 +806,15 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     : positions;
 
   // ── Pagination logic ──────────────────────────────────────────────────────────
-  const filteredUsers = users.filter(u =>
-    u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.role?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.role?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
+    
+    return matchesSearch && matchesStatus;
+  });
 
   const totalItems = filteredUsers.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage);
@@ -727,6 +837,20 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       }
     }
   };
+
+  // Get status counts for the filter badges
+  const getStatusCounts = () => {
+    const counts = {
+      all: users.length,
+      Active: users.filter(u => u.status === 'Active').length,
+      Locked: users.filter(u => u.status === 'Locked').length,
+      Deactivated: users.filter(u => u.status === 'Deactivated').length,
+      Pending: users.filter(u => u.status === 'Pending').length,
+    };
+    return counts;
+  };
+
+  const statusCounts = getStatusCounts();
 
   // ── Render pagination controls ──────────────────────────────────────────────
   const renderPagination = () => {
@@ -973,6 +1097,23 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 style={styles.searchInput}
               />
             </div>
+            
+            <div style={styles.filterWrapper}>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                style={styles.filterSelect}
+              >
+                <option value="all">All Status ({statusCounts.all})</option>
+                <option value="Active">Active ({statusCounts.Active})</option>
+                <option value="Locked">Locked ({statusCounts.Locked})</option>
+                <option value="Deactivated">Deactivated ({statusCounts.Deactivated})</option>
+                <option value="Pending">Pending ({statusCounts.Pending})</option>
+              </select>
+            </div>
           </div>
 
           <div style={styles.tableWrapper}>
@@ -992,7 +1133,24 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 {loading && currentItems.length === 0 ? (
                   <tr><td colSpan="7" style={styles.emptyRow}>Loading users...</td></tr>
                 ) : currentItems.length === 0 ? (
-                  <tr><td colSpan="7" style={styles.emptyRow}>No user accounts found.</td></tr>
+                  <tr><td colSpan="7" style={styles.emptyRow}>
+                    {searchQuery || statusFilter !== 'all' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 0' }}>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-muted)', marginBottom: '12px' }}>
+                          <circle cx="11" cy="11" r="8"></circle>
+                          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text-primary)' }}>No users found</span>
+                        <span style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                          {searchQuery && `No results for "${searchQuery}"`}
+                          {statusFilter !== 'all' && searchQuery && ' with '}
+                          {statusFilter !== 'all' && `status "${statusFilter}"`}
+                        </span>
+                      </div>
+                    ) : (
+                      'No user accounts found.'
+                    )}
+                  </td></tr>
                 ) : (
                   currentItems.map(u => (
                     <tr key={u.id} style={styles.tableBodyRow}>
@@ -1005,7 +1163,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                       </td>
                       <td style={styles.td}>{u.branch_name || '—'}</td>
                       <td style={styles.td}>
-                        <span style={{ ...styles.statusBadge, backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : u.status === 'Locked' ? 'var(--color-danger-light)' : 'var(--color-warning-light)', color: u.status === 'Active' ? 'var(--color-success)' : u.status === 'Locked' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
+                        <span style={{ ...styles.statusBadge, backgroundColor: u.status === 'Active' ? 'var(--color-primary-light)' : u.status === 'Locked' ? 'var(--color-danger-light)' : u.status === 'Deactivated' ? 'var(--color-warning-light)' : 'rgba(107,114,128,0.1)', color: u.status === 'Active' ? 'var(--color-success)' : u.status === 'Locked' ? 'var(--color-danger)' : u.status === 'Deactivated' ? 'var(--color-warning)' : 'var(--color-text-secondary)' }}>
                           {u.status}
                         </span>
                       </td>
@@ -1019,7 +1177,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                             </svg>
                           </button>
                           
-                          {/* Lock/Unlock button */}
                           <button 
                             onClick={() => u.status === 'Active' ? handleLockAccount(u.id) : handleUnlockAccount(u.id)} 
                             style={{ 
@@ -1043,7 +1200,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                             )}
                           </button>
                           
-                          {/* Deactivate/Activate button */}
                           <button 
                             onClick={() => handleDeactivateActivate(u.id)} 
                             style={{ 
@@ -1064,7 +1220,6 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             </table>
           </div>
 
-          {/* ✅ Pagination */}
           {renderPagination()}
         </div>
       )}
@@ -1182,7 +1337,25 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                           {req.requestType}
                         </span>
                       </td>
-                      <td style={{ ...styles.td, maxWidth: '400px', whiteSpace: 'normal', lineHeight: '1.4' }}>{req.message}</td>
+                      <td style={styles.td}>
+                        <div 
+                          style={{ 
+                            maxWidth: '400px', 
+                            whiteSpace: 'nowrap', 
+                            overflow: 'hidden', 
+                            textOverflow: 'ellipsis',
+                            cursor: 'pointer',
+                            color: 'var(--color-text-primary)',
+                            transition: 'color 0.2s',
+                          }}
+                          onClick={() => openMessageModal(req)}
+                          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-primary)'}
+                          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-text-primary)'}
+                          title="Click to view full message"
+                        >
+                          {req.message}
+                        </div>
+                      </td>
                       <td style={styles.td}>{req.date}</td>
                       <td style={styles.td}>
                         <span style={{ ...styles.statusBadge, backgroundColor: req.status === 'Pending' ? 'var(--color-warning-light)' : req.status === 'Approved' ? 'var(--color-primary-light)' : req.status === 'Rejected' ? 'var(--color-danger-light)' : 'rgba(107,114,128,0.1)', color: req.status === 'Pending' ? 'var(--color-warning)' : req.status === 'Approved' ? 'var(--color-success)' : req.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
@@ -1196,7 +1369,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                               <button
                                 onClick={() => {
                                   resetForm();
-                                  setFormData(prev => ({ ...prev, email: req.email, role: 'Employee' }));
+                                  setFormData(prev => ({ ...prev, email: req.email, role: '' }));
                                   setShowCreateModal(true);
                                 }}
                                 style={{ ...styles.statusToggleBtn, color: 'var(--color-primary)', background: 'var(--color-primary-light)' }}
@@ -1345,6 +1518,110 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </div>
       )}
 
+      {/* ── Message Viewer Modal ── */}
+      {showMessageModal && selectedRequest && (
+        <div style={styles.modalOverlay} onClick={(e) => e.target === e.currentTarget && closeMessageModal()}>
+          <div className="glass-card" style={{ ...styles.modalCard, maxWidth: '560px' }}>
+            <div style={styles.modalHeader}>
+              <h2 style={{ margin: 0, fontSize: 18, color: 'var(--color-text-primary)' }}>
+                Message Details
+              </h2>
+              <button onClick={closeMessageModal} style={styles.closeModalBtn}>&times;</button>
+            </div>
+            
+            <div style={{ marginTop: '16px', textAlign: 'left' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ ...styles.formLabel, fontSize: '11px', fontWeight: '700' }}>From</label>
+                <div style={{ 
+                  padding: '10px 12px', 
+                  background: 'var(--color-bg-root)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                }}>
+                  {selectedRequest.email}
+                  {selectedRequest.name && (
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '13px', marginLeft: '8px' }}>
+                      ({selectedRequest.name})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ ...styles.formLabel, fontSize: '11px', fontWeight: '700' }}>Request Type</label>
+                <div style={{ 
+                  padding: '10px 12px', 
+                  background: 'var(--color-bg-root)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                }}>
+                  <span style={{ ...styles.requestTypeBadge, backgroundColor: selectedRequest.requestType === 'Account Request' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', color: selectedRequest.requestType === 'Account Request' ? 'var(--color-primary)' : 'var(--color-warning)' }}>
+                    {selectedRequest.requestType}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ ...styles.formLabel, fontSize: '11px', fontWeight: '700' }}>Date Received</label>
+                <div style={{ 
+                  padding: '10px 12px', 
+                  background: 'var(--color-bg-root)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                }}>
+                  {selectedRequest.date}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ ...styles.formLabel, fontSize: '11px', fontWeight: '700' }}>Status</label>
+                <div style={{ 
+                  padding: '10px 12px', 
+                  background: 'var(--color-bg-root)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                }}>
+                  <span style={{ ...styles.statusBadge, backgroundColor: selectedRequest.status === 'Pending' ? 'var(--color-warning-light)' : selectedRequest.status === 'Approved' ? 'var(--color-primary-light)' : selectedRequest.status === 'Rejected' ? 'var(--color-danger-light)' : 'rgba(107,114,128,0.1)', color: selectedRequest.status === 'Pending' ? 'var(--color-warning)' : selectedRequest.status === 'Approved' ? 'var(--color-success)' : selectedRequest.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
+                    {selectedRequest.status}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ ...styles.formLabel, fontSize: '11px', fontWeight: '700' }}>Message</label>
+                <div style={{ 
+                  padding: '14px 16px', 
+                  background: 'var(--color-bg-root)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                  lineHeight: '1.6',
+                  maxHeight: '200px',
+                  overflowY: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}>
+                  {selectedRequest.message || 'No message provided.'}
+                </div>
+              </div>
+
+              <div style={styles.modalActions}>
+                <button onClick={closeMessageModal} style={styles.cancelBtn}>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Create Modal ── */}
       {showCreateModal && (
         <div style={styles.modalOverlay}>
@@ -1399,10 +1676,16 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Assign Role *</label>
-                <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} style={styles.modalSelect} required>
+                <select 
+                  value={formData.role} 
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })} 
+                  style={styles.modalSelect} 
+                  required
+                >
+                  <option value="">-- Select Role --</option>
+                  <option value="Employee">Employee</option>
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
-                  <option value="Employee">Employee</option>
                   <option value="Human Resources">Human Resources</option>
                 </select>
               </div>
@@ -1469,10 +1752,16 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>System Role *</label>
-                <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} style={styles.modalSelect} required>
+                <select 
+                  value={formData.role} 
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })} 
+                  style={styles.modalSelect} 
+                  required
+                >
+                  <option value="">-- Select Role --</option>
+                  <option value="Employee">Employee</option>
                   <option value="Resource Manager">Resource Manager</option>
                   <option value="Project Manager">Project Manager</option>
-                  <option value="Employee">Employee</option>
                   <option value="Human Resources">Human Resources</option>
                 </select>
               </div>
@@ -1559,6 +1848,23 @@ const styles = {
     color: 'var(--color-text-primary)',
     fontSize: '14px',
     outline: 'none',
+    transition: 'border-color 0.2s',
+  },
+  filterWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  filterSelect: {
+    padding: '10px 14px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
+    outline: 'none',
+    cursor: 'pointer',
+    minWidth: '180px',
     transition: 'border-color 0.2s',
   },
   createBtn: {
@@ -1845,7 +2151,6 @@ const styles = {
     fontSize: '13px',
     fontWeight: '700',
   },
-  // ── Pagination styles ──
   paginationContainer: {
     display: 'flex',
     justifyContent: 'space-between',

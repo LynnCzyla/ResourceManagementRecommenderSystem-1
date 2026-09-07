@@ -5,13 +5,13 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
-const { sendAdminWelcomeEmail } = require('../../utils/mailer'); // ← Use shared mailer
+const { sendAdminWelcomeEmail } = require('../../utils/mailer');
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
 
-// Generate random password (or use the one from mailer)
+// Generate random password
 function generateTempPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
   let pwd = '';
@@ -24,41 +24,84 @@ function generateTempPassword() {
 // Generate sequential employee ID with WEA-Location format
 const generateEmployeeId = async (branchName) => {
   try {
+    // Extract location from branch name
     let location = 'BRANCH';
+    
     if (branchName) {
-      if (branchName.includes('-')) {
-        location = branchName.split('-')[1] || branchName;
-      } else {
-        location = branchName;
+      // Handle branch names like "WEA-PHIL" or "WEA-Singapore" or "WEA-IDN"
+      let cleanName = branchName;
+      if (branchName.toUpperCase().startsWith('WEA-')) {
+        cleanName = branchName.substring(4); // Remove "WEA-"
+      }
+      
+      // Remove any special characters and convert to uppercase
+      location = cleanName.replace(/[^a-zA-Z]/g, '').toUpperCase();
+      
+      // If location is empty, use the original name
+      if (!location) {
+        location = branchName.replace(/[^a-zA-Z]/g, '').toUpperCase();
       }
     }
+    
+    // If still empty, use a default
+    if (!location) {
+      location = 'BRANCH';
+    }
 
-    const { data, error } = await supabase
+    console.log(`🔍 Generating ID for branch: ${branchName}, extracted location: ${location}`);
+
+    // Get ALL profiles with employee_id
+    const { data: allProfiles, error: allError } = await supabase
       .from("profiles")
       .select("employee_id")
-      .like("employee_id", `WEA-${location}-%`)
-      .order("employee_id", { ascending: false })
-      .limit(1);
+      .not('employee_id', 'is', null);
 
-    if (error) throw error;
+    if (allError) {
+      console.error("❌ Error fetching profiles:", allError);
+      const timestamp = Date.now().toString().slice(-6);
+      return `WEA-${location}-${timestamp}`;
+    }
+
+    console.log(`📦 Total profiles with employee_id: ${allProfiles?.length || 0}`);
+    
+    // Filter for this specific location (e.g., WEA-PHIL-XXX)
+    const filtered = allProfiles.filter(d => {
+      if (!d.employee_id) return false;
+      return d.employee_id.startsWith(`WEA-${location}-`);
+    });
+    
+    console.log(`📦 Found ${filtered.length} IDs for location ${location}`);
+    if (filtered.length > 0) {
+      console.log('📋 Existing IDs for this location:', filtered.map(d => d.employee_id));
+    }
 
     let lastNumber = 0;
-    
-    if (data && data.length > 0) {
-      const lastId = data[0].employee_id;
-      const match = lastId.match(/WEA-.*-(\d+)/);
-      if (match) {
-        lastNumber = parseInt(match[1], 10);
-      }
+    if (filtered.length > 0) {
+      filtered.forEach(d => {
+        // Extract the number from WEA-{LOCATION}-{NUMBER}
+        const match = d.employee_id.match(/WEA-[A-Z]+-(\d+)/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > lastNumber) lastNumber = num;
+        }
+      });
     }
+    
+    console.log(`🔢 Highest number found for ${location}: ${lastNumber}`);
 
     const nextNumber = lastNumber + 1;
     const paddedNumber = String(nextNumber).padStart(3, '0');
+    const newId = `WEA-${location}-${paddedNumber}`;
     
-    return `WEA-${location}-${paddedNumber}`;
+    console.log(`✅ Generated new ID: ${newId}`);
+    console.log(`📊 Next number: ${nextNumber}, Padded: ${paddedNumber}`);
+    
+    return newId;
   } catch (error) {
-    console.error("Error generating employee ID:", error);
-    return `WEA-${branchName || 'BRANCH'}-${Date.now().toString().slice(-6)}`;
+    console.error("❌ Error generating employee ID:", error);
+    const timestamp = Date.now().toString().slice(-6);
+    const cleanName = (branchName || 'BRANCH').replace(/[^a-zA-Z]/g, '').toUpperCase();
+    return `WEA-${cleanName || 'BRANCH'}-${timestamp}`;
   }
 };
 
@@ -409,6 +452,7 @@ router.post('/admins', async (req, res) => {
       }
     }
 
+    // ✅ Generate employee ID based on existing IDs in the database
     const employeeId = await generateEmployeeId(branch.name);
     const tempPassword = generateTempPassword();
 
@@ -522,7 +566,7 @@ router.post('/admins', async (req, res) => {
         email,
         branch: branch.name
       },
-      tempPassword, // Still return for manual sharing if needed
+      tempPassword,
       email_sent: emailSent,
     });
   } catch (err) {
@@ -673,7 +717,7 @@ router.patch('/admins/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['Active', 'Inactive'].includes(status)) {
+  if (!['Active', 'Inactive', 'Deactivated'].includes(status)) {
     return res.status(400).json({
       success: false,
       error: "status must be 'Active' or 'Inactive'."

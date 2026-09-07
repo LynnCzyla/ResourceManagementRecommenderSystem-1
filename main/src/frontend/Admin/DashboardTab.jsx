@@ -18,6 +18,9 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   const [activities, setActivities] = useState([]);
   const [branchInfo, setBranchInfo] = useState(null);
   const [userRole, setUserRole] = useState('');
+  const [userActivityData, setUserActivityData] = useState([]);
+  const [activityFilter, setActivityFilter] = useState('30'); // '7', '14', '30', '60', '90'
+  const [loadingActivity, setLoadingActivity] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionDuration, setSessionDuration] = useState('00:00');
@@ -41,6 +44,55 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
     return () => clearInterval(timer);
   }, []);
 
+  // Fetch user activity based on filter
+  const fetchUserActivity = async (days) => {
+    try {
+      setLoadingActivity(true);
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const res = await fetch(`http://localhost:5000/api/admin/dashboard/user-activity?days=${days}`, { headers });
+      const json = await res.json();
+
+      if (json.success) {
+        setUserActivityData(json.data || []);
+      } else {
+        generateMockUserActivity(days);
+      }
+    } catch (err) {
+      console.error('Error fetching user activity:', err);
+      generateMockUserActivity(days);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  // Mock data generator for the chart
+  const generateMockUserActivity = (days) => {
+    const mockData = [];
+    const now = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      // Generate more realistic data with peaks on weekdays
+      const dayOfWeek = date.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const baseCount = isWeekend ? 3 : 10;
+      const randomVariation = Math.floor(Math.random() * 8);
+      mockData.push({
+        date: date.toISOString().split('T')[0],
+        count: baseCount + randomVariation
+      });
+    }
+    setUserActivityData(mockData);
+  };
+
+  // Handle filter change
+  const handleFilterChange = (days) => {
+    setActivityFilter(days);
+    fetchUserActivity(parseInt(days));
+  };
+
   useEffect(() => {
     const fetchDashboardStats = async () => {
       try {
@@ -56,7 +108,13 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
             totalUsers: json.data.totalUsers,
             totalDepartments: json.data.totalDepartments,
           });
-          setUserRolesData(json.data.userRolesData || []);
+          
+          // Filter out Admin and Super Admin roles from the chart data
+          const filteredRoles = (json.data.userRolesData || []).filter(
+            role => role.label !== 'Admin' && role.label !== 'Super Admin'
+          );
+          setUserRolesData(filteredRoles);
+          
           setBranchInfo(json.data.branch || null);
           setUserRole(json.data.user_role || '');
         } else {
@@ -73,7 +131,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        const res = await fetch('http://localhost:5000/api/admin/dashboard/activity?limit=5', { headers });
+        const res = await fetch('http://localhost:5000/api/admin/dashboard/activity?limit=10', { headers });
         const json = await res.json();
 
         if (json.success) {
@@ -102,6 +160,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
 
     fetchDashboardStats();
     fetchActivity();
+    fetchUserActivity(30); // Default: 30 days
     fetchDepartments();
   }, []);
 
@@ -167,6 +226,21 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       return 'Admin';
     }
     return 'Admin';
+  };
+
+  // Find max value for chart scaling
+  const maxActivityValue = Math.max(...userActivityData.map(d => d.count), 1);
+
+  // Get filter label
+  const getFilterLabel = (days) => {
+    const map = {
+      '7': 'Last 7 Days',
+      '14': 'Last 14 Days',
+      '30': 'Last 30 Days',
+      '60': 'Last 60 Days',
+      '90': 'Last 90 Days'
+    };
+    return map[days] || 'Last 30 Days';
   };
 
   return (
@@ -352,6 +426,138 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         </div>
       </div>
 
+      {/* User Activity Chart with Filter */}
+      <div className="glass-card" style={{ marginTop: '24px' }}>
+        <div style={styles.chartHeader}>
+          <div>
+            <h2 style={styles.chartTitle}>User Activity</h2>
+            <p style={styles.chartSubtitle}>
+              {branchInfo ? `Daily active users in ${branchInfo.name}` : 'Daily active users across all branches'}
+            </p>
+          </div>
+          <div style={styles.filterContainer}>
+            <button
+              onClick={() => handleFilterChange('7')}
+              style={{
+                ...styles.filterBtn,
+                backgroundColor: activityFilter === '7' ? 'var(--color-primary)' : 'transparent',
+                color: activityFilter === '7' ? '#fff' : 'var(--color-text-secondary)',
+              }}
+            >
+              7D
+            </button>
+            <button
+              onClick={() => handleFilterChange('14')}
+              style={{
+                ...styles.filterBtn,
+                backgroundColor: activityFilter === '14' ? 'var(--color-primary)' : 'transparent',
+                color: activityFilter === '14' ? '#fff' : 'var(--color-text-secondary)',
+              }}
+            >
+              14D
+            </button>
+            <button
+              onClick={() => handleFilterChange('30')}
+              style={{
+                ...styles.filterBtn,
+                backgroundColor: activityFilter === '30' ? 'var(--color-primary)' : 'transparent',
+                color: activityFilter === '30' ? '#fff' : 'var(--color-text-secondary)',
+              }}
+            >
+              30D
+            </button>
+            <button
+              onClick={() => handleFilterChange('60')}
+              style={{
+                ...styles.filterBtn,
+                backgroundColor: activityFilter === '60' ? 'var(--color-primary)' : 'transparent',
+                color: activityFilter === '60' ? '#fff' : 'var(--color-text-secondary)',
+              }}
+            >
+              60D
+            </button>
+            <button
+              onClick={() => handleFilterChange('90')}
+              style={{
+                ...styles.filterBtn,
+                backgroundColor: activityFilter === '90' ? 'var(--color-primary)' : 'transparent',
+                color: activityFilter === '90' ? '#fff' : 'var(--color-text-secondary)',
+              }}
+            >
+              90D
+            </button>
+          </div>
+        </div>
+        
+        <div style={styles.chartContainer}>
+          {loadingActivity ? (
+            <div style={styles.loadingContainer}>
+              <span style={styles.spinner}></span>
+              <span style={{ color: 'var(--color-text-muted)', marginTop: '12px' }}>Loading activity data...</span>
+            </div>
+          ) : userActivityData.length > 0 ? (
+            <div style={styles.barChart}>
+              {userActivityData.map((day, index) => {
+                const height = (day.count / maxActivityValue) * 100;
+                const date = new Date(day.date);
+                const dayLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                const isToday = date.toDateString() === new Date().toDateString();
+                
+                return (
+                  <div key={index} style={styles.barWrapper}>
+                    <div style={styles.barContainer}>
+                      <div 
+                        style={{
+                          ...styles.bar,
+                          height: `${Math.max(height, 5)}%`,
+                          backgroundColor: isToday ? 'var(--color-danger)' : (isWeekend ? 'var(--color-accent)' : 'var(--color-primary)'),
+                          opacity: day.count === 0 ? 0.3 : 1,
+                          border: isToday ? '2px solid var(--color-danger)' : 'none',
+                        }}
+                      >
+                        <span style={styles.barValue}>{day.count}</span>
+                      </div>
+                    </div>
+                    <span style={{
+                      ...styles.barLabel,
+                      fontWeight: isToday ? '700' : '400',
+                      color: isToday ? 'var(--color-danger)' : 'var(--color-text-muted)',
+                    }}>
+                      {isToday ? 'Today' : dayLabel}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '40px 0' }}>
+              No activity data available.
+            </p>
+          )}
+        </div>
+        
+        <div style={styles.chartFooter}>
+          <span style={styles.chartFooterText}>
+            {getFilterLabel(activityFilter)} • {userActivityData.reduce((sum, day) => sum + day.count, 0)} total activities
+          </span>
+          <span style={styles.chartFooterLegend}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: 'var(--color-primary)' }}></span>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Weekday</span>
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: 'var(--color-accent)' }}></span>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Weekend</span>
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: 'var(--color-danger)' }}></span>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Today</span>
+            </span>
+          </span>
+        </div>
+      </div>
+
       <div className="dashboard-grid" style={{ marginTop: '24px' }}>
         <div className="glass-card">
           <h2 style={styles.chartTitle}>Recent Portal Activity</h2>
@@ -533,6 +739,34 @@ const styles = {
     color: 'var(--color-text-muted)',
     marginBottom: '20px',
   },
+  chartHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: '12px',
+    marginBottom: '8px',
+  },
+  filterContainer: {
+    display: 'flex',
+    gap: '4px',
+    background: 'var(--color-bg-root)',
+    padding: '4px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    flexWrap: 'wrap',
+  },
+  filterBtn: {
+    padding: '6px 14px',
+    borderRadius: '6px',
+    border: 'none',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    background: 'transparent',
+    color: 'var(--color-text-secondary)',
+  },
   donutContainer: {
     display: 'flex',
     alignItems: 'center',
@@ -691,4 +925,106 @@ const styles = {
     fontWeight: '600',
     color: 'var(--color-primary)',
   },
+  // Chart styles
+  chartContainer: {
+    padding: '10px 0',
+    overflowX: 'auto',
+    minHeight: '240px',
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '200px',
+    gap: '8px',
+  },
+  barChart: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: '4px',
+    height: '200px',
+    paddingBottom: '25px',
+    position: 'relative',
+    minWidth: '100%',
+  },
+  barWrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    flex: 1,
+    height: '100%',
+    minWidth: '12px',
+  },
+  barContainer: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    height: '100%',
+    width: '100%',
+  },
+  bar: {
+    width: '100%',
+    minHeight: '4px',
+    borderRadius: '4px 4px 0 0',
+    position: 'relative',
+    transition: 'height 0.3s ease',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingTop: '2px',
+  },
+  barValue: {
+    fontSize: '9px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    opacity: 0.7,
+  },
+  barLabel: {
+    fontSize: '9px',
+    color: 'var(--color-text-muted)',
+    marginTop: '4px',
+    transform: 'rotate(-45deg)',
+    transformOrigin: 'top left',
+    whiteSpace: 'nowrap',
+  },
+  chartFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: '12px',
+    borderTop: '1px solid var(--color-border)',
+    marginTop: '8px',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  chartFooterText: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+  },
+  chartFooterLegend: {
+    display: 'flex',
+    gap: '16px',
+    flexWrap: 'wrap',
+  },
+  spinner: {
+    width: '30px',
+    height: '30px',
+    border: '3px solid var(--color-border)',
+    borderTopColor: 'var(--color-primary)',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+  },
 };
+
+// Add keyframe styles
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = `
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
+}

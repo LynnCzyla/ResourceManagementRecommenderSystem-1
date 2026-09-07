@@ -23,6 +23,7 @@ export default function BranchManagementTab() {
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState({});
 
   const [tableNotConfigured, setTableNotConfigured] = useState(false);
 
@@ -71,6 +72,26 @@ export default function BranchManagementTab() {
     });
   };
 
+  // ✅ Validation function
+  const validateForm = (data) => {
+    const errors = {};
+    
+    if (!data.name || !data.name.trim()) {
+      errors.name = 'Branch name is required.';
+    }
+    if (!data.location || !data.location.trim()) {
+      errors.location = 'Location is required.';
+    }
+    if (!data.address || !data.address.trim()) {
+      errors.address = 'Address is required.';
+    }
+    if (!data.contact_number || !data.contact_number.trim()) {
+      errors.contact_number = 'Contact number is required.';
+    }
+    
+    return errors;
+  };
+
   const loadBranches = useCallback(async (page = pagination.page) => {
     setLoading(true);
     try {
@@ -101,14 +122,25 @@ export default function BranchManagementTab() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    
+    // ✅ Validate form
+    const errors = validateForm(formData);
+    setValidationErrors(errors);
+    
+    if (Object.keys(errors).length > 0) {
+      // Show first error as alert
+      const firstError = Object.values(errors)[0];
+      showErrorAlert(firstError, 'Validation Error');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      // Remove manager_name from form data (it's auto-assigned later)
       const submitData = {
-        name: formData.name,
-        location: formData.location,
-        address: formData.address,
-        contact_number: formData.contact_number,
+        name: formData.name.trim(),
+        location: formData.location.trim(),
+        address: formData.address.trim(),
+        contact_number: formData.contact_number.trim(),
         status: formData.status,
       };
 
@@ -122,6 +154,7 @@ export default function BranchManagementTab() {
 
       setShowCreateModal(false);
       setFormData(emptyForm);
+      setValidationErrors({});
       loadBranches(1);
       showSuccessAlert('Branch created successfully!');
     } catch (err) {
@@ -133,14 +166,24 @@ export default function BranchManagementTab() {
 
   const handleEdit = async (e) => {
     e.preventDefault();
+    
+    // ✅ Validate form
+    const errors = validateForm(formData);
+    setValidationErrors(errors);
+    
+    if (Object.keys(errors).length > 0) {
+      const firstError = Object.values(errors)[0];
+      showErrorAlert(firstError, 'Validation Error');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      // Remove manager_name from form data (it's auto-assigned)
       const submitData = {
-        name: formData.name,
-        location: formData.location,
-        address: formData.address,
-        contact_number: formData.contact_number,
+        name: formData.name.trim(),
+        location: formData.location.trim(),
+        address: formData.address.trim(),
+        contact_number: formData.contact_number.trim(),
         status: formData.status,
       };
 
@@ -155,6 +198,7 @@ export default function BranchManagementTab() {
       setShowEditModal(false);
       setSelectedBranch(null);
       setFormData(emptyForm);
+      setValidationErrors({});
       loadBranches();
       showSuccessAlert('Branch updated successfully!');
     } catch (err) {
@@ -192,12 +236,23 @@ export default function BranchManagementTab() {
       contact_number: branch.contact_number || '',
       status: branch.status || 'Active',
     });
+    setValidationErrors({});
     setShowEditModal(true);
   };
 
   const goToPage = (page) => {
     if (page < 1 || page > pagination.totalPages) return;
     loadBranches(page);
+  };
+
+  // Helper to check if field has error
+  const hasError = (field) => {
+    return validationErrors && validationErrors[field];
+  };
+
+  // Helper to get error message
+  const getError = (field) => {
+    return validationErrors && validationErrors[field];
   };
 
   return (
@@ -247,7 +302,7 @@ export default function BranchManagementTab() {
           <option value="Inactive">Inactive</option>
         </select>
         <button
-          onClick={() => { setFormData(emptyForm); setShowCreateModal(true); }}
+          onClick={() => { setFormData(emptyForm); setValidationErrors({}); setShowCreateModal(true); }}
           style={styles.createBtn}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
@@ -348,7 +403,7 @@ export default function BranchManagementTab() {
         )}
       </div>
 
-      {/* Create Modal - Removed Manager Name */}
+      {/* Create Modal */}
       {showCreateModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
@@ -368,44 +423,97 @@ export default function BranchManagementTab() {
                     type="text"
                     required
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      if (validationErrors.name) {
+                        setValidationErrors({ ...validationErrors, name: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('name') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="e.g., WEA-PHIL, WEA-Singapore"
                   />
+                  {hasError('name') && (
+                    <span style={styles.errorText}>{getError('name')}</span>
+                  )}
                   <span style={styles.helperText}>Format: WEA-Location (e.g., WEA-PHIL)</span>
                 </div>
 
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Location</label>
+                  <label style={styles.formLabel}>
+                    Location <span style={styles.required}>*</span>
+                  </label>
                   <input
                     type="text"
+                    required
                     value={formData.location}
-                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, location: e.target.value });
+                      if (validationErrors.location) {
+                        setValidationErrors({ ...validationErrors, location: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('location') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="e.g., Manila, Singapore"
                   />
+                  {hasError('location') && (
+                    <span style={styles.errorText}>{getError('location')}</span>
+                  )}
                 </div>
 
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Address</label>
+                  <label style={styles.formLabel}>
+                    Address <span style={styles.required}>*</span>
+                  </label>
                   <input
                     type="text"
+                    required
                     value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      if (validationErrors.address) {
+                        setValidationErrors({ ...validationErrors, address: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('address') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="Full branch address"
                   />
+                  {hasError('address') && (
+                    <span style={styles.errorText}>{getError('address')}</span>
+                  )}
                 </div>
 
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Contact Number</label>
+                  <label style={styles.formLabel}>
+                    Contact Number <span style={styles.required}>*</span>
+                  </label>
                   <input
                     type="text"
+                    required
                     value={formData.contact_number}
-                    onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, contact_number: e.target.value });
+                      if (validationErrors.contact_number) {
+                        setValidationErrors({ ...validationErrors, contact_number: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('contact_number') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="e.g., 09123456789"
                   />
+                  {hasError('contact_number') && (
+                    <span style={styles.errorText}>{getError('contact_number')}</span>
+                  )}
                 </div>
               </div>
 
@@ -428,7 +536,7 @@ export default function BranchManagementTab() {
         </div>
       )}
 
-      {/* Edit Modal - Removed Manager Name */}
+      {/* Edit Modal */}
       {showEditModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
@@ -448,43 +556,96 @@ export default function BranchManagementTab() {
                     type="text"
                     required
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      if (validationErrors.name) {
+                        setValidationErrors({ ...validationErrors, name: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('name') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="e.g., WEA-PHIL, WEA-Singapore"
                   />
+                  {hasError('name') && (
+                    <span style={styles.errorText}>{getError('name')}</span>
+                  )}
                 </div>
 
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Location</label>
+                  <label style={styles.formLabel}>
+                    Location <span style={styles.required}>*</span>
+                  </label>
                   <input
                     type="text"
+                    required
                     value={formData.location}
-                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, location: e.target.value });
+                      if (validationErrors.location) {
+                        setValidationErrors({ ...validationErrors, location: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('location') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="e.g., Manila, Singapore"
                   />
+                  {hasError('location') && (
+                    <span style={styles.errorText}>{getError('location')}</span>
+                  )}
                 </div>
 
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Address</label>
+                  <label style={styles.formLabel}>
+                    Address <span style={styles.required}>*</span>
+                  </label>
                   <input
                     type="text"
+                    required
                     value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      if (validationErrors.address) {
+                        setValidationErrors({ ...validationErrors, address: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('address') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="Full branch address"
                   />
+                  {hasError('address') && (
+                    <span style={styles.errorText}>{getError('address')}</span>
+                  )}
                 </div>
 
                 <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Contact Number</label>
+                  <label style={styles.formLabel}>
+                    Contact Number <span style={styles.required}>*</span>
+                  </label>
                   <input
                     type="text"
+                    required
                     value={formData.contact_number}
-                    onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, contact_number: e.target.value });
+                      if (validationErrors.contact_number) {
+                        setValidationErrors({ ...validationErrors, contact_number: '' });
+                      }
+                    }}
+                    style={{
+                      ...styles.formInput,
+                      borderColor: hasError('contact_number') ? 'var(--color-danger)' : 'var(--color-border)',
+                    }}
                     placeholder="e.g., 09123456789"
                   />
+                  {hasError('contact_number') && (
+                    <span style={styles.errorText}>{getError('contact_number')}</span>
+                  )}
                 </div>
 
                 <div style={styles.formGroup}>
@@ -575,6 +736,13 @@ const styles = {
   editBtn: { padding: '6px', background: 'transparent', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer', transition: 'all 0.2s' },
   deleteBtn: { padding: '6px', background: 'transparent', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-danger)', cursor: 'pointer', transition: 'all 0.2s' },
   emptyCell: { padding: '32px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '14px' },
+  
+  // Error styles
+  errorText: {
+    fontSize: '12px',
+    color: 'var(--color-danger)',
+    marginTop: '4px',
+  },
 
   pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '16px' },
   pageBtn: { padding: '6px 14px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer' },
@@ -590,7 +758,7 @@ const styles = {
   formSection: { display: 'flex', flexDirection: 'column', gap: '14px' },
   sectionTitle: { fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)', margin: '0 0 4px 0' },
   
-  formGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  formGroup: { display: 'flex', flexDirection: 'column', gap: '4px' },
   formLabel: { fontSize: '13px', fontWeight: '600', color: 'var(--color-text-primary)' },
   required: { color: 'var(--color-danger)' },
   formInput: { padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', fontSize: '14px', background: 'var(--color-bg-root)', color: 'var(--color-text-primary)', outline: 'none', width: '100%' },

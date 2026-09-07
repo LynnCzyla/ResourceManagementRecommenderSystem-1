@@ -48,16 +48,14 @@ router.get('/accounts', async (req, res) => {
     
     if (error) throw error;
 
-    // ← NEW: Get emails from auth.users for all profiles
+    // Get emails from auth.users for all profiles
     const profileIds = (profiles || []).map((p) => p.id);
     let emailMap = new Map();
     
     if (profileIds.length > 0) {
-      // Get auth users with their emails
       const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
       
       if (!authError && authUsers) {
-        // Create a map of user_id -> email
         authUsers.users.forEach(user => {
           emailMap.set(user.id, user.email);
         });
@@ -76,15 +74,20 @@ router.get('/accounts', async (req, res) => {
       }
     }
 
-    // Format response with emails
+    // ✅ FIX: Format response with individual name fields
     let accounts = (profiles || []).map((p) => {
       const lock = lockMap.get(p.id);
       return {
         id: p.id,
         employee_id: p.employee_id,
+        // ✅ Return individual name fields
+        first_name: p.first_name || '',
+        middle_name: p.middle_name || '',
+        last_name: p.last_name || '',
+        // Keep combined name for display
         name: `${p.first_name || ''}${p.middle_name ? ` ${p.middle_name}` : ''} ${p.last_name || ''}`.trim(),
-        email: emailMap.get(p.id) || '', // ← Get email from auth
-        role: p.role || 'employee',
+        email: emailMap.get(p.id) || '',
+        role: p.role || 'Employee',
         status: p.status || 'Active',
         branch: p.branches || null,
         branch_id: p.branch_id,
@@ -115,12 +118,114 @@ router.get('/accounts', async (req, res) => {
   }
 });
 
+// ✅ NEW: PUT /api/superadmin/accounts/:id - Update account
+router.put('/accounts/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    first_name,
+    middle_name,
+    last_name,
+    email,
+    role,
+    branch_id,
+    status,
+  } = req.body;
+
+  // Validate required fields
+  if (!first_name || !last_name) {
+    return res.status(400).json({
+      success: false,
+      error: 'first_name and last_name are required.'
+    });
+  }
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: 'email is required.'
+    });
+  }
+
+  if (!branch_id) {
+    return res.status(400).json({
+      success: false,
+      error: 'branch_id is required. User must be assigned to a branch.'
+    });
+  }
+
+  try {
+    // Check if user exists
+    const { data: existingProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, employee_id')
+      .eq('id', id)
+      .single();
+
+    if (profileError || !existingProfile) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found.'
+      });
+    }
+
+    // Update email in auth
+    if (email) {
+      try {
+        await supabase.auth.admin.updateUserById(id, { email });
+      } catch (authErr) {
+        console.error('Error updating auth email:', authErr);
+        // Continue even if auth update fails
+      }
+    }
+
+    // Update profile
+    const { data: updatedProfile, error: updateError } = await supabase
+      .from('profiles')
+      .update({
+        first_name,
+        middle_name: middle_name || null,
+        last_name,
+        role: role || 'Employee',
+        branch_id,
+        status: status || 'Active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Log the action
+    await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: req.user?.id || null,
+        action: 'UPDATE_ACCOUNT',
+        system_category: 'Account Management',
+        log_description: `Updated account for ${first_name} ${last_name} (${existingProfile.employee_id})`,
+      });
+
+    res.json({
+      success: true,
+      message: 'Account updated successfully',
+      data: {
+        ...updatedProfile,
+        email,
+      }
+    });
+  } catch (err) {
+    console.error('Error updating account:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // PATCH /api/superadmin/accounts/:id/status
 router.patch('/accounts/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['Active', 'Inactive'].includes(status)) {
+  if (!['Active', 'Inactive', 'Deactivated'].includes(status)) {
     return res.status(400).json({
       success: false,
       error: "status must be 'Active' or 'Inactive'."
