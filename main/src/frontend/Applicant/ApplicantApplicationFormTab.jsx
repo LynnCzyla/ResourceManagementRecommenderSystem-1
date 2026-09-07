@@ -7,6 +7,7 @@ export default function ApplicantApplicationFormTab() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [maxFileSize, setMaxFileSize] = useState(5); // ✅ Use separate state for max file size
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -36,7 +37,39 @@ export default function ApplicantApplicationFormTab() {
 
   useEffect(() => {
     loadMyApplications();
+    fetchSystemSettings();
   }, []);
+
+  // ✅ Fetch system settings from the new endpoint
+  const fetchSystemSettings = async () => {
+    try {
+      const API_URL = 'http://localhost:5000/api/applicant/system-settings';
+      console.log('📡 Fetching system settings from:', API_URL);
+      
+      const res = await fetch(API_URL);
+      console.log('📡 Response status:', res.status);
+      
+      if (res.ok) {
+        const data = await res.json();
+        console.log('📡 System settings data:', data);
+        
+        if (data.success && data.data) {
+          const size = data.data.max_file_upload_size || 5;
+          console.log('✅ Setting max file size to:', size);
+          
+          // ✅ Update the state with the new value
+          setMaxFileSize(size);
+        } else {
+          console.warn('⚠️ API returned success:false or no data');
+        }
+      } else {
+        console.error('❌ API returned error status:', res.status);
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch system settings:', err);
+      // Keep default value (5MB)
+    }
+  };
 
   const loadMyApplications = async () => {
     try {
@@ -118,15 +151,23 @@ export default function ApplicantApplicationFormTab() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      // ✅ Use dynamic max file size
+      const maxSizeBytes = maxFileSize * 1024 * 1024;
+      
+      console.log(`📄 File size: ${(file.size / (1024 * 1024)).toFixed(2)}MB, Limit: ${maxFileSize}MB`);
+
       if (file.type !== 'application/pdf') {
         showErrorAlert('Only PDF files are accepted.', 'Invalid File Type');
         e.target.value = null;
         setFormData({ ...formData, resume: null });
         return;
       }
-      const maxSize = 5 * 1024 * 1024; // 5MB
-      if (file.size > maxSize) {
-        showErrorAlert('File size exceeds the 5MB limit.', 'File Too Large');
+
+      if (file.size > maxSizeBytes) {
+        showErrorAlert(
+          `File size exceeds the ${maxFileSize}MB limit.`,
+          'File Too Large'
+        );
         e.target.value = null;
         setFormData({ ...formData, resume: null });
         return;
@@ -161,6 +202,9 @@ export default function ApplicantApplicationFormTab() {
   if (loading) {
     return <div style={styles.loading}>Loading applications...</div>;
   }
+
+  // ✅ Log current value for debugging
+  console.log('🔍 Current maxFileSize state:', maxFileSize);
 
   return (
     <div style={styles.container}>
@@ -387,7 +431,12 @@ export default function ApplicantApplicationFormTab() {
                 />
               </div>
               <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Resume (PDF) *</label>
+                <label style={styles.formLabel}>
+                  Resume (PDF) * 
+                  <span style={styles.fileSizeHint}>
+                    (Max {maxFileSize}MB) {/* ✅ Shows dynamic value */}
+                  </span>
+                </label>
                 <div style={styles.fileUpload}>
                   <input
                     type="file"
@@ -406,7 +455,9 @@ export default function ApplicantApplicationFormTab() {
                     <span style={styles.fileText}>
                       {formData.resume ? formData.resume.name : 'Click to upload your resume'}
                     </span>
-                    <span style={styles.fileHint}>Accepted formats: PDF only (Max 5MB)</span>
+                    <span style={styles.fileHint}>
+                      Accepted formats: PDF only (Max {maxFileSize}MB) {/* ✅ Shows dynamic value */}
+                    </span>
                   </label>
                 </div>
               </div>
@@ -595,6 +646,12 @@ const styles = {
     fontSize: '13px',
     fontWeight: '600',
     color: 'var(--color-text-secondary)',
+  },
+  fileSizeHint: {
+    fontSize: '12px',
+    fontWeight: '400',
+    color: 'var(--color-text-muted)',
+    marginLeft: '4px',
   },
   formInput: {
     padding: '10px 12px',
