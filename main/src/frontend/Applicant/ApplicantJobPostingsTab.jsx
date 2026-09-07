@@ -23,6 +23,9 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
 
   const [applicantEmail, setApplicantEmail] = useState('');
 
+  // ✅ Add state for max file size
+  const [maxFileSize, setMaxFileSize] = useState(5);
+
   const [applyForm, setApplyForm] = useState({
     firstName: '',
     middleName: '',
@@ -36,6 +39,30 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     coverLetter: '',
     resume: null,
   });
+
+  // ✅ Fetch system settings for file size limit
+  const fetchSystemSettings = async () => {
+    try {
+      const API_URL = 'http://localhost:5000/api/applicant/system-settings';
+      console.log('📡 Fetching system settings from:', API_URL);
+      
+      const res = await fetch(API_URL);
+      
+      if (res.ok) {
+        const data = await res.json();
+        console.log('📡 System settings data:', data);
+        
+        if (data.success && data.data) {
+          const size = data.data.max_file_upload_size || 5;
+          console.log('✅ Setting max file size to:', size);
+          setMaxFileSize(size);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch system settings:', err);
+      // Keep default 5MB
+    }
+  };
 
   // Fetch branches for filter
   const fetchBranches = async () => {
@@ -167,6 +194,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
 
   useEffect(() => {
     fetchBranches();
+    fetchSystemSettings(); // ✅ Fetch system settings on mount
     if (showMyApplications) {
       loadMyApplications();
     } else {
@@ -235,9 +263,10 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
         setApplyForm({ ...applyForm, resume: null });
         return;
       }
-      const maxSize = 5 * 1024 * 1024;
+      // ✅ Use dynamic max file size
+      const maxSize = maxFileSize * 1024 * 1024;
       if (file.size > maxSize) {
-        showErrorAlert('File size exceeds the 5MB limit.', 'File Too Large');
+        showErrorAlert(`File size exceeds the ${maxFileSize}MB limit.`, 'File Too Large');
         e.target.value = null;
         setApplyForm({ ...applyForm, resume: null });
         return;
@@ -660,10 +689,16 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                   </div>
                 </div>
 
+                {/* ✅ UPDATED Resume Section with dynamic file size */}
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Resume</h4>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>Upload Resume (PDF only) *</label>
+                    <label style={styles.label}>
+                      Upload Resume (PDF only) *
+                      <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>
+                        (Max {maxFileSize}MB)
+                      </span>
+                    </label>
                     <input
                       type="file"
                       accept="application/pdf"
@@ -671,7 +706,9 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                       onChange={handleApplyFileChange}
                       style={styles.fileInput}
                     />
-                    <p style={styles.fileHelp}>Accepted formats: PDF only. Max size: 5MB</p>
+                    <p style={styles.fileHelp}>
+                      Accepted formats: PDF only. Max size: {maxFileSize}MB
+                    </p>
                   </div>
                 </div>
 
@@ -1109,4 +1146,3 @@ const styles = {
     color: 'var(--color-text-secondary)',
   },
 };
-
