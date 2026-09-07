@@ -175,6 +175,15 @@ export default function RMRequestsTab() {
   
   const filteredRequests = useMemo(() => {
     return requests.filter(req => {
+      // Exclude requests for completed/archived projects
+      if (req.projectStatus === 'Completed' || req.projectStatus === 'Archived') {
+        return false;
+      }
+      const statusLower = (req.status || '').toLowerCase();
+      // Exclude Cancelled / Canceled / Completed / Done requests unless explicitly filtered
+      if (['cancelled', 'canceled', 'completed', 'done'].includes(statusLower) && statusFilter !== req.status) {
+        return false;
+      }
       const matchesSearch =
         req.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.role_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -186,7 +195,7 @@ export default function RMRequestsTab() {
       const matchesUnassigned = showUnassignedOnly ? !isFullyAssigned : true;
       return matchesSearch && matchesStatus && matchesUnassigned;
     });
-  }, [requests, searchQuery, statusFilter, showUnassignedOnly]);
+  }, [requests, searchQuery, statusFilter, showUnassignedOnly, assignments]);
 
   const groupedProjects = useMemo(
     () => groupRequestsByProject(filteredRequests),
@@ -450,7 +459,9 @@ export default function RMRequestsTab() {
           <div style={styles.requestList}>
             {groupedProjects.length === 0 ? (
               <div style={styles.emptyState}>
-                {showUnassignedOnly ? 'No unassigned requests found.' : 'No requests found.'}
+                {showUnassignedOnly 
+                  ? 'No unassigned requests found.' 
+                  : 'No pending resource requests. All active requirements have been allocated or projects are completed.'}
               </div>
             ) : (
               groupedProjects.map(project => {
