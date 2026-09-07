@@ -347,6 +347,12 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
       return;
     }
 
+     // ✅ ADD THIS: Validate confirm password is not empty
+    if (!passwordForm.confirmPassword) {
+      setPasswordAlert({ type: 'error', message: 'Please confirm your new password.' });
+      return;
+    }
+
     // Check password requirements
     if (passwordRequirements) {
       const isPasswordValid = Object.values(requirements).every(req => req === true);
