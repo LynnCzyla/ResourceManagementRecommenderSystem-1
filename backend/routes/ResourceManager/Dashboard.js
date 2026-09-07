@@ -131,23 +131,63 @@ router.get('/', async (req, res) => {
     // ✅ Get employee IDs for this branch
     const employeeIds = employees.map(e => e.id);
 
-    // ✅ Filter assignments to only those from this branch's employees
-    const assignments = allAssignments.filter(a => employeeIds.includes(a.profile_id));
+    // ✅ Filter active projects map
+    const activeProjectMap = new Map();
+    for (const p of allProjects) {
+      if (p.status === 'Active') {
+        activeProjectMap.set(p.id, p);
+      }
+    }
+    const activeProjectIds = new Set(activeProjectMap.keys());
 
-    // ✅ Get project IDs from filtered assignments
-    const projectIdsFromAssignments = [...new Set(assignments.map(a => a.project_id))];
+    // ✅ Filter assignments to active projects for this branch's employees
+    const assignments = allAssignments.filter(a => 
+      employeeIds.includes(a.profile_id) && 
+      activeProjectIds.has(a.project_id) && 
+      a.status === 'Assigned'
+    );
 
-    // ✅ Filter projects to only those that have assignments from this branch
-    let projects = allProjects.filter(p => projectIdsFromAssignments.includes(p.id));
-
-    if (projectIdsFromAssignments.length === 0) {
-      projects = [];
+    // ✅ Map employee to their active project name(s)
+    const employeeProjectMap = new Map();
+    for (const a of assignments) {
+      const proj = activeProjectMap.get(a.project_id);
+      if (proj) {
+        if (!employeeProjectMap.has(a.profile_id)) {
+          employeeProjectMap.set(a.profile_id, []);
+        }
+        if (!employeeProjectMap.get(a.profile_id).includes(proj.project_name)) {
+          employeeProjectMap.get(a.profile_id).push(proj.project_name);
+        }
+      }
     }
 
-    // ✅ Get ALL tasks for employees in this branch
-    const tasks = allTasks.filter(t => employeeIds.includes(t.profile_id));
+    // ✅ Filter projects to active projects with assignments from this branch
+    const projectIdsFromAssignments = [...new Set(assignments.map(a => a.project_id))];
+    let projects = allProjects.filter(p => projectIdsFromAssignments.includes(p.id) && p.status === 'Active');
 
-    console.log(`📊 Data: ${employees.length} employees, ${assignments.length} assignments, ${projects.length} projects, ${tasks.length} tasks`);
+    // ✅ Filter active tasks for employees in this branch (only active projects and non-completed tasks)
+    const activeTasks = allTasks.filter(t => 
+      employeeIds.includes(t.profile_id) && 
+      activeProjectIds.has(t.project_id) && 
+      !['Completed', 'Completed-Hidden', 'Archived'].includes(t.status)
+    );
+
+    // Also include active projects from active tasks if employee has active tasks
+    for (const t of activeTasks) {
+      if (t.profile_id && activeProjectIds.has(t.project_id)) {
+        const proj = activeProjectMap.get(t.project_id);
+        if (proj) {
+          if (!employeeProjectMap.has(t.profile_id)) {
+            employeeProjectMap.set(t.profile_id, []);
+          }
+          if (!employeeProjectMap.get(t.profile_id).includes(proj.project_name)) {
+            employeeProjectMap.get(t.profile_id).push(proj.project_name);
+          }
+        }
+      }
+    }
+
+    console.log(`📊 Data: ${employees.length} employees, ${assignments.length} active assignments, ${projects.length} active projects, ${activeTasks.length} active tasks`);
 
     // ✅ Count assignments
     const assignmentCounts = {};
@@ -155,17 +195,17 @@ router.get('/', async (req, res) => {
       assignmentCounts[a.profile_id] = (assignmentCounts[a.profile_id] || 0) + 1;
     }
 
-    // ✅ Count tasks per employee
+    // ✅ Count active tasks per employee
     const taskCounts = {};
-    for (const t of tasks) {
+    for (const t of activeTasks) {
       if (t.profile_id) {
         taskCounts[t.profile_id] = (taskCounts[t.profile_id] || 0) + 1;
       }
     }
 
-    // ✅ Calculate Workload Score per employee (weighted by priority)
+    // ✅ Calculate Workload Score per employee (weighted by priority from active tasks)
     const workloadScores = {};
-    for (const t of tasks) {
+    for (const t of activeTasks) {
       if (t.profile_id) {
         const priority = t.priority || 'Low';
         const weight = PRIORITY_WEIGHTS[priority] || 1;
@@ -174,10 +214,7 @@ router.get('/', async (req, res) => {
     }
 
     // ✅ Count active projects
-    let activeProjectsCount = 0;
-    for (const p of projects) {
-      if (p.status === 'Active') activeProjectsCount++;
-    }
+    const activeProjectsCount = projects.length;
 
     // ✅ Process employees with Workload Score
     const employeeRows = [];
@@ -226,7 +263,9 @@ router.get('/', async (req, res) => {
         displayRole = 'Employee';
       }
 
-      const hasTask = taskCount > 0;
+      const assignedProjects = employeeProjectMap.get(emp.id) || [];
+      const hasProject = assignedProjects.length > 0;
+      const projectName = hasProject ? assignedProjects.join(', ') : 'Unassigned';
 
       employeeRows.push({
         id: emp.id,
@@ -242,8 +281,10 @@ router.get('/', async (req, res) => {
         utilizationRate,
         taskCount: taskCount,
         workloadScore: workloadScore,
-        assignmentCount: assignmentCounts[emp.id] || 0,
-        taskStatus: hasTask ? 'Assigned' : 'Unassigned',
+        assignmentCount: assignedProjects.length,
+        projectName: projectName,
+        projectStatus: hasProject ? 'Assigned' : 'Unassigned',
+        taskStatus: hasProject ? 'Assigned' : 'Unassigned',
         createdAt: emp.created_at || null,
       });
     }
