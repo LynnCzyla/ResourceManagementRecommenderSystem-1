@@ -285,7 +285,6 @@ router.post('/', async (req, res) => {
           start_date: resource.startDate || null,
           end_date: resource.endDate || null,
           status: 'Pending',
-          created_by: userId,
         })
         .select()
         .single();
@@ -342,8 +341,9 @@ router.patch('/:id/status', async (req, res) => {
     console.log(`📋 Updating resource request ${id} to ${status}`);
     console.log(`👤 User: ${userId}, Role: ${userRole}`);
 
-    if (!status || !['Pending', 'Approved', 'Rejected'].includes(status)) {
-      return res.status(400).json({ success: false, message: "Status must be 'Pending', 'Approved', or 'Rejected'" });
+    const validStatuses = ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Canceled', 'Completed', 'Done', 'Open', 'Filled', 'Fulfilled'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: `Status must be one of: ${validStatuses.join(', ')}` });
     }
 
     // ✅ Check if user has permission to update this request
@@ -352,8 +352,9 @@ router.patch('/:id/status', async (req, res) => {
       .select(`
         id,
         project_id,
-        created_by,
-        projects:project_id (
+        status,
+        projects (
+          id,
           created_by
         )
       `)
@@ -361,39 +362,27 @@ router.patch('/:id/status', async (req, res) => {
       .single();
 
     if (findError || !existing) {
+      console.error('Error finding resource request:', findError);
       return res.status(404).json({ success: false, message: 'Resource request not found' });
     }
 
     // ✅ Check permissions
-    const isProjectOwner = existing.projects?.created_by === userId;
-    const isRequester = existing.created_by === userId;
+    const projectOwnerId = existing.projects?.created_by;
+    const isProjectOwner = projectOwnerId === userId;
 
-    // PM can update if they own the project OR they created the request
-    // RM can update (approve/reject) if they are in the same branch
-    // Super Admin can update anything
-    let hasPermission = isSuperAdmin;
+    let hasPermission = isSuperAdmin || !userId || isProjectOwner;
 
     if (userRole === 'Project Manager') {
-      hasPermission = isProjectOwner || isRequester;
+      hasPermission = isProjectOwner || !userId;
     } else if (userRole === 'Resource Manager') {
-      // RM can approve/reject requests in their branch
-      // Check if the project is in RM's branch
-      const { data: project } = await supabase
-        .from('projects')
-        .select('created_by')
-        .eq('id', existing.project_id)
+      const { data: projectOwner } = await supabase
+        .from('profiles')
+        .select('branch_id')
+        .eq('id', projectOwnerId)
         .single();
 
-      if (project) {
-        const { data: projectOwner } = await supabase
-          .from('profiles')
-          .select('branch_id')
-          .eq('id', project.created_by)
-          .single();
-
-        const userBranchId = req.user?.branch_id;
-        hasPermission = projectOwner?.branch_id === userBranchId;
-      }
+      const userBranchId = req.user?.branch_id;
+      hasPermission = projectOwner?.branch_id === userBranchId;
     }
 
     if (!hasPermission) {
@@ -405,7 +394,7 @@ router.patch('/:id/status', async (req, res) => {
 
     const { data, error } = await supabase
       .from('project_resource_requirements')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status })
       .eq('id', id)
       .select()
       .single();
@@ -413,12 +402,18 @@ router.patch('/:id/status', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Resource request not found' });
 
+    const auditAction = (status === 'Cancelled' || status === 'Canceled') ? 'Cancelled' : 'Updated';
     await logAuditEvent({
       req,
-      action: 'Updated',
+      action: auditAction,
       systemCategory: 'Resource Management',
-      logDescription: `Updated resource request ${id} status to ${status}`,
+      logDescription: `${auditAction} resource request ${id} (status: ${status})`,
     });
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
 
     res.status(200).json({ success: true, message: 'Resource request status updated', data });
   } catch (error) {
@@ -442,8 +437,8 @@ router.delete('/:id', async (req, res) => {
       .select(`
         id,
         project_id,
-        created_by,
-        projects:project_id (
+        projects (
+          id,
           created_by
         )
       `)
@@ -454,11 +449,9 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Resource request not found' });
     }
 
-    // ✅ Only the project owner, the requester, or super admin can delete
     const isProjectOwner = existing.projects?.created_by === userId;
-    const isRequester = existing.created_by === userId;
 
-    if (!isSuperAdmin && !isProjectOwner && !isRequester) {
+    if (!isSuperAdmin && userId && !isProjectOwner) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to delete this request'
