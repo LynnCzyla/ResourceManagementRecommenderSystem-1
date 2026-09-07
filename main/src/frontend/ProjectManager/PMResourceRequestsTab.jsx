@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { getResourceRequests, createResourceRequest, getProjects, getSkills } from './pmApi';
+import Swal from 'sweetalert2';
+import { getResourceRequests, createResourceRequest, getProjects, getSkills, cancelResourceRequest } from './pmApi';
 
 export default function PMResourceRequestsTab({ user }) {
   const [requests, setRequests] = useState([]);
@@ -12,6 +13,8 @@ export default function PMResourceRequestsTab({ user }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageJumpValue, setPageJumpValue] = useState('');
+  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
+  const [cancellingId, setCancellingId] = useState(null);
   const rowsPerPage = 10;
 
   // Skills state for autocomplete
@@ -249,22 +252,120 @@ export default function PMResourceRequestsTab({ user }) {
     }
   };
 
-  const statusOptions = [...new Set(requests.map(r => r.status).filter(Boolean))];
+  // Helper to determine if a request belongs to History (filled/allocated, cancelled, rejected, or completed)
+  const isHistoryRequest = (status) => {
+    const s = String(status || '').trim().toLowerCase();
+    return ['filled', 'allocated', 'fulfilled', 'approved', 'completed', 'done', 'closed', 'cancelled', 'canceled', 'rejected'].includes(s);
+  };
 
-  // ✅ Search checks both primary and secondary skills (falls back to combined `skills` if present)
-  const filteredRequests = requests.filter(req => {
+  const activeRequests = requests.filter(r => !isHistoryRequest(r.status));
+  const historyRequests = requests.filter(r => isHistoryRequest(r.status));
+  const currentTabRequests = activeTab === 'history' ? historyRequests : activeRequests;
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setCurrentPage(1);
+    setStatusFilter('all');
+    setSearchQuery('');
+  };
+
+  const handleCancelRequest = async (req) => {
+    const roleText = req.role ? `"${req.role}"` : 'this resource request';
+    const projectText = req.projectName ? ` on project "${req.projectName}"` : '';
+
+    const result = await Swal.fire({
+      title: 'Cancel Resource Request?',
+      text: `Are you sure you want to cancel the request for ${roleText}${projectText}? It will be moved to the Request History tab.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, cancel request',
+      cancelButtonText: 'No, keep it',
+      background: 'var(--color-bg-card, #ffffff)',
+      color: 'var(--color-text-primary, #1e293b)',
+    });
+
+    if (!result.isConfirmed) return;
+
+    setCancellingId(req.id);
+    try {
+      await cancelResourceRequest(req.id);
+      await loadData();
+      setActiveTab('history');
+      Swal.fire({
+        title: 'Request Canceled',
+        text: 'The resource request has been marked as Canceled and moved to Request History.',
+        icon: 'success',
+        confirmButtonColor: 'var(--color-primary, #2563eb)',
+        timer: 2400,
+        showConfirmButton: false,
+        background: 'var(--color-bg-card, #ffffff)',
+        color: 'var(--color-text-primary, #1e293b)',
+      });
+    } catch (err) {
+      console.error('Failed to cancel resource request:', err);
+      Swal.fire({
+        title: 'Error',
+        text: err.message || 'Failed to cancel resource request.',
+        icon: 'error',
+        confirmButtonColor: 'var(--color-primary, #2563eb)',
+        background: 'var(--color-bg-card, #ffffff)',
+        color: 'var(--color-text-primary, #1e293b)',
+      });
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const getStatusBadgeStyle = (status) => {
+    const s = String(status || '').toLowerCase();
+    if (['approved', 'filled', 'fulfilled', 'completed', 'done'].includes(s)) {
+      return {
+        backgroundColor: 'rgba(34, 197, 94, 0.12)',
+        color: 'var(--color-success, #16a34a)',
+        border: '1px solid rgba(34, 197, 94, 0.25)',
+      };
+    }
+    if (['cancelled', 'canceled'].includes(s)) {
+      return {
+        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+        color: 'var(--color-danger, #ef4444)',
+        border: '1px solid rgba(239, 68, 68, 0.25)',
+      };
+    }
+    if (s === 'rejected') {
+      return {
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        color: 'var(--color-danger, #ef4444)',
+        border: '1px solid rgba(239, 68, 68, 0.3)',
+      };
+    }
+    // Pending, Open, In Progress
+    return {
+      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+      color: 'var(--color-warning, #d97706)',
+      border: '1px solid rgba(245, 158, 11, 0.25)',
+    };
+  };
+
+  const statusOptions = [...new Set(currentTabRequests.map(r => r.status).filter(Boolean))];
+
+  // ✅ Search checks project name, role, and primary/secondary skills
+  const filteredRequests = currentTabRequests.filter(req => {
     const allReqSkills = [
       ...(req.primarySkills || req.skills || []),
       ...(req.secondarySkills || [])
     ];
     const matchesSearch =
-      req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (req.projectName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (req.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       allReqSkills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesSearch && (statusFilter === 'all' || req.status === statusFilter);
   }).sort((a, b) => {
-    if (sortBy === 'status') return a.status.localeCompare(b.status);
-    if (sortBy === 'project') return a.projectName.localeCompare(b.projectName);
-    if (sortBy === 'quantity') return a.quantity - b.quantity;
+    if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
+    if (sortBy === 'project') return (a.projectName || '').localeCompare(b.projectName || '');
+    if (sortBy === 'quantity') return (a.quantity || 0) - (b.quantity || 0);
     return 0;
   });
 
@@ -277,7 +378,7 @@ export default function PMResourceRequestsTab({ user }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, sortBy]);
+  }, [searchQuery, statusFilter, sortBy, activeTab]);
 
   const goToPage = (page) => {
     const clamped = Math.min(Math.max(1, page), totalPages);
@@ -291,9 +392,9 @@ export default function PMResourceRequestsTab({ user }) {
     if (!isNaN(page)) goToPage(page);
   };
 
-  const totalQuantityNeeded = requests.reduce((sum, r) => sum + (parseInt(r.quantity, 10) || 0), 0);
-  const pendingCount = requests.filter(r => r.status === 'Pending').length;
-  const filledCount = requests.filter(r => r.status === 'Approved' || r.status === 'Filled').length;
+  const activeQuantityNeeded = activeRequests.reduce((sum, r) => sum + (parseInt(r.quantity, 10) || 0), 0);
+  const pendingCount = activeRequests.filter(r => r.status === 'Pending').length;
+  const historyCount = historyRequests.length;
 
   return (
     <div style={styles.container}>
@@ -311,7 +412,7 @@ export default function PMResourceRequestsTab({ user }) {
               </svg>
               <input
                 type="text"
-                placeholder="Search requests..."
+                placeholder={activeTab === 'history' ? "Search history..." : "Search requests..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={styles.searchInput}
@@ -337,10 +438,40 @@ export default function PMResourceRequestsTab({ user }) {
               <option value="quantity">Sort by Quantity</option>
             </select>
           </div>
-          <button onClick={() => setShowCreateModal(true)} style={styles.createBtn}>
+          <button
+            onClick={() => {
+              loadData();
+              setShowCreateModal(true);
+            }}
+            style={styles.createBtn}
+          >
             + New Request
           </button>
         </div>
+      </div>
+
+      {/* ✅ Sub-tabs: Active Requests / Request History */}
+      <div style={styles.tabsRow}>
+        <button
+          type="button"
+          onClick={() => handleTabChange('active')}
+          style={{ ...styles.tabBtn, ...(activeTab === 'active' ? styles.tabBtnActive : {}) }}
+        >
+          Active Requests
+          <span style={{ ...styles.tabCount, ...(activeTab === 'active' ? styles.tabCountActive : {}) }}>
+            {activeRequests.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTabChange('history')}
+          style={{ ...styles.tabBtn, ...(activeTab === 'history' ? styles.tabBtnActive : {}) }}
+        >
+          Request History
+          <span style={{ ...styles.tabCount, ...(activeTab === 'history' ? styles.tabCountActive : {}) }}>
+            {historyRequests.length}
+          </span>
+        </button>
       </div>
 
       {loadError && (
@@ -350,20 +481,20 @@ export default function PMResourceRequestsTab({ user }) {
       {/* Metric Cards */}
       <div style={styles.metricsGrid}>
         <div className="glass-card" style={styles.metricCard}>
-          <div style={styles.metricValue}>{requests.length}</div>
-          <div style={styles.metricLabel}>Total Requests</div>
+          <div style={styles.metricValue}>{activeRequests.length}</div>
+          <div style={styles.metricLabel}>Active Requests</div>
         </div>
         <div className="glass-card" style={styles.metricCard}>
-          <div style={styles.metricValue}>{totalQuantityNeeded}</div>
+          <div style={styles.metricValue}>{activeQuantityNeeded}</div>
           <div style={styles.metricLabel}>Employees Needed</div>
         </div>
         <div className="glass-card" style={styles.metricCard}>
           <div style={{ ...styles.metricValue, color: 'var(--color-warning)' }}>{pendingCount}</div>
-          <div style={styles.metricLabel}>Pending</div>
+          <div style={styles.metricLabel}>Pending Approval</div>
         </div>
         <div className="glass-card" style={styles.metricCard}>
-          <div style={{ ...styles.metricValue, color: 'var(--color-success)' }}>{filledCount}</div>
-          <div style={styles.metricLabel}>Filled</div>
+          <div style={{ ...styles.metricValue, color: 'var(--color-primary)' }}>{historyCount}</div>
+          <div style={styles.metricLabel}>In History</div>
         </div>
       </div>
 
@@ -373,26 +504,41 @@ export default function PMResourceRequestsTab({ user }) {
           <table style={styles.table}>
             <thead>
               <tr style={styles.trHeader}>
-                <th style={styles.th}>Project</th>
+                <th style={styles.th}>Project / Role</th>
                 <th style={styles.th}>Required Skills</th>
                 <th style={styles.th}>Duration</th>
                 <th style={styles.th}>Dates</th>
                 <th style={styles.th}>Qty</th>
                 <th style={styles.th}>Status</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {paginatedRequests.length === 0 ? (
                 <tr>
-                  <td colSpan="6" style={styles.emptyRow}>No resource requests found.</td>
+                  <td colSpan="7" style={styles.emptyRow}>
+                    {activeTab === 'history'
+                      ? 'No request history found. Completed or cancelled requests will appear here.'
+                      : (searchQuery || statusFilter !== 'all'
+                        ? 'No active requests match your filters.'
+                        : 'No active resource requests found. Click "+ New Request" to create one.')}
+                  </td>
                 </tr>
               ) : (
                 paginatedRequests.map(req => {
                   const primary = req.primarySkills || req.skills || [];
                   const secondary = req.secondarySkills || [];
+                  const isCancellable = activeTab === 'active' && (req.status === 'Pending' || req.status === 'Open');
                   return (
                     <tr key={req.id} style={styles.trRow}>
-                      <td style={{ ...styles.td, fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</td>
+                      <td style={styles.td}>
+                        <div style={{ fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</div>
+                        {req.role && (
+                          <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                            {req.role}
+                          </div>
+                        )}
+                      </td>
                       <td style={styles.td}>
                         <div style={styles.skillsGroup}>
                           {primary.length > 0 && (
@@ -411,17 +557,54 @@ export default function PMResourceRequestsTab({ user }) {
                           )}
                         </div>
                       </td>
-                      <td style={styles.td}>{req.duration}</td>
+                      <td style={styles.td}>{req.duration || '—'}</td>
                       <td style={styles.td}>{req.startDate} to {req.endDate}</td>
                       <td style={{ ...styles.td, fontWeight: '600' }}>{req.quantity}</td>
                       <td style={styles.td}>
                         <span style={{
                           ...styles.statusBadge,
-                          backgroundColor: req.status === 'Approved' ? 'var(--color-primary-light)' : 'rgba(245, 158, 11, 0.1)',
-                          color: req.status === 'Approved' ? 'var(--color-success)' : 'var(--color-warning)'
+                          ...getStatusBadgeStyle(req.status),
                         }}>
                           {req.status}
                         </span>
+                      </td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>
+                        {isCancellable ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelRequest(req)}
+                            disabled={cancellingId === req.id}
+                            style={{
+                              ...styles.cancelRequestBtn,
+                              ...(cancellingId === req.id ? styles.cancelRequestBtnDisabled : {})
+                            }}
+                            title="Cancel this resource request"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}>
+                              <line x1="18" y1="6" x2="6" y2="18"></line>
+                              <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                            {cancellingId === req.id ? 'Cancelling...' : 'Cancel Request'}
+                          </button>
+                        ) : (
+                          <span style={{
+                            ...styles.historyActionText,
+                            color: ['filled', 'allocated', 'completed', 'done'].includes(String(req.status || '').toLowerCase())
+                              ? 'var(--color-success, #16a34a)'
+                              : (['cancelled', 'canceled', 'rejected'].includes(String(req.status || '').toLowerCase())
+                                ? 'var(--color-danger, #ef4444)'
+                                : undefined),
+                            fontWeight: '600',
+                          }}>
+                            {['filled', 'allocated'].includes(String(req.status || '').toLowerCase())
+                              ? 'Allocated'
+                              : (['completed', 'done'].includes(String(req.status || '').toLowerCase())
+                                ? 'Completed'
+                                : (['cancelled', 'canceled'].includes(String(req.status || '').toLowerCase())
+                                  ? 'Cancelled'
+                                  : (String(req.status || '').toLowerCase() === 'rejected' ? 'Rejected' : 'Stored')))}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -434,7 +617,7 @@ export default function PMResourceRequestsTab({ user }) {
         {filteredRequests.length > 0 && (
           <div style={styles.paginationBar}>
             <span style={styles.paginationInfo}>
-              Showing {(safeCurrentPage - 1) * rowsPerPage + 1}
+              Showing {filteredRequests.length === 0 ? 0 : (safeCurrentPage - 1) * rowsPerPage + 1}
               -{Math.min(safeCurrentPage * rowsPerPage, filteredRequests.length)} of {filteredRequests.length}
             </span>
             <div style={styles.paginationControls}>
@@ -502,11 +685,20 @@ export default function PMResourceRequestsTab({ user }) {
                   style={styles.modalSelect}
                   required
                 >
-                  <option value="">Select a project</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                  <option value="">Select an active project</option>
+                  {projects
+                    .filter(p => !['Completed', 'Archived'].includes(p.status))
+                    .map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.isRestored ? ' (Restored)' : ''}
+                      </option>
+                    ))}
                 </select>
+                {projects.filter(p => !['Completed', 'Archived'].includes(p.status)).length === 0 && (
+                  <span style={{ fontSize: '11px', color: 'var(--color-warning)', marginTop: '4px', display: 'block' }}>
+                    No active projects available. Create or restore a project first.
+                  </span>
+                )}
               </div>
 
               {/* Resource Requirements Section */}
@@ -724,13 +916,73 @@ const styles = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '24px',
+    gap: '20px',
+  },
+  tabsRow: {
+    display: 'flex',
+    gap: '8px',
+    borderBottom: '1px solid var(--color-border)',
+    marginTop: '-4px',
+  },
+  tabBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  tabBtnActive: {
+    color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  tabCount: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '30px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-muted)',
+  },
+  tabCountActive: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+  },
+  cancelRequestBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    color: 'var(--color-danger, #ef4444)',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
+    borderRadius: '6px',
+    padding: '6px 12px',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  cancelRequestBtnDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  historyActionText: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '500',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '8px',
+    marginBottom: '4px',
   },
   headerActions: {
     display: 'flex',
