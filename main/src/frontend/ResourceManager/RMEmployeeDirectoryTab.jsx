@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects, fetchEmployeeDetails } from './Rmapi';
+import Swal from 'sweetalert2';
+import { fetchEmployees, toggleEmployeeVerified, assignEmployeeFromDirectory, fetchProjects, fetchEmployeeDetails, fetchRequirements } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
 export default function RMEmployeeDirectoryTab() {
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [requirements, setRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -16,6 +18,8 @@ export default function RMEmployeeDirectoryTab() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [assignForm, setAssignForm] = useState({
     projectId: '',
+    requirementId: '',
+    role: '',
     startDate: new Date().toISOString().split('T')[0],
     notes: ''
   });
@@ -24,15 +28,23 @@ export default function RMEmployeeDirectoryTab() {
 
   useEffect(() => {
     loadEmployees();
+    const handleUpdate = () => loadEmployees();
+    window.addEventListener('rmDataUpdated', handleUpdate);
+    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
   }, []);
 
   const loadEmployees = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [empData, projData] = await Promise.all([fetchEmployees(), fetchProjects()]);
-      setEmployees(empData.employees || []);
-      setProjects(projData.projects || []);
+      const [empData, projData, reqData] = await Promise.all([
+        fetchEmployees(),
+        fetchProjects(),
+        fetchRequirements()
+      ]);
+      setEmployees(empData.employees || empData.data || empData || []);
+      setProjects(projData.projects || projData.data || projData || []);
+      setRequirements(reqData.data || reqData || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -44,9 +56,17 @@ export default function RMEmployeeDirectoryTab() {
     setEmployees((prev) => prev.map((emp) => (emp.id === empId ? { ...emp, isVerified: !emp.isVerified } : emp)));
     try {
       await toggleEmployeeVerified(empId);
+      window.dispatchEvent(new CustomEvent('rmDataUpdated'));
     } catch (err) {
       setEmployees((prev) => prev.map((emp) => (emp.id === empId ? { ...emp, isVerified: !emp.isVerified } : emp)));
-      alert(`Couldn't update verification status: ${err.message}`);
+      Swal.fire({
+        title: 'Error!',
+        text: `Couldn't update verification status: ${err.message}`,
+        icon: 'error',
+        background: 'var(--color-bg-card, #1e293b)',
+        color: 'var(--color-text-primary, #fff)',
+        confirmButtonColor: 'var(--color-danger, #ef4444)'
+      });
     }
   };
 
@@ -55,6 +75,8 @@ export default function RMEmployeeDirectoryTab() {
     setSelectedEmployee(emp);
     setAssignForm({
       projectId: '',
+      requirementId: '',
+      role: emp.role || '',
       startDate: new Date().toISOString().split('T')[0],
       notes: ''
     });
@@ -70,18 +92,58 @@ export default function RMEmployeeDirectoryTab() {
     e.preventDefault();
     if (!selectedEmployee || !assignForm.projectId) return;
 
+    // Guard against duplicate assignment to the same project
+    const pIdNum = Number(assignForm.projectId);
+    const isAlreadyAssigned =
+      (selectedEmployee.assignedProjectIds && (selectedEmployee.assignedProjectIds.includes(pIdNum) || selectedEmployee.assignedProjectIds.includes(assignForm.projectId))) ||
+      (selectedEmployee.assignedProjects && selectedEmployee.assignedProjects.some(pName => {
+        const p = projects.find(proj => String(proj.id) === String(assignForm.projectId));
+        return p && p.name === pName;
+      }));
+
+    if (isAlreadyAssigned) {
+      Swal.fire({
+        title: 'Already Assigned!',
+        text: `${selectedEmployee.name} is already assigned to this project.`,
+        icon: 'warning',
+        background: 'var(--color-bg-card, #1e293b)',
+        color: 'var(--color-text-primary, #fff)',
+        confirmButtonColor: 'var(--color-primary, #10b981)'
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
       await assignEmployeeFromDirectory(selectedEmployee.id, {
         projectId: assignForm.projectId,
         startDate: assignForm.startDate,
-        notes: assignForm.notes
+        role: assignForm.role || selectedEmployee.role,
+        notes: assignForm.notes,
+        requirementId: assignForm.requirementId || null
       });
-      alert(`Assigned ${selectedEmployee.name} to project`);
+
+      Swal.fire({
+        title: 'Assigned Successfully!',
+        text: `Assigned ${selectedEmployee.name} to project.`,
+        icon: 'success',
+        background: 'var(--color-bg-card, #1e293b)',
+        color: 'var(--color-text-primary, #fff)',
+        confirmButtonColor: 'var(--color-primary, #10b981)'
+      });
+
       handleCloseAssignModal();
       loadEmployees();
+      window.dispatchEvent(new CustomEvent('rmDataUpdated'));
     } catch (err) {
-      alert(`Couldn't assign employee: ${err.message}`);
+      Swal.fire({
+        title: 'Assignment Failed',
+        text: err.message || "Couldn't assign employee",
+        icon: 'error',
+        background: 'var(--color-bg-card, #1e293b)',
+        color: 'var(--color-text-primary, #fff)',
+        confirmButtonColor: 'var(--color-danger, #ef4444)'
+      });
     } finally {
       setSubmitting(false);
     }
@@ -253,6 +315,62 @@ const handleViewEmployee = async (emp) => {
                 </div>
               </div>
 
+              {/* Assignment & Availability Badges */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    padding: '4px 10px',
+                    borderRadius: '20px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    backgroundColor: emp.isAssigned ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                    color: emp.isAssigned ? 'var(--color-success)' : 'var(--color-text-muted)',
+                    border: emp.isAssigned ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)',
+                  }}
+                  title={emp.isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'No active project assignments'}
+                >
+                  <span style={{ fontSize: '9px' }}>{emp.isAssigned ? '●' : '○'}</span>
+                  {emp.isAssigned
+                    ? `Assigned: ${emp.assignedProjects?.join(', ') || 'Active Project'}`
+                    : 'Unassigned'}
+                </span>
+
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    padding: '4px 10px',
+                    borderRadius: '20px',
+                    backgroundColor:
+                      emp.workloadStatus === 'Available'
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : emp.workloadStatus === 'Limited Availability'
+                        ? 'rgba(245, 158, 11, 0.15)'
+                        : 'rgba(239, 68, 68, 0.15)',
+                    color:
+                      emp.workloadStatus === 'Available'
+                        ? 'var(--color-success)'
+                        : emp.workloadStatus === 'Limited Availability'
+                        ? 'var(--color-warning)'
+                        : 'var(--color-danger)',
+                    border:
+                      emp.workloadStatus === 'Available'
+                        ? '1px solid rgba(16, 185, 129, 0.3)'
+                        : emp.workloadStatus === 'Limited Availability'
+                        ? '1px solid rgba(245, 158, 11, 0.3)'
+                        : '1px solid rgba(239, 68, 68, 0.3)',
+                  }}
+                >
+                  {emp.workloadStatus || 'Available'}
+                  {emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.workloadStatus !== 'Available'
+                    ? ` (${emp.utilizationRate}%)`
+                    : ''}
+                </span>
+              </div>
+
               {/* Skills Section */}
               <div style={styles.section}>
                 <h4 style={styles.sectionHeader}>Core Skills</h4>
@@ -318,7 +436,9 @@ const handleViewEmployee = async (emp) => {
             </div>
 
             <div style={styles.modalProfileCard}>
-              <div style={styles.modalProfileBadge}>[{selectedEmployee.department}]</div>
+              <div style={styles.modalProfileBadge}>
+                [{selectedEmployee.department}] &bull; {selectedEmployee.isAssigned ? `Assigned (${selectedEmployee.assignedProjects?.join(', ')})` : 'Unassigned'} &bull; [{selectedEmployee.workloadStatus || 'Available'}]
+              </div>
               <h3 style={styles.modalProfileName}>{selectedEmployee.name}</h3>
               <div style={styles.modalProfileRole}>{selectedEmployee.role}</div>
             </div>
@@ -328,14 +448,79 @@ const handleViewEmployee = async (emp) => {
                 <label style={styles.formLabel}>Select Project</label>
                 <select
                   value={assignForm.projectId}
-                  onChange={(e) => setAssignForm({ ...assignForm, projectId: e.target.value })}
+                  onChange={(e) => {
+                    const pId = e.target.value;
+                    const foundProj = projects.find(p => String(p.id) === String(pId));
+                    let formattedStartDate = assignForm.startDate;
+                    if (foundProj?.startDate) {
+                      try {
+                        formattedStartDate = new Date(foundProj.startDate).toISOString().split('T')[0];
+                      } catch (_) {}
+                    }
+                    setAssignForm({
+                      ...assignForm,
+                      projectId: pId,
+                      startDate: formattedStartDate,
+                      requirementId: '',
+                      role: selectedEmployee?.role || ''
+                    });
+                  }}
                   style={styles.formSelect}
                   required
                 >
-                  <option value="">-- Select a project --</option>
-                  {projects.map(proj => (
-                    <option key={proj.id} value={proj.id}>{proj.name}</option>
-                  ))}
+                  <option value="">-- Select a project (Active / Pending) --</option>
+                  {projects
+                    .filter(proj => {
+                      const st = String(proj.status || '').toLowerCase();
+                      return st === 'active' || st === 'pending';
+                    })
+                    .map(proj => {
+                      const pIdNum = Number(proj.id);
+                      const isAlreadyAssigned =
+                        (selectedEmployee?.assignedProjectIds && (selectedEmployee.assignedProjectIds.includes(pIdNum) || selectedEmployee.assignedProjectIds.includes(proj.id))) ||
+                        (selectedEmployee?.assignedProjects && selectedEmployee.assignedProjects.includes(proj.name));
+                      return (
+                        <option key={proj.id} value={proj.id} disabled={isAlreadyAssigned}>
+                          {proj.name} ({proj.status || 'Active'}){isAlreadyAssigned ? ' — [Already Assigned]' : ''}
+                        </option>
+                      );
+                    })}
+                </select>
+              </div>
+
+              {/* Select Requested Role Dropdown (Item 12) */}
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Select Requested Role (Optional)</label>
+                <select
+                  value={assignForm.requirementId}
+                  onChange={(e) => {
+                    const reqId = e.target.value;
+                    const foundReq = requirements.find(r => String(r.id) === String(reqId));
+                    setAssignForm({
+                      ...assignForm,
+                      requirementId: reqId,
+                      role: foundReq ? (foundReq.role_title || foundReq.role || assignForm.role) : (selectedEmployee?.role || '')
+                    });
+                  }}
+                  style={styles.formSelect}
+                  disabled={!assignForm.projectId}
+                >
+                  <option value="">
+                    {assignForm.projectId
+                      ? `-- Direct Assignment (${selectedEmployee?.role || 'Default Role'}) --`
+                      : '-- Please select a project first --'}
+                  </option>
+                  {requirements
+                    .filter(req => {
+                      if (String(req.project_id) !== String(assignForm.projectId)) return false;
+                      const st = String(req.status || '').toLowerCase();
+                      return st !== 'filled' && st !== 'cancelled' && st !== 'rejected';
+                    })
+                    .map(req => (
+                      <option key={req.id} value={req.id}>
+                        {req.role_title || req.role} ({req.quantity_needed || req.quantity || 1} needed - {req.status || 'Pending'})
+                      </option>
+                    ))}
                 </select>
               </div>
 
