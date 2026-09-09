@@ -44,6 +44,11 @@ export default function RMDashboardTab() {
 
   useEffect(() => {
     loadDashboard();
+    const handleUpdate = () => {
+      loadDashboard();
+    };
+    window.addEventListener('rmDataUpdated', handleUpdate);
+    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
   }, []);
 
   const loadDashboard = async () => {
