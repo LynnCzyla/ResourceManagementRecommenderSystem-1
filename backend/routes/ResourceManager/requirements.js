@@ -341,8 +341,7 @@ router.put('/:id/status', async (req, res) => {
         const { data, error } = await supabase
             .from('project_resource_requirements')
             .update({ 
-                status: status,
-                updated_at: new Date().toISOString()
+                status: status
             })
             .eq('id', id)
             .select()
@@ -351,9 +350,18 @@ router.put('/:id/status', async (req, res) => {
         if (error) {
             console.error('❌ Update error:', error);
             return res.status(500).json({ 
-                success: false,
+                success: false, 
                 error: error.message 
             });
+        }
+
+        try {
+            const { clearDashboardCache } = require('./Dashboard');
+            const { clearProjectsCache } = require('./Projects');
+            if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+            if (clearProjectsCache) clearProjectsCache(isSuperAdmin ? null : userBranchId);
+        } catch (cErr) {
+            console.warn('⚠️ Non-fatal error clearing cache after requirement status update:', cErr.message);
         }
 
         console.log(`✅ Requirement ${id} updated to ${status}`);
