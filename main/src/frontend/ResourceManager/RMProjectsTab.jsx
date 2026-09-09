@@ -4,9 +4,9 @@ import Swal from 'sweetalert2';
 import {
   fetchProjects,
   fetchEmployees,
-  assignEmployeeToProject,
   removeEmployeeFromProject,
-  fetchProjectHistoryDetails
+  fetchProjectHistoryDetails,
+  fetchRequirements
 } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
@@ -15,14 +15,20 @@ const COMPLETED_STATUSES = ['Completed', 'Archived'];
 export default function RMProjectsTab() {
   const [projects, setProjects] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [requirements, setRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [assignForm, setAssignForm] = useState({ employeeId: '', role: '' });
+  const [expandedSkills, setExpandedSkills] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [submitting, setSubmitting] = useState(false);
+
+  const toggleSkillsExpand = (projId) => {
+    setExpandedSkills(prev => ({
+      ...prev,
+      [projId]: !prev[projId]
+    }));
+  };
+  const MAX_VISIBLE_SKILLS = 4;
 
   // ✅ Tabs: "active" (Projects) vs "history" (Project History / completed)
   const [activeTab, setActiveTab] = useState('active');
@@ -38,15 +44,23 @@ export default function RMProjectsTab() {
 
   useEffect(() => {
     loadData();
+    const handleUpdate = () => loadData();
+    window.addEventListener('rmDataUpdated', handleUpdate);
+    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
   }, []);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [projData, empData] = await Promise.all([fetchProjects(), fetchEmployees()]);
-      setProjects(projData.projects || []);
-      setEmployees(empData.employees || []);
+      const [projData, empData, reqData] = await Promise.all([
+        fetchProjects(),
+        fetchEmployees(),
+        fetchRequirements()
+      ]);
+      setProjects(projData.projects || projData.data || projData || []);
+      setEmployees(empData.employees || empData.data || empData || []);
+      setRequirements(reqData.data || reqData || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -103,36 +117,6 @@ export default function RMProjectsTab() {
     });
   };
 
-  const handleOpenAssignModal = (proj) => {
-    setSelectedProject(proj);
-    setShowAssignModal(true);
-    setAssignForm({ employeeId: '', role: '' });
-  };
-
-  const handleAssignSubmit = async (e) => {
-    e.preventDefault();
-    if (!assignForm.employeeId) return;
-
-    const chosenEmp = employees.find(emp => emp.id === assignForm.employeeId);
-    if (!chosenEmp) return;
-
-    setSubmitting(true);
-    try {
-      await assignEmployeeToProject(selectedProject.id, {
-        employeeId: chosenEmp.id,
-        role: assignForm.role || chosenEmp.role
-      });
-      setShowAssignModal(false);
-      showSuccessAlert(`Successfully assigned ${chosenEmp.name} to project!`);
-      await loadData();
-    } catch (err) {
-      showErrorAlert(err.message.includes('already assigned')
-        ? `${chosenEmp.name} is already assigned to this project!`
-        : err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handleRemoveMember = async (projId, empId, empName, projName) => {
     const result = await showConfirmationAlert(
@@ -145,6 +129,7 @@ export default function RMProjectsTab() {
     try {
       await removeEmployeeFromProject(projId, empId);
       await loadData();
+      window.dispatchEvent(new CustomEvent('rmDataUpdated'));
     } catch (err) {
       showErrorAlert(err.message);
     }
@@ -336,9 +321,20 @@ export default function RMProjectsTab() {
                   {(!proj.requiredSkills || proj.requiredSkills.length === 0) ? (
                     <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>No required skills listed.</span>
                   ) : (
-                    proj.requiredSkills.map((sk, i) => (
-                      <span key={i} style={styles.skillPill}>{sk}</span>
-                    ))
+                    <>
+                      {proj.requiredSkills.slice(0, expandedSkills[proj.id] ? proj.requiredSkills.length : MAX_VISIBLE_SKILLS).map((sk, i) => (
+                        <span key={i} style={styles.skillPill}>{sk}</span>
+                      ))}
+                      {proj.requiredSkills.length > MAX_VISIBLE_SKILLS && (
+                        <button
+                          type="button"
+                          onClick={() => toggleSkillsExpand(proj.id)}
+                          style={styles.seeMoreBtn}
+                        >
+                          {expandedSkills[proj.id] ? 'See less' : `+${proj.requiredSkills.length - MAX_VISIBLE_SKILLS} more`}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -405,8 +401,8 @@ export default function RMProjectsTab() {
                     {assignedList.length === 0 ? (
                       <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>No members recorded.</div>
                     ) : (
-                      assignedList.map(member => (
-                        <div key={member.employeeId} style={styles.memberRow}>
+                      assignedList.map((member, idx) => (
+                        <div key={member.assignmentId || `${member.employeeId}-${member.role || idx}`} style={styles.memberRow}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <RMAvatar name={member.employeeName} src={member.avatar} size={34} />
                             <div>
@@ -431,8 +427,8 @@ export default function RMProjectsTab() {
                   </div>
                 </div>
 
-                {/* Card Action Button */}
-                {activeTab === 'history' ? (
+                {/* Card Action Button (View Details on History only) */}
+                {activeTab === 'history' && (
                   <button
                     type="button"
                     onClick={() => handleOpenHistoryDetails(proj)}
@@ -440,62 +436,12 @@ export default function RMProjectsTab() {
                   >
                     👁 View Details
                   </button>
-                ) : (
-                  <button onClick={() => handleOpenAssignModal(proj)} style={styles.assignBtn}>
-                    Assign Resource
-                  </button>
                 )}
               </div>
             );
           })
         )}
       </div>
-
-      {/* Assign Employee Modal */}
-      {showAssignModal && selectedProject && (
-        <div style={styles.modalOverlay}>
-          <div className="glass-card" style={styles.modalCard}>
-            <div style={styles.modalHeader}>
-              <h2 style={{ margin: 0, fontSize: '18px' }}>Assign Resource to: {selectedProject.name}</h2>
-              <button onClick={() => setShowAssignModal(false)} style={styles.closeModalBtn}>&times;</button>
-            </div>
-            <form onSubmit={handleAssignSubmit} style={{ marginTop: '16px' }}>
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Select Employee</label>
-                <select
-                  value={assignForm.employeeId}
-                  onChange={(e) => setAssignForm({ ...assignForm, employeeId: e.target.value })}
-                  style={styles.modalSelect}
-                  required
-                >
-                  <option value="">-- Choose Candidate --</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={styles.formGroup}>
-                <label style={styles.formLabel}>Project Role Overwrite</label>
-                <input
-                  type="text"
-                  value={assignForm.role}
-                  onChange={(e) => setAssignForm({ ...assignForm, role: e.target.value })}
-                  placeholder="Leave blank to use default role"
-                  style={styles.modalInput}
-                />
-              </div>
-
-              <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowAssignModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" disabled={submitting} style={{ ...styles.saveBtn, opacity: submitting ? 0.6 : 1 }}>
-                  {submitting ? 'Assigning…' : 'Assign Member'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* ✅ Project History Details Modal (Client Feedback, Employees & Task Status) */}
       {historyDetailsModal.isOpen && (
@@ -1042,6 +988,17 @@ const styles = {
     color: 'var(--color-text-primary)',
     padding: '3px 8px',
     borderRadius: '4px',
+  },
+  seeMoreBtn: {
+    background: 'rgba(59, 130, 246, 0.1)',
+    border: '1px solid rgba(59, 130, 246, 0.25)',
+    color: 'var(--color-primary, #3b82f6)',
+    borderRadius: '12px',
+    padding: '2px 8px',
+    fontSize: '10px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   },
   // Feedback preview on history card
   historyFeedbackCard: {
