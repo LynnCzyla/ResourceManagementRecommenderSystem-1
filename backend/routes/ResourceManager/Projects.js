@@ -298,6 +298,7 @@ router.get('/', async (req, res) => {
       const assignedEmployees = relevantAssignments.map((a) => {
         const profile = profileById.get(a.profile_id);
         return {
+          assignmentId: a.id,
           employeeId: a.profile_id,
           employeeName: profile 
             ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown'
@@ -493,7 +494,7 @@ router.get('/:id', async (req, res) => {
  */
 router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
-  const { employeeId, role } = req.body;
+  const { employeeId, role, requirementId } = req.body;
   const userBranchId = req.user.branch_id;
   const isSuperAdmin = req.user.is_super_admin;
 
@@ -535,11 +536,27 @@ router.post('/:id/assign', async (req, res) => {
       });
     }
 
+    // Auto-match requirementId if not directly provided
+    let finalRequirementId = requirementId || null;
+    if (!finalRequirementId && role) {
+      const { data: matchedReq } = await supabase
+        .from('project_resource_requirements')
+        .select('id')
+        .eq('project_id', id)
+        .ilike('role_title', role.trim())
+        .not('status', 'in', '("Filled","Fulfilled","Completed","Cancelled")')
+        .maybeSingle();
+      if (matchedReq?.id) {
+        finalRequirementId = matchedReq.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from('project_assignments')
       .insert({
         project_id: id,
         profile_id: employeeId,
+        requirement_id: finalRequirementId,
         assigned_role: role || null,
         status: 'Assigned',
         assigned_by: req.user?.id || null,
@@ -549,6 +566,31 @@ router.post('/:id/assign', async (req, res) => {
       .single();
     
     if (error) throw error;
+
+    // Check if requirement should be marked as 'Filled'
+    if (finalRequirementId) {
+      const { data: activeAssignments } = await supabase
+        .from('project_assignments')
+        .select('id')
+        .eq('requirement_id', finalRequirementId)
+        .eq('status', 'Assigned');
+
+      const { data: reqData } = await supabase
+        .from('project_resource_requirements')
+        .select('quantity_needed')
+        .eq('id', finalRequirementId)
+        .single();
+
+      const needed = reqData?.quantity_needed || 1;
+      const currentCount = activeAssignments?.length || 0;
+
+      if (currentCount >= needed) {
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Filled' })
+          .eq('id', finalRequirementId);
+      }
+    }
 
     // ✅ Check and update project status if needed
     const { data: projectRow } = await supabase
@@ -589,6 +631,14 @@ router.post('/:id/assign', async (req, res) => {
     }
 
     clearProjectsCache(isSuperAdmin ? null : userBranchId);
+    try {
+      const { clearDashboardCache } = require('./Dashboard');
+      const { clearEmployeeCache } = require('./Employees');
+      if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+      if (clearEmployeeCache) clearEmployeeCache(isSuperAdmin ? null : userBranchId);
+    } catch (cErr) {
+      console.warn('Non-fatal cache clearing error in Projects assign:', cErr.message);
+    }
 
     res.json({ 
       success: true, 
@@ -634,8 +684,21 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       .eq('profile_id', employeeId)
       .maybeSingle();
 
-    const requirementId = assignmentData?.requirement_id;
+    let requirementId = assignmentData?.requirement_id;
     const assignedRole = assignmentData?.assigned_role || 'team member';
+
+    // If requirementId was not recorded directly, look up by project_id and assigned_role
+    if (!requirementId && assignedRole && assignedRole !== 'team member') {
+      const { data: matchedReq } = await supabase
+        .from('project_resource_requirements')
+        .select('id')
+        .eq('project_id', id)
+        .ilike('role_title', assignedRole.trim())
+        .maybeSingle();
+      if (matchedReq?.id) {
+        requirementId = matchedReq.id;
+      }
+    }
 
     const { error } = await supabase
       .from('project_assignments')
@@ -644,6 +707,18 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       .eq('profile_id', employeeId);
     
     if (error) throw error;
+
+    // Unassign any non-completed tasks for this employee in this project
+    try {
+      await supabase
+        .from('project_tasks')
+        .update({ profile_id: null })
+        .eq('project_id', id)
+        .eq('profile_id', employeeId)
+        .neq('status', 'Completed');
+    } catch (taskErr) {
+      console.warn('Non-fatal task unassignment error:', taskErr.message);
+    }
 
     // Reset requirement status to 'Pending' if needed
     if (requirementId) {
@@ -702,6 +777,14 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     }
 
     clearProjectsCache(isSuperAdmin ? null : userBranchId);
+    try {
+      const { clearDashboardCache } = require('./Dashboard');
+      const { clearEmployeeCache } = require('./Employees');
+      if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+      if (clearEmployeeCache) clearEmployeeCache(isSuperAdmin ? null : userBranchId);
+    } catch (cErr) {
+      console.warn('Non-fatal cache clearing error in Projects delete assign:', cErr.message);
+    }
 
     res.json({ 
       success: true, 
