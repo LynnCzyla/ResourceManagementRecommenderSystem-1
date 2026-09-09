@@ -63,12 +63,27 @@ function transformRequest(row) {
     .map(rs => rs.skills)
     .filter(Boolean);
 
+  const effectiveStartDate = row.start_date || row.projects?.start_date || null;
+  const effectiveEndDate = row.end_date || row.projects?.end_date || null;
+
   let duration = null;
-  if (row.start_date && row.end_date) {
-    const diffDays = Math.ceil(
-      Math.abs(new Date(row.end_date) - new Date(row.start_date)) / (1000 * 60 * 60 * 24)
-    );
-    duration = `${diffDays} days`;
+  if (effectiveStartDate && effectiveEndDate) {
+    const s = new Date(effectiveStartDate);
+    const e = new Date(effectiveEndDate);
+    if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e >= s) {
+      const diffDays = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+      const weeks = Math.round(diffDays / 7);
+      if (diffDays >= 7 && diffDays <= 55) {
+        duration = `${weeks} ${weeks === 1 ? 'Week' : 'Weeks'}`;
+      } else if (diffDays > 55) {
+        const months = (diffDays / 30.4375).toFixed(1);
+        duration = months.endsWith('.0')
+          ? `${parseInt(months, 10)} Months`
+          : `~${months} Months`;
+      } else {
+        duration = `${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
+      }
+    }
   }
 
   return {
@@ -81,9 +96,9 @@ function transformRequest(row) {
     primarySkills,
     secondarySkills,
     timeline: row.assignment_type,
-    duration,
-    startDate: row.start_date,
-    endDate: row.end_date,
+    duration: duration || (row.duration ? `${row.duration} days` : null),
+    startDate: effectiveStartDate,
+    endDate: effectiveEndDate,
     status: row.status,
     quantity: row.quantity_needed,
     justification: row.justification,
@@ -95,7 +110,7 @@ function transformRequest(row) {
 
 const REQUEST_SELECT = `
   *,
-  projects ( id, project_name, created_by ),
+  projects ( id, project_name, start_date, end_date, created_by ),
   positions ( id, position_name ),
   requirement_skills (
     id,
@@ -218,7 +233,7 @@ router.post('/', async (req, res) => {
     // ✅ Verify the project exists and user has access
     const { data: project, error: projectError } = await supabase
       .from('projects')
-      .select('id, created_by, project_name')
+      .select('id, created_by, project_name, start_date, end_date')
       .eq('id', projectId)
       .single();
 
@@ -282,8 +297,8 @@ router.post('/', async (req, res) => {
           quantity_needed: parseInt(resource.quantity, 10) || 1,
           assignment_type: resource.assignment || 'Full-Time (40 hours/week)',
           justification: resource.justification || null,
-          start_date: resource.startDate || null,
-          end_date: resource.endDate || null,
+          start_date: resource.startDate || project.start_date || null,
+          end_date: resource.endDate || project.end_date || null,
           status: 'Pending',
         })
         .select()
