@@ -28,6 +28,21 @@ const requireHumanResources = (req, res, next) => {
   next();
 };
 
+// ✅ Role check middleware for routes accessible by HR or Admin (e.g. hired employees for account creation)
+const requireHrOrAdmin = (req, res, next) => {
+  const userRole = req.user?.role;
+  const isSuperAdmin = req.user?.is_super_admin || false;
+
+  if (isSuperAdmin || userRole === 'Human Resources' || userRole === 'Admin' || userRole === 'Administrator') {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: 'Access denied. Human Resources or Admin role required.'
+  });
+};
+
 // Import routes with debug logs
 console.log('📦 Loading Dashboard route...');
 const dashboardRoutes = require('./dashboard');
@@ -68,7 +83,7 @@ router.use('/job-postings', requireHumanResources, jobPostingsRoutes);
 router.use('/applications', requireHumanResources, applicationsRoutes);
 router.use('/resource-requests', requireHumanResources, resourceRequestsRoutes);
 router.use('/interviews', requireHumanResources, interviewsRoutes);
-router.use('/hired-employees', requireHumanResources, hiredEmployeesRoutes);
+router.use('/hired-employees', requireHrOrAdmin, hiredEmployeesRoutes);
 router.use('/departments', requireHumanResources, departmentsRoutes);
 router.use('/branches', requireHumanResources, branchesRoutes);
 console.log('✅ All routes registered');

@@ -13,7 +13,7 @@ import DepartmentsTab from './DepartmentsTab';
 
 const BACKEND_RETRY_DELAY_MS = 5 * 60 * 1000;
 
-export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
+export default function AdminLayout({ user, onLogout, isDark, toggleTheme, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('adminActiveTab') || 'dashboard';
   });
@@ -22,6 +22,10 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
   const [currentAvatar, setCurrentAvatar] = useState(user.avatar);
+
+  useEffect(() => {
+    if (user?.avatar) setCurrentAvatar(user.avatar);
+  }, [user?.avatar]);
 
   // Submenu states
   const [userMgmtOpen, setUserMgmtOpen] = useState(true);
@@ -518,6 +522,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
         onClose={() => setShowProfileSettings(false)}
         user={user}
         onAvatarUpdate={(newUrl) => setCurrentAvatar(newUrl)}
+        onProfileUpdate={onProfileUpdate}
       />
     </div>
   );

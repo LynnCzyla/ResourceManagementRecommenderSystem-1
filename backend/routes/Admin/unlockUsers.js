@@ -1,9 +1,8 @@
-// backend/routes/Admin/unlockUsers.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
-const { verifyToken } = require('../Middleware/auth');
+const { verifyToken, clearProfileCache } = require('../Middleware/auth');
 
 // ✅ Apply auth middleware to ALL routes
 router.use(verifyToken);
@@ -283,6 +282,9 @@ router.post('/unlock/unlock-user', async (req, res) => {
       performed_by: req.user.employee_id
     });
 
+    // Clear cached profile
+    clearProfileCache(userId);
+
     res.status(200).json({
       success: true,
       message: 'User account unlocked successfully'
@@ -408,6 +410,14 @@ router.post('/lock-user', async (req, res) => {
       branch: req.user.branch_id,
       performed_by: req.user.employee_id
     });
+
+    // Clear cached profile and invalidate Supabase session
+    clearProfileCache(userId);
+    try {
+      await supabase.auth.admin.signOut(userId);
+    } catch (soErr) {
+      console.error('Non-fatal error signing out locked user:', soErr.message);
+    }
 
     res.status(200).json({
       success: true,

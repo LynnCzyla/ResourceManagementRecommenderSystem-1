@@ -32,51 +32,6 @@ const getProfileFromToken = async (userId) => {
     return result;
 };
 
-// Helper: best-effort guess at a person's name in the document, for DISPLAY only
-// (e.g. "Found: 'Carlo Reyes'" in a confirmation prompt). Never used for security decisions.
-const extractPossibleName = (rawText) => {
-    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 15);
-
-    // Prefer an explicit "Name:" style label, common on certificates/forms
-    for (const line of lines) {
-        const labelMatch = line.match(/^(?:NAME|FULL NAME|APPLICANT)\s*[:\-]\s*(.+)$/i);
-        if (labelMatch && labelMatch[1].trim().length > 1) {
-            return labelMatch[1].trim();
-        }
-    }
-
-    // Otherwise guess: a short line of 2-4 Title Case words (common resume/cert header pattern)
-    const namePattern = /^([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,3})$/;
-    for (const line of lines) {
-        if (namePattern.test(line) && line.length < 50) {
-            return line;
-        }
-    }
-
-    return null;
-};
-
-// Helper: check if document content contains the employee's name
-const checkNameInContent = (rawText, firstName, middleName, lastName) => {
-    const text = rawText.toUpperCase();
-    const first = (firstName || '').toUpperCase().trim();
-    const middle = (middleName || '').toUpperCase().trim();
-    const last = (lastName || '').toUpperCase().trim();
-
-    // Check combinations — at minimum first + last must appear
-    const hasFirst = first && text.includes(first);
-    const hasLast = last && text.includes(last);
-    const hasMiddle = middle && text.includes(middle);
-
-    // Must have at least first name AND last name in the document
-    if (hasFirst && hasLast) return true;
-
-    // Also accept: last name + middle name (some certificates use middle initial)
-    if (hasLast && hasMiddle) return true;
-
-    return false;
-};
-
 // Helper: normalize skill names consistently (module-level, used everywhere below)
 const normalizeSkill = (skill) => {
     if (typeof skill === 'string') return skill.trim();
@@ -207,40 +162,7 @@ exports.processDocument = async (req, res) => {
         }
 
         const employeeId = profileData.employee_id;
-        const employeeIdUpper = employeeId.toUpperCase();
-        const firstName = profileData.first_name || '';
-        const middleName = profileData.middle_name || '';
-        const lastName = profileData.last_name || '';
-
-        // FormData sends booleans as strings, so check for both
-        const confirmMismatch = req.body.confirmMismatch === 'true' || req.body.confirmMismatch === true;
-
-        // ✅ LAYER 1 SECURITY: Check filename for EMP-XXX pattern
         const filename = file.originalname;
-        const filenameUpper = filename.toUpperCase();
-        const filenameMatch = filenameUpper.match(/^(EMP-\d+)/);
-
-        if (filenameMatch) {
-            const fileEmployeeId = filenameMatch[1];
-            if (fileEmployeeId !== employeeIdUpper) {
-                if (!confirmMismatch) {
-                    console.log(`⚠️ Filename ID mismatch — expected "${employeeIdUpper}", filename says "${fileEmployeeId}". Awaiting user confirmation.`);
-                    return res.status(409).json({
-                        success: false,
-                        error: 'DOCUMENT_MISMATCH',
-                        requiresConfirmation: true,
-                        data: {
-                            reason: 'filename_id',
-                            expected: employeeIdUpper,
-                            found: fileEmployeeId,
-                            employeeId
-                        },
-                        message: `The file name suggests this document belongs to ${fileEmployeeId}, but you're signed in as ${employeeId}. The document doesn't appear to align with your information — are you sure you want to upload it?`
-                    });
-                }
-                console.log(`⚠️ Filename ID mismatch overridden by user (${employeeId}) — proceeding with upload`);
-            }
-        }
 
         console.log(`📄 Processing: ${filename} for employee: ${employeeId}`);
 
@@ -262,66 +184,6 @@ exports.processDocument = async (req, res) => {
         }
 
         const rawText = result.ocr?.raw_text || result.ocr?.cleaned_text || '';
-        const rawTextUpper = rawText.toUpperCase();
-
-        // ✅ LAYER 2 SECURITY: Check EMP-XXX IDs in document content
-        const contentMatches = [...rawTextUpper.matchAll(/EMP-\d+/g)].map(m => m[0]);
-        const uniqueIds = [...new Set(contentMatches)];
-
-        console.log(`🔍 Employee IDs found in document: ${uniqueIds.join(', ') || 'none'}`);
-
-        if (uniqueIds.length > 0) {
-            const foreignIds = uniqueIds.filter(id => id !== employeeIdUpper);
-            if (foreignIds.length > 0) {
-                if (!confirmMismatch) {
-                    console.log(`⚠️ Content ID mismatch — expected "${employeeIdUpper}", document mentions "${foreignIds.join(', ')}". Awaiting user confirmation.`);
-                    return res.status(409).json({
-                        success: false,
-                        error: 'DOCUMENT_MISMATCH',
-                        requiresConfirmation: true,
-                        data: {
-                            reason: 'content_id',
-                            expected: employeeIdUpper,
-                            found: foreignIds.join(', '),
-                            employeeId
-                        },
-                        message: `This document mentions ID(s) ${foreignIds.join(', ')}, but you're signed in as ${employeeId}. The document doesn't appear to align with your information — are you sure you want to upload it?`
-                    });
-                }
-                console.log(`⚠️ Content ID mismatch overridden by user (${employeeId}) — proceeding with upload`);
-            }
-        }
-
-        // ✅ LAYER 3 SECURITY: Check employee name in document content
-        // Only applies when no EMP-XXX found (e.g. certificates)
-        if (uniqueIds.length === 0 && rawText.length > 50) {
-            console.log(`🔍 No EMP-ID found — checking name: ${firstName} ${lastName}`);
-            const nameFound = checkNameInContent(rawText, firstName, middleName, lastName);
-
-            if (!nameFound) {
-                if (!confirmMismatch) {
-                    const foundName = extractPossibleName(rawText);
-                    console.log(`⚠️ Name mismatch — expected "${firstName} ${lastName}", best guess "${foundName || 'none'}". Awaiting user confirmation.`);
-                    return res.status(409).json({
-                        success: false,
-                        error: 'DOCUMENT_MISMATCH',
-                        requiresConfirmation: true,
-                        data: {
-                            reason: 'name',
-                            expected: `${firstName} ${lastName}`.trim(),
-                            found: foundName || null,
-                            employeeId
-                        },
-                        message: foundName
-                            ? `This document appears to belong to "${foundName}", but your profile name is "${firstName} ${lastName}". The document doesn't appear to align with your information — are you sure you want to upload it?`
-                            : `This document doesn't appear to mention your name (${firstName} ${lastName}). The document doesn't appear to align with your information — are you sure you want to upload it?`
-                    });
-                }
-                console.log(`⚠️ Name mismatch overridden by user (${employeeId}) — proceeding with upload`);
-            } else {
-                console.log(`✅ Name check passed — "${firstName} ${lastName}" found in document`);
-            }
-        }
 
         // ============ NORMALIZE + SEPARATE AUTO-APPROVED VS NEEDS-REVIEW ============
         const extractedSkills = (result.nlp?.skills || []).map(normalizeSkill).filter(Boolean);
@@ -521,9 +383,6 @@ exports.processDocument = async (req, res) => {
 
             const nameIdExclude = new Set([
                 employeeId.toLowerCase(),
-                firstName.toLowerCase(),
-                lastName.toLowerCase(),
-                `${firstName} ${lastName}`.toLowerCase(),
                 'full name',
                 'employee id',
                 'name'

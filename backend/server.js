@@ -46,11 +46,11 @@ const superAdminBranchesRoutes  = require('./routes/SuperAdmin/branches');
 const superAdminAuditLogsRoutes = require('./routes/SuperAdmin/audit-logs');
 
 // ============ MOUNT SUPER ADMIN ROUTES ============
-app.use('/api/superadmin', superAdminDashboardRoutes);
-app.use('/api/superadmin', superAdminAccountsRoutes);
-app.use('/api/superadmin', superAdminAdminsRoutes);
-app.use('/api/superadmin', superAdminBranchesRoutes);
-app.use('/api/superadmin', superAdminAuditLogsRoutes);
+app.use('/api/superadmin', verifyToken, superAdminDashboardRoutes);
+app.use('/api/superadmin', verifyToken, superAdminAccountsRoutes);
+app.use('/api/superadmin', verifyToken, superAdminAdminsRoutes);
+app.use('/api/superadmin', verifyToken, superAdminBranchesRoutes);
+app.use('/api/superadmin', verifyToken, superAdminAuditLogsRoutes);
 
 // ============ MOUNT OTHER ROUTES ============
 app.use('/api/rm', require('./routes/ResourceManager/Index'));

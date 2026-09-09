@@ -567,8 +567,21 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       return;
     }
 
-    if (!formData.email.trim()) {
+    const trimmedEmail = formData.email.trim().toLowerCase();
+    if (!trimmedEmail) {
       setError('Email address is required.');
+      setLoading(false);
+      return;
+    }
+
+    // Frontend validation: check if email already exists in system
+    const emailExists = users.some(
+      u => (u.email || '').trim().toLowerCase() === trimmedEmail
+    );
+    if (emailExists) {
+      const errorMsg = 'An account with this email address already exists.';
+      setError(errorMsg);
+      showErrorAlert(errorMsg);
       setLoading(false);
       return;
     }
@@ -785,8 +798,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
   const pendingHireCandidates = hiredEmployeesRaw
     .filter(emp => {
-      const notes = emp.job_applications?.notes || '';
-      const offerAccepted = notes.includes('OFFER_SENT') && notes.includes('OFFER_ACCEPTED');
+      const notes = emp.job_applications?.notes || emp.notes || '';
+      const offerAccepted = Boolean(emp.offer_accepted) || notes.includes('OFFER_ACCEPTED') || emp.status === 'Offer Accepted';
       const email = (emp.email || '').trim().toLowerCase();
       return offerAccepted && !!email && !existingAccountEmails.has(email);
     })
@@ -986,7 +999,10 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
       <div style={styles.subTabsContainer}>
         <button 
-          onClick={() => setSubTab('accounts')} 
+          onClick={() => {
+            setSubTab('accounts');
+            fetchUsers();
+          }} 
           onMouseEnter={(e) => {
             if (subTab !== 'accounts') {
               e.currentTarget.style.background = 'var(--color-primary-light)';
@@ -1005,7 +1021,11 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           User Accounts {loading && '...'}
         </button>
         <button 
-          onClick={() => setSubTab('create')} 
+          onClick={() => {
+            setSubTab('create');
+            fetchHiredEmployees();
+            fetchUsers();
+          }} 
           onMouseEnter={(e) => {
             if (subTab !== 'create') {
               e.currentTarget.style.background = 'var(--color-primary-light)';
@@ -1234,9 +1254,34 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 Employees who accepted their job offer from HR and are ready for a system account.
               </p>
             </div>
-            <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn} disabled={loading}>
-              + Create User Account
-            </button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button 
+                onClick={async () => {
+                  await Promise.all([fetchHiredEmployees(), fetchUsers()]);
+                  showSuccessAlert('Pending queue synchronized with HR records.', 'Synced!');
+                }} 
+                style={{
+                  ...styles.statusToggleBtn,
+                  background: 'var(--color-bg-root)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                }} 
+                disabled={loadingHires}
+                title="Refresh list of accepted offers from HR"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+                {loadingHires ? 'Syncing...' : 'Sync with HR'}
+              </button>
+              <button onClick={() => { resetForm(); setShowCreateModal(true); }} style={styles.createBtn} disabled={loading}>
+                + Create User Account
+              </button>
+            </div>
           </div>
 
           <div style={styles.tableWrapper}>
@@ -1280,8 +1325,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                       <td style={styles.td}>{candidate.hireDate || 'N/A'}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <span style={{ ...styles.statusBadge, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-accent)' }}>Offer Sent✓</span>
-                          <span style={{ ...styles.statusBadge, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-success)' }}>✔ Accepted</span>
+                          <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', fontWeight: '600' }}>Offer Accepted</span>
                         </div>
                       </td>
                       <td style={styles.td}>
@@ -1645,7 +1689,25 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Email Address *</label>
-                <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={styles.modalInput} placeholder="user@wea.com" required />
+                <input 
+                  type="email" 
+                  value={formData.email} 
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    if (error && error.toLowerCase().includes('email')) setError(null);
+                  }} 
+                  style={{
+                    ...styles.modalInput,
+                    ...(users.some(u => (u.email || '').trim().toLowerCase() === (formData.email || '').trim().toLowerCase()) && formData.email.trim() ? { borderColor: '#ef4444' } : {})
+                  }} 
+                  placeholder="user@wea.com" 
+                  required 
+                />
+                {users.some(u => (u.email || '').trim().toLowerCase() === (formData.email || '').trim().toLowerCase()) && formData.email.trim() && (
+                  <span style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px', fontWeight: '500' }}>
+                    An account with this email address already exists.
+                  </span>
+                )}
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Department</label>

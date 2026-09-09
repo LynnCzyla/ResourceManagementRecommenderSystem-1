@@ -799,12 +799,106 @@ router.put('/:id', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Project not found' });
 
+    const todayDate = new Date().toISOString().split('T')[0];
+
+    // ✅ Sync dates to project_assignments and requirements if changed
+    if (startDate !== undefined || endDate !== undefined) {
+      const assignmentDateUpdates = {};
+      if (startDate !== undefined) assignmentDateUpdates.start_date = startDate;
+      if (endDate !== undefined) assignmentDateUpdates.end_date = endDate;
+
+      await supabase
+        .from('project_assignments')
+        .update(assignmentDateUpdates)
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+
+      await supabase
+        .from('project_resource_requirements')
+        .update(assignmentDateUpdates)
+        .eq('project_id', id)
+        .in('status', ['Pending', 'Open']);
+    }
+
     if (status === 'Completed') {
       await supabase
         .from('project_resource_requirements')
         .update({ status: 'Completed' })
         .eq('project_id', id)
         .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+
+      // ✅ Update assignments to Completed when project completes
+      await supabase
+        .from('project_assignments')
+        .update({
+          status: 'Completed',
+          end_date: todayDate,
+        })
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+    }
+
+    // ✅ Cross-role notifications for RM and Assigned Employees
+    try {
+      const projectName = data.project_name || name || 'Project';
+      const pmName = [req.user?.first_name, req.user?.last_name].filter(Boolean).join(' ') || 'Project Manager';
+      const pmBranchId = req.user?.branch_id;
+
+      // 1. Fetch assigned employees
+      const { data: assignments } = await supabase
+        .from('project_assignments')
+        .select('profile_id')
+        .eq('project_id', id);
+
+      const employeeIds = [...new Set((assignments || []).map(a => a.profile_id).filter(Boolean))];
+
+      // 2. Fetch Resource Managers for this branch
+      let rmQuery = supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'Resource Manager')
+        .eq('status', 'Active');
+      if (pmBranchId) {
+        rmQuery = rmQuery.eq('branch_id', pmBranchId);
+      }
+      const { data: rmUsers } = await rmQuery;
+      const rmIds = (rmUsers || []).map(u => u.id).filter(rmId => rmId !== req.user?.id);
+
+      const notificationsToInsert = [];
+
+      const empMessage = status === 'Completed'
+        ? `Project "${projectName}" has been marked as Completed.`
+        : `Project "${projectName}" details have been updated (Status: ${data.status || 'Active'}, Priority: ${data.priority || 'Medium'}, Deadline: ${data.end_date || 'N/A'}).`;
+
+      employeeIds.forEach(empId => {
+        notificationsToInsert.push({
+          recipient_id: empId,
+          type: 'project',
+          text: empMessage,
+          read: false,
+        });
+      });
+
+      const rmMessage = status === 'Completed'
+        ? `Project "${projectName}" was marked as Completed by PM ${pmName}.`
+        : `Project "${projectName}" details were updated by PM ${pmName} (Status: ${data.status || 'Active'}, Priority: ${data.priority || 'Medium'}, Deadline: ${data.end_date || 'N/A'}).`;
+
+      rmIds.forEach(rmId => {
+        if (!employeeIds.includes(rmId)) {
+          notificationsToInsert.push({
+            recipient_id: rmId,
+            type: 'project',
+            text: rmMessage,
+            read: false,
+          });
+        }
+      });
+
+      if (notificationsToInsert.length > 0) {
+        await supabase.from('notifications').insert(notificationsToInsert);
+      }
+    } catch (notifErr) {
+      console.error('Non-fatal error generating project update notifications:', notifErr);
     }
 
     await logAuditEvent({
@@ -1061,6 +1155,60 @@ router.patch('/:id/status', async (req, res) => {
       }
     }
 
+    // ✅ Cross-role notifications for RM and Assigned Employees on status change
+    try {
+      const projName = project.project_name || 'Project';
+      const pmBranchId = req.user?.branch_id;
+
+      const { data: assignments } = await supabase
+        .from('project_assignments')
+        .select('profile_id')
+        .eq('project_id', id);
+
+      const employeeIds = [...new Set((assignments || []).map(a => a.profile_id).filter(Boolean))];
+
+      let rmQuery = supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'Resource Manager')
+        .eq('status', 'Active');
+      if (pmBranchId) {
+        rmQuery = rmQuery.eq('branch_id', pmBranchId);
+      }
+      const { data: rmUsers } = await rmQuery;
+      const rmIds = (rmUsers || []).map(u => u.id).filter(rmId => rmId !== req.user?.id);
+
+      const notificationsToInsert = [];
+      const statusMsg = `Project "${projName}" status has been changed to ${status}.`;
+
+      employeeIds.forEach(empId => {
+        notificationsToInsert.push({
+          recipient_id: empId,
+          type: 'project',
+          text: statusMsg,
+          read: false,
+        });
+      });
+
+      const rmMsg = `Project "${projName}" status was updated to ${status} by PM ${reportEmployeeName}.`;
+      rmIds.forEach(rmId => {
+        if (!employeeIds.includes(rmId)) {
+          notificationsToInsert.push({
+            recipient_id: rmId,
+            type: 'project',
+            text: rmMsg,
+            read: false,
+          });
+        }
+      });
+
+      if (notificationsToInsert.length > 0) {
+        await supabase.from('notifications').insert(notificationsToInsert);
+      }
+    } catch (notifErr) {
+      console.error('Non-fatal error generating status change notifications:', notifErr);
+    }
+
     await logAuditEvent({
       req,
       action: 'Updated',
@@ -1089,8 +1237,39 @@ router.patch('/:id/status', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Fetch project and assigned employees before deleting
+    const { data: project } = await supabase
+      .from('projects')
+      .select('project_name, created_by')
+      .eq('id', id)
+      .maybeSingle();
+
+    const { data: assignments } = await supabase
+      .from('project_assignments')
+      .select('profile_id')
+      .eq('project_id', id);
+
     const { error } = await supabase.from('projects').delete().eq('id', id);
     if (error) throw error;
+
+    // Notify assigned employees about project deletion
+    if (project && assignments && assignments.length > 0) {
+      try {
+        const employeeIds = [...new Set(assignments.map(a => a.profile_id).filter(Boolean))];
+        const notifs = employeeIds.map(empId => ({
+          recipient_id: empId,
+          type: 'alert',
+          text: `Project "${project.project_name}" has been deleted by Project Manager.`,
+          read: false,
+        }));
+        if (notifs.length > 0) {
+          await supabase.from('notifications').insert(notifs);
+        }
+      } catch (nErr) {
+        console.error('Non-fatal error sending deletion notification:', nErr);
+      }
+    }
 
     await logAuditEvent({
       req,

@@ -22,7 +22,7 @@ function timeAgo(dateStr) {
   return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
 }
 
-export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
+export default function PMLayout({ user, onLogout, isDark, toggleTheme, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('pmActiveTab') || 'dashboard';
   });
@@ -461,6 +461,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
         isOpen={showProfileSettings}
         onClose={() => setShowProfileSettings(false)}
         user={user}
+        onProfileUpdate={onProfileUpdate}
       />
     </div>
   );

@@ -11,7 +11,7 @@ const hasHrOrAdminRole = (user) => {
   
   if (isSuperAdmin) return true;
   if (role === 'Human Resources') return true;
-  if (role === 'Admin') return true;
+  if (role === 'Admin' || role === 'Administrator') return true;
   return false;
 };
 
@@ -58,6 +58,7 @@ router.get('/', async (req, res) => {
             phone,
             position_applied,
             department,
+            notes,
             branch_id,
             branches:branch_id (
               id,
@@ -136,6 +137,7 @@ router.get('/', async (req, res) => {
           phone,
           position_applied,
           department,
+          notes,
           branch_id,
           branches:branch_id (
             id,
@@ -202,6 +204,9 @@ const transformHiredEmployees = (data) => {
       branchId = item.interviews.profiles.branch_id;
     }
 
+    const notes = item.job_applications?.notes || item.notes || '';
+    const offerAccepted = notes.includes('OFFER_ACCEPTED');
+
     return {
       ...item,
       department_name: item.departments?.department_name || 'N/A',
@@ -216,6 +221,8 @@ const transformHiredEmployees = (data) => {
       branch_name: branchName,
       interview_status: item.interviews?.status || 'N/A',
       interview_date: item.interviews?.interview_date || 'N/A',
+      notes: notes,
+      offer_accepted: offerAccepted,
     };
   });
 };
@@ -642,14 +649,44 @@ router.put('/:id/accept-offer', async (req, res) => {
         .eq('id', emp.application_id)
         .single();
       const existingNotes = appData?.notes || '';
-      const updatedNotes = existingNotes.includes('OFFER_ACCEPTED')
-        ? existingNotes
-        : `${existingNotes} OFFER_ACCEPTED`.trim();
+      let updatedNotes = existingNotes;
+      if (!updatedNotes.includes('OFFER_SENT')) {
+        updatedNotes = `${updatedNotes} OFFER_SENT`.trim();
+      }
+      if (!updatedNotes.includes('OFFER_ACCEPTED')) {
+        updatedNotes = `${updatedNotes} OFFER_ACCEPTED`.trim();
+      }
       const { error } = await supabase
         .from('job_applications')
         .update({ notes: updatedNotes })
         .eq('id', emp.application_id);
       if (error) throw error;
+    }
+
+    // Update hired_employees status to Active if not already
+    await supabase
+      .from('hired_employees')
+      .update({ status: 'Active' })
+      .eq('id', id);
+
+    // Notify Administrator(s) that offer is accepted and ready for account creation
+    try {
+      const { data: admins } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('role', ['Administrator', 'Super Admin']);
+
+      if (admins && admins.length > 0) {
+        const adminNotifs = admins.map(adm => ({
+          recipient_id: adm.id,
+          type: 'info',
+          text: `🎉 Candidate ${emp.name} has accepted the job offer. Ready for account creation in User Management.`,
+          read: false,
+        }));
+        await supabase.from('notifications').insert(adminNotifs);
+      }
+    } catch (notifErr) {
+      console.error('Failed to notify admins of offer acceptance:', notifErr);
     }
 
     await logAuditEvent({
@@ -659,7 +696,11 @@ router.put('/:id/accept-offer', async (req, res) => {
       logDescription: `Marked offer as formally accepted for ${emp.name} (${emp.email})`,
     });
 
-    res.status(200).json({ success: true, message: 'Offer acceptance recorded.', data: emp });
+    res.status(200).json({ 
+      success: true, 
+      message: 'Offer acceptance recorded.', 
+      data: { ...emp, status: 'Active', offer_accepted: true } 
+    });
   } catch (error) {
     console.error('Error recording offer acceptance:', error);
     res.status(500).json({ success: false, error: 'Failed to record offer acceptance.' });

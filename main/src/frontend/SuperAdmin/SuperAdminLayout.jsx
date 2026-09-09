@@ -10,7 +10,7 @@ import AuditLogsTab from './AuditLogsTab';
 import SystemSettingsTab from './SystemSettingsTab'; // ✅ ADD THIS IMPORT
 import ProfileSettings from '../ProfileSettings';
 
-export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }) {
+export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('superAdminActiveTab') || 'dashboard';
   });
@@ -18,6 +18,10 @@ export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
   const [currentAvatar, setCurrentAvatar] = useState(user.avatar);
+
+  useEffect(() => {
+    if (user?.avatar) setCurrentAvatar(user.avatar);
+  }, [user?.avatar]);
 
   const [phTime, setPhTime] = useState('');
 
@@ -316,6 +320,7 @@ export default function SuperAdminLayout({ user, onLogout, isDark, toggleTheme }
         onClose={() => setShowProfileSettings(false)}
         user={user}
         onAvatarUpdate={(newUrl) => setCurrentAvatar(newUrl)}
+        onProfileUpdate={onProfileUpdate}
       />
     </div>
   );

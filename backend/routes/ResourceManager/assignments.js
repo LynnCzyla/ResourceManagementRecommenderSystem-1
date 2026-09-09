@@ -52,11 +52,13 @@ router.get('/', async (req, res) => {
             if (item.profile_id) {
                 const { data: profileData } = await supabase
                     .from('profiles')
-                    .select('name, email')
+                    .select('first_name, middle_name, last_name, employee_id')
                     .eq('id', item.profile_id)
                     .single();
-                employeeName = profileData?.name || null;
-                employeeEmail = profileData?.email || null;
+                employeeName = profileData
+                    ? `${profileData.first_name || ''}${profileData.middle_name ? ` ${profileData.middle_name}` : ''} ${profileData.last_name || ''}`.trim()
+                    : null;
+                employeeEmail = null;
             }
 
             return {
@@ -179,6 +181,55 @@ router.post('/', async (req, res) => {
                     }
                 }
             }
+        }
+
+        // Cross-role notifications: notify assigned employee & PM
+        try {
+            let projectName = 'a project';
+            let projectOwner = null;
+            if (project_id) {
+                const { data: proj } = await supabase
+                    .from('projects')
+                    .select('project_name, created_by')
+                    .eq('id', project_id)
+                    .single();
+                if (proj) {
+                    projectName = proj.project_name;
+                    projectOwner = proj.created_by;
+                }
+            }
+
+            let empName = 'An employee';
+            if (profile_id) {
+                const { data: empProf } = await supabase
+                    .from('profiles')
+                    .select('first_name, last_name')
+                    .eq('id', profile_id)
+                    .single();
+                if (empProf) {
+                    empName = `${empProf.first_name || ''} ${empProf.last_name || ''}`.trim();
+                }
+            }
+
+            const notifs = [
+                {
+                    recipient_id: profile_id,
+                    type: 'assignment',
+                    text: `You have been assigned to project "${projectName}" as ${assigned_role || 'team member'}.`,
+                    read: false
+                }
+            ];
+            if (projectOwner && projectOwner !== req.user?.id) {
+                notifs.push({
+                    recipient_id: projectOwner,
+                    type: 'assignment',
+                    text: `${empName} has been assigned to your project "${projectName}" as ${assigned_role || 'team member'}.`,
+                    read: false
+                });
+            }
+            await supabase.from('notifications').insert(notifs);
+        } catch (notifErr) {
+            console.error('Non-fatal error creating assignment notifications:', notifErr.message);
         }
 
         res.status(201).json(data);

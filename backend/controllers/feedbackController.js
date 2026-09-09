@@ -1086,54 +1086,86 @@ exports.saveSkillFeedback = async (req, res) => {
             return res.status(403).json({ success: false, error: 'You can only save feedback for your own documents' });
         }
 
-        // ============ SAVE SKILLS TO DATABASE (CASE-INSENSITIVE DEDUP) ============
+        // ============ SAVE SKILLS TO DATABASE (BATCHED, CASE-INSENSITIVE DEDUP) ============
         if (approved_skills && approved_skills.length > 0) {
             console.log(`✅ Saving ${approved_skills.length} approved skills to database...`);
 
-            // Pull the full skills table ONCE and match in-memory by skillKey,
-            // instead of N sequential case-sensitive .eq() queries. This is
-            // what was letting "Microsoft Excel" and "microsoft excel" become
-            // two separate rows.
-            const { data: existingSkillsAll } = await supabase
-                .from('skills')
-                .select('id, skill_name');
-            const skillMap = new Map((existingSkillsAll || []).map(s => [skillKey(s.skill_name), s.id]));
+            // Normalize + dedupe the incoming batch itself first (in-memory,
+            // free) so we never issue two DB calls for the same skill twice.
+            const normalizedNames = [];
+            const seenKeys = new Set();
+            for (const raw of approved_skills) {
+                const name = normalizeSkill(raw);
+                if (!name) continue;
+                const key = skillKey(name);
+                if (seenKeys.has(key)) continue;
+                seenKeys.add(key);
+                normalizedNames.push({ key, name });
+            }
 
-            const { data: existingLinksAll } = await supabase
-                .from('employee_skills')
-                .select('id, skill_id')
-                .eq('profile_id', profileData.id);
-            const linkedSkillIds = new Set((existingLinksAll || []).map(l => l.skill_id));
+            // TARGETED fetch: only the rows that could match THIS batch,
+            // via case-insensitive exact match (ilike with no wildcards),
+            // instead of pulling the entire skills table. Bounded by
+            // approved_skills.length, not by total skills in the system.
+            let skillMap = new Map();
+            if (normalizedNames.length > 0) {
+                const orFilter = normalizedNames
+                    .map(({ name }) => `skill_name.ilike.${name.replace(/[(),]/g, '')}`)
+                    .join(',');
+                const { data: matchingSkills } = await supabase
+                    .from('skills')
+                    .select('id, skill_name')
+                    .or(orFilter);
+                (matchingSkills || []).forEach(s => skillMap.set(skillKey(s.skill_name), s.id));
+            }
 
-            for (const skillNameRaw of approved_skills) {
-                const skillName = normalizeSkill(skillNameRaw);
-                if (!skillName) continue;
-                const key = skillKey(skillName);
+            // BATCH insert whatever wasn't found — ONE call for all new
+            // skills instead of one INSERT per missing skill.
+            const toInsert = normalizedNames
+                .filter(({ key }) => !skillMap.has(key))
+                .map(({ name }) => ({ skill_name: name }));
 
-                let skillId = skillMap.get(key);
-                if (!skillId) {
-                    const { data: newSkill, error: insertSkillError } = await supabase
-                        .from('skills')
-                        .insert({ skill_name: skillName })
-                        .select()
-                        .single();
-                    if (!insertSkillError && newSkill) {
-                        skillId = newSkill.id;
-                        skillMap.set(key, skillId);
-                        console.log(`   ✅ Added new skill: ${skillName}`);
-                    }
+            if (toInsert.length > 0) {
+                const { data: insertedSkills, error: insertSkillError } = await supabase
+                    .from('skills')
+                    .upsert(toInsert, { onConflict: 'skill_name', ignoreDuplicates: false })
+                    .select('id, skill_name');
+                if (!insertSkillError && insertedSkills) {
+                    insertedSkills.forEach(s => skillMap.set(skillKey(s.skill_name), s.id));
+                    console.log(`   ✅ Added ${insertedSkills.length} new skill(s)`);
+                } else if (insertSkillError) {
+                    console.error('   ❌ Batch skill insert error:', insertSkillError.message);
                 }
+            }
 
-                if (skillId && !linkedSkillIds.has(skillId)) {
-                    const { error: linkError } = await supabase
-                        .from('employee_skills')
-                        .insert({
-                            profile_id: profileData.id,
-                            skill_id: skillId
-                        });
-                    if (!linkError) {
-                        linkedSkillIds.add(skillId); // prevent re-inserting in same batch
-                    }
+            const relevantSkillIds = [...skillMap.values()];
+
+            // TARGETED fetch of this employee's existing links, filtered to
+            // only the skill ids relevant to this batch (not the employee's
+            // whole skill list, and never anyone else's).
+            let linkedSkillIds = new Set();
+            if (relevantSkillIds.length > 0) {
+                const { data: existingLinks } = await supabase
+                    .from('employee_skills')
+                    .select('skill_id')
+                    .eq('profile_id', profileData.id)
+                    .in('skill_id', relevantSkillIds);
+                linkedSkillIds = new Set((existingLinks || []).map(l => l.skill_id));
+            }
+
+            // BATCH insert the missing links — ONE call for all of them.
+            const linksToInsert = relevantSkillIds
+                .filter(id => !linkedSkillIds.has(id))
+                .map(id => ({ profile_id: profileData.id, skill_id: id }));
+
+            if (linksToInsert.length > 0) {
+                const { error: linkError } = await supabase
+                    .from('employee_skills')
+                    .insert(linksToInsert);
+                if (linkError) {
+                    console.error('   ❌ Batch link insert error:', linkError.message);
+                } else {
+                    console.log(`   ✅ Linked ${linksToInsert.length} new skill(s) to profile`);
                 }
             }
             console.log(`✅ Skills saved to employee profile`);
@@ -1162,6 +1194,21 @@ exports.saveSkillFeedback = async (req, res) => {
         if (updateError) {
             throw updateError;
         }
+
+        // Return after the user-facing database save. Learning, training,
+        // retraining, and cleanup are maintenance work and must not block Save.
+        res.json({
+            success: true,
+            data: {
+                documentId: updatedDocument.id,
+                approved_skills: approved_skills || [],
+                rejected_skills: rejected_skills || []
+            },
+            message: `✅ ${approved_skills?.length || 0} skills saved!`
+        });
+
+        setImmediate(async () => {
+            try {
 
         // ============ UPDATE LEARNING SYSTEM ============
         let merged = 0;
@@ -1300,14 +1347,9 @@ exports.saveSkillFeedback = async (req, res) => {
             }
         }
 
-        res.json({
-            success: true,
-            data: {
-                documentId: updatedDocument.id,
-                approved_skills: approved_skills || [],
-                rejected_skills: rejected_skills || []
-            },
-            message: `✅ ${approved_skills?.length || 0} skills saved!`
+            } catch (backgroundError) {
+                console.error('⚠️ Post-save learning work failed:', backgroundError.message);
+            }
         });
 
     } catch (error) {

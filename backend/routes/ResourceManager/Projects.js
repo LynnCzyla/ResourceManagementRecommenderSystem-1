@@ -505,7 +505,7 @@ router.post('/:id/assign', async (req, res) => {
     // ✅ Check if employee belongs to user's branch
     const { data: employee, error: empError } = await supabase
       .from('profiles')
-      .select('branch_id, role')
+      .select('branch_id, role, first_name, last_name')
       .eq('id', employeeId)
       .single();
 
@@ -553,7 +553,7 @@ router.post('/:id/assign', async (req, res) => {
     // ✅ Check and update project status if needed
     const { data: projectRow } = await supabase
       .from('projects')
-      .select('status')
+      .select('status, project_name, created_by')
       .eq('id', id)
       .single();
 
@@ -562,6 +562,30 @@ router.post('/:id/assign', async (req, res) => {
         .from('projects')
         .update({ status: 'Active', updated_at: new Date().toISOString() })
         .eq('id', id);
+    }
+
+    // Cross-role notifications: notify employee and PM
+    try {
+      const notifs = [
+        {
+          recipient_id: employeeId,
+          type: 'assignment',
+          text: `You have been assigned to project "${projectRow?.project_name || 'a project'}" as ${role || 'team member'}.`,
+          read: false
+        }
+      ];
+      if (projectRow?.created_by && projectRow.created_by !== req.user?.id) {
+        const empName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+        notifs.push({
+          recipient_id: projectRow.created_by,
+          type: 'assignment',
+          text: `${empName || 'An employee'} has been assigned to your project "${projectRow.project_name}" as ${role || 'team member'}.`,
+          read: false
+        });
+      }
+      await supabase.from('notifications').insert(notifs);
+    } catch (notifErr) {
+      console.error('Non-fatal error creating assignment notification:', notifErr.message);
     }
 
     clearProjectsCache(isSuperAdmin ? null : userBranchId);
@@ -589,7 +613,7 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     // ✅ Check if employee belongs to user's branch
     const { data: employee, error: empError } = await supabase
       .from('profiles')
-      .select('branch_id')
+      .select('branch_id, first_name, last_name')
       .eq('id', employeeId)
       .single();
 
@@ -602,6 +626,17 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       });
     }
 
+    // Get assignment details before deletion to check requirement and role
+    const { data: assignmentData } = await supabase
+      .from('project_assignments')
+      .select('requirement_id, assigned_role')
+      .eq('project_id', id)
+      .eq('profile_id', employeeId)
+      .maybeSingle();
+
+    const requirementId = assignmentData?.requirement_id;
+    const assignedRole = assignmentData?.assigned_role || 'team member';
+
     const { error } = await supabase
       .from('project_assignments')
       .delete()
@@ -610,11 +645,67 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     
     if (error) throw error;
 
+    // Reset requirement status to 'Pending' if needed
+    if (requirementId) {
+      const { data: remaining } = await supabase
+        .from('project_assignments')
+        .select('id')
+        .eq('requirement_id', requirementId)
+        .eq('status', 'Assigned');
+
+      const { data: reqData } = await supabase
+        .from('project_resource_requirements')
+        .select('quantity_needed')
+        .eq('id', requirementId)
+        .single();
+
+      const needed = reqData?.quantity_needed || 1;
+      const count = remaining?.length || 0;
+
+      if (count < needed) {
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Pending' })
+          .eq('id', requirementId);
+      }
+    }
+
+    // Fetch project info for notifications
+    const { data: project } = await supabase
+      .from('projects')
+      .select('project_name, created_by')
+      .eq('id', id)
+      .single();
+
+    try {
+      const projectName = project?.project_name || 'a project';
+      const empName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+      const notifs = [
+        {
+          recipient_id: employeeId,
+          type: 'assignment',
+          text: `You have been removed from project "${projectName}".`,
+          read: false
+        }
+      ];
+      if (project?.created_by && project.created_by !== req.user?.id) {
+        notifs.push({
+          recipient_id: project.created_by,
+          type: 'assignment',
+          text: `${empName || 'An employee'} has been removed from project "${projectName}" (${assignedRole}).`,
+          read: false
+        });
+      }
+      await supabase.from('notifications').insert(notifs);
+    } catch (notifErr) {
+      console.error('Non-fatal error creating unassign notification:', notifErr.message);
+    }
+
     clearProjectsCache(isSuperAdmin ? null : userBranchId);
 
     res.json({ 
-      success: true,
-      message: 'Employee removed from project successfully'
+      success: true, 
+      message: 'Employee removed from project successfully' 
     });
   } catch (err) {
     console.error('❌ RM project remove member error:', err);

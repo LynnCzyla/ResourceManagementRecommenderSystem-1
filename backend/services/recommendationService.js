@@ -31,6 +31,31 @@ class RecommendationEngine {
         return (str || '').toLowerCase().trim().replace(/\s+/g, ' ');
     }
 
+    _splitSkillIntoComponents(skill) {
+        if (!skill) return [];
+
+        const parts = skill.trim().split(/\s+and\s+/i);
+        if (parts.length !== 2) return [];
+
+        const left = parts[0].trim();
+        const right = parts[1].trim();
+        const leftWords = left.split(/\s+/);
+        const rightWords = right.split(/\s+/);
+        const trailingWord = rightWords[rightWords.length - 1];
+        const leftLastWord = leftWords[leftWords.length - 1];
+
+        const leftComponent =
+            trailingWord && leftLastWord.toLowerCase() !== trailingWord.toLowerCase()
+                ? `${left} ${trailingWord}`
+                : left;
+
+        const components = [leftComponent, right]
+            .map(component => component.trim())
+            .filter(component => component.split(/\s+/).length >= 2);
+
+        return [...new Set(components.map(component => this._normalize(component)))];
+    }
+
     /**
      * Get project with creator's branch info
      */
@@ -211,10 +236,23 @@ class RecommendationEngine {
         const normalizedEmployeeSkills =
             employeeSkills.map(skill => this._normalize(skill));
 
+        const derivedComponentSources = new Map();
+        const derivedEmployeeComponents = employeeSkills.flatMap(skill => {
+            const components = this._splitSkillIntoComponents(skill);
+            components.forEach(component => {
+                if (!derivedComponentSources.has(component)) {
+                    derivedComponentSources.set(component, skill);
+                }
+            });
+            return components;
+        });
+
         const normalizedComponents =
-            employeeComponents.map(component =>
-                this._normalize(component)
-            );
+            [...employeeComponents, ...derivedEmployeeComponents]
+                .map(component => this._normalize(component))
+                .filter((component, index, components) =>
+                    components.indexOf(component) === index
+                );
 
         // 🔍 TEMPORARY DEBUG: same logic as before, but now returns WHY a
         // relationship was considered aliased instead of just true/false,
@@ -410,6 +448,7 @@ class RecommendationEngine {
                             this._normalize(component) ===
                             matchedEmpSkill
                     ) ||
+                    derivedComponentSources.get(matchedEmpSkill) ||
                     matchedEmpSkill;
 
                 matchedWeight += weight;

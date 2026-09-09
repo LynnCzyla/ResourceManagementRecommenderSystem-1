@@ -52,6 +52,10 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
       const res = await fetch(`http://localhost:5000/api/admin/dashboard/user-activity?days=${days}`, { headers });
+      if (!res.ok) {
+        generateMockUserActivity(days);
+        return;
+      }
       const json = await res.json();
 
       if (json.success) {
@@ -496,7 +500,10 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
               <span style={{ color: 'var(--color-text-muted)', marginTop: '12px' }}>Loading activity data...</span>
             </div>
           ) : userActivityData.length > 0 ? (
-            <div style={styles.barChart}>
+            <div style={{
+              ...styles.barChart,
+              minWidth: userActivityData.length > 14 ? `${userActivityData.length * 30}px` : '100%',
+            }}>
               {userActivityData.map((day, index) => {
                 const height = (day.count / maxActivityValue) * 100;
                 const date = new Date(day.date);
@@ -521,8 +528,9 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                     </div>
                     <span style={{
                       ...styles.barLabel,
-                      fontWeight: isToday ? '700' : '400',
-                      color: isToday ? 'var(--color-danger)' : 'var(--color-text-muted)',
+                      fontWeight: isToday ? '800' : '600',
+                      color: isToday ? '#38bdf8' : '#ffffff',
+                      textShadow: '0 1px 3px rgba(0, 0, 0, 0.8)',
                     }}>
                       {isToday ? 'Today' : dayLabel}
                     </span>
@@ -927,24 +935,24 @@ const styles = {
   },
   // Chart styles
   chartContainer: {
-    padding: '10px 0',
+    padding: '16px 8px 32px',
     overflowX: 'auto',
-    minHeight: '240px',
+    minHeight: '290px',
   },
   loadingContainer: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '200px',
+    height: '220px',
     gap: '8px',
   },
   barChart: {
     display: 'flex',
     alignItems: 'flex-end',
-    gap: '4px',
-    height: '200px',
-    paddingBottom: '25px',
+    gap: '6px',
+    height: '230px',
+    paddingBottom: '60px',
     position: 'relative',
     minWidth: '100%',
   },
@@ -954,12 +962,13 @@ const styles = {
     alignItems: 'center',
     flex: 1,
     height: '100%',
-    minWidth: '12px',
+    minWidth: '18px',
+    position: 'relative',
   },
   barContainer: {
     display: 'flex',
     alignItems: 'flex-end',
-    height: '100%',
+    height: '145px',
     width: '100%',
   },
   bar: {
@@ -976,17 +985,21 @@ const styles = {
   },
   barValue: {
     fontSize: '9px',
-    fontWeight: '600',
-    color: 'var(--color-text-primary)',
-    opacity: 0.7,
+    fontWeight: '700',
+    color: '#ffffff',
+    textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
+    opacity: 0.9,
   },
   barLabel: {
-    fontSize: '9px',
-    color: 'var(--color-text-muted)',
-    marginTop: '4px',
+    fontSize: '11px',
+    fontWeight: '600',
+    color: '#ffffff',
+    marginTop: '12px',
     transform: 'rotate(-45deg)',
     transformOrigin: 'top left',
     whiteSpace: 'nowrap',
+    display: 'inline-block',
+    letterSpacing: '0.3px',
   },
   chartFooter: {
     display: 'flex',

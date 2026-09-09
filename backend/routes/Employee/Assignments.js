@@ -32,7 +32,7 @@ router.get('/assignments', verifyToken, async (req, res) => {
     const formattedAssignments = activeAssignments.map(row => {
       const proj = row.projects || {};
       const pmProfile = proj.profiles || {};
-      const pmName = [pmProfile.first_name, pmProfile.last_name].filter(Boolean).join(' ') || 'Lynn Czyla M. Alpuerto';
+      const pmName = [pmProfile.first_name, pmProfile.last_name].filter(Boolean).join(' ') || 'Project Manager';
 
       return {
         id: proj.id,
@@ -184,7 +184,7 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
       .from('project_tasks')
       .update(updatePayload)
       .eq('id', id)
-      .select('*, projects(project_name), profiles:profiles!project_tasks_profile_id_fkey(first_name, last_name)')
+      .select('*, projects(project_name, created_by), profiles:profiles!project_tasks_profile_id_fkey(first_name, last_name)')
       .single();
 
     if (updateError) throw updateError;
@@ -215,6 +215,25 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
       }
     } catch (reportInsertErr) {
       console.error('Non-fatal error inserting into project_report from employee:', reportInsertErr);
+    }
+
+    // Cross-role notification: notify PM
+    try {
+      const pmId = data.projects?.created_by;
+      if (pmId && pmId !== req.user?.id) {
+        const empName = data.profiles
+          ? [data.profiles.first_name, data.profiles.last_name].filter(Boolean).join(' ').trim()
+          : 'An employee';
+        const projName = data.projects?.project_name || 'a project';
+        await supabase.from('notifications').insert({
+          recipient_id: pmId,
+          type: 'task_progress',
+          text: `${empName} logged ${newPercentageVal}% progress on task "${data.title}" in project "${projName}" (Total: ${finalTotalPercentage}%).`,
+          read: false
+        });
+      }
+    } catch (notifErr) {
+      console.error('Non-fatal error creating progress notification:', notifErr.message);
     }
 
     res.json({ success: true, message: 'Progress logged successfully', data });

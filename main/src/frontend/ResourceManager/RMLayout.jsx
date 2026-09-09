@@ -52,7 +52,7 @@ function PHClock({ user }) {
   );
 }
 
-export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
+export default function RMLayout({ user, onLogout, isDark, toggleTheme, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('rmActiveTab') || 'dashboard';
   });
@@ -61,6 +61,10 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
   const [currentAvatar, setCurrentAvatar] = useState(user.avatar);
+
+  useEffect(() => {
+    if (user?.avatar) setCurrentAvatar(user.avatar);
+  }, [user?.avatar]);
 
   // Mock notifications for Resource Manager
   const [notifications, setNotifications] = useState([
@@ -414,6 +418,7 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme }) {
         onClose={() => setShowProfileSettings(false)}
         user={user}
         onAvatarUpdate={(newUrl) => setCurrentAvatar(newUrl)}
+        onProfileUpdate={onProfileUpdate}
       />
     </div>
   );
