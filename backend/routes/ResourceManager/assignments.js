@@ -104,11 +104,11 @@ router.post('/', async (req, res) => {
 
         console.log(`📋 Creating assignment for requirement ${requirement_id}...`);
 
-        // Check if already assigned
+        // Check if already assigned to this project
         const { data: existing, error: checkError } = await supabase
             .from('project_assignments')
             .select('id')
-            .eq('requirement_id', requirement_id)
+            .eq('project_id', project_id)
             .eq('profile_id', profile_id)
             .eq('status', 'Assigned');
 
@@ -118,7 +118,7 @@ router.post('/', async (req, res) => {
         }
 
         if (existing && existing.length > 0) {
-            return res.status(400).json({ error: 'Employee already assigned to this requirement' });
+            return res.status(400).json({ error: 'Employee is already assigned to this project' });
         }
 
         // Create assignment
@@ -230,6 +230,17 @@ router.post('/', async (req, res) => {
             await supabase.from('notifications').insert(notifs);
         } catch (notifErr) {
             console.error('Non-fatal error creating assignment notifications:', notifErr.message);
+        }
+
+        try {
+            const { clearDashboardCache } = require('./Dashboard');
+            const { clearEmployeeCache } = require('./Employees');
+            const { clearProjectsCache } = require('./Projects');
+            if (clearDashboardCache) clearDashboardCache();
+            if (clearEmployeeCache) clearEmployeeCache();
+            if (clearProjectsCache) clearProjectsCache();
+        } catch (cErr) {
+            console.warn('Non-fatal cache clearing error in assignments:', cErr.message);
         }
 
         res.status(201).json(data);
