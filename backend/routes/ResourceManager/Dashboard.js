@@ -165,27 +165,18 @@ router.get('/', async (req, res) => {
     const projectIdsFromAssignments = [...new Set(assignments.map(a => a.project_id))];
     let projects = allProjects.filter(p => projectIdsFromAssignments.includes(p.id) && p.status === 'Active');
 
-    // ✅ Filter active tasks for employees in this branch (only active projects and non-completed tasks)
+    // ✅ Set of active (profile_id + project_id) pairs from active assignments
+    const activeAssignmentKeys = new Set(
+      assignments.map(a => `${a.profile_id}_${a.project_id}`)
+    );
+
+    // ✅ Filter active tasks for employees in this branch (only active projects, actively assigned employees, and non-completed tasks)
     const activeTasks = allTasks.filter(t => 
       employeeIds.includes(t.profile_id) && 
       activeProjectIds.has(t.project_id) && 
+      activeAssignmentKeys.has(`${t.profile_id}_${t.project_id}`) &&
       !['Completed', 'Completed-Hidden', 'Archived'].includes(t.status)
     );
-
-    // Also include active projects from active tasks if employee has active tasks
-    for (const t of activeTasks) {
-      if (t.profile_id && activeProjectIds.has(t.project_id)) {
-        const proj = activeProjectMap.get(t.project_id);
-        if (proj) {
-          if (!employeeProjectMap.has(t.profile_id)) {
-            employeeProjectMap.set(t.profile_id, []);
-          }
-          if (!employeeProjectMap.get(t.profile_id).includes(proj.project_name)) {
-            employeeProjectMap.get(t.profile_id).push(proj.project_name);
-          }
-        }
-      }
-    }
 
     console.log(`📊 Data: ${employees.length} employees, ${assignments.length} active assignments, ${projects.length} active projects, ${activeTasks.length} active tasks`);
 
