@@ -1,0 +1,13 @@
+node_modules
+backend/node_modules
+main/
+main/node_modules
+python/venv
+python/__pycache__
+**/__pycache__
+.git
+.env
+backend/.env
+python/.env
+*.log
+.DS_Store
