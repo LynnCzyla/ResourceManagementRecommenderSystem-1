@@ -1,6 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { getResourceRequests, createResourceRequest, getProjects, getSkills, cancelResourceRequest } from './pmApi';
+
+// Helpers to format date range and dynamic duration nicely
+const formatDateRange = (startDate, endDate) => {
+  if (!startDate && !endDate) return 'N/A';
+  const formatSingle = (dStr) => {
+    if (!dStr) return '';
+    const d = new Date(dStr);
+    return isNaN(d.getTime()) ? dStr : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+  if (startDate && endDate) return `${formatSingle(startDate)} to ${formatSingle(endDate)}`;
+  if (startDate) return formatSingle(startDate);
+  if (endDate) return formatSingle(endDate);
+  return 'N/A';
+};
+
+const formatDurationDisplay = (duration, startDate, endDate) => {
+  if (startDate && endDate) {
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e >= s) {
+      const diffDays = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+      if (diffDays <= 0) return 'N/A';
+      if (diffDays === 1) return '1 Day';
+      if (diffDays < 7) return `${diffDays} Days`;
+      const weeks = Math.round(diffDays / 7);
+      if (diffDays < 30) return `${weeks} ${weeks === 1 ? 'Week' : 'Weeks'}`;
+      if (diffDays >= 30 && diffDays <= 55) return `${weeks} Weeks`;
+      const months = (diffDays / 30.4375).toFixed(1);
+      return months.endsWith('.0') ? `${parseInt(months, 10)} Months` : `~${months} Months`;
+    }
+  }
+  if (duration && duration !== '—' && duration !== '-' && duration !== 'null' && duration !== 'undefined') {
+    return duration;
+  }
+  return 'N/A';
+};
 
 export default function PMResourceRequestsTab({ user }) {
   const [requests, setRequests] = useState([]);
@@ -15,9 +51,17 @@ export default function PMResourceRequestsTab({ user }) {
   const [pageJumpValue, setPageJumpValue] = useState('');
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
   const [cancellingId, setCancellingId] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const rowsPerPage = 10;
 
-  // Skills state for autocomplete
+  // Skills dynamic database search state
+  const skillCacheRef = useRef({});
+  const debounceTimerRef = useRef(null);
+  const [activeSkillFocus, setActiveSkillFocus] = useState(null); // { index, type: 'primary' | 'secondary' }
+  const [dynamicSuggestions, setDynamicSuggestions] = useState([]);
+  const [isSearchingSkills, setIsSearchingSkills] = useState(false);
+
+  // Initial skills loaded on mount as fallback
   const [allSkills, setAllSkills] = useState([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
 
@@ -40,13 +84,15 @@ export default function PMResourceRequestsTab({ user }) {
     resources: initialResources
   });
 
-  // ✅ Fetch all skills from database on mount, for autocomplete
+  // ✅ Fetch initial skills from database on mount
   useEffect(() => {
     const fetchSkills = async () => {
       setIsLoadingSkills(true);
       try {
         const data = await getSkills();
-        setAllSkills(data || []);
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        setAllSkills(list);
+        skillCacheRef.current[''] = list;
       } catch (error) {
         console.error('Error fetching skills:', error);
         setAllSkills([]);
@@ -76,6 +122,41 @@ export default function PMResourceRequestsTab({ user }) {
     loadData();
   }, [user]);
 
+  // ── Dynamic Skills Search Helper ────────────────────────────────────
+  const searchSkillsDynamic = (query, currentSelected = []) => {
+    const trimmed = (query || '').trim();
+    if (!trimmed) {
+      setDynamicSuggestions([]);
+      setIsSearchingSkills(false);
+      return;
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (skillCacheRef.current[lower]) {
+      const cached = skillCacheRef.current[lower];
+      setDynamicSuggestions(cached.filter(s => !currentSelected.includes(s.skill_name)));
+      return;
+    }
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    setIsSearchingSkills(true);
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const data = await getSkills(trimmed);
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        skillCacheRef.current[lower] = list;
+        setDynamicSuggestions(list.filter(s => !currentSelected.includes(s.skill_name)));
+      } catch (err) {
+        console.error('Error searching skills dynamically:', err);
+      } finally {
+        setIsSearchingSkills(false);
+      }
+    }, 150);
+  };
+
   // ── Skill tag helpers ───────────────────────────────────────────────
   // `type` is 'primary' or 'secondary'. Maps to the resource's
   // primarySkills/primarySkillInput or secondarySkills/secondarySkillInput fields.
@@ -87,6 +168,7 @@ export default function PMResourceRequestsTab({ user }) {
   // ✅ Handle skill input with comma separation
   const handleSkillInputChange = (index, type, value) => {
     const { skillsField, inputField } = fieldNames(type);
+    setActiveSkillFocus({ index, type });
 
     // Check if the last character is a comma
     if (value.endsWith(',')) {
@@ -103,6 +185,7 @@ export default function PMResourceRequestsTab({ user }) {
           updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
+        setDynamicSuggestions([]);
         return;
       }
     }
@@ -112,6 +195,9 @@ export default function PMResourceRequestsTab({ user }) {
       updated[index] = { ...updated[index], [inputField]: value };
       return { ...prev, resources: updated };
     });
+
+    const currentSelected = formData.resources[index]?.[skillsField] || [];
+    searchSkillsDynamic(value, currentSelected);
   };
 
   // ✅ Handle Enter key to add skill
@@ -133,6 +219,7 @@ export default function PMResourceRequestsTab({ user }) {
           updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
+        setDynamicSuggestions([]);
       }
     }
   };
@@ -153,6 +240,7 @@ export default function PMResourceRequestsTab({ user }) {
       updated[index][inputField] = '';
       return { ...prev, resources: updated };
     });
+    setDynamicSuggestions([]);
   };
 
   // ✅ Remove a skill from the selected list
@@ -199,7 +287,6 @@ export default function PMResourceRequestsTab({ user }) {
   };
 
   const handleRemoveResource = (index) => {
-    if (formData.resources.length <= 1) return;
     setFormData(prev => ({
       ...prev,
       resources: prev.resources.filter((_, i) => i !== index)
@@ -228,7 +315,9 @@ export default function PMResourceRequestsTab({ user }) {
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     if (!formData.projectId || !formData.resources.length) return;
+    if (isSubmitting) return;
 
+    setIsSubmitting(true);
     setSubmitError('');
     try {
       // Convert skill arrays to comma-separated strings for backend
@@ -249,6 +338,8 @@ export default function PMResourceRequestsTab({ user }) {
     } catch (err) {
       console.error('Failed to create resource request:', err);
       setSubmitError(err.message || 'Failed to create resource request');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -557,8 +648,8 @@ export default function PMResourceRequestsTab({ user }) {
                           )}
                         </div>
                       </td>
-                      <td style={styles.td}>{req.duration || '—'}</td>
-                      <td style={styles.td}>{req.startDate} to {req.endDate}</td>
+                      <td style={styles.td}>{formatDurationDisplay(req.duration, req.startDate, req.endDate)}</td>
+                      <td style={styles.td}>{formatDateRange(req.startDate, req.endDate)}</td>
                       <td style={{ ...styles.td, fontWeight: '600' }}>{req.quantity}</td>
                       <td style={styles.td}>
                         <span style={{
@@ -708,17 +799,11 @@ export default function PMResourceRequestsTab({ user }) {
                 </div>
 
                 {formData.resources.map((res, index) => {
-                  const primarySuggestions = allSkills.filter(skill =>
-                    skill.skill_name.toLowerCase().includes((res.primarySkillInput || '').toLowerCase()) &&
-                    !res.primarySkills.includes(skill.skill_name)
-                  ).slice(0, 10);
-                  const showPrimarySuggestions = res.primarySkillInput && res.primarySkillInput.length > 0 && primarySuggestions.length > 0;
+                  const isPrimaryActive = activeSkillFocus?.index === index && activeSkillFocus?.type === 'primary';
+                  const showPrimarySuggestions = isPrimaryActive && (res.primarySkillInput || '').trim().length > 0;
 
-                  const secondarySuggestions = allSkills.filter(skill =>
-                    skill.skill_name.toLowerCase().includes((res.secondarySkillInput || '').toLowerCase()) &&
-                    !res.secondarySkills.includes(skill.skill_name)
-                  ).slice(0, 10);
-                  const showSecondarySuggestions = res.secondarySkillInput && res.secondarySkillInput.length > 0 && secondarySuggestions.length > 0;
+                  const isSecondaryActive = activeSkillFocus?.index === index && activeSkillFocus?.type === 'secondary';
+                  const showSecondarySuggestions = isSecondaryActive && (res.secondarySkillInput || '').trim().length > 0;
 
                   return (
                     <div key={index} style={styles.resourceCard}>
@@ -756,7 +841,7 @@ export default function PMResourceRequestsTab({ user }) {
                         </div>
                       </div>
 
-                      {/* ✅ Primary Skills — required, tag input with autocomplete */}
+                      {/* ✅ Primary Skills — required, tag input with dynamic database autocomplete */}
                       <div style={styles.formGroup}>
                         <label style={styles.formLabel}>Primary Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
 
@@ -783,6 +868,18 @@ export default function PMResourceRequestsTab({ user }) {
                             value={res.primarySkillInput || ''}
                             onChange={(e) => handleSkillInputChange(index, 'primary', e.target.value)}
                             onKeyDown={(e) => handleSkillKeyDown(index, 'primary', e)}
+                            onFocus={() => {
+                              setActiveSkillFocus({ index, type: 'primary' });
+                              const val = res.primarySkillInput || '';
+                              if (val.trim()) {
+                                searchSkillsDynamic(val, res.primarySkills);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveSkillFocus(prev => (prev?.index === index && prev?.type === 'primary' ? null : prev));
+                              }, 200);
+                            }}
                             style={styles.modalInput}
                             placeholder="Type skill and press comma or Enter..."
                             required={res.primarySkills.length === 0}
@@ -790,25 +887,35 @@ export default function PMResourceRequestsTab({ user }) {
 
                           {showPrimarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {primarySuggestions.map((skill) => (
+                              {isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                  Searching database skills...
+                                </div>
+                              )}
+                              {!isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-muted)', fontStyle: 'italic', cursor: 'default' }}>
+                                  No database skills found (press comma or Enter to add)
+                                </div>
+                              )}
+                              {dynamicSuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, 'primary', skill.skill_name)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handleSelectSkill(index, 'primary', skill.skill_name);
+                                  }}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
                                 </div>
                               ))}
-                              {isLoadingSkills && (
-                                <div style={styles.suggestionItem}>Loading skills...</div>
-                              )}
                             </div>
                           )}
                         </div>
                         <span style={styles.inputHelp}>Must-have skills. Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add.</span>
                       </div>
 
-                      {/* ✅ Secondary Skills — optional, tag input with autocomplete */}
+                      {/* ✅ Secondary Skills — optional, tag input with dynamic database autocomplete */}
                       <div style={styles.formGroup}>
                         <label style={styles.formLabel}>Secondary Skills</label>
 
@@ -835,24 +942,46 @@ export default function PMResourceRequestsTab({ user }) {
                             value={res.secondarySkillInput || ''}
                             onChange={(e) => handleSkillInputChange(index, 'secondary', e.target.value)}
                             onKeyDown={(e) => handleSkillKeyDown(index, 'secondary', e)}
+                            onFocus={() => {
+                              setActiveSkillFocus({ index, type: 'secondary' });
+                              const val = res.secondarySkillInput || '';
+                              if (val.trim()) {
+                                searchSkillsDynamic(val, res.secondarySkills);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveSkillFocus(prev => (prev?.index === index && prev?.type === 'secondary' ? null : prev));
+                              }, 200);
+                            }}
                             style={styles.modalInput}
                             placeholder="Type skill and press comma or Enter..."
                           />
 
                           {showSecondarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {secondarySuggestions.map((skill) => (
+                              {isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                  Searching database skills...
+                                </div>
+                              )}
+                              {!isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-muted)', fontStyle: 'italic', cursor: 'default' }}>
+                                  No database skills found (press comma or Enter to add)
+                                </div>
+                              )}
+                              {dynamicSuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, 'secondary', skill.skill_name)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handleSelectSkill(index, 'secondary', skill.skill_name);
+                                  }}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
                                 </div>
                               ))}
-                              {isLoadingSkills && (
-                                <div style={styles.suggestionItem}>Loading skills...</div>
-                              )}
                             </div>
                           )}
                         </div>
@@ -901,8 +1030,48 @@ export default function PMResourceRequestsTab({ user }) {
               </div>
 
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Submit Request</button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  disabled={isSubmitting}
+                  style={{
+                    ...styles.cancelBtn,
+                    opacity: isSubmitting ? 0.6 : 1,
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  style={{
+                    ...styles.saveBtn,
+                    opacity: isSubmitting ? 0.8 : 1,
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span style={{
+                        width: '14px',
+                        height: '14px',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: '#ffffff',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite',
+                      }} />
+                      Submitting Request...
+                    </>
+                  ) : (
+                    'Submit Request'
+                  )}
+                </button>
               </div>
             </form>
           </div>
