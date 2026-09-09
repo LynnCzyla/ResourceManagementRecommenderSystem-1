@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { supabase } from '../../lib/supabaseClient';
+import { API_BASE_URL } from '../../config/api';
 
 const RATING_LABELS = {
   rating: 'Overall Rating',
@@ -64,7 +65,7 @@ export default function EmployeeFeedbackTab({ user }) {
     setError('');
     try {
       const authHeader = await getAuthHeader();
-      const res = await axios.get('http://localhost:5000/api/employee/feedback', { headers: authHeader });
+      const res = await axios.get(`${API_BASE_URL}/api/employee/feedback`, { headers: authHeader });
       if (res.data.success) {
         setSummary(res.data.data.summary);
         setFeedback(res.data.data.feedback || []);

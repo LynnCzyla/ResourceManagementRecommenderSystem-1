@@ -10,6 +10,7 @@ import UserManagementTab from './UserManagementTab';
 import LogsTab from './LogsTab'; // ✅ Keep this - Admins see their branch logs
 import ProfileSettings from '../ProfileSettings';
 import DepartmentsTab from './DepartmentsTab';
+import { API_BASE_URL } from '../../config/api';
 
 const BACKEND_RETRY_DELAY_MS = 5 * 60 * 1000;
 
@@ -71,7 +72,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
 
     const fetchNotifications = async () => {
       try {
-        const res = await fetch(`http://localhost:5000/api/notifications?userId=${user.id}`);
+        const res = await fetch(`${API_BASE_URL}/api/notifications?userId=${user.id}`);
         const result = await res.json();
         if (result.success) {
           setNotifications(result.data);
@@ -125,7 +126,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
   const markAllRead = async () => {
     if (Date.now() < backendUnavailableUntilRef.current) return;
     try {
-      await fetch('http://localhost:5000/api/notifications/mark-all-read', {
+      await fetch(`${API_BASE_URL}/api/notifications/mark-all-read`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id }),
@@ -140,7 +141,7 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme }) {
     e.stopPropagation();
     if (Date.now() < backendUnavailableUntilRef.current) return;
     try {
-      await fetch(`http://localhost:5000/api/notifications/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE_URL}/api/notifications/${id}`, { method: 'DELETE' });
       setNotifications(prev => prev.filter(n => n.id !== id));
     } catch (err) {
       console.error('Failed to delete notification:', err);

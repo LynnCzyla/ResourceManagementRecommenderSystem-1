@@ -1,6 +1,7 @@
 // D:\ResourceManagementRecommenderSystem\main\src\frontend\HumanResource\Hrclient.js
 
 import axios from 'axios';
+import { API_BASE_URL } from '../../config/api';
 
 const TOKEN_KEYS = ['token', 'authToken', 'accessToken', 'access_token'];
 const USER_KEY = 'user';
@@ -36,7 +37,7 @@ function clearSessionAndRedirect() {
 }
 
 const hrClient = axios.create({
-  baseURL: 'http://localhost:5000/api/hr',
+  baseURL: `${API_BASE_URL}/api/hr`,
 });
 
 hrClient.interceptors.request.use((config) => {

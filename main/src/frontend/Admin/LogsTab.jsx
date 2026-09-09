@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config/api';
 
 export default function LogsTab() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,7 +28,7 @@ export default function LogsTab() {
       try {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        const res = await fetch('http://localhost:5000/api/admin/audit-logs/filters', { headers });
+        const res = await fetch(`${API_BASE_URL}/api/admin/audit-logs/filters`, { headers });
         const json = await res.json();
         if (json.success) {
           setCategoriesList(json.data.categories || []);
@@ -63,7 +64,7 @@ export default function LogsTab() {
         if (startDate) params.append('startDate', startDate);
         if (endDate) params.append('endDate', endDate);
 
-        const res = await fetch(`http://localhost:5000/api/admin/audit-logs?${params.toString()}`, { headers });
+        const res = await fetch(`${API_BASE_URL}/api/admin/audit-logs?${params.toString()}`, { headers });
         const json = await res.json();
 
         if (isMounted) {
@@ -113,7 +114,7 @@ export default function LogsTab() {
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
 
-      const res = await fetch(`http://localhost:5000/api/admin/audit-logs/export?${params.toString()}`, { headers });
+      const res = await fetch(`${API_BASE_URL}/api/admin/audit-logs/export?${params.toString()}`, { headers });
       if (!res.ok) throw new Error('Export failed');
 
       const blob = await res.blob();

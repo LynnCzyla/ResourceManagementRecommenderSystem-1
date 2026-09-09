@@ -1,6 +1,7 @@
 // src/context/SessionContext.jsx
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { API_BASE_URL } from '../config/api';
 
 const SessionContext = createContext();
 
@@ -23,7 +24,7 @@ export const SessionProvider = ({ children }) => {
   useEffect(() => {
     const fetchSessionTimeout = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/settings/system-settings');
+        const response = await fetch(`${API_BASE_URL}/api/settings/system-settings`);
         const result = await response.json();
         
         if (result.success && result.data.sessionTimeout) {

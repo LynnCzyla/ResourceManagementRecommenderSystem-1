@@ -1,10 +1,11 @@
 // main/src/frontend/ResourceManager/Rmapi.js
 import { supabase } from '../../lib/supabaseClient';
+import { API_BASE_URL } from '../../config/api';
 
 // Use consistent API base URL
 const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/rm`
-  : 'http://localhost:5000/api/rm';
+  : `${API_BASE_URL}/api/rm`;
 
 // Debug logging
 console.log('🔧 RM API Base URL:', API_BASE);
@@ -42,7 +43,7 @@ export const fetchEmployeeDetails = async (employeeId) => {
     const token = localStorage.getItem('token');
     console.log(`🔍 Fetching details for employee: ${employeeId}`);
     
-    const response = await fetch(`http://localhost:5000/api/rm/employees/${employeeId}/details`, {
+    const response = await fetch(`${API_BASE_URL}/api/rm/employees/${employeeId}/details`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -145,6 +146,18 @@ export async function fetchProjects() {
     return handle(res);
   } catch (error) {
     console.error('❌ Projects fetch error:', error);
+    throw error;
+  }
+}
+
+export async function fetchProjectHistoryDetails(projectId) {
+  console.log(`📋 Fetching project history details for ${projectId}...`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/projects/${projectId}/history-details`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Project history details fetch error:', error);
     throw error;
   }
 }

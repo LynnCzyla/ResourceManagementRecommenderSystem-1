@@ -9,6 +9,7 @@ import HRInterviewsTab from './HRInterviewsTab';
 import HRHiredEmployeesTab from './HRHiredEmployeesTab';
 import HRResourceRequestsTab from './HRResourceRequestsTab';
 import ProfileSettings from '../ProfileSettings';
+import { API_BASE_URL } from '../../config/api';
 
 function PHClock({ user }) {
   const [phTime, setPhTime] = useState('');
@@ -68,7 +69,7 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
   const fetchNotifications = async () => {
     if (!user?.id) return;
     try {
-      const response = await axios.get(`http://localhost:5000/api/notifications?userId=${user.id}`);
+      const response = await axios.get(`${API_BASE_URL}/api/notifications?userId=${user.id}`);
       if (response.data.success) {
         setNotifications(response.data.data || []);
       }
@@ -121,7 +122,7 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
   const markAllRead = async () => {
     if (!user?.id) return;
     try {
-      const response = await axios.patch('http://localhost:5000/api/notifications/mark-all-read', { userId: user.id });
+      const response = await axios.patch(`${API_BASE_URL}/api/notifications/mark-all-read`, { userId: user.id });
       if (response.data.success) {
         setNotifications(notifications.map(n => ({ ...n, read: true })));
       }
@@ -133,7 +134,7 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
   const deleteNotification = async (id, e) => {
     e.stopPropagation();
     try {
-      const response = await axios.delete(`http://localhost:5000/api/notifications/${id}`);
+      const response = await axios.delete(`${API_BASE_URL}/api/notifications/${id}`);
       if (response.data.success) {
         setNotifications(notifications.filter(n => n.id !== id));
       }

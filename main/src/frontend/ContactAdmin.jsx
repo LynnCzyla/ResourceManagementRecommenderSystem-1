@@ -1,6 +1,7 @@
 // frontend/ContactAdmin.jsx - Updated with branch selection and new API path
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config/api';
 
 export default function ContactAdmin({ isOpen, onClose }) {
   const [firstName, setFirstName] = useState('');
@@ -21,7 +22,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
     const fetchBranches = async () => {
       try {
         // ✅ Using the new public path
-        const response = await fetch('http://localhost:5000/api/public/admin/branches');
+        const response = await fetch(`${API_BASE_URL}/api/public/admin/branches`);
         const result = await response.json();
         if (result.success) {
           setBranches(result.data || []);
@@ -83,7 +84,7 @@ export default function ContactAdmin({ isOpen, onClose }) {
       console.log('📩 Sending contact admin request:', { firstName, middleName, lastName, email, purpose, phone, branchId });
   
       // ✅ Using the new public path
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/public/admin/contact-admin`, {
+      const response = await fetch(`${API_BASE_URL}/api/public/admin/contact-admin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

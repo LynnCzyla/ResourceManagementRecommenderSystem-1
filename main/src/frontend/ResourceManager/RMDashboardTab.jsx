@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchDashboard } from './Rmapi';
 import RMAvatar from './RMAvatar';
+import { API_BASE_URL } from '../../config/api';
 
 const BAR_COLORS = [
   'var(--color-primary)',
@@ -94,7 +95,7 @@ export default function RMDashboardTab() {
         return;
       }
   
-      const response = await fetch('http://localhost:5000/api/rm/reports/utilization', {
+      const response = await fetch(`${API_BASE_URL}/api/rm/reports/utilization`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -338,7 +339,7 @@ export default function RMDashboardTab() {
                 <tr>
                   <th style={styles.th}>Employee</th>
                   <th style={styles.th}>Role/Position</th>
-                  <th style={styles.th}>Task</th>
+                  <th style={styles.th}>Project</th>
                   <th style={styles.th}>Workload Status</th>
                 </tr>
               </thead>
@@ -357,9 +358,10 @@ export default function RMDashboardTab() {
                       emp.workloadStatus === 'Available' ? 'var(--color-primary-light)' :
                       emp.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' :
                       'rgba(239, 68, 68, 0.1)';
-                    const taskAssigned = emp.taskStatus === 'Assigned';
-                    const taskColor = taskAssigned ? 'var(--color-success)' : 'var(--color-text-muted)';
-                    const taskBg = taskAssigned ? 'var(--color-primary-light)' : 'rgba(100, 116, 139, 0.12)';
+                    const hasProject = emp.projectName && emp.projectName !== 'Unassigned';
+                    const projectDisplayName = hasProject ? 'Assigned' : 'Unassigned';
+                    const projectColor = hasProject ? 'var(--color-primary)' : 'var(--color-text-muted)';
+                    const projectBg = hasProject ? 'var(--color-primary-light, rgba(59, 130, 246, 0.12))' : 'rgba(100, 116, 139, 0.12)';
                     const roleLabel = emp.role || 'Employee';
                     return (
                       <tr key={emp.id} style={styles.tr}>
@@ -376,8 +378,18 @@ export default function RMDashboardTab() {
                           <span style={styles.roleBadge}>{roleLabel}</span>
                         </td>
                         <td style={styles.td}>
-                          <span style={{ ...styles.statusBadge, color: taskColor, backgroundColor: taskBg }}>
-                            {emp.taskStatus}
+                          <span
+                            style={{
+                              ...styles.statusBadge,
+                              color: projectColor,
+                              backgroundColor: projectBg,
+                              fontWeight: '600',
+                              display: 'inline-block',
+                              verticalAlign: 'middle',
+                            }}
+                            title={hasProject ? `Assigned: ${emp.projectName}` : 'Unassigned'}
+                          >
+                            {projectDisplayName}
                           </span>
                         </td>
                         <td style={styles.td}>
@@ -461,7 +473,7 @@ export default function RMDashboardTab() {
                 </div>
                 
                 <div style={styles.chartWrapper}>
-                  <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} width="100%" height="auto" style={{ display: 'block' }}>
+                  <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} width="100%" height={svgHeight} style={{ display: 'block', width: '100%', height: 'auto' }}>
                     {/* Horizontal gridlines */}
                     {[0, 0.25, 0.5, 0.75, 1.0].map((ratio, index) => {
                       const val = yMin + ratio * (yMax - yMin);

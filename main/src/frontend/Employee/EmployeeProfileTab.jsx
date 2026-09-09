@@ -3,8 +3,9 @@ import axios from 'axios';
 import Swal from 'sweetalert2';
 import { supabase } from '../../lib/supabaseClient';
 import SkillFeedbackModal from './SkillFeedbackModal';
+import { API_BASE_URL } from '../../config/api';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = `${API_BASE_URL}/api`;
 
 export default function EmployeeProfileTab() {
   // Auth states

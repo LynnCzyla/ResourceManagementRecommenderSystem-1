@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 //
 // Thin fetch wrapper around the backend's Project Manager API
 // (backend/routes/ProjectManager/*) plus the shared notifications
@@ -12,8 +13,8 @@
 // 5. Request timeout
 // 6. Cache invalidation after mutations
 
-const PM_BASE = 'http://localhost:5000/api/pm';
-const NOTIF_BASE = 'http://localhost:5000/api/notifications';
+const PM_BASE = `${API_BASE_URL}/api/pm`;
+const NOTIF_BASE = `${API_BASE_URL}/api/notifications`;
 
 // ── Auth Helper ──────────────────────────────────────────────────────────
 
@@ -207,7 +208,7 @@ export function clearCacheForEndpoints(endpoints) {
 export function invalidateCache() {
   clearAllCache();
   // Optionally call the backend cache clear endpoint
-  fetch('http://localhost:5000/api/pm/employees/cache/clear', {
+  fetch(`${API_BASE_URL}/api/pm/employees/cache/clear`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   }).catch(() => {
@@ -257,6 +258,10 @@ export function getProject(id, signal) {
   return pm(`/projects/${id}`, { signal });
 }
 
+export function getProjectHistoryDetails(id, signal) {
+  return pm(`/projects/${id}/history-details`, { signal, skipCache: true });
+}
+
 export function createProject(payload) {
   clearCacheForEndpoints(['/projects', '/dashboard']);
   return pm('/projects', { 
@@ -275,11 +280,11 @@ export function updateProject(id, payload) {
   });
 }
 
-export function updateProjectStatus(id, status) {
-  clearCacheForEndpoints(['/projects', '/dashboard']);
+export function updateProjectStatus(id, status, restoreMode) {
+  clearCacheForEndpoints(['/projects', '/dashboard', '/employees', '/tasks']);
   return pm(`/projects/${id}/status`, { 
     method: 'PATCH', 
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, restoreMode }),
     skipCache: true
   });
 }
@@ -334,10 +339,14 @@ export function updateResourceRequestStatus(id, status) {
   });
 }
 
+export function cancelResourceRequest(id) {
+  return updateResourceRequestStatus(id, 'Canceled');
+}
+
 export function deleteResourceRequest(id) {
   clearCacheForEndpoints(['/resource-requests', '/dashboard']);
   return pm(`/resource-requests/${id}`, { 
-    method: 'DELETE',
+    method: 'DELETE', 
     skipCache: true
   });
 }
@@ -385,6 +394,12 @@ export function deleteTask(id) {
     method: 'DELETE',
     skipCache: true
   });
+}
+
+// ── Weekly Reports ───────────────────────────────────────────────────────
+
+export function getWeeklyReports(signal) {
+  return pm('/reports', { signal, skipCache: true });
 }
 
 // ── Notifications ───────────────────────────────────────────────────────

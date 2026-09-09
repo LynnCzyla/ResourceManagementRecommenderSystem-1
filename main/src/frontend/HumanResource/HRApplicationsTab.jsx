@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
+import { API_BASE_URL } from '../../config/api';
 
 
 const mapApplication = (row) => {
@@ -432,7 +433,7 @@ export default function HRApplicationsTab() {
         const getResumeUrl = (resumePath) => {
           if (!resumePath) return '';
           if (resumePath.startsWith('http')) return resumePath;
-          return `http://localhost:5000/${resumePath}`;
+          return `${API_BASE_URL}/${resumePath}`;
         };
         const resumeUrl = getResumeUrl(selectedApplication.resume);
         const resumeFileName = selectedApplication.resume ? (selectedApplication.resume.includes('/') ? selectedApplication.resume.split('/').pop() : selectedApplication.resume) : '';

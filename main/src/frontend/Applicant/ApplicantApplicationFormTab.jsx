@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../../config/api';
 
 export default function ApplicantApplicationFormTab() {
   const [selectedPosition, setSelectedPosition] = useState('');
@@ -43,7 +44,7 @@ export default function ApplicantApplicationFormTab() {
   // ✅ Fetch system settings from the new endpoint
   const fetchSystemSettings = async () => {
     try {
-      const API_URL = 'http://localhost:5000/api/applicant/system-settings';
+      const API_URL = `${API_BASE_URL}/api/applicant/system-settings`;
       console.log('📡 Fetching system settings from:', API_URL);
       
       const res = await fetch(API_URL);

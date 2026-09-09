@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
+import { API_BASE_URL } from '../../config/api';
 
 // Maps a job_postings row (with joined departments/positions) coming back from the
 // API into the flat shape this component's UI was built around.
@@ -130,7 +131,7 @@ export default function HRJobPostingsTab() {
     } catch (err) {
       console.error('Failed to load departments', err);
       try {
-        const fallbackRes = await fetch('http://localhost:5000/api/hr/departments');
+        const fallbackRes = await fetch(`${API_BASE_URL}/api/hr/departments`);
         const fallbackData = await fallbackRes.json();
         if (fallbackData.success) setDepartments(fallbackData.data || []);
       } catch (fallbackErr) {

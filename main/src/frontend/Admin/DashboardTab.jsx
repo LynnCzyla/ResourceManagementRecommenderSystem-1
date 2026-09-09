@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config/api';
 
 export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   const navigateTo = (tabName, expandMenu) => {
@@ -51,7 +52,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const res = await fetch(`http://localhost:5000/api/admin/dashboard/user-activity?days=${days}`, { headers });
+      const res = await fetch(`${API_BASE_URL}/api/admin/dashboard/user-activity?days=${days}`, { headers });
       const json = await res.json();
 
       if (json.success) {
@@ -99,7 +100,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        const res = await fetch('http://localhost:5000/api/admin/dashboard/stats', { headers });
+        const res = await fetch(`${API_BASE_URL}/api/admin/dashboard/stats`, { headers });
         const json = await res.json();
 
         if (json.success) {
@@ -131,7 +132,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        const res = await fetch('http://localhost:5000/api/admin/dashboard/activity?limit=10', { headers });
+        const res = await fetch(`${API_BASE_URL}/api/admin/dashboard/activity?limit=10`, { headers });
         const json = await res.json();
 
         if (json.success) {
@@ -147,7 +148,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        const res = await fetch('http://localhost:5000/api/admin/departments', { headers });
+        const res = await fetch(`${API_BASE_URL}/api/admin/departments`, { headers });
         const json = await res.json();
 
         if (json.success) {
@@ -178,7 +179,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const res = await fetch(`http://localhost:5000/api/admin/positions?dept_id=${deptId}`, { headers });
+      const res = await fetch(`${API_BASE_URL}/api/admin/positions?dept_id=${deptId}`, { headers });
       const json = await res.json();
 
       if (json.success) {

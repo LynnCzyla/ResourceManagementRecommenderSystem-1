@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { supabase } from '../../lib/supabaseClient';
+import { API_BASE_URL } from '../../config/api';
 
 // Monday of the current week, in YYYY-MM-DD.
 function getWeekStart() {
@@ -84,12 +85,12 @@ export default function EmployeeAssignmentsTab({ user }) {
     try {
       const authHeader = await getAuthHeader();
 
-      const projRes = await axios.get('http://localhost:5000/api/employee/assignments', { headers: authHeader });
+      const projRes = await axios.get(`${API_BASE_URL}/api/employee/assignments`, { headers: authHeader });
       if (projRes.data.success) {
         setProjects(projRes.data.data || []);
       }
 
-      const tasksRes = await axios.get('http://localhost:5000/api/employee/tasks', { headers: authHeader });
+      const tasksRes = await axios.get(`${API_BASE_URL}/api/employee/tasks`, { headers: authHeader });
       if (tasksRes.data.success) {
         setTasks(tasksRes.data.data || []);
       }
@@ -105,7 +106,7 @@ export default function EmployeeAssignmentsTab({ user }) {
     setHistoryError('');
     try {
       const authHeader = await getAuthHeader();
-      const res = await axios.get('http://localhost:5000/api/employee/history', { headers: authHeader });
+      const res = await axios.get(`${API_BASE_URL}/api/employee/history`, { headers: authHeader });
       if (res.data.success) {
         setHistoryTasks(res.data.data.completedTasks || []);
         setHistoryProjects(res.data.data.completedProjects || []);
@@ -159,7 +160,7 @@ export default function EmployeeAssignmentsTab({ user }) {
   const handleUpdateStatus = async (taskId, newStatus) => {
     try {
       const authHeader = await getAuthHeader();
-      const response = await axios.put(`http://localhost:5000/api/employee/tasks/${taskId}`, { status: newStatus }, { headers: authHeader });
+      const response = await axios.put(`${API_BASE_URL}/api/employee/tasks/${taskId}`, { status: newStatus }, { headers: authHeader });
       if (response.data.success) {
         setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
         // Moving a task to Completed sends it straight to the History sub-tab,
@@ -213,7 +214,7 @@ export default function EmployeeAssignmentsTab({ user }) {
     setSubmitting(true);
     try {
       const authHeader = await getAuthHeader();
-      const response = await axios.post(`http://localhost:5000/api/employee/tasks/${taskId}/progress`, {
+      const response = await axios.post(`${API_BASE_URL}/api/employee/tasks/${taskId}/progress`, {
         startDate: logStartDate,
         endDate: logEndDate,
         percentage: logPercentage,

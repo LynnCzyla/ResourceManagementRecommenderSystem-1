@@ -1,6 +1,7 @@
 // src/components/ProtectedRoute.js
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { API_BASE_URL } from '../config/api';
 
 export default function ProtectedRoute({ children }) {
   const [loading, setLoading] = useState(true);
@@ -16,7 +17,7 @@ export default function ProtectedRoute({ children }) {
           const loginTime = localStorage.getItem('loginTime');
           if (loginTime) {
             // Fetch session timeout from backend
-            const response = await fetch('http://localhost:5000/api/settings/system-settings');
+            const response = await fetch(`${API_BASE_URL}/api/settings/system-settings`);
             const result = await response.json();
             
             if (result.success) {

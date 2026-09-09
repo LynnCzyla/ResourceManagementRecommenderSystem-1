@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../../config/api';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -155,7 +156,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setLoading(true);
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:5000/api/users', { headers });
+      const response = await fetch(`${API_BASE_URL}/api/users`, { headers });
       const data = await response.json();
 
       if (data.success) {
@@ -192,7 +193,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setLoadingLocked(true);
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:5000/api/admin/locked-users', { headers });
+      const response = await fetch(`${API_BASE_URL}/api/admin/locked-users`, { headers });
       const data = await response.json();
 
       if (data.success) {
@@ -230,7 +231,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setLoadingRequests(true);
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:5000/api/admin/contact-requests', { headers });
+      const response = await fetch(`${API_BASE_URL}/api/admin/contact-requests`, { headers });
       const data = await response.json();
 
       if (data.success) {
@@ -262,7 +263,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setLoadingHires(true);
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:5000/api/hr/hired-employees', { headers });
+      const response = await fetch(`${API_BASE_URL}/api/hr/hired-employees`, { headers });
       const data = await response.json();
 
       if (data.success) {
@@ -282,8 +283,8 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       const headers = getAuthHeaders();
       const [deptRes, posRes] = await Promise.all([
-        fetch('http://localhost:5000/api/admin/departments', { headers }),
-        fetch('http://localhost:5000/api/admin/positions', { headers }),
+        fetch(`${API_BASE_URL}/api/admin/departments`, { headers }),
+        fetch(`${API_BASE_URL}/api/admin/positions`, { headers }),
       ]);
       const deptData = await deptRes.json();
       const posData = await posRes.json();
@@ -306,7 +307,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
 
     try {
       const headers = getAuthHeaders();
-      await fetch(`http://localhost:5000/api/admin/contact-requests/${id}`, {
+      await fetch(`${API_BASE_URL}/api/admin/contact-requests/${id}`, {
         method: 'DELETE',
         headers,
       });
@@ -326,7 +327,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const user = userString ? JSON.parse(userString) : null;
       const adminId = user?.id || null;
 
-      await fetch(`http://localhost:5000/api/admin/contact-requests/${id}/status`, {
+      await fetch(`${API_BASE_URL}/api/admin/contact-requests/${id}/status`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({
@@ -357,7 +358,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setUnlockingId(userId);
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:5000/api/admin/unlock/unlock-user', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/unlock/unlock-user`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ userId }),
@@ -391,7 +392,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     try {
       setLoading(true);
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:5000/api/admin/lock-user', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/lock-user`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ userId }),
@@ -432,7 +433,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const headers = getAuthHeaders();
       
       const newStatus = isActive ? 'Deactivated' : 'Active';
-      const response = await fetch(`http://localhost:5000/api/users/${userId}/status`, {
+      const response = await fetch(`${API_BASE_URL}/api/users/${userId}/status`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ status: newStatus }),
@@ -477,13 +478,13 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       
       let response;
       if (isActive) {
-        response = await fetch('http://localhost:5000/api/admin/lock-user', {
+        response = await fetch(`${API_BASE_URL}/api/admin/lock-user`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ userId }),
         });
       } else {
-        response = await fetch('http://localhost:5000/api/admin/unlock/unlock-user', {
+        response = await fetch(`${API_BASE_URL}/api/admin/unlock/unlock-user`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ userId }),
@@ -580,7 +581,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       
-      const response = await fetch('http://localhost:5000/api/users/create', {
+      const response = await fetch(`${API_BASE_URL}/api/users/create`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -668,7 +669,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       
-      const response = await fetch(`http://localhost:5000/api/users/${selectedUser.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/users/${selectedUser.id}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({

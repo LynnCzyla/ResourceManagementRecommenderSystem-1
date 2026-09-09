@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { fetchResourceRequests, createResourceRequest } from './Rmapi';
+import { API_BASE_URL } from '../../config/api';
 
 const emptyForm = {
   requestTitle: '',
@@ -68,7 +69,7 @@ export default function RMResourceRequestFormTab() {
       
       // Fetch departments
       console.log('📋 Fetching departments...');
-      const deptRes = await fetch('http://localhost:5000/api/admin/departments', {
+      const deptRes = await fetch(`${API_BASE_URL}/api/admin/departments`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -93,7 +94,7 @@ export default function RMResourceRequestFormTab() {
 
       // Fetch positions
       console.log('📋 Fetching positions...');
-      const posRes = await fetch('http://localhost:5000/api/admin/positions', {
+      const posRes = await fetch(`${API_BASE_URL}/api/admin/positions`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',

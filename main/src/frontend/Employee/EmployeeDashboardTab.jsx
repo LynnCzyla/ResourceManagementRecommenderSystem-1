@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { supabase } from '../../lib/supabaseClient';
+import { API_BASE_URL } from '../../config/api';
 
 export default function EmployeeDashboardTab({ user }) {
   const [tasks, setTasks] = useState([]);
@@ -27,7 +28,7 @@ export default function EmployeeDashboardTab({ user }) {
         const authHeader = await getAuthHeader();
         
         // 1. Fetch dashboard stats
-        const dashboardRes = await axios.get('http://localhost:5000/api/employee/dashboard', { headers: authHeader });
+        const dashboardRes = await axios.get(`${API_BASE_URL}/api/employee/dashboard`, { headers: authHeader });
         if (dashboardRes.data.success) {
           const d = dashboardRes.data.data;
           setEmployeeInfo(d.employeeInfo);
@@ -39,7 +40,7 @@ export default function EmployeeDashboardTab({ user }) {
         }
 
         // 2. Fetch tasks
-        const tasksRes = await axios.get('http://localhost:5000/api/employee/tasks', { headers: authHeader });
+        const tasksRes = await axios.get(`${API_BASE_URL}/api/employee/tasks`, { headers: authHeader });
         if (tasksRes.data.success) {
           setTasks(tasksRes.data.data || []);
         }

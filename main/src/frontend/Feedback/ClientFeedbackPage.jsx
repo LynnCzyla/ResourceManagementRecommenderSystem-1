@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import weaLogo from '../../assets/WEA_logo_bgremoved.png';
+import { API_BASE_URL } from '../../config/api';
 
-const PUBLIC_BASE = 'http://localhost:5000/api/public';
+const PUBLIC_BASE = `${API_BASE_URL}/api/public`;
 
 const RATING_CATEGORIES = [
   { key: 'rating', label: 'Overall Rating' },
@@ -61,6 +62,7 @@ export default function ClientFeedbackPage() {
 
   const [employeeResponses, setEmployeeResponses] = useState({});
   const [sharedFields, setSharedFields] = useState({
+    projectRating: 0,
     deliverablesFeedback: '',
     projectFeedback: '',
     additionalComments: '',
@@ -128,6 +130,9 @@ export default function ClientFeedbackPage() {
         errors[`${emp.id}.wouldRecommend`] = 'Please select Yes or No';
       }
     }
+    if (!sharedFields.projectRating || sharedFields.projectRating < 1) {
+      errors.projectRating = 'Overall project rating is required';
+    }
     if (!sharedFields.deliverablesFeedback.trim()) {
       errors.deliverablesFeedback = 'Deliverables feedback is required';
     }
@@ -172,6 +177,7 @@ export default function ClientFeedbackPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           responses,
+          projectRating: sharedFields.projectRating,
           deliverablesFeedback: sharedFields.deliverablesFeedback.trim(),
           projectFeedback: sharedFields.projectFeedback.trim(),
           additionalComments: sharedFields.additionalComments.trim(),
@@ -414,6 +420,25 @@ export default function ClientFeedbackPage() {
           <div className="glass-card" style={styles.card}>
             <div style={styles.sectionTitle}>Overall Project Feedback</div>
             <div style={styles.sectionNote}>These questions apply to the project as a whole, not any one person.</div>
+
+            <div style={{ ...styles.formGroup, marginBottom: '22px' }}>
+              <label style={styles.label}>Overall Project Rating *</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '6px' }}>
+                <StarRating
+                  value={sharedFields.projectRating}
+                  onChange={(val) => updateSharedField('projectRating', val)}
+                  size={28}
+                />
+                {sharedFields.projectRating > 0 && (
+                  <span style={{ fontSize: '15px', fontWeight: '700', color: '#eab308' }}>
+                    {sharedFields.projectRating} / 5 Stars
+                  </span>
+                )}
+              </div>
+              {fieldErrors.projectRating && (
+                <span style={{ ...styles.fieldError, marginTop: '4px' }}>{fieldErrors.projectRating}</span>
+              )}
+            </div>
 
             <div style={styles.formGroup}>
               <label style={styles.label}>Deliverables Feedback *</label>

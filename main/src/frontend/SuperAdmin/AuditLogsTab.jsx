@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config/api';
 
-const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/superadmin`;
+const API_BASE = `${API_BASE_URL}/api/superadmin`;
 const ROWS_PER_PAGE = 10;
 
 export default function SuperAdminAuditLogsTab() {

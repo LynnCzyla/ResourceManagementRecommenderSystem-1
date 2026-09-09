@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../../config/api';
 
 // ✅ Use the correct public applicant API endpoint
-const API = 'http://localhost:5000/api/applicant';
-const SUPER_ADMIN_API = 'http://localhost:5000/api/superadmin';
+const API = `${API_BASE_URL}/api/applicant`;
+const SUPER_ADMIN_API = `${API_BASE_URL}/api/superadmin`;
 
 export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [jobPostings, setJobPostings] = useState([]);
@@ -43,7 +44,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   // ✅ Fetch system settings for file size limit
   const fetchSystemSettings = async () => {
     try {
-      const API_URL = 'http://localhost:5000/api/applicant/system-settings';
+      const API_URL = `${API_BASE_URL}/api/applicant/system-settings`;
       console.log('📡 Fetching system settings from:', API_URL);
       
       const res = await fetch(API_URL);

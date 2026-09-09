@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../config/api';
 
-const API = 'http://localhost:5000/api/admin';
+const API = `${API_BASE_URL}/api/admin`;
 
 export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate }) {
   const [activeTab, setActiveTab] = useState('profile');

@@ -5,6 +5,7 @@ import { supabase, getSession } from '../lib/supabaseClient';
 import ForgotPassword from './ForgotPassword';
 import ContactAdmin from './ContactAdmin';
 import ExpiredLinkModal from './ExpiredLinkModal';
+import { API_BASE_URL } from '../config/api';
 
 export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal }) {
   const [email, setEmail] = useState('');
@@ -197,7 +198,7 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
 
     try {
       // Call backend API for login with attempts tracking
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config/api';
 
 export default function SystemSettingsTab() {
   const [ocrThreshold, setOcrThreshold] = useState(75);
@@ -38,7 +39,7 @@ export default function SystemSettingsTab() {
   const fetchSettings = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('http://localhost:5000/api/settings/system-settings');
+      const response = await fetch(`${API_BASE_URL}/api/settings/system-settings`);
       const result = await response.json();
       
       if (result.success) {
@@ -138,7 +139,7 @@ export default function SystemSettingsTab() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:5000/api/settings/system-settings', {
+      const response = await fetch(`${API_BASE_URL}/api/settings/system-settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
