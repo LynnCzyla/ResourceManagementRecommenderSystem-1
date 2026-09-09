@@ -219,6 +219,11 @@ export default function RMRequestsTab() {
   
   useEffect(() => {
     fetchData();
+    const handleUpdate = () => {
+      fetchData();
+    };
+    window.addEventListener('rmDataUpdated', handleUpdate);
+    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
   }, []);
 
   useEffect(() => {
@@ -276,6 +281,7 @@ export default function RMRequestsTab() {
       });
       await fetchData();
       setActiveRequestDetails(null);
+      window.dispatchEvent(new CustomEvent('rmDataUpdated'));
       showSuccessAlert(`Allocated ${candidate.name} to ${request.projectName}`);
     } catch (error) {
       console.error('Error allocating:', error);
