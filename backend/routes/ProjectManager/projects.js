@@ -108,7 +108,13 @@ function transformProject(row, clientFeedback = null) {
 
   const rawDesc = row.project_description || '';
   const isRestored = rawDesc.includes('<!-- RESTORED -->') || rawDesc.includes('[RESTORED]');
-  const cleanDescription = rawDesc.replace(/<!-- RESTORED -->/g, '').replace(/\[RESTORED\]/g, '').trim();
+  const cancelMatch = rawDesc.match(/<!-- CANCELLED_REASON:\s*([\s\S]*?)\s*-->/);
+  const cancellationReason = cancelMatch ? cancelMatch[1].trim() : (row.cancellation_reason || null);
+  const cleanDescription = rawDesc
+    .replace(/<!-- RESTORED -->/g, '')
+    .replace(/\[RESTORED\]/g, '')
+    .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+    .trim();
 
   return {
     id: row.id,
@@ -116,6 +122,7 @@ function transformProject(row, clientFeedback = null) {
     description: cleanDescription,
     rawDescription: rawDesc,
     isRestored,
+    cancellationReason,
     teamSize: row.team_size,
     duration: row.duration_days,
     startDate: row.start_date,
@@ -555,13 +562,26 @@ router.get('/:id/history-details', async (req, res) => {
       ? Math.round((completedTasksCount / totalTasksCount) * 100)
       : 100;
 
+    const rawHistoryDesc = project.project_description || '';
+    const isHistoryRestored = rawHistoryDesc.includes('<!-- RESTORED -->') || rawHistoryDesc.includes('[RESTORED]');
+    const cancelMatch = rawHistoryDesc.match(/<!-- CANCELLED_REASON:\s*([\s\S]*?)\s*-->/);
+    const cancellationReason = cancelMatch ? cancelMatch[1].trim() : (project.cancellation_reason || null);
+    const cleanHistoryDescription = rawHistoryDesc
+      .replace(/<!-- RESTORED -->/g, '')
+      .replace(/\[RESTORED\]/g, '')
+      .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+      .trim();
+
     res.status(200).json({
       success: true,
       data: {
         project: {
           id: project.id,
           name: project.project_name,
-          description: project.project_description,
+          description: cleanHistoryDescription,
+          rawDescription: rawHistoryDesc,
+          isRestored: isHistoryRestored,
+          cancellationReason,
           status: project.status,
           priority: project.priority,
           startDate: project.start_date,
@@ -725,8 +745,8 @@ router.post('/', async (req, res) => {
           quantity_needed: parseInt(resource.quantity, 10) || 1,
           assignment_type: resource.assignment || 'Full-time',
           justification: resource.justification || null,
-          start_date: resource.startDate || null,
-          end_date: resource.endDate || null,
+          start_date: resource.startDate || startDate || null,
+          end_date: resource.endDate || endDate || null,
         })
         .select()
         .single();
@@ -920,7 +940,7 @@ router.put('/:id', async (req, res) => {
 router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, restoreMode = 'with_previous' } = req.body;
+    const { status, restoreMode = 'with_previous', reason } = req.body;
 
     if (!status) {
       return res.status(400).json({ success: false, message: 'Status is required' });
@@ -939,20 +959,31 @@ router.patch('/:id/status', async (req, res) => {
 
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split('T')[0];
-      const reportEmployeeId = req.user?.id || project.created_by || null;
-      const reportEmployeeName = [req.user?.first_name, req.user?.last_name]
-        .filter(Boolean)
-        .join(' ')
-        .trim() || 'Project Manager';
-    const wasCompleted = project.status === 'Completed';
+    const reportEmployeeId = req.user?.id || project.created_by || null;
+    const reportEmployeeName = [req.user?.first_name, req.user?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim() || 'Project Manager';
+    const wasCompleted = project.status === 'Completed' || project.status === 'Cancelled';
     const isRestoring = status === 'Active' && wasCompleted;
+    const isCancelling = status === 'Cancelled';
 
     const updatePayload = { status, updated_at: nowIso };
     if (isRestoring) {
-      const existingDesc = project.project_description || '';
+      const existingDesc = (project.project_description || '')
+        .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+        .trim();
       if (!existingDesc.includes('<!-- RESTORED -->') && !existingDesc.includes('[RESTORED]')) {
         updatePayload.project_description = `${existingDesc} <!-- RESTORED -->`.trim();
+      } else {
+        updatePayload.project_description = existingDesc;
       }
+    } else if (isCancelling) {
+      const existingDesc = (project.project_description || '')
+        .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+        .trim();
+      const reasonText = (reason || '').trim() || 'No reason provided';
+      updatePayload.project_description = `${existingDesc} <!-- CANCELLED_REASON: ${reasonText} -->`.trim();
     }
 
     const { data, error } = await supabase
@@ -1092,6 +1123,47 @@ router.patch('/:id/status', async (req, res) => {
       if (reqErr) {
         console.error('Non-fatal error updating project resource requirements on completion:', reqErr);
       }
+    } else if (status === 'Cancelled') {
+      // 1. Unassign all active employees from this project
+      const { error: assignErr } = await supabase
+        .from('project_assignments')
+        .update({
+          status: 'Cancelled',
+          end_date: todayDate,
+        })
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+
+      if (assignErr) {
+        console.error('Non-fatal error updating project assignments on cancellation:', assignErr);
+      }
+
+      // 2. Mark pending/open/approved/filled resource requirements as Cancelled
+      const { error: reqErr } = await supabase
+        .from('project_resource_requirements')
+        .update({
+          status: 'Cancelled',
+        })
+        .eq('project_id', id)
+        .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+
+      if (reqErr) {
+        console.error('Non-fatal error updating project resource requirements on cancellation:', reqErr);
+      }
+
+      // 3. Mark non-completed tasks as Cancelled
+      const { error: taskErr } = await supabase
+        .from('project_tasks')
+        .update({
+          status: 'Cancelled',
+          updated_at: nowIso,
+        })
+        .eq('project_id', id)
+        .neq('status', 'Completed');
+
+      if (taskErr) {
+        console.error('Non-fatal error updating project tasks on cancellation:', taskErr);
+      }
     } else if (isRestoring) {
       if (restoreMode === 'as_new') {
         // Option B: Restore as New Project
@@ -1179,7 +1251,11 @@ router.patch('/:id/status', async (req, res) => {
       const rmIds = (rmUsers || []).map(u => u.id).filter(rmId => rmId !== req.user?.id);
 
       const notificationsToInsert = [];
-      const statusMsg = `Project "${projName}" status has been changed to ${status}.`;
+      const cancelReasonText = (reason || '').trim();
+      const reasonSuffix = cancelReasonText ? ` (Reason: ${cancelReasonText})` : '';
+      const statusMsg = status === 'Cancelled'
+        ? `Project "${projName}" has been cancelled${reasonSuffix}.`
+        : `Project "${projName}" status has been changed to ${status}.`;
 
       employeeIds.forEach(empId => {
         notificationsToInsert.push({
@@ -1190,7 +1266,9 @@ router.patch('/:id/status', async (req, res) => {
         });
       });
 
-      const rmMsg = `Project "${projName}" status was updated to ${status} by PM ${reportEmployeeName}.`;
+      const rmMsg = status === 'Cancelled'
+        ? `Project "${projName}" was cancelled by PM ${reportEmployeeName}${reasonSuffix}.`
+        : `Project "${projName}" status was updated to ${status} by PM ${reportEmployeeName}.`;
       rmIds.forEach(rmId => {
         if (!employeeIds.includes(rmId)) {
           notificationsToInsert.push({
@@ -1213,7 +1291,9 @@ router.patch('/:id/status', async (req, res) => {
       req,
       action: 'Updated',
       systemCategory: 'Resource Management',
-      logDescription: `Updated project ${id} status to ${status}`,
+      logDescription: status === 'Cancelled'
+        ? `Cancelled project ${id} ("${project.project_name}")${(reason || '').trim() ? ` with reason: ${(reason || '').trim()}` : ''}`
+        : `Updated project ${id} status to ${status}`,
     });
 
     invalidateProjectsCache();
