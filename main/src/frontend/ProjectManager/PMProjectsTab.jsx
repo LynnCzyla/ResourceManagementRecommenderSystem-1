@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getProjects, createProject, updateProject, getSkills, updateProjectStatus, getProjectHistoryDetails } from './pmApi';
 
 // Statuses that count as "done" and belong in the Project History tab.
-const COMPLETED_STATUSES = ['Completed', 'Archived'];
+const COMPLETED_STATUSES = ['Completed', 'Archived', 'Cancelled'];
 
 const calculateDurationDays = (startDate, endDate) => {
   if (!startDate || !endDate) return '';
@@ -16,6 +16,7 @@ const calculateDurationDays = (startDate, endDate) => {
 export default function PMProjectsTab({ user, onNavigate }) {
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -25,7 +26,16 @@ export default function PMProjectsTab({ user, onNavigate }) {
   const [activeTab, setActiveTab] = useState('active');
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
   const [statusError, setStatusError] = useState('');
-  const [completionNotice, setCompletionNotice] = useState(null); // { projectName, projectId }
+  const [completionNotice, setCompletionNotice] = useState(null); // { projectName, projectId, isCancelled, reason }
+
+  // ✅ Cancel Project Modal state
+  const [cancelModal, setCancelModal] = useState({
+    isOpen: false,
+    project: null,
+    reason: '',
+    isSubmitting: false,
+    error: '',
+  });
 
   // ✅ Custom confirm modal (replaces browser window.confirm) for
   // "Mark as Complete" / "Restore Project" actions.
@@ -55,7 +65,24 @@ export default function PMProjectsTab({ user, onNavigate }) {
   const [editError, setEditError] = useState('');
   const [editNotice, setEditNotice] = useState(null);
 
-  // Skills state for autocomplete
+  // Expanded skills per project card
+  const [expandedSkillsMap, setExpandedSkillsMap] = useState({});
+
+  const toggleSkillsExpanded = (projId) => {
+    setExpandedSkillsMap(prev => ({
+      ...prev,
+      [projId]: !prev[projId]
+    }));
+  };
+
+  // Dynamic skills search state
+  const skillCacheRef = useRef({});
+  const debounceTimerRef = useRef(null);
+  const [activeSkillFocus, setActiveSkillFocus] = useState(null); // { index, type: 'primary' | 'secondary' }
+  const [dynamicSuggestions, setDynamicSuggestions] = useState([]);
+  const [isSearchingSkills, setIsSearchingSkills] = useState(false);
+
+  // Initial skills loaded on mount as quick fallback
   const [allSkills, setAllSkills] = useState([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
 
@@ -82,18 +109,17 @@ export default function PMProjectsTab({ user, onNavigate }) {
     resources: initialResources
   });
 
-  // ✅ Fetch all skills from database on mount - using getSkills from pmApi
+  // ✅ Fetch initial skills from database on mount
   useEffect(() => {
     const fetchSkills = async () => {
       setIsLoadingSkills(true);
       try {
         const data = await getSkills();
-        if (data) {
-          setAllSkills(data || []);
-          console.log('✅ Skills loaded:', data.length);
-        }
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        setAllSkills(list);
+        skillCacheRef.current[''] = list;
       } catch (error) {
-        console.error('Error fetching skills:', error);
+        console.error('Error fetching initial skills:', error);
         setAllSkills([]);
       } finally {
         setIsLoadingSkills(false);
@@ -116,6 +142,41 @@ export default function PMProjectsTab({ user, onNavigate }) {
     loadProjects();
   }, [user]);
 
+  // ── Dynamic Skills Search Helper ────────────────────────────────────
+  const searchSkillsDynamic = (query, currentSelected = []) => {
+    const trimmed = (query || '').trim();
+    if (!trimmed) {
+      setDynamicSuggestions([]);
+      setIsSearchingSkills(false);
+      return;
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (skillCacheRef.current[lower]) {
+      const cached = skillCacheRef.current[lower];
+      setDynamicSuggestions(cached.filter(s => !currentSelected.includes(s.skill_name)));
+      return;
+    }
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    setIsSearchingSkills(true);
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const data = await getSkills(trimmed);
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        skillCacheRef.current[lower] = list;
+        setDynamicSuggestions(list.filter(s => !currentSelected.includes(s.skill_name)));
+      } catch (err) {
+        console.error('Error searching skills dynamically:', err);
+      } finally {
+        setIsSearchingSkills(false);
+      }
+    }, 150);
+  };
+
   // ── Skill tag helpers ───────────────────────────────────────────────
   // `type` is 'primary' or 'secondary'. Maps to the resource's
   // primarySkills/primarySkillInput or secondarySkills/secondarySkillInput fields.
@@ -127,6 +188,7 @@ export default function PMProjectsTab({ user, onNavigate }) {
   // ✅ Handle skill input with comma separation
   const handleSkillInputChange = (index, type, value) => {
     const { skillsField, inputField } = fieldNames(type);
+    setActiveSkillFocus({ index, type });
 
     // Check if the last character is a comma
     if (value.endsWith(',')) {
@@ -143,6 +205,7 @@ export default function PMProjectsTab({ user, onNavigate }) {
           updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
+        setDynamicSuggestions([]);
         return;
       }
     }
@@ -153,6 +216,9 @@ export default function PMProjectsTab({ user, onNavigate }) {
       updated[index] = { ...updated[index], [inputField]: value };
       return { ...prev, resources: updated };
     });
+
+    const currentSelected = formData.resources[index]?.[skillsField] || [];
+    searchSkillsDynamic(value, currentSelected);
   };
 
   // ✅ Handle Enter key to add skill
@@ -174,7 +240,12 @@ export default function PMProjectsTab({ user, onNavigate }) {
           updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
+        setDynamicSuggestions([]);
+        setActiveSkillFocus(null);
       }
+    } else if (e.key === 'Escape') {
+      setActiveSkillFocus(null);
+      setDynamicSuggestions([]);
     }
   };
 
@@ -194,6 +265,8 @@ export default function PMProjectsTab({ user, onNavigate }) {
       updated[index][inputField] = '';
       return { ...prev, resources: updated };
     });
+    setDynamicSuggestions([]);
+    setActiveSkillFocus(null);
   };
 
   // ✅ Remove a skill from the selected list
@@ -266,12 +339,17 @@ export default function PMProjectsTab({ user, onNavigate }) {
         justification: ''
       }]
     });
+    setDynamicSuggestions([]);
+    setActiveSkillFocus(null);
   };
 
+  // ✅ Create Project with 1-click protection & loading state
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.description) return;
+    if (isCreatingProject) return;
+    if (!formData.name?.trim() || !formData.description?.trim()) return;
 
+    setIsCreatingProject(true);
     setSubmitError('');
     try {
       // Convert skill arrays to comma-separated strings for backend
@@ -282,8 +360,8 @@ export default function PMProjectsTab({ user, onNavigate }) {
       }));
 
       await createProject({
-        name: formData.name,
-        description: formData.description,
+        name: formData.name.trim(),
+        description: formData.description.trim(),
         teamSize: formData.teamSize,
         duration: formData.duration,
         startDate: formData.startDate || new Date().toISOString().split('T')[0],
@@ -299,6 +377,68 @@ export default function PMProjectsTab({ user, onNavigate }) {
     } catch (err) {
       console.error('Failed to create project:', err);
       setSubmitError(err.message || 'Failed to create project');
+    } finally {
+      setIsCreatingProject(false);
+    }
+  };
+
+  // ✅ Cancel Project Modal Handlers
+  const handleOpenCancelModal = (proj) => {
+    setCancelModal({
+      isOpen: true,
+      project: proj,
+      reason: '',
+      isSubmitting: false,
+      error: '',
+    });
+  };
+
+  const handleCloseCancelModal = () => {
+    if (cancelModal.isSubmitting) return;
+    setCancelModal({
+      isOpen: false,
+      project: null,
+      reason: '',
+      isSubmitting: false,
+      error: '',
+    });
+  };
+
+  const handleConfirmCancelProject = async (e) => {
+    if (e) e.preventDefault();
+    if (!cancelModal.project) return;
+    if (!cancelModal.reason.trim()) {
+      setCancelModal(prev => ({ ...prev, error: 'Please enter a reason for cancelling this project.' }));
+      return;
+    }
+
+    setCancelModal(prev => ({ ...prev, isSubmitting: true, error: '' }));
+    try {
+      await updateProjectStatus(cancelModal.project.id, 'Cancelled', 'with_previous', cancelModal.reason.trim());
+      await loadProjects();
+      const cancelledName = cancelModal.project.name;
+      const cancelledReason = cancelModal.reason.trim();
+      setCancelModal({
+        isOpen: false,
+        project: null,
+        reason: '',
+        isSubmitting: false,
+        error: '',
+      });
+      setActiveTab('history');
+      setCompletionNotice({
+        projectName: cancelledName,
+        projectId: cancelModal.project.id,
+        isCancelled: true,
+        reason: cancelledReason,
+      });
+    } catch (err) {
+      console.error('Failed to cancel project:', err);
+      setCancelModal(prev => ({
+        ...prev,
+        isSubmitting: false,
+        error: err.message || 'Failed to cancel project. Please try again.',
+      }));
     }
   };
 
@@ -536,8 +676,8 @@ export default function PMProjectsTab({ user, onNavigate }) {
           padding: '16px 20px',
           marginBottom: '20px',
           borderRadius: '12px',
-          backgroundColor: 'rgba(16, 185, 129, 0.08)',
-          border: '1px solid rgba(16, 185, 129, 0.3)',
+          backgroundColor: completionNotice.isCancelled ? 'rgba(239, 68, 68, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+          border: completionNotice.isCancelled ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -549,28 +689,39 @@ export default function PMProjectsTab({ user, onNavigate }) {
               width: '36px',
               height: '36px',
               borderRadius: '50%',
-              backgroundColor: 'rgba(16, 185, 129, 0.16)',
+              backgroundColor: completionNotice.isCancelled ? 'rgba(239, 68, 68, 0.16)' : 'rgba(16, 185, 129, 0.16)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#10b981',
+              color: completionNotice.isCancelled ? '#ef4444' : '#10b981',
               flexShrink: 0,
             }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
+              {completionNotice.isCancelled ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              )}
             </div>
             <div>
-              <div style={{ color: '#10b981', fontWeight: '700', fontSize: '14px' }}>
-                Project &ldquo;{completionNotice.projectName}&rdquo; marked as Completed!
+              <div style={{ color: completionNotice.isCancelled ? '#ef4444' : '#10b981', fontWeight: '700', fontSize: '14px' }}>
+                {completionNotice.isCancelled
+                  ? `Project “${completionNotice.projectName}” has been cancelled.`
+                  : `Project “${completionNotice.projectName}” marked as Completed!`}
               </div>
               <div style={{ color: 'var(--color-text-secondary)', fontSize: '13px', marginTop: '2px' }}>
-                A 100% completion progress report has been created and sent to the Weekly Progress Report page. Team members have been unassigned.
+                {completionNotice.isCancelled
+                  ? `Reason: “${completionNotice.reason || 'No reason specified'}”. The project was moved to Project History and team members were unassigned.`
+                  : 'A 100% completion progress report has been created and sent to the Weekly Progress Report page. Team members have been unassigned.'}
               </div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            {onNavigate && (
+            {!completionNotice.isCancelled && onNavigate && (
               <button
                 type="button"
                 onClick={() => onNavigate('weekly-report')}
@@ -662,6 +813,23 @@ export default function PMProjectsTab({ user, onNavigate }) {
           filteredProjects.map(proj => {
             const primary = proj.requiredPrimarySkills || proj.requiredSkills || [];
             const secondary = proj.requiredSecondarySkills || [];
+            const isSkillsExpanded = !!expandedSkillsMap[proj.id];
+            const totalSkillsCount = primary.length + secondary.length;
+            const hasMoreSkills = totalSkillsCount > 5;
+
+            let visiblePrimary = primary;
+            let visibleSecondary = secondary;
+            if (hasMoreSkills && !isSkillsExpanded) {
+              if (primary.length >= 5) {
+                visiblePrimary = primary.slice(0, 5);
+                visibleSecondary = [];
+              } else {
+                visiblePrimary = primary;
+                visibleSecondary = secondary.slice(0, 5 - primary.length);
+              }
+            }
+            const hiddenCount = totalSkillsCount - 5;
+
             return (
               <div key={proj.id} className="glass-card" style={styles.projCard}>
                 <div style={styles.cardHeader}>
@@ -669,8 +837,20 @@ export default function PMProjectsTab({ user, onNavigate }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                     <span style={{
                       ...styles.statusBadge,
-                      backgroundColor: proj.status === 'Active' ? 'var(--color-primary-light)' : (COMPLETED_STATUSES.includes(proj.status) ? 'rgba(148, 163, 184, 0.15)' : 'rgba(245, 158, 11, 0.1)'),
-                      color: proj.status === 'Active' ? 'var(--color-success)' : (COMPLETED_STATUSES.includes(proj.status) ? 'var(--color-text-secondary)' : 'var(--color-warning)')
+                      backgroundColor: proj.status === 'Active' 
+                        ? 'var(--color-primary-light)' 
+                        : (proj.status === 'Cancelled'
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : (COMPLETED_STATUSES.includes(proj.status) 
+                                ? 'rgba(148, 163, 184, 0.15)' 
+                                : 'rgba(245, 158, 11, 0.1)')),
+                      color: proj.status === 'Active' 
+                        ? 'var(--color-success)' 
+                        : (proj.status === 'Cancelled'
+                            ? '#ef4444'
+                            : (COMPLETED_STATUSES.includes(proj.status) 
+                                ? 'var(--color-text-secondary)' 
+                                : 'var(--color-warning)'))
                     }}>
                       {proj.status}
                     </span>
@@ -690,6 +870,23 @@ export default function PMProjectsTab({ user, onNavigate }) {
                 </div>
                 <p style={styles.projDesc}>{proj.description}</p>
 
+                {/* ✅ Cancellation Reason Box in Project History */}
+                {activeTab === 'history' && proj.status === 'Cancelled' && (
+                  <div style={styles.cancellationReasonBox}>
+                    <div style={styles.cancellationReasonHeader}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                      </svg>
+                      <span style={styles.cancellationReasonLabel}>CANCELLATION REASON</span>
+                    </div>
+                    <div style={styles.cancellationReasonText}>
+                      &ldquo;{proj.cancellationReason || 'No reason specified'}&rdquo;
+                    </div>
+                  </div>
+                )}
+
                 <div style={styles.metaRow}>
                   <div style={styles.metaCol}>
                     <span style={styles.metaLabel}>TIMELINE</span>
@@ -708,22 +905,40 @@ export default function PMProjectsTab({ user, onNavigate }) {
                       <span style={styles.noSkillsText}>No specific skills defined</span>
                     </div>
                   ) : (
-                    <>
-                      {primary.length > 0 && (
-                        <div style={styles.skillsContainer}>
-                          {primary.map((skill, idx) => (
-                            <span key={`p-${idx}`} style={styles.skillTag}>{skill}</span>
-                          ))}
-                        </div>
+                    <div style={styles.skillsContainer}>
+                      {visiblePrimary.map((skill, idx) => (
+                        <span key={`p-${idx}`} style={styles.skillTag}>{skill}</span>
+                      ))}
+                      {visibleSecondary.map((skill, idx) => (
+                        <span key={`s-${idx}`} style={styles.skillTagSecondary}>{skill}</span>
+                      ))}
+                      {hasMoreSkills && !isSkillsExpanded && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSkillsExpanded(proj.id);
+                          }}
+                          style={styles.moreSkillsBtn}
+                          title={`Click to show all ${totalSkillsCount} skills`}
+                        >
+                          +{hiddenCount} more
+                        </button>
                       )}
-                      {secondary.length > 0 && (
-                        <div style={{ ...styles.skillsContainer, marginTop: '4px' }}>
-                          {secondary.map((skill, idx) => (
-                            <span key={`s-${idx}`} style={styles.skillTagSecondary}>{skill}</span>
-                          ))}
-                        </div>
+                      {hasMoreSkills && isSkillsExpanded && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSkillsExpanded(proj.id);
+                          }}
+                          style={styles.seeLessBtn}
+                          title="Click to collapse skills"
+                        >
+                          See less
+                        </button>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
 
@@ -816,14 +1031,25 @@ export default function PMProjectsTab({ user, onNavigate }) {
                       >
                         ✏ Edit Project
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCompleteProject(proj)}
-                        disabled={statusUpdatingId === proj.id}
-                        style={styles.completeBtn}
-                      >
-                        {statusUpdatingId === proj.id ? 'Updating…' : '✓ Mark as Complete'}
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCancelModal(proj)}
+                          disabled={statusUpdatingId === proj.id}
+                          style={styles.cancelProjectBtn}
+                          title="Cancel this project"
+                        >
+                          ✕ Cancel Project
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCompleteProject(proj)}
+                          disabled={statusUpdatingId === proj.id}
+                          style={styles.completeBtn}
+                        >
+                          {statusUpdatingId === proj.id ? 'Updating…' : '✓ Mark as Complete'}
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -961,17 +1187,10 @@ export default function PMProjectsTab({ user, onNavigate }) {
                 </div>
 
                 {formData.resources.map((res, index) => {
-                  const primarySuggestions = allSkills.filter(skill => 
-                    skill.skill_name.toLowerCase().includes((res.primarySkillInput || '').toLowerCase()) &&
-                    !res.primarySkills.includes(skill.skill_name)
-                  ).slice(0, 10);
-                  const showPrimarySuggestions = res.primarySkillInput && res.primarySkillInput.length > 0 && primarySuggestions.length > 0;
-
-                  const secondarySuggestions = allSkills.filter(skill => 
-                    skill.skill_name.toLowerCase().includes((res.secondarySkillInput || '').toLowerCase()) &&
-                    !res.secondarySkills.includes(skill.skill_name)
-                  ).slice(0, 10);
-                  const showSecondarySuggestions = res.secondarySkillInput && res.secondarySkillInput.length > 0 && secondarySuggestions.length > 0;
+                  const isPrimaryFocused = activeSkillFocus?.index === index && activeSkillFocus?.type === 'primary';
+                  const isSecondaryFocused = activeSkillFocus?.index === index && activeSkillFocus?.type === 'secondary';
+                  const showPrimarySuggestions = isPrimaryFocused && Boolean(res.primarySkillInput?.trim());
+                  const showSecondarySuggestions = isSecondaryFocused && Boolean(res.secondarySkillInput?.trim());
 
                   return (
                     <div key={index} style={styles.resourceCard}>
@@ -1040,6 +1259,18 @@ export default function PMProjectsTab({ user, onNavigate }) {
                             value={res.primarySkillInput || ''}
                             onChange={(e) => handleSkillInputChange(index, 'primary', e.target.value)}
                             onKeyDown={(e) => handleSkillKeyDown(index, 'primary', e)}
+                            onFocus={() => {
+                              setActiveSkillFocus({ index, type: 'primary' });
+                              const val = res.primarySkillInput || '';
+                              if (val.trim()) {
+                                searchSkillsDynamic(val, res.primarySkills);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveSkillFocus(prev => (prev?.index === index && prev?.type === 'primary' ? null : prev));
+                              }, 200);
+                            }}
                             style={styles.modalInput}
                             placeholder="Type skill and press comma or Enter..."
                             required={res.primarySkills.length === 0}
@@ -1047,18 +1278,28 @@ export default function PMProjectsTab({ user, onNavigate }) {
 
                           {showPrimarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {primarySuggestions.map((skill) => (
+                              {isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                  Searching database skills...
+                                </div>
+                              )}
+                              {!isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-muted)', fontStyle: 'italic', cursor: 'default' }}>
+                                  No database skills found (press comma or Enter to add)
+                                </div>
+                              )}
+                              {dynamicSuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, 'primary', skill.skill_name)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handleSelectSkill(index, 'primary', skill.skill_name);
+                                  }}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
                                 </div>
                               ))}
-                              {isLoadingSkills && (
-                                <div style={styles.suggestionItem}>Loading skills...</div>
-                              )}
                             </div>
                           )}
                         </div>
@@ -1092,24 +1333,46 @@ export default function PMProjectsTab({ user, onNavigate }) {
                             value={res.secondarySkillInput || ''}
                             onChange={(e) => handleSkillInputChange(index, 'secondary', e.target.value)}
                             onKeyDown={(e) => handleSkillKeyDown(index, 'secondary', e)}
+                            onFocus={() => {
+                              setActiveSkillFocus({ index, type: 'secondary' });
+                              const val = res.secondarySkillInput || '';
+                              if (val.trim()) {
+                                searchSkillsDynamic(val, res.secondarySkills);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveSkillFocus(prev => (prev?.index === index && prev?.type === 'secondary' ? null : prev));
+                              }, 200);
+                            }}
                             style={styles.modalInput}
                             placeholder="Type skill and press comma or Enter..."
                           />
 
                           {showSecondarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {secondarySuggestions.map((skill) => (
+                              {isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                  Searching database skills...
+                                </div>
+                              )}
+                              {!isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-muted)', fontStyle: 'italic', cursor: 'default' }}>
+                                  No database skills found (press comma or Enter to add)
+                                </div>
+                              )}
+                              {dynamicSuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, 'secondary', skill.skill_name)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handleSelectSkill(index, 'secondary', skill.skill_name);
+                                  }}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
                                 </div>
                               ))}
-                              {isLoadingSkills && (
-                                <div style={styles.suggestionItem}>Loading skills...</div>
-                              )}
                             </div>
                           )}
                         </div>
@@ -1135,8 +1398,48 @@ export default function PMProjectsTab({ user, onNavigate }) {
               </div>
 
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Create Project</button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  disabled={isCreatingProject}
+                  style={{
+                    ...styles.cancelBtn,
+                    opacity: isCreatingProject ? 0.6 : 1,
+                    cursor: isCreatingProject ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingProject}
+                  style={{
+                    ...styles.saveBtn,
+                    opacity: isCreatingProject ? 0.8 : 1,
+                    cursor: isCreatingProject ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {isCreatingProject ? (
+                    <>
+                      <span style={{
+                        width: '14px',
+                        height: '14px',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: '#ffffff',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite',
+                      }} />
+                      Creating Project...
+                    </>
+                  ) : (
+                    'Create Project'
+                  )}
+                </button>
               </div>
             </form>
           </div>
@@ -1411,6 +1714,139 @@ export default function PMProjectsTab({ user, onNavigate }) {
                 {confirmDialog.kind === 'complete' ? 'Mark as Complete' : 'Restore Project'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Project Modal */}
+      {cancelModal.isOpen && cancelModal.project && (
+        <div style={styles.modalOverlay} onClick={handleCloseCancelModal}>
+          <div
+            className="glass-card"
+            style={{ ...styles.modalCard, maxWidth: '520px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={styles.modalHeader}>
+              <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  color: '#ef4444',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                }}>
+                  ✕
+                </span>
+                Cancel Project
+              </h2>
+              <button
+                type="button"
+                onClick={handleCloseCancelModal}
+                disabled={cancelModal.isSubmitting}
+                style={styles.closeModalBtn}
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmCancelProject} style={{ marginTop: '16px' }}>
+              <p style={{ fontSize: '14px', color: 'var(--color-text-secondary)', margin: '0 0 16px 0', lineHeight: '1.5' }}>
+                Are you sure you want to cancel <strong style={{ color: 'var(--color-text-primary)' }}>&ldquo;{cancelModal.project.name}&rdquo;</strong>? This project will be marked as <span style={{ color: '#ef4444', fontWeight: '700' }}>Cancelled</span>, unassigned from team members, and moved to the <strong>Project History</strong> tab.
+              </p>
+
+              {cancelModal.error && (
+                <div style={{
+                  padding: '10px 14px',
+                  marginBottom: '16px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#ef4444',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                }}>
+                  {cancelModal.error}
+                </div>
+              )}
+
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>
+                  Reason for Cancellation <span style={{ color: 'var(--color-danger)' }}>*</span>
+                </label>
+                <textarea
+                  value={cancelModal.reason}
+                  onChange={(e) => setCancelModal(prev => ({ ...prev, reason: e.target.value, error: '' }))}
+                  placeholder="e.g., Client postponed the project, Budget constraints, Scope change, etc."
+                  rows={4}
+                  required
+                  disabled={cancelModal.isSubmitting}
+                  style={{
+                    ...styles.modalTextarea,
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                  }}
+                  autoFocus
+                />
+                <span style={styles.inputHelp}>
+                  Please provide a clear reason. This will be recorded and displayed in the Project History tab.
+                </span>
+              </div>
+
+              <div style={{ ...styles.modalActions, marginTop: '24px' }}>
+                <button
+                  type="button"
+                  onClick={handleCloseCancelModal}
+                  disabled={cancelModal.isSubmitting}
+                  style={{
+                    ...styles.cancelBtn,
+                    opacity: cancelModal.isSubmitting ? 0.6 : 1,
+                    cursor: cancelModal.isSubmitting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Keep Project
+                </button>
+                <button
+                  type="submit"
+                  disabled={cancelModal.isSubmitting || !cancelModal.reason.trim()}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: '#ef4444',
+                    color: '#fff',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: (cancelModal.isSubmitting || !cancelModal.reason.trim()) ? 'not-allowed' : 'pointer',
+                    opacity: (cancelModal.isSubmitting || !cancelModal.reason.trim()) ? 0.6 : 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  {cancelModal.isSubmitting ? (
+                    <>
+                      <span style={{
+                        width: '14px',
+                        height: '14px',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: '#ffffff',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite',
+                      }} />
+                      Cancelling Project...
+                    </>
+                  ) : (
+                    '✕ Confirm Cancellation'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -2066,6 +2502,35 @@ const styles = {
     color: 'var(--color-text-muted)',
     fontWeight: '600',
   },
+  moreSkillsBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-primary, #10b981)',
+    fontSize: '11px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    padding: '4px 6px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    borderRadius: '4px',
+    transition: 'all 0.15s ease',
+    lineHeight: '1',
+  },
+  seeLessBtn: {
+    background: 'rgba(15, 23, 42, 0.6)',
+    border: '1.5px solid rgba(255, 255, 255, 0.75)',
+    borderRadius: '20px',
+    color: 'var(--color-primary, #10b981)',
+    fontSize: '11px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    padding: '3px 12px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s ease',
+    lineHeight: '1.2',
+  },
   noSkillsText: {
     fontSize: '12px',
     color: 'var(--color-text-muted)',
@@ -2463,5 +2928,44 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     fontWeight: 'bold',
+  },
+  cancelProjectBtn: {
+    padding: '8px 14px',
+    borderRadius: '8px',
+    border: '1px solid rgba(239, 68, 68, 0.4)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    color: '#ef4444',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  cancellationReasonBox: {
+    padding: '10px 14px',
+    margin: '12px 0',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(239, 68, 68, 0.06)',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
+  },
+  cancellationReasonHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  cancellationReasonLabel: {
+    fontSize: '11px',
+    fontWeight: '700',
+    color: '#ef4444',
+    letterSpacing: '0.5px',
+  },
+  cancellationReasonText: {
+    color: 'var(--color-text-secondary)',
+    fontSize: '13px',
+    fontStyle: 'italic',
+    marginTop: '4px',
+    lineHeight: '1.4',
   },
 };
