@@ -5,13 +5,17 @@ import ApplicantLayout from './Applicant/ApplicantLayout';
 export default function ApplicantPortal({ isDark, toggleTheme }) {
   // ✅ Check if we should show the landing page or the portal
   const [showPortal, setShowPortal] = useState(() => {
-    // Check sessionStorage for the enter flag
+    // Only auto-skip to the full portal when we're actually on the
+    // dedicated /applicant-portal route (i.e. the tab opened via
+    // "Enter Applicant Portal"). The landing page rendered from the
+    // Login screen should always show the intro + button, even if a
+    // previous visit in this tab already set the "entered" flag.
+    const onPortalRoute = window.location.pathname === '/applicant-portal';
     const hasEntered = sessionStorage.getItem('applicant_portal_entered') === 'true';
     const params = new URLSearchParams(window.location.search);
     const hasEnterParam = params.get('enter') === 'true';
-    
-    // If either flag is true, show the portal directly
-    return !(hasEntered || hasEnterParam);
+
+    return !(onPortalRoute && (hasEntered || hasEnterParam));
   });
 
   const handleEnterPortal = () => {
