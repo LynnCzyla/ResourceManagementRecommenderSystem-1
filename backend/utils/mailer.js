@@ -1,118 +1,17 @@
 // backend/utils/mailer.js
-// Shared nodemailer transporter so every route (forgotPassword, interviews,
-// etc.) sends real emails automatically instead of opening a mail client.
-const nodemailer = require("nodemailer");
-const path = require("path");
-const fs = require("fs");
+// Shared mailer so every route (forgotPassword, interviews, etc.) sends
+// real emails automatically instead of opening a mail client.
+//
+// Sends via Brevo's transactional email HTTP API (see ./brevoMailer.js).
+// NOTE: Brevo's API can't do inline cid: images, so the logo is embedded
+// as a base64 data URI instead (getLogoHtml() below handles this).
+const { sendMail: brevoSendMail, getLogoHtml } = require("./brevoMailer");
 
-// Validate required environment variables
-const requiredEnvVars = ['SMTP_USER', 'SMTP_PASS'];
-const missingVars = requiredEnvVars.filter(v => !process.env[v]);
-if (missingVars.length) {
-  console.warn(`⚠️ Missing environment variables: ${missingVars.join(', ')}`);
-}
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  family: 4, // force IPv4 — some hosts (e.g. Render) can't route outbound IPv6
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
-
-// ============================================
-// LOGO HANDLING - MULTIPLE METHODS
-// ============================================
-
-// Method 1: Get logo as attachment with CID
-const getLogoAttachment = () => {
-  try {
-    const logoPath = path.join(__dirname, '../../main/src/assets/WEA_logo_bgremoved.png');
-    
-    console.log(`🔍 Looking for logo attachment at: ${logoPath}`);
-    
-    if (fs.existsSync(logoPath)) {
-      const stats = fs.statSync(logoPath);
-      console.log(`✅ Logo attachment found! (${stats.size} bytes)`);
-      return {
-        filename: 'WEA_logo_bgremoved.png',
-        path: logoPath,
-        cid: 'wealogo'
-      };
-    } else {
-      console.error('❌ Logo file NOT FOUND for attachment');
-      return null;
-    }
-  } catch (error) {
-    console.error('❌ Could not create logo attachment:', error.message);
-    return null;
-  }
-};
-
-// Method 2: Get logo as data URI (fallback)
-const getLogoDataUri = () => {
-  try {
-    const logoPath = path.join(__dirname, '../../main/src/assets/WEA_logo_bgremoved.png');
-    
-    if (fs.existsSync(logoPath)) {
-      const imageBuffer = fs.readFileSync(logoPath);
-      const base64 = imageBuffer.toString('base64');
-      console.log(`✅ Logo data URI created (${base64.length} chars)`);
-      return `data:image/png;base64,${base64}`;
-    }
-  } catch (error) {
-    console.error('❌ Could not create data URI:', error.message);
-  }
-  return null;
-};
-
-// Get logo HTML with multiple methods
-const getLogoHtml = () => {
-  // Use CID attachment (Method 1)
-  const attachment = getLogoAttachment();
-  if (attachment) {
-    // Method A: Try CID first (most reliable for email clients)
-    return `
-      <!-- Try CID attachment -->
-      <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain; display: inline-block; max-width: 200px;" />
-      <!-- Inline CSS to show text if image fails -->
-      <div style="display: none; font-size: 28px; font-weight: 800; color: #3b82f6; letter-spacing: 3px; font-family: 'Outfit', sans-serif;">WEA</div>
-    `;
-  }
-  
-  // Method B: Try data URI as fallback
-  const dataUri = getLogoDataUri();
-  if (dataUri) {
-    return `<img src="${dataUri}" alt="WEA Logo" style="height: 65px; object-fit: contain; display: inline-block; max-width: 200px;" />`;
-  }
-  
-  // Method C: Text fallback
-  return `<div style="font-size: 28px; font-weight: 800; color: #3b82f6; letter-spacing: 3px; font-family: 'Outfit', sans-serif;">WEA</div>`;
-};
-
-// Helper: Send email with consistent error handling
+// Helper: Send email with consistent error handling (kept for backward
+// compatibility with the rest of this file, now backed by Brevo's API
+// instead of nodemailer).
 const sendEmail = async (mailOptions) => {
-  try {
-    // Filter out null attachments
-    if (mailOptions.attachments) {
-      mailOptions.attachments = mailOptions.attachments.filter(att => att !== null);
-    }
-    
-    console.log(`📧 Sending email to ${mailOptions.to}`);
-    console.log(`📎 Attachments: ${mailOptions.attachments ? mailOptions.attachments.length : 0}`);
-    
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${mailOptions.to}`);
-    console.log(`📧 Message ID: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error('❌ Email send failed:', error);
-    console.error('📧 Recipient:', mailOptions.to);
-    return { success: false, error: error.message };
-  }
+  return await brevoSendMail(mailOptions);
 };
 
 // Helper: Base email wrapper
@@ -153,10 +52,6 @@ const sendAdminWelcomeEmail = async ({
 
   console.log(`📧 Sending welcome email to ${to}`);
   console.log(`🔗 Login URL: ${loginUrl}`);
-
-  // Get the logo attachment
-  const logoAttachment = getLogoAttachment();
-  console.log(`📎 Logo attachment: ${logoAttachment ? 'Yes' : 'No'}`);
 
   const mailOptions = {
     from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
@@ -239,7 +134,6 @@ const sendAdminWelcomeEmail = async ({
         </div>
       </div>
     `),
-    attachments: logoAttachment ? [logoAttachment] : [] // Only include if it exists
   };
 
   return await sendEmail(mailOptions);
@@ -288,7 +182,6 @@ const sendInterviewEmail = async ({ to, applicantName, position, date, time, int
         </div>
       </div>
     `),
-    attachments: [getLogoAttachment()]
   };
 
   return await sendEmail(mailOptions);
@@ -362,7 +255,6 @@ const sendOnboardingOfferEmail = async ({
         </div>
       </div>
     `),
-    attachments: [getLogoAttachment()]
   };
 
   return await sendEmail(mailOptions);
@@ -415,7 +307,6 @@ const sendRejectionEmail = async ({ to, applicantName, position, reason }) => {
         </div>
       </div>
     `),
-    attachments: [getLogoAttachment()]
   };
 
   return await sendEmail(mailOptions);
@@ -482,17 +373,17 @@ const sendFeedbackRequestEmail = async ({
         </div>
       </div>
     `),
-    attachments: [getLogoAttachment()]
   };
 
   return await sendEmail(mailOptions);
 };
 
-module.exports = { 
-  transporter, 
-  sendInterviewEmail, 
-  sendOnboardingOfferEmail, 
-  sendRejectionEmail, 
+module.exports = {
+  sendEmail,
+  getLogoHtml,
+  sendInterviewEmail,
+  sendOnboardingOfferEmail,
+  sendRejectionEmail,
   sendFeedbackRequestEmail,
   sendAdminWelcomeEmail,
 };

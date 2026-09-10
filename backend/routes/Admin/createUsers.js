@@ -2,8 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
-const nodemailer = require("nodemailer");
-const path = require("path");
+const { sendMail, getLogoDataUri } = require("../../utils/brevoMailer");
 const { logAuditEvent } = require('../../utils/auditLogger');
 const { verifyToken } = require('../Middleware/auth');
 
@@ -112,18 +111,6 @@ const getBranchCode = async (branchId) => {
   }
 };
 
-// Configure email transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  family: 4, // force IPv4 — some hosts (e.g. Render) can't route outbound IPv6
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
-
 // Send "create your password" email with a Supabase recovery link (mirrors forgotPassword.js).
 // The user clicks through to /reset-password, which already displays the live password
 // requirements configured by the Super Admin (min length, uppercase, lowercase, number, special).
@@ -141,7 +128,7 @@ const sendCreateAccountEmail = async (email, firstName, lastName, employeeId, cr
           <!-- Header -->
           <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
             <div style="margin-bottom: 16px;">
-              <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
+              <img src="${getLogoDataUri()}" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
             </div>
             <h1 style="font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
               Welcome to WEA!
@@ -201,16 +188,11 @@ const sendCreateAccountEmail = async (email, firstName, lastName, employeeId, cr
         </p>
       </div>
     `,
-    attachments: [{
-      filename: 'WEA_logo_bgremoved.png',
-      path: path.join(__dirname, '../../../main/src/assets/WEA_logo_bgremoved.png'),
-      cid: 'wealogo'
-    }]
   };
 
   try {
-    await transporter.sendMail(mailOptions);
-    return true;
+    const result = await sendMail(mailOptions);
+    return result.success;
   } catch (error) {
     console.error('Error sending create-account email:', error);
     return false;

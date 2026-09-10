@@ -2,23 +2,10 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
-const nodemailer = require("nodemailer");
-const path = require("path");
+const { sendMail, getLogoDataUri } = require("../../utils/brevoMailer");
 const { logAuditEvent } = require('../../utils/auditLogger');
 
-// Self-contained transporter (mirrors createUsers.js's setup)
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  family: 4, // force IPv4 — some hosts (e.g. Render) can't route outbound IPv6
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
-
-// Build and send the password-reset email via nodemailer
+// Build and send the password-reset email via Brevo's API
 const sendResetEmail = async (email, resetLink) => {
   const mailOptions = {
     from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
@@ -33,7 +20,7 @@ const sendResetEmail = async (email, resetLink) => {
           <!-- Header -->
           <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
             <div style="margin-bottom: 16px;">
-              <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
+              <img src="${getLogoDataUri()}" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
             </div>
             <h1 style="font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
               Reset Your Password
@@ -79,14 +66,9 @@ const sendResetEmail = async (email, resetLink) => {
         </p>
       </div>
     `,
-    attachments: [{
-      filename: 'WEA_logo_bgremoved.png',
-      path: path.join(__dirname, '../../../main/src/assets/WEA_logo_bgremoved.png'),
-      cid: 'wealogo'
-    }]
   };
 
-  await transporter.sendMail(mailOptions);
+  await sendMail(mailOptions);
 };
 
 // Detect the specific "no user with this email" case from Supabase's

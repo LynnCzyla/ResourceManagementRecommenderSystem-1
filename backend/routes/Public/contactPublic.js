@@ -2,20 +2,8 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
-const nodemailer = require("nodemailer");
-const path = require("path");
+const { sendMail, getLogoDataUri } = require("../../utils/brevoMailer");
 const { logAuditEvent } = require('../../utils/auditLogger');
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  family: 4, // force IPv4 — some hosts (e.g. Render) can't route outbound IPv6
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
 
 const buildFullName = (firstName, middleName, lastName) =>
   [firstName, middleName, lastName].filter(Boolean).join(' ');
@@ -30,7 +18,7 @@ const sendConfirmationEmail = async ({ fullName, email, purpose, message }) => {
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 20px; overflow: hidden;">
           <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
             <div style="margin-bottom: 16px;">
-              <img src="cid:wealogo" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
+              <img src="${getLogoDataUri()}" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
             </div>
             <h1 style="font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
               We Received Your Message
@@ -61,13 +49,8 @@ const sendConfirmationEmail = async ({ fullName, email, purpose, message }) => {
         </p>
       </div>
     `,
-    attachments: [{
-      filename: 'WEA_logo_bgremoved.png',
-      path: path.join(__dirname, '../../../main/src/assets/WEA_logo_bgremoved.png'),
-      cid: 'wealogo'
-    }]
   };
-  await transporter.sendMail(mailOptions);
+  await sendMail(mailOptions);
 };
 
 // ============================================
