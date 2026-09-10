@@ -10,6 +10,7 @@ const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: process.env.SMTP_PORT || 587,
   secure: process.env.SMTP_SECURE === 'true',
+  family: 4, // force IPv4 — some hosts (e.g. Render) can't route outbound IPv6
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
@@ -148,73 +149,83 @@ router.post("/contact-admin", async (req, res) => {
 
     console.log("✅ Contact request saved");
 
-    await logAuditEvent({
-      action: 'Created',
-      systemCategory: 'Contact Requests',
-      logDescription: `Created contact request from ${fullName} (${email})`,
-      branch: branchId || null,
-    });
-
-    // Notify admins
-    try {
-      let adminQuery = supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'Admin');
-
-      if (branchId) {
-        adminQuery = adminQuery.eq('branch_id', branchId);
-      }
-
-      const { data: admins, error: adminError } = await adminQuery;
-
-      if (adminError) {
-        console.error("❌ Failed to fetch admins:", adminError.message);
-      } else if (admins && admins.length > 0) {
-        let branchName = 'All Branches';
-        if (branchId) {
-          const { data: branchData } = await supabase
-            .from('branches')
-            .select('name')
-            .eq('id', branchId)
-            .single();
-          if (branchData) {
-            branchName = branchData.name;
-          }
-        }
-
-        const adminNotifications = admins.map(admin => ({
-          recipient_id: admin.id,
-          type: 'alert',
-          text: `📩 New contact request from ${fullName} (${email}) — Purpose: ${purpose} — Branch: ${branchName}`,
-          read: false
-        }));
-
-        const { error: notifError } = await supabase
-          .from('notifications')
-          .insert(adminNotifications);
-
-        if (notifError) {
-          console.error("❌ Failed to insert admin notifications:", notifError.message);
-        } else {
-          console.log(`✅ Notified ${admins.length} admin(s) about contact request`);
-        }
-      }
-    } catch (notifErr) {
-      console.error("❌ Admin notification error:", notifErr.message);
-    }
-
-    try {
-      await sendConfirmationEmail({ fullName, email, purpose, message });
-      console.log("✅ Confirmation email sent to requester:", email);
-    } catch (emailErr) {
-      console.error("❌ Failed to send confirmation email:", emailErr.message);
-    }
-
+    // Respond right away — the essential part (saving the message) is
+    // done. Audit logging, admin notifications, and the confirmation
+    // email are all "nice to have" side effects that shouldn't make
+    // the person wait. They run in the background after we respond.
     res.json({
       success: true,
       message: "Your message has been sent to the administrator."
     });
+
+    (async () => {
+      try {
+        await logAuditEvent({
+          action: 'Created',
+          systemCategory: 'Contact Requests',
+          logDescription: `Created contact request from ${fullName} (${email})`,
+          branch: branchId || null,
+        });
+      } catch (auditErr) {
+        console.error("❌ Audit log error:", auditErr.message);
+      }
+
+      // Notify admins
+      try {
+        let adminQuery = supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'Admin');
+
+        if (branchId) {
+          adminQuery = adminQuery.eq('branch_id', branchId);
+        }
+
+        const { data: admins, error: adminError } = await adminQuery;
+
+        if (adminError) {
+          console.error("❌ Failed to fetch admins:", adminError.message);
+        } else if (admins && admins.length > 0) {
+          let branchName = 'All Branches';
+          if (branchId) {
+            const { data: branchData } = await supabase
+              .from('branches')
+              .select('name')
+              .eq('id', branchId)
+              .single();
+            if (branchData) {
+              branchName = branchData.name;
+            }
+          }
+
+          const adminNotifications = admins.map(admin => ({
+            recipient_id: admin.id,
+            type: 'alert',
+            text: `📩 New contact request from ${fullName} (${email}) — Purpose: ${purpose} — Branch: ${branchName}`,
+            read: false
+          }));
+
+          const { error: notifError } = await supabase
+            .from('notifications')
+            .insert(adminNotifications);
+
+          if (notifError) {
+            console.error("❌ Failed to insert admin notifications:", notifError.message);
+          } else {
+            console.log(`✅ Notified ${admins.length} admin(s) about contact request`);
+          }
+        }
+      } catch (notifErr) {
+        console.error("❌ Admin notification error:", notifErr.message);
+      }
+
+      try {
+        await sendConfirmationEmail({ fullName, email, purpose, message });
+        console.log("✅ Confirmation email sent to requester:", email);
+      } catch (emailErr) {
+        console.error("❌ Failed to send confirmation email:", emailErr.message);
+      }
+    })();
 
   } catch (error) {
     console.error("Error in contact-admin:", error);
