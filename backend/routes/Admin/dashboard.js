@@ -358,4 +358,58 @@ router.get('/dashboard/branch-stats', async (req, res) => {
   }
 });
 
+// ✅ GET /api/admin/dashboard/user-activity?days=30 - User activity timeline from audit_logs
+router.get('/dashboard/user-activity', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days, 10) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    let query = supabase
+      .from('audit_logs')
+      .select('created_at, user_id, profiles:user_id(branch_id)')
+      .gte('created_at', startDate.toISOString())
+      .order('created_at', { ascending: true });
+
+    const { data: logs, error } = await query;
+    if (error) {
+      console.warn('⚠️ Could not fetch audit_logs for user activity:', error.message);
+    }
+
+    // Filter by branch for non-super admins
+    const filteredLogs = (logs || []).filter(log => {
+      if (req.user?.is_super_admin) return true;
+      return !log.profiles?.branch_id || log.profiles?.branch_id === req.user?.branch_id;
+    });
+
+    // Group by date (YYYY-MM-DD)
+    const countsByDate = {};
+    filteredLogs.forEach(log => {
+      if (log.created_at) {
+        const dateKey = log.created_at.slice(0, 10);
+        countsByDate[dateKey] = (countsByDate[dateKey] || 0) + 1;
+      }
+    });
+
+    // Generate complete timeline for every day in the requested window
+    const result = [];
+    const now = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateKey = d.toISOString().split('T')[0];
+      result.push({
+        date: dateKey,
+        count: countsByDate[dateKey] || 0,
+      });
+    }
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('Error fetching user activity stats:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

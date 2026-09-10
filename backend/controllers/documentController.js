@@ -4,6 +4,15 @@ const storageService = require('../services/storageService');
 const supabase = require('../supabase');
 const path = require('path');
 const fs = require('fs');
+const {
+    normalizeSkill,
+    skillKey,
+    compactSkillKey,
+    singularCompactSkillKey,
+    buildComparisonKeys,
+    addComparisonKeys,
+    hasComparisonKey
+} = require('../utils/skillNormalizer');
 
 // ============================================================
 // Cached Profile Helper — avoids re-querying `profiles` on every
@@ -32,104 +41,9 @@ const getProfileFromToken = async (userId) => {
     return result;
 };
 
-// Helper: best-effort guess at a person's name in the document, for DISPLAY only
-// (e.g. "Found: 'Carlo Reyes'" in a confirmation prompt). Never used for security decisions.
-const extractPossibleName = (rawText) => {
-    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 15);
-
-    // Prefer an explicit "Name:" style label, common on certificates/forms
-    for (const line of lines) {
-        const labelMatch = line.match(/^(?:NAME|FULL NAME|APPLICANT)\s*[:\-]\s*(.+)$/i);
-        if (labelMatch && labelMatch[1].trim().length > 1) {
-            return labelMatch[1].trim();
-        }
-    }
-
-    // Otherwise guess: a short line of 2-4 Title Case words (common resume/cert header pattern)
-    const namePattern = /^([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,3})$/;
-    for (const line of lines) {
-        if (namePattern.test(line) && line.length < 50) {
-            return line;
-        }
-    }
-
-    return null;
-};
-
-// Helper: check if document content contains the employee's name
-const checkNameInContent = (rawText, firstName, middleName, lastName) => {
-    const text = rawText.toUpperCase();
-    const first = (firstName || '').toUpperCase().trim();
-    const middle = (middleName || '').toUpperCase().trim();
-    const last = (lastName || '').toUpperCase().trim();
-
-    // Check combinations — at minimum first + last must appear
-    const hasFirst = first && text.includes(first);
-    const hasLast = last && text.includes(last);
-    const hasMiddle = middle && text.includes(middle);
-
-    // Must have at least first name AND last name in the document
-    if (hasFirst && hasLast) return true;
-
-    // Also accept: last name + middle name (some certificates use middle initial)
-    if (hasLast && hasMiddle) return true;
-
-    return false;
-};
-
-// Helper: normalize skill names consistently (module-level, used everywhere below)
-const normalizeSkill = (skill) => {
-    if (typeof skill === 'string') return skill.trim();
-    if (typeof skill === 'object' && skill !== null) {
-        return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
-    }
-    return String(skill).trim();
-};
-
-// ============ NEW: canonical key for ALL comparisons/dedup ============
-// Case-insensitive, whitespace-collapsed. Never used for display — only for matching.
-const skillKey = (skill) => normalizeSkill(skill).toLowerCase().replace(/\s+/g, ' ').trim();
-
-// Secondary key for looser matching in auto-approve fallback.
-// Helps match variants like "Power Point" vs "PowerPoint".
-const compactSkillKey = (skill) => normalizeSkill(skill).toLowerCase().replace(/[^a-z0-9]+/g, '');
-
-const singularizeToken = (token) => {
-    if (!token || token.length < 4) return token;
-    if (token.endsWith('ies') && token.length > 4) return `${token.slice(0, -3)}y`;
-    if (token.endsWith('ses') || token.endsWith('xes') || token.endsWith('zes')) return token.slice(0, -2);
-    if (token.endsWith('s') && !token.endsWith('ss')) return token.slice(0, -1);
-    return token;
-};
-
-const singularSkillKey = (skill) => {
-    const tokens = skillKey(skill).split(' ').map(singularizeToken).filter(Boolean);
-    return tokens.join(' ').trim();
-};
-
-const singularCompactSkillKey = (skill) => {
-    const tokens = skillKey(skill).split(' ').map(singularizeToken).filter(Boolean);
-    return tokens.join('').replace(/[^a-z0-9]+/g, '');
-};
-
-const buildComparisonKeys = (skill) => {
-    const strict = skillKey(skill);
-    const compact = compactSkillKey(skill);
-    const singular = singularSkillKey(skill);
-    const singularCompact = singularCompactSkillKey(skill);
-
-    return [strict, compact, singular, singularCompact].filter(Boolean);
-};
-
-const addComparisonKeys = (set, skill) => {
-    for (const key of buildComparisonKeys(skill)) {
-        set.add(key);
-    }
-};
-
-const hasComparisonKey = (set, skill) => {
-    return buildComparisonKeys(skill).some(key => set.has(key));
-};
+// All normalization helpers imported from backend/utils/skillNormalizer.js
+// (normalizeSkill, skillKey, compactSkillKey, singularCompactSkillKey,
+//  buildComparisonKeys, addComparisonKeys, hasComparisonKey)
 
 // ============ NEW: load this employee's full feedback history ============
 // Pulls every skill this employee has ever approved or rejected from the
@@ -164,10 +78,21 @@ async function getEmployeeFeedbackHistory(employeeId) {
     return { approvedKeys, rejectedKeys };
 }
 
-// ============ NEW: global rejected-noise history ============
+// ============ IN-MEMORY CACHES (5-minute TTL) ============
+let cachedGlobalNoise = null;
+let cachedGlobalNoiseTime = 0;
+let cachedKBSkills = null;
+let cachedKBSkillsTime = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+// ============ global rejected-noise history ============
 // Any phrase repeatedly marked as Not Skill by other employees should be
 // treated as learned noise and should not be shown again for manual review.
 async function getGlobalRejectedNoiseKeys() {
+    const now = Date.now();
+    if (cachedGlobalNoise && (now - cachedGlobalNoiseTime < CACHE_TTL_MS)) {
+        return cachedGlobalNoise;
+    }
     const rejectedKeys = new Set();
 
     try {
@@ -178,19 +103,49 @@ async function getGlobalRejectedNoiseKeys() {
 
         if (error) {
             console.error('⚠️ Could not load global rejected-noise history:', error.message);
-            return rejectedKeys;
+            return cachedGlobalNoise || rejectedKeys;
         }
 
         for (const row of feedbackRows || []) {
             addComparisonKeys(rejectedKeys, row.phrase);
         }
 
-        console.log(`📊 Global rejected-noise keys: ${rejectedKeys.size}`);
+        cachedGlobalNoise = rejectedKeys;
+        cachedGlobalNoiseTime = now;
+        console.log(`📊 Global rejected-noise keys cached: ${rejectedKeys.size}`);
     } catch (e) {
         console.error('⚠️ Error loading global rejected-noise history:', e.message);
     }
 
-    return rejectedKeys;
+    return cachedGlobalNoise || rejectedKeys;
+}
+
+// ============ cached knowledge base skills ============
+async function getKnowledgeBaseSkills() {
+    const now = Date.now();
+    if (cachedKBSkills && (now - cachedKBSkillsTime < CACHE_TTL_MS)) {
+        return cachedKBSkills;
+    }
+    try {
+        const { data: kbSkills, error } = await supabase
+            .from('skills')
+            .select('skill_name');
+
+        if (error) {
+            console.error('⚠️ Could not load knowledge base skills:', error.message);
+            return cachedKBSkills || [];
+        }
+
+        const skills = Array.isArray(kbSkills)
+            ? kbSkills.map(row => normalizeSkill(row.skill_name)).filter(Boolean)
+            : [];
+        cachedKBSkills = skills;
+        cachedKBSkillsTime = now;
+        return skills;
+    } catch (e) {
+        console.error('⚠️ Error loading knowledge base skills:', e.message);
+        return cachedKBSkills || [];
+    }
 }
 
 exports.processDocument = async (req, res) => {
@@ -207,40 +162,7 @@ exports.processDocument = async (req, res) => {
         }
 
         const employeeId = profileData.employee_id;
-        const employeeIdUpper = employeeId.toUpperCase();
-        const firstName = profileData.first_name || '';
-        const middleName = profileData.middle_name || '';
-        const lastName = profileData.last_name || '';
-
-        // FormData sends booleans as strings, so check for both
-        const confirmMismatch = req.body.confirmMismatch === 'true' || req.body.confirmMismatch === true;
-
-        // ✅ LAYER 1 SECURITY: Check filename for EMP-XXX pattern
         const filename = file.originalname;
-        const filenameUpper = filename.toUpperCase();
-        const filenameMatch = filenameUpper.match(/^(EMP-\d+)/);
-
-        if (filenameMatch) {
-            const fileEmployeeId = filenameMatch[1];
-            if (fileEmployeeId !== employeeIdUpper) {
-                if (!confirmMismatch) {
-                    console.log(`⚠️ Filename ID mismatch — expected "${employeeIdUpper}", filename says "${fileEmployeeId}". Awaiting user confirmation.`);
-                    return res.status(409).json({
-                        success: false,
-                        error: 'DOCUMENT_MISMATCH',
-                        requiresConfirmation: true,
-                        data: {
-                            reason: 'filename_id',
-                            expected: employeeIdUpper,
-                            found: fileEmployeeId,
-                            employeeId
-                        },
-                        message: `The file name suggests this document belongs to ${fileEmployeeId}, but you're signed in as ${employeeId}. The document doesn't appear to align with your information — are you sure you want to upload it?`
-                    });
-                }
-                console.log(`⚠️ Filename ID mismatch overridden by user (${employeeId}) — proceeding with upload`);
-            }
-        }
 
         console.log(`📄 Processing: ${filename} for employee: ${employeeId}`);
 
@@ -262,81 +184,22 @@ exports.processDocument = async (req, res) => {
         }
 
         const rawText = result.ocr?.raw_text || result.ocr?.cleaned_text || '';
-        const rawTextUpper = rawText.toUpperCase();
-
-        // ✅ LAYER 2 SECURITY: Check EMP-XXX IDs in document content
-        const contentMatches = [...rawTextUpper.matchAll(/EMP-\d+/g)].map(m => m[0]);
-        const uniqueIds = [...new Set(contentMatches)];
-
-        console.log(`🔍 Employee IDs found in document: ${uniqueIds.join(', ') || 'none'}`);
-
-        if (uniqueIds.length > 0) {
-            const foreignIds = uniqueIds.filter(id => id !== employeeIdUpper);
-            if (foreignIds.length > 0) {
-                if (!confirmMismatch) {
-                    console.log(`⚠️ Content ID mismatch — expected "${employeeIdUpper}", document mentions "${foreignIds.join(', ')}". Awaiting user confirmation.`);
-                    return res.status(409).json({
-                        success: false,
-                        error: 'DOCUMENT_MISMATCH',
-                        requiresConfirmation: true,
-                        data: {
-                            reason: 'content_id',
-                            expected: employeeIdUpper,
-                            found: foreignIds.join(', '),
-                            employeeId
-                        },
-                        message: `This document mentions ID(s) ${foreignIds.join(', ')}, but you're signed in as ${employeeId}. The document doesn't appear to align with your information — are you sure you want to upload it?`
-                    });
-                }
-                console.log(`⚠️ Content ID mismatch overridden by user (${employeeId}) — proceeding with upload`);
-            }
-        }
-
-        // ✅ LAYER 3 SECURITY: Check employee name in document content
-        // Only applies when no EMP-XXX found (e.g. certificates)
-        if (uniqueIds.length === 0 && rawText.length > 50) {
-            console.log(`🔍 No EMP-ID found — checking name: ${firstName} ${lastName}`);
-            const nameFound = checkNameInContent(rawText, firstName, middleName, lastName);
-
-            if (!nameFound) {
-                if (!confirmMismatch) {
-                    const foundName = extractPossibleName(rawText);
-                    console.log(`⚠️ Name mismatch — expected "${firstName} ${lastName}", best guess "${foundName || 'none'}". Awaiting user confirmation.`);
-                    return res.status(409).json({
-                        success: false,
-                        error: 'DOCUMENT_MISMATCH',
-                        requiresConfirmation: true,
-                        data: {
-                            reason: 'name',
-                            expected: `${firstName} ${lastName}`.trim(),
-                            found: foundName || null,
-                            employeeId
-                        },
-                        message: foundName
-                            ? `This document appears to belong to "${foundName}", but your profile name is "${firstName} ${lastName}". The document doesn't appear to align with your information — are you sure you want to upload it?`
-                            : `This document doesn't appear to mention your name (${firstName} ${lastName}). The document doesn't appear to align with your information — are you sure you want to upload it?`
-                    });
-                }
-                console.log(`⚠️ Name mismatch overridden by user (${employeeId}) — proceeding with upload`);
-            } else {
-                console.log(`✅ Name check passed — "${firstName} ${lastName}" found in document`);
-            }
-        }
 
         // ============ NORMALIZE + SEPARATE AUTO-APPROVED VS NEEDS-REVIEW ============
         const extractedSkills = (result.nlp?.skills || []).map(normalizeSkill).filter(Boolean);
         const pythonAutoApproved = (result.nlp?.auto_approved || []).map(normalizeSkill).filter(Boolean);
         const needsReviewNormalized = (result.nlp?.needs_review || []).map(normalizeSkill).filter(Boolean);
 
-        let knowledgeBaseSkills = [];
-        try {
-            const { data: kbSkills } = await supabase
-                .from('skills')
-                .select('skill_name');
-            knowledgeBaseSkills = Array.isArray(kbSkills) ? kbSkills.map(row => normalizeSkill(row.skill_name)).filter(Boolean) : [];
-        } catch (kbError) {
-            console.log('⚠️ Could not load knowledge base skills for auto-approve fallback:', kbError.message);
-        }
+        // Concurrently fetch employee feedback history, global noise, and knowledge base
+        const [
+            { approvedKeys: historyApprovedKeys, rejectedKeys: historyRejectedKeys },
+            globalRejectedNoiseKeys,
+            knowledgeBaseSkills
+        ] = await Promise.all([
+            getEmployeeFeedbackHistory(employeeId),
+            getGlobalRejectedNoiseKeys(),
+            getKnowledgeBaseSkills()
+        ]);
 
         const knowledgeBaseSet = new Set();
         const knowledgeBaseCompactSet = new Set();
@@ -366,17 +229,6 @@ exports.processDocument = async (req, res) => {
         let finalNeedsReview = (needsReviewNormalized.length > 0 ? needsReviewNormalized : extractedSkills).filter(skill =>
             !hasComparisonKey(autoApprovedComparisonSet, skill) && skill.length > 0
         );
-
-        // ============ NEW: FILTER OUT SKILLS THIS EMPLOYEE HAS ALREADY REVIEWED ============
-        // Reads the employee's full feedback_training history (approved + rejected,
-        // across ALL of their documents) and strips those skills out of both
-        // finalNeedsReview and autoApprovedNormalized. This is the fix: previously
-        // this controller only checked approved_skills/rejected_skills on a single
-        // document row, so a skill rejected on Document A (e.g. "Level", "Engr",
-        // "Basic Use") would still show up as "Pending" on Document B, C, etc.
-        const { approvedKeys: historyApprovedKeys, rejectedKeys: historyRejectedKeys } =
-            await getEmployeeFeedbackHistory(employeeId);
-        const globalRejectedNoiseKeys = await getGlobalRejectedNoiseKeys();
 
         let previouslyRejected = [...historyRejectedKeys];
 
@@ -521,9 +373,6 @@ exports.processDocument = async (req, res) => {
 
             const nameIdExclude = new Set([
                 employeeId.toLowerCase(),
-                firstName.toLowerCase(),
-                lastName.toLowerCase(),
-                `${firstName} ${lastName}`.toLowerCase(),
                 'full name',
                 'employee id',
                 'name'
@@ -761,6 +610,52 @@ exports.getStats = async (req, res) => {
         const stats = await pythonService.getStats();
         res.json({ success: true, stats });
     } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ✅ Get OCR text for a specific document (on-demand)
+exports.getDocumentOcrText = async (req, res) => {
+    try {
+        const { documentId } = req.params;
+
+        if (!documentId) {
+            return res.status(400).json({ success: false, error: 'Document ID is required' });
+        }
+
+        // Verify user owns this document
+        const { data: profileData, error: profileError } = await getProfileFromToken(req.user.id);
+
+        if (profileError || !profileData) {
+            return res.status(403).json({ success: false, error: 'Profile not found' });
+        }
+
+        // Get only the OCR text for this specific document
+        const { data, error } = await supabase
+            .from('documents')
+            .select('id, raw_ocr_text, cleaned_ocr_text')
+            .eq('id', documentId)
+            .eq('employee_id', profileData.employee_id)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                return res.status(404).json({ success: false, error: 'Document not found' });
+            }
+            throw error;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                id: data.id,
+                raw_ocr_text: data.raw_ocr_text,
+                cleaned_ocr_text: data.cleaned_ocr_text
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching OCR text:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

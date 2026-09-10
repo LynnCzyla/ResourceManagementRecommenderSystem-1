@@ -136,7 +136,8 @@ router.get('/', async (req, res) => {
       const { data: assignments, error: assignmentsError } = await supabase
         .from('project_assignments')
         .select('profile_id')
-        .eq('project_id', projectId);
+        .eq('project_id', projectId)
+        .eq('status', 'Assigned');
       
       if (assignmentsError) throw assignmentsError;
 
@@ -145,11 +146,12 @@ router.get('/', async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
       }
     } else if (pmId) {
-      // Get all projects for this PM
+      // Get all active projects for this PM (exclude Completed and Archived)
       const { data: pmProjects, error: projectsError } = await supabase
         .from('projects')
         .select('id')
-        .eq('created_by', pmId);
+        .eq('created_by', pmId)
+        .not('status', 'in', '("Completed","Archived")');
       
       if (projectsError) throw projectsError;
 
@@ -158,11 +160,12 @@ router.get('/', async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
       }
 
-      // Get all assignments for these projects
+      // Get active assignments for these active projects
       const { data: assignments, error: assignmentsError } = await supabase
         .from('project_assignments')
         .select('profile_id')
-        .in('project_id', projectIds);
+        .in('project_id', projectIds)
+        .eq('status', 'Assigned');
       
       if (assignmentsError) throw assignmentsError;
 
@@ -261,3 +264,4 @@ router.post('/cache/clear', (req, res) => {
 });
 
 module.exports = router;
+module.exports.invalidateEmployeesCache = () => cache.clear();

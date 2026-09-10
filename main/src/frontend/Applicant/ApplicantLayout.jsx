@@ -17,7 +17,7 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
           </div>
         </div>
         <div style={styles.headerRight}>
-          <button 
+          <button
             onClick={() => setShowMyApplications(!showMyApplications)}
             style={{
               ...styles.navButton,

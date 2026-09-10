@@ -1769,7 +1769,6 @@ class NLPProcessor:
 
         if cat1 != cat2 and cat1 != 'Other' and cat2 != 'Other':
             reason = f"different known categories ({cat1} vs {cat2})"
-            print(f"[ALIAS] REJECTED:\n  \"{skill1}\" <-> \"{skill2}\"\n  reason={reason}")
             self._record_merge_decision(skill1, skill2, False, reason=reason)
             if stats is not None:
                 stats['prefilter_rejected'] = stats.get('prefilter_rejected', 0) + 1
@@ -1777,7 +1776,6 @@ class NLPProcessor:
 
         if (cat1 == 'Other' or cat2 == 'Other') and overlap == 0:
             reason = 'uncategorized + zero raw word overlap — insufficient evidence'
-            print(f"[ALIAS] REJECTED:\n  \"{skill1}\" <-> \"{skill2}\"\n  reason={reason}")
             self._record_merge_decision(skill1, skill2, False, reason=reason)
             if stats is not None:
                 stats['prefilter_rejected'] = stats.get('prefilter_rejected', 0) + 1
@@ -1785,23 +1783,10 @@ class NLPProcessor:
         # ===================================================
 
         # ============ LEXICAL PRE-FILTER (cheap pre-filter #2, no spaCy) ====
-        # Requirement: only pairs with plausible lexical/structural overlap
-        # ever reach _evaluate_equivalence() (and therefore ever risk a
-        # spaCy call). This is a strict subset check of _evaluate_equivalence's
-        # own accept branches (see _is_lexically_plausible_alias docstring),
-        # so it can reject a pair here only if the full check would have
-        # rejected it too — alias safety is unchanged, only wasted work is
-        # skipped. Pairs like "service teams" <-> "electrical construction
-        # project sales support" (zero token overlap) are already caught by
-        # the category filter above; pairs like "client technical
-        # communication and support" <-> "client relationship management"
-        # (share one word but fail full-coverage/core-overlap) are caught
-        # here, before any spaCy call.
         cheap_sig = self._get_equivalence_signals(skill1, skill2, compute_similarity=False)
         if not self._is_lexically_plausible_alias(cheap_sig):
             reasons = self._cheap_rejection_reasons(cheap_sig)
             reason_text = '; '.join(reasons)
-            print(f"[ALIAS] REJECTED:\n  \"{skill1}\" <-> \"{skill2}\"\n  reason={reason_text}")
             self._record_merge_decision(skill1, skill2, False, similarity=None, reason=reason_text)
             if stats is not None:
                 stats['prefilter_rejected'] = stats.get('prefilter_rejected', 0) + 1
@@ -2056,6 +2041,15 @@ class NLPProcessor:
             
             score = 0
             
+            # Phase 3B: Explicit high-confidence skill section header boost (+5)
+            EXPLICIT_SKILL_HEADERS = (
+                'skills', 'technical skills', 'core competencies', 'key skills',
+                'competencies', 'areas of expertise', 'software skills',
+                'technical competencies', 'tools & technologies', 'proficiencies'
+            )
+            if any(h in section_lower for h in EXPLICIT_SKILL_HEADERS):
+                score += 5
+
             # Check section name for skill indicators
             for indicator in skill_indicators:
                 if indicator in section_lower:
@@ -2085,14 +2079,14 @@ class NLPProcessor:
                     break
             
             # ============ FIX: hard-exclude known metadata/table sections ============
-            # These sections describe classification metadata or project tables,
-            # not skills — but generic substrings like 'competenc', 'document',
-            # 'management', 'control', 'experience', 'project' cause them to
-            # incorrectly score as skill sections.
+            # Phase 3B: Expanded exclusion list to include education, references, and contact details
             METADATA_SECTION_MARKERS = (
                 'classification', 'primary role', 'functional area',
                 'specialization category', 'experience category',
-                'relevant project experience', 'project name'
+                'relevant project experience', 'project name',
+                'education', 'educational background', 'academic history',
+                'character reference', 'references', 'personal reference',
+                'personal details', 'personal information', 'contact information'
             )
             if any(marker in section_lower for marker in METADATA_SECTION_MARKERS):
                 score -= 10
@@ -2517,22 +2511,27 @@ class NLPProcessor:
                     'confidence': confidence
                 }
                 
-                if is_skill and confidence >= 0.85:
+                # Phase 3: Lowered auto-approve threshold from 0.85 → 0.75
+                # so dictionary-matched skills flow directly to approved
+                # without flooding needs_review.
+                if is_skill and confidence >= 0.75:
                     print(f"[ML] '{candidate}' -> High confidence skill ({confidence:.2%})")
                     master = self.get_master_skill(candidate_lower)
                     if master != candidate_lower:
                         print(f"[ML] Normalized: '{candidate}' -> '{master}'")
                         return master, 'auto_approved', ml_meta
                     return candidate, 'auto_approved', ml_meta
-                
-                elif is_skill and confidence >= 0.65:
+
+                elif is_skill and confidence >= 0.50:
                     print(f"[ML] '{candidate}' -> Likely skill ({confidence:.2%}) - needs review")
                     return candidate, 'needs_review', ml_meta
-                
-                elif confidence < 0.40:
+
+                # Phase 3: Raised rejection floor from 0.40 → 0.50
+                # to narrow the ambiguous band and reduce noise in needs_review.
+                elif confidence < 0.50:
                     print(f"[ML]  '{candidate}' -> Not skill ({confidence:.2%}) - rejected")
                     return False
-                
+
                 else:
                     print(f"[ML]  '{candidate}' -> Uncertain ({confidence:.2%}) - show for review")
                     return candidate, 'needs_review', ml_meta
@@ -2755,6 +2754,9 @@ class NLPProcessor:
         # whether two merge runs were genuinely redundant.
         current_signature = hashlib.md5('|'.join(sorted(self.learned_skills)).encode('utf-8')).hexdigest()
         skillset_unchanged = (current_signature == self._last_merge_skillset_signature)
+        if skillset_unchanged and self._last_merge_skillset_signature is not None:
+            print(f"[MERGE-DIAG] Invocation #{invocation_number} called by '{caller}' - skill set unchanged ({len(self.learned_skills)} skills). Skipping redundant merge.", file=sys.stderr)
+            return 0
         print(f"[MERGE-DIAG] Invocation #{invocation_number} called by '{caller}' "
               f"(pid={os.getpid()}) - skill set unchanged since last merge: {skillset_unchanged}",
               file=sys.stderr)
@@ -3198,9 +3200,9 @@ class NLPProcessor:
         if len(new_skills) > 0 or len(self.learned_skills) % 10 == 0:
             self._discover_categories()
         
-        # Run dynamic merge (keeps all skills, creates aliases)
-        if self.stats['documents_analyzed'] > 0 and len(self.learned_skills) > 5:
-            print(f"[NLP] Running dynamic merge after {self.stats['documents_analyzed']} documents...")
+        # Run dynamic merge only when new skills are actually learned (keeps all skills, creates aliases)
+        if len(new_skills) > 0 and len(self.learned_skills) > 5:
+            print(f"[NLP] Running dynamic merge for {len(new_skills)} new skills...")
             merged = self.merge_synonyms_dynamically(caller='_learn_from_document')
             if merged > 0:
                 print(f"[NLP] Dynamically merged {merged} skills (kept as aliases)!")

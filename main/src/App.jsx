@@ -14,6 +14,7 @@ import EmployeeLayout from './frontend/Employee/EmployeeLayout';
 import ClientFeedbackPage from './frontend/Feedback/ClientFeedbackPage';
 import { supabase, getSession, establishSessionFromUrl } from './lib/supabaseClient';
 import Swal from 'sweetalert2';
+import axios from 'axios';
 import './App.css';
 
 const BOOT_IS_RECOVERY =
@@ -202,6 +203,49 @@ function App() {
   useEffect(() => {
     document.body.classList.toggle('dark-theme', isDark);
   }, [isDark]);
+
+  // Sync profile updates across entire app in real time
+  useEffect(() => {
+    const handleProfileUpdatedEvent = () => {
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setCurrentUser(prev => ({ ...prev, ...parsed }));
+        }
+      } catch (e) {
+        console.error('Error syncing profile update in App:', e);
+      }
+    };
+    window.addEventListener('userProfileUpdated', handleProfileUpdatedEvent);
+    return () => window.removeEventListener('userProfileUpdated', handleProfileUpdatedEvent);
+  }, []);
+
+  // Real-time security: Intercept 403 ACCOUNT_LOCKED_OR_INACTIVE responses immediately
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      response => response,
+      error => {
+        if (error.response?.status === 403 && 
+           (error.response?.data?.code === 'ACCOUNT_LOCKED_OR_INACTIVE' || 
+            error.response?.data?.error?.includes('locked or deactivated') ||
+            error.response?.data?.error?.includes('inactive'))) {
+          Swal.fire({
+            title: 'Account Inaccessible',
+            text: error.response?.data?.error || 'Your account is locked, inactive, or deactivated. You will now be signed out.',
+            icon: 'error',
+            confirmButtonText: 'OK',
+            confirmButtonColor: 'var(--color-danger)',
+            customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+          }).then(() => {
+            performLogout();
+          });
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
 
   // SINGLE AUTH LISTENER
   useEffect(() => {
@@ -486,23 +530,30 @@ function App() {
     );
   }
 
+  const handleProfileUpdate = (updatedUser) => {
+    setCurrentUser(prev => ({
+      ...prev,
+      ...updatedUser
+    }));
+  };
+
   const renderLayout = () => {
     if (!currentUser) return null;
     const role = currentUser.role;
     console.log('🎯 Rendering layout for role:', role);
     switch (role) {
       case 'Super Admin':
-        return <SuperAdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <SuperAdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} onProfileUpdate={handleProfileUpdate} />;
       case 'Admin':
-        return <AdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <AdminLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} onProfileUpdate={handleProfileUpdate} />;
       case 'Project Manager':
-        return <PMLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <PMLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} onProfileUpdate={handleProfileUpdate} />;
       case 'Resource Manager':
-        return <RMLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <RMLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} onProfileUpdate={handleProfileUpdate} />;
       case 'Human Resources':
-        return <HRLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <HRLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} onProfileUpdate={handleProfileUpdate} />;
       default:
-        return <EmployeeLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} />;
+        return <EmployeeLayout key={currentUser.id} user={currentUser} onLogout={handleLogout} isDark={isDark} toggleTheme={toggleTheme} onProfileUpdate={handleProfileUpdate} />;
     }
   };
 

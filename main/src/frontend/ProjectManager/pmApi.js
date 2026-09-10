@@ -280,11 +280,11 @@ export function updateProject(id, payload) {
   });
 }
 
-export function updateProjectStatus(id, status, restoreMode) {
+export function updateProjectStatus(id, status, restoreMode, reason) {
   clearCacheForEndpoints(['/projects', '/dashboard', '/employees', '/tasks']);
   return pm(`/projects/${id}/status`, { 
     method: 'PATCH', 
-    body: JSON.stringify({ status, restoreMode }),
+    body: JSON.stringify({ status, restoreMode, reason }),
     skipCache: true
   });
 }

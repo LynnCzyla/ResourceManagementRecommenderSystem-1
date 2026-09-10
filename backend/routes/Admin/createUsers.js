@@ -264,6 +264,22 @@ router.post("/create", async (req, res) => {
 
     const branchName = branchData?.name || null;
 
+    const trimmedEmail = (email || '').trim().toLowerCase();
+
+    // ✅ Unique email validation: Check if email already exists in system
+    const { data: userCheck, error: userCheckError } = await supabase.auth.admin.listUsers();
+    if (!userCheckError && userCheck?.users) {
+      const emailExists = userCheck.users.some(
+        u => (u.email || '').trim().toLowerCase() === trimmedEmail
+      );
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          error: "An account with this email address already exists."
+        });
+      }
+    }
+
     // Generate a throwaway password just to satisfy the auth API — it is
     // never shown or emailed. The user sets their real password themselves
     // via the "Create Password" link below (same flow as Forgot Password).
@@ -271,7 +287,7 @@ router.post("/create", async (req, res) => {
 
     // 1. Create auth user with the throwaway password
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email,
+      email: trimmedEmail,
       password: throwawayPassword,
       email_confirm: true,
       user_metadata: {
@@ -283,9 +299,14 @@ router.post("/create", async (req, res) => {
     });
 
     if (authError) {
+      const isDuplicate = authError.message?.toLowerCase().includes('already') || 
+                          authError.message?.toLowerCase().includes('duplicate') ||
+                          authError.message?.toLowerCase().includes('exists');
       return res.status(400).json({
         success: false,
-        error: authError.message
+        error: isDuplicate 
+          ? "An account with this email address already exists."
+          : authError.message
       });
     }
 

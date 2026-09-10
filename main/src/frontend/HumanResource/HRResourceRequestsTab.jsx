@@ -109,7 +109,8 @@ export default function HRResourceRequestsTab() {
 
     try {
       await hrClient.patch(`/resource-requests/${id}/approve`, {});
-      showSuccessAlert('Resource request approved.');
+      window.dispatchEvent(new Event('resourceRequestsUpdated'));
+      showSuccessAlert('Resource request approved! You can now create a Job Posting for this approved request.');
       setShowDetailsModal(false);
       loadResourceRequests();
     } catch (error) {

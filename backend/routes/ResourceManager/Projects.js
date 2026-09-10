@@ -29,6 +29,33 @@ const clearProjectsCache = (branchId = null) => {
 // Statuses that mean "not started yet"
 const NOT_STARTED_STATUSES = ['Pending', 'Pending Approval', 'Inactive'];
 
+// Extract project rating and comment from formatted project_feedback string
+function extractProjectRatingAndFeedback(rawFeedback, responses = []) {
+  let rating = null;
+  let feedback = (rawFeedback || '').trim();
+
+  if (feedback) {
+    const match = feedback.match(/^\[Rating:\s*([1-5](?:\.\d+)?)\/5\]\s*([\s\S]*)$/);
+    if (match) {
+      rating = parseFloat(match[1]);
+      feedback = match[2].trim();
+    }
+  }
+
+  // Fallback: If no explicit rating tag was extracted, compute average of employee ratings
+  if (rating === null && responses && responses.length > 0) {
+    const validRatings = responses
+      .map(r => Number(r.rating))
+      .filter(r => !isNaN(r) && r > 0);
+    if (validRatings.length > 0) {
+      const avg = validRatings.reduce((sum, r) => sum + r, 0) / validRatings.length;
+      rating = Math.round(avg * 10) / 10;
+    }
+  }
+
+  return { rating, feedback };
+}
+
 /**
  * GET /api/rm/projects
  * Powers RMProjectsTab.jsx - WITH BRANCH FILTERING VIA created_by
@@ -123,7 +150,7 @@ router.get('/', async (req, res) => {
           assigned_role,
           status
         `)
-        .eq('status', 'Assigned')
+        .in('status', ['Assigned', 'Completed'])
     ]);
 
     if (projectsResult.error) throw projectsResult.error;
@@ -202,6 +229,61 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // ✅ Fetch client feedback for projects
+    const projectIds = projects.map(p => p.id);
+    let feedbackMap = {};
+    if (projectIds.length > 0) {
+      try {
+        const { data: feedbackData, error: feedbackError } = await supabase
+          .from('feedback_requests')
+          .select(`
+            id,
+            project_id,
+            client_name,
+            client_email,
+            status,
+            completed_at,
+            feedback_responses (
+              id,
+              profile_id,
+              rating,
+              project_feedback,
+              deliverables_feedback,
+              additional_comments
+            )
+          `)
+          .in('project_id', projectIds)
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false });
+
+        if (!feedbackError && feedbackData) {
+          for (const reqRow of feedbackData) {
+            if (!feedbackMap[reqRow.project_id]) {
+              const responses = reqRow.feedback_responses || [];
+              const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+              const extracted = extractProjectRatingAndFeedback(
+                primaryResponse.project_feedback,
+                responses
+              );
+
+              feedbackMap[reqRow.project_id] = {
+                requestId: reqRow.id,
+                clientName: reqRow.client_name,
+                clientEmail: reqRow.client_email,
+                completedAt: reqRow.completed_at,
+                rating: extracted.rating,
+                projectFeedback: extracted.feedback,
+                deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+                additionalComments: primaryResponse.additional_comments || null,
+              };
+            }
+          }
+        }
+      } catch (fbErr) {
+        console.error('Non-fatal error fetching feedback for projects in RM:', fbErr);
+      }
+    }
+
     // ✅ Process projects
     const result = [];
     const toActivate = [];
@@ -210,14 +292,19 @@ router.get('/', async (req, res) => {
       const requiredSkills = [...new Set(projectSkills)];
 
       const projectAssignments = assignmentsByProject.get(proj.id) || [];
-      const assignedEmployees = projectAssignments.map((a) => {
+      const relevantAssignments = proj.status === 'Completed'
+        ? projectAssignments
+        : projectAssignments.filter(a => a.status === 'Assigned');
+      const assignedEmployees = relevantAssignments.map((a) => {
         const profile = profileById.get(a.profile_id);
         return {
+          assignmentId: a.id,
           employeeId: a.profile_id,
           employeeName: profile 
             ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown'
             : 'Unknown',
           role: a.assigned_role,
+          status: a.status,
           avatar: `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(
             profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unknown' : 'Unknown'
           )}`,
@@ -238,11 +325,20 @@ router.get('/', async (req, res) => {
         toActivate.push(proj.id);
       }
 
+      const rawDesc = proj.project_description || '';
+      const isRestored = rawDesc.includes('<!-- RESTORED -->') || rawDesc.includes('[RESTORED]');
+      const cleanDescription = rawDesc
+        .replace(/<!--\s*RESTORED\s*-->/gi, '')
+        .replace(/\[RESTORED\]/gi, '')
+        .trim();
+
       result.push({
         id: proj.id,
         code: proj.project_code,
         name: proj.project_name,
-        description: proj.project_description,
+        description: cleanDescription,
+        rawDescription: rawDesc,
+        isRestored,
         status,
         startDate: proj.start_date,
         endDate: proj.end_date,
@@ -253,6 +349,7 @@ router.get('/', async (req, res) => {
         skillsCount: requiredSkills.length,
         createdBy: proj.created_by,
         createdByName: createdByName,
+        clientFeedback: feedbackMap[proj.id] || null,
       });
     }
 
@@ -397,7 +494,7 @@ router.get('/:id', async (req, res) => {
  */
 router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
-  const { employeeId, role } = req.body;
+  const { employeeId, role, requirementId } = req.body;
   const userBranchId = req.user.branch_id;
   const isSuperAdmin = req.user.is_super_admin;
 
@@ -409,7 +506,7 @@ router.post('/:id/assign', async (req, res) => {
     // ✅ Check if employee belongs to user's branch
     const { data: employee, error: empError } = await supabase
       .from('profiles')
-      .select('branch_id, role')
+      .select('branch_id, role, first_name, last_name')
       .eq('id', employeeId)
       .single();
 
@@ -439,11 +536,27 @@ router.post('/:id/assign', async (req, res) => {
       });
     }
 
+    // Auto-match requirementId if not directly provided
+    let finalRequirementId = requirementId || null;
+    if (!finalRequirementId && role) {
+      const { data: matchedReq } = await supabase
+        .from('project_resource_requirements')
+        .select('id')
+        .eq('project_id', id)
+        .ilike('role_title', role.trim())
+        .not('status', 'in', '("Filled","Fulfilled","Completed","Cancelled")')
+        .maybeSingle();
+      if (matchedReq?.id) {
+        finalRequirementId = matchedReq.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from('project_assignments')
       .insert({
         project_id: id,
         profile_id: employeeId,
+        requirement_id: finalRequirementId,
         assigned_role: role || null,
         status: 'Assigned',
         assigned_by: req.user?.id || null,
@@ -454,10 +567,35 @@ router.post('/:id/assign', async (req, res) => {
     
     if (error) throw error;
 
+    // Check if requirement should be marked as 'Filled'
+    if (finalRequirementId) {
+      const { data: activeAssignments } = await supabase
+        .from('project_assignments')
+        .select('id')
+        .eq('requirement_id', finalRequirementId)
+        .eq('status', 'Assigned');
+
+      const { data: reqData } = await supabase
+        .from('project_resource_requirements')
+        .select('quantity_needed')
+        .eq('id', finalRequirementId)
+        .single();
+
+      const needed = reqData?.quantity_needed || 1;
+      const currentCount = activeAssignments?.length || 0;
+
+      if (currentCount >= needed) {
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Filled' })
+          .eq('id', finalRequirementId);
+      }
+    }
+
     // ✅ Check and update project status if needed
     const { data: projectRow } = await supabase
       .from('projects')
-      .select('status')
+      .select('status, project_name, created_by')
       .eq('id', id)
       .single();
 
@@ -468,7 +606,39 @@ router.post('/:id/assign', async (req, res) => {
         .eq('id', id);
     }
 
+    // Cross-role notifications: notify employee and PM
+    try {
+      const notifs = [
+        {
+          recipient_id: employeeId,
+          type: 'assignment',
+          text: `You have been assigned to project "${projectRow?.project_name || 'a project'}" as ${role || 'team member'}.`,
+          read: false
+        }
+      ];
+      if (projectRow?.created_by && projectRow.created_by !== req.user?.id) {
+        const empName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+        notifs.push({
+          recipient_id: projectRow.created_by,
+          type: 'assignment',
+          text: `${empName || 'An employee'} has been assigned to your project "${projectRow.project_name}" as ${role || 'team member'}.`,
+          read: false
+        });
+      }
+      await supabase.from('notifications').insert(notifs);
+    } catch (notifErr) {
+      console.error('Non-fatal error creating assignment notification:', notifErr.message);
+    }
+
     clearProjectsCache(isSuperAdmin ? null : userBranchId);
+    try {
+      const { clearDashboardCache } = require('./Dashboard');
+      const { clearEmployeeCache } = require('./Employees');
+      if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+      if (clearEmployeeCache) clearEmployeeCache(isSuperAdmin ? null : userBranchId);
+    } catch (cErr) {
+      console.warn('Non-fatal cache clearing error in Projects assign:', cErr.message);
+    }
 
     res.json({ 
       success: true, 
@@ -493,7 +663,7 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     // ✅ Check if employee belongs to user's branch
     const { data: employee, error: empError } = await supabase
       .from('profiles')
-      .select('branch_id')
+      .select('branch_id, first_name, last_name')
       .eq('id', employeeId)
       .single();
 
@@ -506,6 +676,30 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       });
     }
 
+    // Get assignment details before deletion to check requirement and role
+    const { data: assignmentData } = await supabase
+      .from('project_assignments')
+      .select('requirement_id, assigned_role')
+      .eq('project_id', id)
+      .eq('profile_id', employeeId)
+      .maybeSingle();
+
+    let requirementId = assignmentData?.requirement_id;
+    const assignedRole = assignmentData?.assigned_role || 'team member';
+
+    // If requirementId was not recorded directly, look up by project_id and assigned_role
+    if (!requirementId && assignedRole && assignedRole !== 'team member') {
+      const { data: matchedReq } = await supabase
+        .from('project_resource_requirements')
+        .select('id')
+        .eq('project_id', id)
+        .ilike('role_title', assignedRole.trim())
+        .maybeSingle();
+      if (matchedReq?.id) {
+        requirementId = matchedReq.id;
+      }
+    }
+
     const { error } = await supabase
       .from('project_assignments')
       .delete()
@@ -514,15 +708,381 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
     
     if (error) throw error;
 
+    // Unassign any non-completed tasks for this employee in this project
+    try {
+      await supabase
+        .from('project_tasks')
+        .update({ profile_id: null })
+        .eq('project_id', id)
+        .eq('profile_id', employeeId)
+        .neq('status', 'Completed');
+    } catch (taskErr) {
+      console.warn('Non-fatal task unassignment error:', taskErr.message);
+    }
+
+    // Reset requirement status to 'Pending' if needed
+    if (requirementId) {
+      const { data: remaining } = await supabase
+        .from('project_assignments')
+        .select('id')
+        .eq('requirement_id', requirementId)
+        .eq('status', 'Assigned');
+
+      const { data: reqData } = await supabase
+        .from('project_resource_requirements')
+        .select('quantity_needed')
+        .eq('id', requirementId)
+        .single();
+
+      const needed = reqData?.quantity_needed || 1;
+      const count = remaining?.length || 0;
+
+      if (count < needed) {
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Pending' })
+          .eq('id', requirementId);
+      }
+    }
+
+    // Fetch project info for notifications
+    const { data: project } = await supabase
+      .from('projects')
+      .select('project_name, created_by')
+      .eq('id', id)
+      .single();
+
+    try {
+      const projectName = project?.project_name || 'a project';
+      const empName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+      const notifs = [
+        {
+          recipient_id: employeeId,
+          type: 'assignment',
+          text: `You have been removed from project "${projectName}".`,
+          read: false
+        }
+      ];
+      if (project?.created_by && project.created_by !== req.user?.id) {
+        notifs.push({
+          recipient_id: project.created_by,
+          type: 'assignment',
+          text: `${empName || 'An employee'} has been removed from project "${projectName}" (${assignedRole}).`,
+          read: false
+        });
+      }
+      await supabase.from('notifications').insert(notifs);
+    } catch (notifErr) {
+      console.error('Non-fatal error creating unassign notification:', notifErr.message);
+    }
+
     clearProjectsCache(isSuperAdmin ? null : userBranchId);
+    try {
+      const { clearDashboardCache } = require('./Dashboard');
+      const { clearEmployeeCache } = require('./Employees');
+      if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+      if (clearEmployeeCache) clearEmployeeCache(isSuperAdmin ? null : userBranchId);
+    } catch (cErr) {
+      console.warn('Non-fatal cache clearing error in Projects delete assign:', cErr.message);
+    }
 
     res.json({ 
-      success: true,
-      message: 'Employee removed from project successfully'
+      success: true, 
+      message: 'Employee removed from project successfully' 
     });
   } catch (err) {
     console.error('❌ RM project remove member error:', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/rm/projects/:id/history-details — comprehensive details for project history view
+ */
+router.get('/:id/history-details', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Fetch Project
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        project_name,
+        project_description,
+        team_size,
+        duration_days,
+        start_date,
+        end_date,
+        priority,
+        status,
+        created_by,
+        created_at,
+        updated_at
+      `)
+      .eq('id', id)
+      .single();
+
+    if (projectError || !project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // 2. Fetch Client Feedback
+    const { data: feedbackRequests, error: feedbackError } = await supabase
+      .from('feedback_requests')
+      .select(`
+        id,
+        client_name,
+        client_email,
+        completed_at,
+        status,
+        feedback_responses (
+          id,
+          profile_id,
+          rating,
+          technical_skills_rating,
+          communication_rating,
+          timeliness_rating,
+          quality_of_work_rating,
+          teamwork_rating,
+          problem_solving_rating,
+          strengths,
+          areas_for_improvement,
+          would_recommend,
+          project_feedback,
+          deliverables_feedback,
+          additional_comments
+        )
+      `)
+      .eq('project_id', id)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false });
+
+    let clientFeedback = null;
+    const employeeFeedbackMap = {};
+
+    if (!feedbackError && feedbackRequests && feedbackRequests.length > 0) {
+      const latestReq = feedbackRequests[0];
+      const responses = latestReq.feedback_responses || [];
+      const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+      const extracted = extractProjectRatingAndFeedback(primaryResponse.project_feedback, responses);
+
+      clientFeedback = {
+        requestId: latestReq.id,
+        clientName: latestReq.client_name,
+        clientEmail: latestReq.client_email,
+        completedAt: latestReq.completed_at,
+        rating: extracted.rating,
+        projectFeedback: extracted.feedback,
+        deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+        additionalComments: primaryResponse.additional_comments || null,
+      };
+
+      for (const resp of responses) {
+        employeeFeedbackMap[resp.profile_id] = {
+          rating: resp.rating,
+          strengths: resp.strengths,
+          areasForImprovement: resp.areas_for_improvement,
+          wouldRecommend: resp.would_recommend,
+          technicalSkillsRating: resp.technical_skills_rating,
+          communicationRating: resp.communication_rating,
+          timelinessRating: resp.timeliness_rating,
+          qualityOfWorkRating: resp.quality_of_work_rating,
+          teamworkRating: resp.teamwork_rating,
+          problemSolvingRating: resp.problem_solving_rating,
+        };
+      }
+    }
+
+    // 3. Fetch Project Assignments
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('project_assignments')
+      .select('id, profile_id, assigned_role, start_date, end_date, status, assigned_at')
+      .eq('project_id', id);
+
+    if (assignmentsError) throw assignmentsError;
+
+    // 4. Fetch Project Tasks
+    const { data: rawTasks, error: tasksError } = await supabase
+      .from('project_tasks')
+      .select(`
+        id,
+        project_id,
+        profile_id,
+        title,
+        description,
+        priority,
+        status,
+        due_date,
+        progress_logs,
+        created_at
+      `)
+      .eq('project_id', id)
+      .order('created_at', { ascending: true });
+
+    if (tasksError) throw tasksError;
+
+    // Collect all profile IDs
+    const profileIdSet = new Set();
+    (assignments || []).forEach(a => a.profile_id && profileIdSet.add(a.profile_id));
+    (rawTasks || []).forEach(t => t.profile_id && profileIdSet.add(t.profile_id));
+    if (project.created_by) profileIdSet.add(project.created_by);
+    (feedbackRequests || []).forEach(fr => {
+      (fr.employee_ids || []).forEach(eid => eid && profileIdSet.add(eid));
+      (fr.feedback_responses || []).forEach(r => r.profile_id && profileIdSet.add(r.profile_id));
+    });
+
+    const profileIds = Array.from(profileIdSet);
+    let profileMap = {};
+
+    if (profileIds.length > 0) {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          first_name,
+          middle_name,
+          last_name,
+          employee_id,
+          role,
+          avatar_url,
+          departments ( id, department_name ),
+          positions ( id, position_name )
+        `)
+        .in('id', profileIds);
+
+      if (!profilesError && profiles) {
+        profiles.forEach(p => { profileMap[p.id] = p; });
+      }
+    }
+
+    const tasks = (rawTasks || []).map(t => {
+      const logs = Array.isArray(t.progress_logs) ? t.progress_logs : [];
+      const totalProgress = logs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
+      const isCompleted = t.status === 'Completed' || totalProgress >= 100;
+      const assignedEmp = t.profile_id ? profileMap[t.profile_id] : null;
+      const assignedName = assignedEmp
+        ? [assignedEmp.first_name, assignedEmp.last_name].filter(Boolean).join(' ').trim()
+        : 'Unassigned';
+
+      return {
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        priority: t.priority,
+        status: t.status,
+        dueDate: t.due_date,
+        profileId: t.profile_id,
+        assignedTo: assignedName,
+        totalProgress: Math.min(100, totalProgress),
+        isCompleted,
+        progressLogs: logs,
+      };
+    });
+
+    const assignmentMap = {};
+    (assignments || []).forEach(a => {
+      if (a.profile_id && !assignmentMap[a.profile_id]) {
+        assignmentMap[a.profile_id] = a;
+      }
+    });
+
+    const employeeIdsToDisplay = Array.from(profileIdSet).filter(pid => {
+      return (
+        assignmentMap[pid] ||
+        tasks.some(t => t.profileId === pid) ||
+        employeeFeedbackMap[pid]
+      );
+    });
+
+    const employees = employeeIdsToDisplay.map(pid => {
+      const p = profileMap[pid] || {};
+      const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim()
+        || [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(' ').trim()
+        || (p.employee_id ? `Employee (${p.employee_id})` : 'Employee');
+      const assignment = assignmentMap[pid];
+      const empTasks = tasks.filter(t => t.profileId === pid);
+      const completedTasks = empTasks.filter(t => t.isCompleted).length;
+      const pendingTasks = empTasks.filter(t => !t.isCompleted).length;
+      const totalTasks = empTasks.length;
+      const fb = employeeFeedbackMap[pid] || null;
+
+      let role = p.positions?.position_name;
+      if (!role) {
+        if (assignment?.assigned_role && assignment.assigned_role !== 'Employee' && assignment.assigned_role !== 'Team Member') {
+          role = assignment.assigned_role;
+        } else if (p.role && p.role !== 'Employee' && p.role !== 'Team Member') {
+          role = p.role;
+        } else {
+          role = assignment?.assigned_role || p.role || 'Team Member';
+        }
+      } else if (assignment?.assigned_role && assignment.assigned_role !== 'Employee' && assignment.assigned_role !== 'Team Member') {
+        role = assignment.assigned_role;
+      }
+
+      return {
+        id: pid,
+        name,
+        employeeId: p.employee_id || '',
+        role: role || 'Team Member',
+        department: p.departments?.department_name || '',
+        avatar: p.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
+        assignedAt: assignment?.assigned_at || null,
+        assignmentStatus: assignment?.status || 'Assigned',
+        clientRating: fb?.rating || null,
+        clientStrengths: fb?.strengths || null,
+        clientImprovements: fb?.areasForImprovement || null,
+        wouldRecommend: fb?.wouldRecommend ?? null,
+        totalTasks,
+        completedTasks,
+        pendingTasks,
+        completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+        tasks: empTasks,
+      };
+    });
+
+    const totalTasksCount = tasks.length;
+    const completedTasksCount = tasks.filter(t => t.isCompleted).length;
+    const pendingTasksCount = totalTasksCount - completedTasksCount;
+    const overallCompletionRate = totalTasksCount > 0
+      ? Math.round((completedTasksCount / totalTasksCount) * 100)
+      : 100;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        project: {
+          id: project.id,
+          name: project.project_name,
+          description: project.project_description,
+          status: project.status,
+          priority: project.priority,
+          startDate: project.start_date,
+          endDate: project.end_date,
+          durationDays: project.duration_days,
+          teamSize: project.team_size,
+          createdAt: project.created_at,
+          updatedAt: project.updated_at,
+        },
+        clientFeedback,
+        summary: {
+          totalTeamMembers: employees.length,
+          totalTasks: totalTasksCount,
+          completedTasks: completedTasksCount,
+          pendingTasks: pendingTasksCount,
+          completionPercentage: overallCompletionRate,
+        },
+        employees,
+        tasks,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching project history details for RM:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch project history details',
+      error: error.message,
+    });
   }
 });
 

@@ -121,14 +121,14 @@ export async function toggleEmployeeVerified(profileId) {
   }
 }
 
-export async function assignEmployeeFromDirectory(profileId, { projectId, startDate, role, notes }) {
+export async function assignEmployeeFromDirectory(profileId, { projectId, startDate, role, notes, requirementId }) {
   console.log(`📋 Assigning employee ${profileId} to project ${projectId}...`);
   try {
     const headers = await authHeaders();
     const res = await fetch(`${API_BASE}/employees/${profileId}/assign`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ projectId, startDate, role, notes }),
+      body: JSON.stringify({ projectId, startDate, role, notes, requirementId }),
     });
     return handle(res);
   } catch (error) {
@@ -169,7 +169,7 @@ export async function assignEmployeeToProject(projectId, { employeeId, role }) {
     const res = await fetch(`${API_BASE}/projects/${projectId}/assign`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ employeeId, role }),
+      body: JSON.stringify({ employeeId, role, requirementId }),
     });
     return handle(res);
   } catch (error) {

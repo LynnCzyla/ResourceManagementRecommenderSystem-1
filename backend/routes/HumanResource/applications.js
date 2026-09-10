@@ -34,6 +34,13 @@ router.get('/', async (req, res) => {
           job_postings (
             id, 
             title, 
+            status,
+            description,
+            source_request_id,
+            hr_resource_requests:source_request_id (
+              id,
+              quantity_needed
+            ),
             department_id,
             departments:department_id (
               id,
@@ -61,17 +68,45 @@ router.get('/', async (req, res) => {
       const { data, error } = await query;
       if (error) throw error;
 
+      // Count hired per posting
+      const hiredCountsByPosting = {};
+      (data || []).forEach(item => {
+        const pId = item.job_posting_id;
+        if (pId && item.status === 'Hired') {
+          hiredCountsByPosting[pId] = (hiredCountsByPosting[pId] || 0) + 1;
+        }
+      });
+
       // Transform data
-      const transformedData = (data || []).map(item => ({
-        ...item,
-        department_name: item.job_postings?.departments?.department_name || item.department || 'N/A',
-        branch_name: item.job_postings?.departments?.branches?.name || 'N/A',
-        branch_id: item.branch_id || item.job_postings?.departments?.branch_id || null,
-        job_title: item.job_postings?.title || 'N/A',
-        posted_by: item.job_postings?.profiles ? 
-          `${item.job_postings.profiles.first_name || ''} ${item.job_postings.profiles.last_name || ''}`.trim() : 
-          'Unknown'
-      }));
+      const transformedData = (data || []).map(item => {
+        const pId = item.job_posting_id;
+        const posting = item.job_postings;
+        let postingQuantity = 1;
+        if (posting?.source_request_id && posting?.hr_resource_requests?.quantity_needed) {
+          postingQuantity = Number(posting.hr_resource_requests.quantity_needed) || 1;
+        }
+        const match = (posting?.description || '').match(/\[VACANCY:\s*(\d+)\]/i);
+        if (match) {
+          postingQuantity = parseInt(match[1], 10) || postingQuantity;
+        }
+        const hiredCount = pId ? (hiredCountsByPosting[pId] || 0) : 0;
+        const postingFilled = pId ? (hiredCount >= postingQuantity) : false;
+
+        return {
+          ...item,
+          department_name: item.job_postings?.departments?.department_name || item.department || 'N/A',
+          branch_name: item.job_postings?.departments?.branches?.name || 'N/A',
+          branch_id: item.branch_id || item.job_postings?.departments?.branch_id || null,
+          job_title: item.job_postings?.title || 'N/A',
+          posting_quantity: postingQuantity,
+          posting_hired_count: hiredCount,
+          posting_filled: postingFilled,
+          posting_status: posting?.status || 'Active',
+          posted_by: item.job_postings?.profiles ? 
+            `${item.job_postings.profiles.first_name || ''} ${item.job_postings.profiles.last_name || ''}`.trim() : 
+            'Unknown'
+        };
+      });
 
       return res.status(200).json({ success: true, data: transformedData || [] });
     }
@@ -92,6 +127,13 @@ router.get('/', async (req, res) => {
         job_postings (
           id, 
           title, 
+          status,
+          description,
+          source_request_id,
+          hr_resource_requests:source_request_id (
+            id,
+            quantity_needed
+          ),
           department_id,
           departments:department_id (
             id,
@@ -120,17 +162,45 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
+    // Count hired per posting
+    const hiredCountsByPosting = {};
+    (data || []).forEach(item => {
+      const pId = item.job_posting_id;
+      if (pId && item.status === 'Hired') {
+        hiredCountsByPosting[pId] = (hiredCountsByPosting[pId] || 0) + 1;
+      }
+    });
+
     // Transform data
-    const transformedData = (data || []).map(item => ({
-      ...item,
-      department_name: item.job_postings?.departments?.department_name || item.department || 'N/A',
-      branch_name: item.job_postings?.departments?.branches?.name || 'N/A',
-      branch_id: item.branch_id || item.job_postings?.departments?.branch_id || null,
-      job_title: item.job_postings?.title || 'N/A',
-      posted_by: item.job_postings?.profiles ? 
-        `${item.job_postings.profiles.first_name || ''} ${item.job_postings.profiles.last_name || ''}`.trim() : 
-        'Unknown'
-    }));
+    const transformedData = (data || []).map(item => {
+      const pId = item.job_posting_id;
+      const posting = item.job_postings;
+      let postingQuantity = 1;
+      if (posting?.source_request_id && posting?.hr_resource_requests?.quantity_needed) {
+        postingQuantity = Number(posting.hr_resource_requests.quantity_needed) || 1;
+      }
+      const match = (posting?.description || '').match(/\[VACANCY:\s*(\d+)\]/i);
+      if (match) {
+        postingQuantity = parseInt(match[1], 10) || postingQuantity;
+      }
+      const hiredCount = pId ? (hiredCountsByPosting[pId] || 0) : 0;
+      const postingFilled = pId ? (hiredCount >= postingQuantity) : false;
+
+      return {
+        ...item,
+        department_name: item.job_postings?.departments?.department_name || item.department || 'N/A',
+        branch_name: item.job_postings?.departments?.branches?.name || 'N/A',
+        branch_id: item.branch_id || item.job_postings?.departments?.branch_id || null,
+        job_title: item.job_postings?.title || 'N/A',
+        posting_quantity: postingQuantity,
+        posting_hired_count: hiredCount,
+        posting_filled: postingFilled,
+        posting_status: posting?.status || 'Active',
+        posted_by: item.job_postings?.profiles ? 
+          `${item.job_postings.profiles.first_name || ''} ${item.job_postings.profiles.last_name || ''}`.trim() : 
+          'Unknown'
+      };
+    });
 
     console.log(`✅ Found ${transformedData?.length || 0} applications in branch`);
 

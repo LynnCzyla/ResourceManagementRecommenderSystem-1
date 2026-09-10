@@ -56,6 +56,14 @@ router.get('/job-postings', async (req, res) => {
           id,
           position_name
         ),
+        hr_resource_requests:source_request_id (
+          id,
+          quantity_needed
+        ),
+        job_applications (
+          id,
+          status
+        ),
         profiles!created_by (
           id,
           first_name,
@@ -73,20 +81,67 @@ router.get('/job-postings', async (req, res) => {
 
     if (error) throw error;
 
-    const transformedData = (data || []).map(item => ({
-      ...item,
-      created_by_name: item.profiles ? `${item.profiles.first_name || ''} ${item.profiles.last_name || ''}`.trim() : 'Unknown',
-      branch_id: item.profiles?.branch_id || null,
-      branch_name: item.profiles?.branches?.name || 'N/A',
-      branch_location: item.profiles?.branches?.location || 'N/A',
-      department_name: item.departments?.department_name || 'N/A',
-      position_name: item.positions?.position_name || 'N/A'
+    const transformedData = await Promise.all((data || []).map(async (item) => {
+      let quantity = 1;
+      if (item.source_request_id && item.hr_resource_requests?.quantity_needed) {
+        quantity = Number(item.hr_resource_requests.quantity_needed) || 1;
+      }
+      let desc = item.description || '';
+      const match = desc.match(/\[VACANCY:\s*(\d+)\]/i) || (item.requirements || '').match(/\[VACANCY:\s*(\d+)\]/i);
+      if (match) {
+        quantity = parseInt(match[1], 10) || quantity;
+      }
+      const cleanDescription = desc.replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
+
+      const hiredCount = (item.job_applications || []).filter(a => a.status === 'Hired').length;
+      const isFilled = hiredCount >= quantity;
+
+      // Auto-close in database if 100% quota is reached
+      if (isFilled && item.status === 'Active') {
+        await supabase.from('job_postings').update({ status: 'Closed' }).eq('id', item.id);
+      }
+
+      return {
+        ...item,
+        description: cleanDescription,
+        quantity,
+        hired_count: hiredCount,
+        is_filled: isFilled,
+        created_by_name: item.profiles ? `${item.profiles.first_name || ''} ${item.profiles.last_name || ''}`.trim() : 'Unknown',
+        branch_id: item.profiles?.branch_id || null,
+        branch_name: item.profiles?.branches?.name || 'N/A',
+        branch_location: item.profiles?.branches?.location || 'N/A',
+        department_name: item.departments?.department_name || 'N/A',
+        position_name: item.positions?.position_name || 'N/A'
+      };
     }));
 
-    res.json({ success: true, data: transformedData });
+    // ✅ Exclude postings that are already 100% filled (1/1, etc.) or Closed
+    const availablePostings = transformedData.filter(p => !p.is_filled && p.status === 'Active');
+
+    res.json({ success: true, data: availablePostings });
   } catch (err) {
     console.error('Error fetching job postings:', err);
     res.status(500).json({ success: false, error: 'Failed to load job postings' });
+  }
+});
+
+// ------------------------------------------------------------
+// GET /api/applicant/branches
+// Public list of Active branches for job filtering
+// ------------------------------------------------------------
+router.get('/branches', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, location, status')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('Error fetching public branches:', err);
+    res.status(500).json({ success: false, error: 'Failed to load branches' });
   }
 });
 
@@ -109,6 +164,10 @@ router.get('/job-postings/:id', async (req, res) => {
           id,
           position_name
         ),
+        hr_resource_requests:source_request_id (
+          id,
+          quantity_needed
+        ),
         profiles!created_by (
           id,
           first_name,
@@ -127,8 +186,21 @@ router.get('/job-postings/:id', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, error: 'Job posting not found' });
 
+    let quantity = 1;
+    if (data.source_request_id && data.hr_resource_requests?.quantity_needed) {
+      quantity = Number(data.hr_resource_requests.quantity_needed) || 1;
+    }
+    let desc = data.description || '';
+    const match = desc.match(/\[VACANCY:\s*(\d+)\]/i) || (data.requirements || '').match(/\[VACANCY:\s*(\d+)\]/i);
+    if (match) {
+      quantity = parseInt(match[1], 10) || quantity;
+    }
+    const cleanDescription = desc.replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
+
     const transformedData = {
       ...data,
+      description: cleanDescription,
+      quantity,
       created_by_name: data.profiles ? `${data.profiles.first_name || ''} ${data.profiles.last_name || ''}`.trim() : 'Unknown',
       branch_id: data.profiles?.branch_id || null,
       branch_name: data.profiles?.branches?.name || 'N/A',
@@ -244,8 +316,14 @@ async function processApplication(req, res) {
         .select(`
           id, 
           title, 
+          status,
           department_id,
           created_by,
+          description,
+          source_request_id,
+          hr_resource_requests:source_request_id (
+            quantity_needed
+          ),
           departments:department_id (
             department_name
           )
@@ -256,6 +334,12 @@ async function processApplication(req, res) {
       if (jobError) {
         console.error('❌ Error fetching job posting:', jobError);
       } else if (jobPosting) {
+        if (jobPosting.status === 'Closed') {
+          return res.status(400).json({
+            success: false,
+            error: 'This job posting is already closed and no longer accepting applications.'
+          });
+        }
         console.log(`📋 Found job posting: ${jobPosting.title}`);
         created_by = jobPosting.created_by;
         jobPostingTitle = jobPosting.title;
@@ -398,6 +482,27 @@ async function processApplication(req, res) {
 
     console.log(`✅ Application submitted successfully with branch_id: ${branch_id}`);
 
+    // Notify HR team members about new applicant
+    try {
+      let hrQuery = supabase.from('profiles').select('id').eq('role', 'Human Resources').eq('status', 'Active');
+      if (branch_id) {
+        hrQuery = hrQuery.eq('branch_id', branch_id);
+      }
+      const { data: hrUsers } = await hrQuery;
+      if (hrUsers && hrUsers.length > 0) {
+        const applicantFullName = `${first_name} ${last_name}`.trim();
+        const hrNotifs = hrUsers.map(u => ({
+          recipient_id: u.id,
+          type: 'alert',
+          text: `📄 New application received from ${applicantFullName} for position "${position_applied}".`,
+          read: false
+        }));
+        await supabase.from('notifications').insert(hrNotifs);
+      }
+    } catch (hrNotifErr) {
+      console.error('Non-fatal error notifying HR of application:', hrNotifErr);
+    }
+
     res.json({ success: true, data });
   } catch (err) {
     console.error('Error creating application:', err);
@@ -488,6 +593,25 @@ router.get('/system-settings', async (req, res) => {
       success: false, 
       error: 'Failed to load system settings' 
     });
+  }
+});
+
+// ------------------------------------------------------------
+// GET /api/applicant/branches
+// Public list of active branches for job filter
+// ------------------------------------------------------------
+router.get('/branches', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, location')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('Error fetching public branches:', err);
+    res.status(500).json({ success: false, error: 'Failed to load branches' });
   }
 });
 

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ExcelJS from 'exceljs';
-import { getTasks, getProjects } from './pmApi';
+import { getWeeklyReports } from './pmApi';
 
 export default function PMWeeklyReportTab({ user }) {
-    const [tasks, setTasks] = useState([]);
+    const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [exporting, setExporting] = useState(false);
@@ -20,13 +20,9 @@ export default function PMWeeklyReportTab({ user }) {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [projectsData, tasksData] = await Promise.all([
-                getProjects(user?.id),
-                getTasks()
-            ]);
-            const myProjectIds = new Set(projectsData.map(p => p.id));
-            const myTasks = (tasksData || []).filter(t => myProjectIds.has(t.projectId));
-            setTasks(myTasks);
+            const res = await getWeeklyReports();
+            const reportsData = Array.isArray(res) ? res : (res?.data || []);
+            setReports(reportsData);
             setLoadError('');
         } catch (err) {
             console.error('Failed to load weekly report data:', err);
@@ -40,54 +36,27 @@ export default function PMWeeklyReportTab({ user }) {
         loadData();
     }, [user]);
 
-    // Flatten: one row per progress-log entry, not per task.
-    // projectName / employeeName already come straight off each task from
-    // transformTask() in backend/routes/ProjectManager/tasks.js, so no
-    // extra lookups are needed here.
+    // Rows mapped directly from public.project_report table records
     const reportRows = useMemo(() => {
-        const rows = [];
-        tasks.forEach(task => {
-            const logs = task.progressLogs || [];
-            if (logs.length === 0) {
-                // Still show tasks with no logs yet, so PMs see idle work
-                rows.push({
-                    id: `${task.id}-none`,
-                    taskTitle: task.title,
-                    taskDesc: task.description,
-                    percentage: null,
-                    date: null,
-                    rawDate: null,
-                    employee: task.employeeName,
-                    project: task.projectName,
-                });
-                return;
-            }
-
-            let runningCumulative = 0;
-            logs.forEach((log, idx) => {
-                runningCumulative += (parseInt(log.percentage, 10) || 0);
-                rows.push({
-                    id: `${task.id}-${idx}`,
-                    taskTitle: task.title,
-                    taskDesc: task.description,
-                    percentage: Math.min(100, runningCumulative),
-                    date: log.date ? new Date(log.date).toLocaleDateString() : '—',
-                    rawDate: log.date ? log.date.split('T')[0] : null, // YYYY-MM-DD
-                    employee: task.employeeName,
-                    project: task.projectName,
-                });
-            });
-        });
-        return rows;
-    }, [tasks]);
+        return reports.map(r => ({
+            id: r.id,
+            taskTitle: r.task_title || 'Untitled Task',
+            taskDesc: r.task_description || '',
+            percentage: r.percentage != null ? r.percentage : null,
+            date: r.log_date ? new Date(r.log_date + 'T00:00:00').toLocaleDateString() : '—',
+            rawDate: r.log_date || null,
+            employee: r.employee_name || 'Unassigned',
+            project: r.project_name || 'Unnamed Project',
+        }));
+    }, [reports]);
 
     const employeeOptions = useMemo(() => {
-        return Array.from(new Set(tasks.map(t => t.employeeName).filter(Boolean))).sort();
-    }, [tasks]);
+        return Array.from(new Set(reports.map(r => r.employee_name).filter(Boolean))).sort();
+    }, [reports]);
 
     const projectOptions = useMemo(() => {
-        return Array.from(new Set(tasks.map(t => t.projectName).filter(Boolean))).sort();
-    }, [tasks]);
+        return Array.from(new Set(reports.map(r => r.project_name).filter(Boolean))).sort();
+    }, [reports]);
 
     const filteredRows = reportRows.filter(row => {
         const matchesSearch =

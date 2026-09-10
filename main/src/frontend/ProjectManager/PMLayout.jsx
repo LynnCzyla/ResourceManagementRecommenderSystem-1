@@ -22,7 +22,7 @@ function timeAgo(dateStr) {
   return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
 }
 
-export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
+export default function PMLayout({ user, onLogout, isDark, toggleTheme, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('pmActiveTab') || 'dashboard';
   });
@@ -121,15 +121,15 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <PMDashboardTab user={user} />;
+        return <PMDashboardTab user={user} onNavigate={handleNavClick} />;
       case 'projects':
-        return <PMProjectsTab user={user} />;
+        return <PMProjectsTab user={user} onNavigate={handleNavClick} />;
       case 'requests':
-        return <PMResourceRequestsTab user={user} />;
+        return <PMResourceRequestsTab user={user} onNavigate={handleNavClick} />;
       case 'tracking':
-        return <PMProjectTrackingTab user={user} />;
+        return <PMProjectTrackingTab user={user} onNavigate={handleNavClick} />;
       case 'weekly-report':
-        return <PMWeeklyReportTab user={user} />;
+        return <PMWeeklyReportTab user={user} onNavigate={handleNavClick} />;
       case 'feedback':
         return <PMFeedbackTabs user={user} />;
       case 'myFeedback':
@@ -461,6 +461,7 @@ export default function PMLayout({ user, onLogout, isDark, toggleTheme }) {
         isOpen={showProfileSettings}
         onClose={() => setShowProfileSettings(false)}
         user={user}
+        onProfileUpdate={onProfileUpdate}
       />
     </div>
   );

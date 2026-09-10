@@ -53,31 +53,6 @@ export default function EmployeeProfileTab() {
   const [pendingDocumentId, setPendingDocumentId] = useState(null);
   const [pendingDocumentType, setPendingDocumentType] = useState('');
 
-  // Document mismatch confirmation — shown via SweetAlert2, generic message only
-  // (no employee IDs/names rendered in the dialog itself)
-  const confirmMismatchDialog = async () => {
-    const result = await Swal.fire({
-      icon: 'warning',
-      title: "Document doesn't match your profile",
-      text: "This document doesn't appear to align with your account information. Are you sure you want to upload it anyway?",
-      showCancelButton: true,
-      confirmButtonText: 'Upload Anyway',
-      cancelButtonText: 'Cancel',
-      confirmButtonColor: 'var(--color-primary)',
-      cancelButtonColor: 'var(--color-secondary)',
-      iconColor: 'var(--color-primary)',
-      background: 'var(--color-bg-card)',
-      color: 'var(--color-text-primary)',
-      reverseButtons: true,
-      customClass: {
-        popup: 'swal-custom-popup',
-        confirmButton: 'swal-custom-confirm',
-        cancelButton: 'swal-custom-cancel'
-      }
-    });
-    return result.isConfirmed;
-  };
-
   const showSuccessAlert = (message, title = 'Success!') => {
     return Swal.fire({
       title,
@@ -138,39 +113,18 @@ export default function EmployeeProfileTab() {
     return {};
   };
 
-  // Posts a document to the backend. If the backend responds with a 409
-  // NAME_MISMATCH, shows a confirm dialog and — if the user accepts —
-  // resubmits the exact same file with confirmMismatch=true to override it.
+  // Posts a document to the backend for OCR/NLP processing.
   const submitDocumentWithMismatchConfirm = async ({ file, documentType, onUploadProgress }) => {
-    const post = async (confirmMismatch) => {
-      const authHeader = await getAuthHeader();
-      const formData = new FormData();
-      formData.append('document', file);
-      formData.append('documentType', documentType);
-      if (confirmMismatch) formData.append('confirmMismatch', 'true');
+    const authHeader = await getAuthHeader();
+    const formData = new FormData();
+    formData.append('document', file);
+    formData.append('documentType', documentType);
 
-      return axios.post(`${API_URL}/employee/process-document`, formData, {
-        headers: authHeader,
-        timeout: 300000,
-        ...(onUploadProgress ? { onUploadProgress } : {})
-      });
-    };
-
-    try {
-      return await post(false);
-    } catch (err) {
-      const data = err.response?.data;
-      if (err.response?.status === 409 && data?.error === 'DOCUMENT_MISMATCH') {
-        const proceed = await confirmMismatchDialog();
-        if (!proceed) {
-          const cancelled = new Error('Upload cancelled — the document didn\'t appear to match your information.');
-          cancelled.isMismatchCancelled = true;
-          throw cancelled;
-        }
-        return post(true);
-      }
-      throw err;
-    }
+    return axios.post(`${API_URL}/employee/process-document`, formData, {
+      headers: authHeader,
+      timeout: 300000,
+      ...(onUploadProgress ? { onUploadProgress } : {})
+    });
   };
 
   useEffect(() => {
@@ -462,8 +416,8 @@ export default function EmployeeProfileTab() {
         let msg = 'Failed to process document';
         if (error.isMismatchCancelled) msg = error.message;
         else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = '⏱️ Processing is taking longer than expected. Please try with a smaller file.';
-        else if (error.response?.status === 500) msg = 'Server error. Please check the backend logs.';
         else if (error.response?.data?.error) msg = error.response.data.error;
+        else if (error.response?.status === 500) msg = 'Server error. Please check the backend logs.';
         else if (error.message) msg = error.message;
         setUploadError(msg);
         setProcessingStatus(error.isMismatchCancelled ? 'Cancelled' : 'Error: ' + msg);
@@ -731,6 +685,22 @@ const handleCertUpload = async (e) => {
       if (response.data.success) {
         setAvatarFile(null);
         await fetchEmployeeData();
+        // Sync with localStorage and window event
+        try {
+          const stored = JSON.parse(localStorage.getItem('user') || '{}');
+          const updatedUser = {
+            ...stored,
+            first_name: profileForm.firstName.trim(),
+            last_name: profileForm.lastName.trim(),
+            name: `${profileForm.firstName.trim()} ${profileForm.lastName.trim()}`,
+            email: profileForm.email.trim(),
+            avatar: newAvatarUrl || stored.avatar
+          };
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+          window.dispatchEvent(new Event('userProfileUpdated'));
+        } catch (lsErr) {
+          console.warn('Could not sync user in localStorage:', lsErr);
+        }
         await showSuccessAlert(response.data.message || 'Profile updated successfully.');
       } else {
         showErrorAlert(response.data.error || 'Failed to update profile.');

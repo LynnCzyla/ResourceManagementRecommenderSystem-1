@@ -12,7 +12,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Branch filter
   const [branchFilter, setBranchFilter] = useState('All');
   const [branches, setBranches] = useState([]);
@@ -46,13 +46,13 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     try {
       const API_URL = `${API_BASE_URL}/api/applicant/system-settings`;
       console.log('📡 Fetching system settings from:', API_URL);
-      
+
       const res = await fetch(API_URL);
-      
+
       if (res.ok) {
         const data = await res.json();
         console.log('📡 System settings data:', data);
-        
+
         if (data.success && data.data) {
           const size = data.data.max_file_upload_size || 5;
           console.log('✅ Setting max file size to:', size);
@@ -68,8 +68,8 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   // Fetch branches for filter
   const fetchBranches = async () => {
     try {
-      // ✅ Use the correct superadmin endpoint
-      const res = await fetch(`${SUPER_ADMIN_API}/branches?limit=100`);
+      // ✅ Use public applicant branches endpoint
+      const res = await fetch(`${API}/branches`);
       const data = await res.json();
       if (data.success) {
         setBranches(data.data || []);
@@ -99,23 +99,23 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     try {
       setLoading(true);
       setError(null);
-      
+
       // ✅ Use the correct public applicant endpoint - NO "hr" in the path!
       const url = `${API}/job-postings`;
-      
+
       console.log('📡 Fetching job postings from:', url);
-      
+
       const res = await fetch(url);
-      
+
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
-      
+
       const data = await res.json();
-      
+
       if (data.success) {
         let postings = data.data.map(mapPosting);
-        
+
         // ✅ Apply branch filter on client side
         if (branchFilter !== 'All') {
           postings = postings.filter(p => {
@@ -124,7 +124,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
             return p.branch_id === branchFilter || p.branch === branch?.name;
           });
         }
-        
+
         setJobPostings(postings);
       } else {
         setError(data.error || 'Failed to load job postings');
@@ -151,6 +151,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     salaryMin: row.salary_min ?? '',
     salaryMax: row.salary_max ?? '',
     status: row.status,
+    quantity: row.quantity || 1,
     postedDate: row.posted_date ? new Date(row.posted_date).toISOString().split('T')[0] : '',
     description: row.description || '',
     requirements: row.requirements || '',
@@ -278,6 +279,15 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
 
   const handleApplicationSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate phone number: must have at least 7 digits and no letters
+    const cleanedPhone = (applyForm.phone || '').trim();
+    const digitsOnly = cleanedPhone.replace(/\D/g, '');
+    if (digitsOnly.length < 7 || /[a-zA-Z]/.test(cleanedPhone)) {
+      showErrorAlert('Please enter a valid phone number with numbers only.', 'Invalid Phone');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const fd = new FormData();
@@ -319,13 +329,63 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
 
   // Filtered job postings by search
   const filteredPostings = jobPostings.filter(posting => {
-    const matchesSearch = 
+    const matchesSearch =
       posting.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.branch?.toLowerCase().includes(searchQuery.toLowerCase());
     const isActive = posting.status === 'Active';
-    return matchesSearch && isActive;
+    const isNotFilled = (posting.hiredCount || 0) < (posting.quantity || 1);
+    return matchesSearch && isActive && isNotFilled;
   });
+
+  // Helper to render Requirements: highlighted skills, with dot per skill, and NO colons (:)
+  const renderFormattedRequirements = (requirementsText) => {
+    if (!requirementsText || !requirementsText.trim()) {
+      return <p style={styles.description}>No specific requirements listed.</p>;
+    }
+
+    // Strip "Experience level: ...", "Required skills:", "Skills:", and ALL colons (:)
+    let cleanText = requirementsText
+      .replace(/Experience level:\s*[^\n\r]+/gi, '')
+      .replace(/(?:Required\s+skills|Skills|Requirements)\s*:\s*/gi, '')
+      .replace(/:/g, ''); // Ensure NO colons anywhere
+
+    // Split by commas, newlines, semicolons
+    const skills = cleanText
+      .split(/[\n\r,;]+/)
+      .map(s => s.replace(/^[\s•\-\*]+|[\s•\-\*]+$/g, '').trim())
+      .filter(Boolean);
+
+    if (skills.length === 0) {
+      return <p style={styles.description}>No specific requirements listed.</p>;
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+        {skills.map((skill, idx) => (
+          <div
+            key={idx}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px 14px',
+              backgroundColor: 'rgba(56, 189, 248, 0.08)',
+              borderLeft: '3px solid #38bdf8',
+              borderRadius: '0 8px 8px 0',
+              color: 'var(--color-text-primary)',
+              fontSize: '14px',
+              fontWeight: '500',
+              lineHeight: '1.5',
+            }}
+          >
+            <span style={{ color: '#38bdf8', fontSize: '11px', lineHeight: 1 }}>●</span>
+            <span style={{ letterSpacing: '0.2px' }}>{skill}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   if (loading) {
     return <div style={styles.loading}>Loading...</div>;
@@ -379,12 +439,12 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                     <h3 style={styles.applicationTitle}>{app.jobTitle}</h3>
                     <span style={{
                       ...styles.statusBadge,
-                      backgroundColor: app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' : 
-                                     app.status === 'Hired' ? 'var(--color-primary-light)' :
-                                     app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                      color: app.status === 'Interview Scheduled' ? 'var(--color-accent)' : 
-                             app.status === 'Hired' ? 'var(--color-primary)' :
-                             app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                      backgroundColor: app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' :
+                        app.status === 'Hired' ? 'var(--color-primary-light)' :
+                          app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                      color: app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
+                        app.status === 'Hired' ? 'var(--color-primary)' :
+                          app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
                     }}>
                       {app.status}
                     </span>
@@ -435,7 +495,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
             style={styles.searchInput}
           />
         </div>
-        
+
         <div style={styles.filters}>
           <select
             value={branchFilter}
@@ -523,6 +583,12 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                     <span style={styles.detailValue}>{selectedPosting.employmentType}</span>
                   </div>
                   <div style={styles.detailItem}>
+                    <span style={styles.detailLabel}>Vacancies / Positions:</span>
+                    <span style={{ ...styles.detailValue, color: '#38bdf8', fontWeight: '700' }}>
+                      {selectedPosting.quantity || 1} {selectedPosting.quantity === 1 ? 'Opening' : 'Openings'}
+                    </span>
+                  </div>
+                  <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Salary Range:</span>
                     <span style={styles.detailValue}>₱{parseInt(selectedPosting.salaryMin || 0).toLocaleString()} - ₱{parseInt(selectedPosting.salaryMax || 0).toLocaleString()}/mo</span>
                   </div>
@@ -531,23 +597,27 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
 
               <div style={styles.detailsSection}>
                 <h4 style={styles.detailsSectionTitle}>Description</h4>
-                <p style={styles.description}>{selectedPosting.description}</p>
+                <p style={{ ...styles.description, whiteSpace: 'pre-line', lineHeight: '1.7' }}>{selectedPosting.description}</p>
               </div>
 
               <div style={styles.detailsSection}>
                 <h4 style={styles.detailsSectionTitle}>Requirements</h4>
-                <p style={styles.description}>{selectedPosting.requirements}</p>
+                {renderFormattedRequirements(selectedPosting.requirements)}
               </div>
 
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Responsibilities</h4>
-                <p style={styles.description}>{selectedPosting.responsibilities}</p>
-              </div>
+              {selectedPosting.responsibilities && (
+                <div style={styles.detailsSection}>
+                  <h4 style={styles.detailsSectionTitle}>Responsibilities</h4>
+                  <p style={{ ...styles.description, whiteSpace: 'pre-line', lineHeight: '1.7' }}>{selectedPosting.responsibilities}</p>
+                </div>
+              )}
 
-              <div style={styles.detailsSection}>
-                <h4 style={styles.detailsSectionTitle}>Benefits</h4>
-                <p style={styles.description}>{selectedPosting.benefits}</p>
-              </div>
+              {selectedPosting.benefits && (
+                <div style={styles.detailsSection}>
+                  <h4 style={styles.detailsSectionTitle}>Benefits</h4>
+                  <p style={{ ...styles.description, whiteSpace: 'pre-line', lineHeight: '1.7' }}>{selectedPosting.benefits}</p>
+                </div>
+              )}
 
               <div style={styles.modalFooter}>
                 <button onClick={() => setShowDetailsModal(false)} style={styles.closeModalBtn}>Close</button>
@@ -618,7 +688,23 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                         type="tel"
                         required
                         value={applyForm.phone}
-                        onChange={(e) => setApplyForm({ ...applyForm, phone: e.target.value })}
+                        onChange={(e) => {
+                          // Restrict to numbers, +, -, (), and spaces only
+                          const cleanVal = e.target.value.replace(/[^0-9+\-()\s]/g, '');
+                          setApplyForm({ ...applyForm, phone: cleanVal });
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            !/[0-9+\-()\s]/.test(e.key) &&
+                            !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) &&
+                            !e.ctrlKey &&
+                            !e.metaKey
+                          ) {
+                            e.preventDefault();
+                          }
+                        }}
+                        pattern="[0-9+\-()\s]{7,20}"
+                        title="Please enter a valid phone number with numbers only"
                         style={styles.input}
                         placeholder="+63 XXX XXX XXXX"
                       />

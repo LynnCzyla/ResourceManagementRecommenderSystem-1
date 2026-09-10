@@ -31,13 +31,21 @@ const mapApplication = (row) => {
     coverLetter: coverLetter,
     resume: row.resume_path || '',
     location: location || '—',
+    postingQuantity: row.posting_quantity || 1,
+    postingHiredCount: row.posting_hired_count || 0,
+    postingFilled: Boolean(row.posting_filled),
+    postingStatus: row.posting_status || 'Active',
   };
 };
 
-// An application is considered "History" once it's reached a terminal
-// outcome (Hired or Rejected). Everything else (Pending, Recommended,
-// Interview Scheduled, etc.) stays in the Active tab.
-const isHistoryStatus = (status) => status === 'Hired' || status === 'Rejected';
+// An application belongs to "History" if:
+// 1. Its status has reached terminal outcome (Hired or Rejected), OR
+// 2. Its job posting has reached its quota (e.g. 1/1 hired) and is marked filled / closed.
+const isHistoryApplication = (app) => {
+  if (app.status === 'Hired' || app.status === 'Rejected') return true;
+  if (app.postingFilled || app.postingStatus === 'Closed') return true;
+  return false;
+};
 
 export default function HRApplicationsTab() {
   const [applications, setApplications] = useState([]);
@@ -228,8 +236,8 @@ export default function HRApplicationsTab() {
   };
 
   // Tab counts
-  const activeCount = applications.filter(app => !isHistoryStatus(app.status)).length;
-  const historyCount = applications.filter(app => isHistoryStatus(app.status)).length;
+  const activeCount = applications.filter(app => !isHistoryApplication(app)).length;
+  const historyCount = applications.filter(app => isHistoryApplication(app)).length;
 
   const filteredApplications = applications.filter(app => {
     const matchesSearch = 
@@ -239,8 +247,8 @@ export default function HRApplicationsTab() {
     const matchesStatus = statusFilter === 'All' || app.status === statusFilter;
     const matchesPosition = positionFilter === 'All' || app.position === positionFilter;
     const matchesTab = activeTab === 'History'
-      ? isHistoryStatus(app.status)
-      : !isHistoryStatus(app.status);
+      ? isHistoryApplication(app)
+      : !isHistoryApplication(app);
     return matchesSearch && matchesStatus && matchesPosition && matchesTab;
   });
 
@@ -372,19 +380,33 @@ export default function HRApplicationsTab() {
                     </td>
                     <td style={styles.td}>{app.appliedDate}</td>
                     <td style={styles.td}>
-                      <span style={{
-                        ...styles.statusBadge,
-                        backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' : 
-                                       app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' :
-                                       app.status === 'Hired' ? 'var(--color-success-light)' :
-                                       app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                        color: app.status === 'Recommended' ? 'var(--color-primary)' : 
-                               app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
-                               app.status === 'Hired' ? 'var(--color-success)' :
-                               app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
-                      }}>
-                        {app.status}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span style={{
+                          ...styles.statusBadge,
+                          backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' : 
+                                 app.status === 'Interview Scheduled' ? 'rgba(56, 189, 248, 0.15)' :
+                                 app.status === 'Hired' ? 'rgba(34, 197, 94, 0.15)' :
+                                 app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                          color: app.status === 'Recommended' ? 'var(--color-primary)' : 
+                                 app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
+                                 app.status === 'Hired' ? 'var(--color-success)' :
+                                 app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                        }}>
+                          {app.status}
+                        </span>
+                        {app.postingFilled && (
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                            color: '#38bdf8'
+                          }}>
+                            Quota: {app.postingHiredCount}/{app.postingQuantity} Filled
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={styles.td}>
                       <div style={styles.actionCell}>

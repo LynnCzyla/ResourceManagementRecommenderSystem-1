@@ -55,7 +55,7 @@ function PHClock({ user }) {
   );
 }
 
-export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
+export default function HRLayout({ user, onLogout, isDark, toggleTheme, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('hrActiveTab') || 'dashboard';
   });
@@ -65,6 +65,26 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
   const [currentAvatar, setCurrentAvatar] = useState(user.avatar);
+  const [unpostedJobPostingsCount, setUnpostedJobPostingsCount] = useState(0);
+
+  useEffect(() => {
+    if (user?.avatar) setCurrentAvatar(user.avatar);
+  }, [user?.avatar]);
+
+  const fetchUnpostedJobPostings = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:5000/api/hr/job-postings/resource-requests', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (response.data.success) {
+        const rows = response.data.data || [];
+        setUnpostedJobPostingsCount(rows.length);
+      }
+    } catch (err) {
+      console.error('Error fetching unposted job postings count:', err);
+    }
+  };
 
   const fetchNotifications = async () => {
     if (!user?.id) return;
@@ -80,21 +100,32 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
 
   useEffect(() => {
     fetchNotifications();
+    fetchUnpostedJobPostings();
 
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         fetchNotifications();
+        fetchUnpostedJobPostings();
       }
     }, 60000);
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') fetchNotifications();
+      if (document.visibilityState === 'visible') {
+        fetchNotifications();
+        fetchUnpostedJobPostings();
+      }
     };
     document.addEventListener('visibilitychange', handleVisibility);
+
+    const handleRRUpdated = () => {
+      fetchUnpostedJobPostings();
+    };
+    window.addEventListener('resourceRequestsUpdated', handleRRUpdated);
 
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('resourceRequestsUpdated', handleRRUpdated);
     };
   }, [user?.id]);
 
@@ -251,6 +282,24 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
               <path d="M16 7V5a2 2 0 0 0-4 0v2"></path>
             </svg>
             {!sidebarCollapsed && <span style={styles.navText}>Job Postings</span>}
+            {unpostedJobPostingsCount > 0 && (
+              <span style={{
+                marginLeft: sidebarCollapsed ? '0' : 'auto',
+                backgroundColor: '#ef4444',
+                color: '#ffffff',
+                fontSize: '10px',
+                fontWeight: '700',
+                borderRadius: '10px',
+                padding: '2px 6px',
+                lineHeight: 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minWidth: '18px',
+              }}>
+                {unpostedJobPostingsCount}
+              </span>
+            )}
           </div>
 
           <div 
@@ -473,6 +522,7 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme }) {
         onClose={() => setShowProfileSettings(false)}
         user={user}
         onAvatarUpdate={(newUrl) => setCurrentAvatar(newUrl)}
+        onProfileUpdate={onProfileUpdate}
       />
     </div>
   );

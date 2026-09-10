@@ -219,7 +219,7 @@ const submitFeedbackResponses = async (req, res) => {
       });
     }
 
-    const { responses, deliverablesFeedback, projectFeedback, additionalComments } = req.body;
+    const { responses, projectRating, deliverablesFeedback, projectFeedback, additionalComments } = req.body;
 
     if (!Array.isArray(responses) || responses.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one employee rating is required' });
@@ -271,6 +271,10 @@ const submitFeedbackResponses = async (req, res) => {
       }
     }
 
+    const formattedProjectFeedback = projectRating
+      ? `[Rating: ${projectRating}/5] ${projectFeedback || ''}`.trim()
+      : (projectFeedback || null);
+
     const rowsToInsert = responses.map(r => {
       const record = {
         feedback_request_id: row.id,
@@ -279,7 +283,7 @@ const submitFeedbackResponses = async (req, res) => {
         areas_for_improvement: r.areasForImprovement || null,
         would_recommend: typeof r.wouldRecommend === 'boolean' ? r.wouldRecommend : null,
         deliverables_feedback: deliverablesFeedback || null,
-        project_feedback: projectFeedback || null,
+        project_feedback: formattedProjectFeedback,
         additional_comments: additionalComments || null,
       };
       for (const field of RATING_FIELDS) {
@@ -320,6 +324,64 @@ const submitFeedbackResponses = async (req, res) => {
 
     // ✅ NEW: auto-create performance_records for all rated respondents
     await syncPerformanceRecords({ feedbackRequestRow: row, insertedResponses: insertedResponses || [] });
+
+    // Cross-role notifications: notify PM, RM(s), and rated employees
+    try {
+      const { data: project } = await supabase
+        .from('projects')
+        .select('project_name, created_by, branch_id')
+        .eq('id', row.project_id)
+        .maybeSingle();
+
+      const projectName = project?.project_name || 'your project';
+      const notifs = [];
+
+      // Notify PM (created_by)
+      if (project?.created_by) {
+        notifs.push({
+          recipient_id: project.created_by,
+          type: 'feedback',
+          text: `Client feedback has been submitted for project "${projectName}".`,
+          read: false
+        });
+      }
+
+      // Notify Branch Resource Manager(s)
+      if (project?.branch_id) {
+        const { data: rms } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'Resource Manager')
+          .eq('branch_id', project.branch_id);
+        (rms || []).forEach(rm => {
+          if (rm.id !== project.created_by) {
+            notifs.push({
+              recipient_id: rm.id,
+              type: 'feedback',
+              text: `Client feedback has been submitted for project "${projectName}".`,
+              read: false
+            });
+          }
+        });
+      }
+
+      // Notify rated employees
+      const ratedIds = (responses || []).map(r => r.employeeId).filter(Boolean);
+      ratedIds.forEach(empId => {
+        notifs.push({
+          recipient_id: empId,
+          type: 'feedback',
+          text: `You have received new client performance feedback for project "${projectName}".`,
+          read: false
+        });
+      });
+
+      if (notifs.length > 0) {
+        await supabase.from('notifications').insert(notifs);
+      }
+    } catch (notifErr) {
+      console.error('Non-fatal error creating client feedback notifications:', notifErr.message);
+    }
 
     res.status(201).json({ success: true, message: 'Feedback submitted successfully' });
   } catch (error) {

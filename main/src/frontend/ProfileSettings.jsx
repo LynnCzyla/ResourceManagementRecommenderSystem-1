@@ -5,7 +5,7 @@ import { API_BASE_URL } from '../config/api';
 
 const API = `${API_BASE_URL}/api/admin`;
 
-export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate }) {
+export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate, onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState('profile');
 
   // ── Profile state ──────────────────────────────────────────────────────────
@@ -314,6 +314,30 @@ export default function ProfileSettings({ isOpen, onClose, user, onAvatarUpdate 
         .eq('id', user.id);
 
       if (profileError) throw profileError;
+
+      const updatedFields = {
+        first_name: profileForm.first_name.trim(),
+        middle_name: profileForm.middle_name.trim() || null,
+        last_name: profileForm.last_name.trim(),
+        contact_number: profileForm.contact_number.trim() || null,
+        department_id: profileForm.department_id ? parseInt(profileForm.department_id) : null,
+        avatar_url: newAvatarUrl || null,
+      };
+
+      try {
+        const stored = JSON.parse(localStorage.getItem('user') || '{}');
+        const updatedUser = {
+          ...stored,
+          ...updatedFields,
+          name: `${updatedFields.first_name} ${updatedFields.last_name}`.trim(),
+          avatar: updatedFields.avatar_url || stored.avatar
+        };
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        onProfileUpdate?.(updatedUser);
+        window.dispatchEvent(new Event('userProfileUpdated'));
+      } catch (lsErr) {
+        console.warn('Could not update localStorage user:', lsErr);
+      }
 
       if (newAvatarUrl) {
         setAvatarUrl(newAvatarUrl);

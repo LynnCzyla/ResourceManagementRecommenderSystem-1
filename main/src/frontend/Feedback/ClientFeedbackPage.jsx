@@ -22,10 +22,10 @@ function emptyEmployeeResponse() {
   return base;
 }
 
-function StarRating({ value, onChange, size = 22 }) {
+function StarRating({ value, onChange, size = 26 }) {
   const [hover, setHover] = useState(0);
   return (
-    <div style={{ display: 'flex', gap: '4px' }}>
+    <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
       {[1, 2, 3, 4, 5].map(n => {
         const filled = (hover || value) >= n;
         return (
@@ -35,6 +35,8 @@ function StarRating({ value, onChange, size = 22 }) {
             onMouseLeave={() => setHover(0)}
             onClick={() => onChange(n)}
             role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onChange(n); }}
             aria-label={`${n} star${n > 1 ? 's' : ''}`}
             style={{
               cursor: 'pointer',
@@ -43,6 +45,12 @@ function StarRating({ value, onChange, size = 22 }) {
               color: filled ? '#eab308' : 'var(--color-border)',
               transition: 'color 0.12s ease',
               userSelect: 'none',
+              minWidth: '44px',
+              minHeight: '44px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '6px',
             }}
           >
             ★
@@ -248,7 +256,8 @@ export default function ClientFeedbackPage() {
     formGroup: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' },
     recommendRow: { display: 'flex', gap: '10px' },
     recommendBtn: (active) => ({
-      padding: '8px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+      padding: '10px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer',
+      minHeight: '44px', minWidth: '72px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
       background: active ? 'rgba(59,130,246,0.12)' : 'transparent',
       color: active ? 'var(--color-primary)' : 'var(--color-text-primary)',

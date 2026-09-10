@@ -19,21 +19,13 @@ export default function ApplicantPortal({ isDark, toggleTheme }) {
   });
 
   const handleEnterPortal = () => {
-    // ✅ Store flag in sessionStorage so it persists across refreshes
     sessionStorage.setItem('applicant_portal_entered', 'true');
-    // Open in a new tab
-    window.open('/applicant-portal?enter=true', '_blank');
+    setShowPortal(false);
   };
 
   const handleBackToLanding = () => {
-    // Clear the flag when exiting
     sessionStorage.removeItem('applicant_portal_entered');
-    // Close the tab or go back
-    if (window.opener) {
-      window.close();
-    } else {
-      window.location.href = '/';
-    }
+    setShowPortal(true);
   };
 
   // Check URL params on mount
@@ -272,7 +264,7 @@ const styles = {
   },
   features: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
     gap: '16px',
     marginBottom: '32px',
   },

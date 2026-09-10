@@ -59,8 +59,36 @@ async function attachSkillsToRequirement(requirementId, skillNames = [], skillTy
   }
 }
 
+// Extract project rating and comment from formatted project_feedback string
+// e.g., "[Rating: 4.5/5] Great collaboration..." or fallback to average of responses
+function extractProjectRatingAndFeedback(rawFeedback, responses = []) {
+  let rating = null;
+  let feedback = (rawFeedback || '').trim();
+
+  if (feedback) {
+    const match = feedback.match(/^\[Rating:\s*([1-5](?:\.\d+)?)\/5\]\s*([\s\S]*)$/);
+    if (match) {
+      rating = parseFloat(match[1]);
+      feedback = match[2].trim();
+    }
+  }
+
+  // Fallback: If no explicit rating tag was extracted, compute average of employee ratings
+  if (rating === null && responses && responses.length > 0) {
+    const validRatings = responses
+      .map(r => Number(r.rating))
+      .filter(r => !isNaN(r) && r > 0);
+    if (validRatings.length > 0) {
+      const avg = validRatings.reduce((sum, r) => sum + r, 0) / validRatings.length;
+      rating = Math.round(avg * 10) / 10;
+    }
+  }
+
+  return { rating, feedback };
+}
+
 // Transform a joined project row into the shape the PM tabs expect.
-function transformProject(row) {
+function transformProject(row, clientFeedback = null) {
   const requirements = row.project_resource_requirements || [];
 
   const manpowerNeeded = requirements.reduce((sum, r) => sum + (r.quantity_needed || 0), 0);
@@ -78,10 +106,23 @@ function transformProject(row) {
       .filter(Boolean)
   );
 
+  const rawDesc = row.project_description || '';
+  const isRestored = rawDesc.includes('<!-- RESTORED -->') || rawDesc.includes('[RESTORED]');
+  const cancelMatch = rawDesc.match(/<!-- CANCELLED_REASON:\s*([\s\S]*?)\s*-->/);
+  const cancellationReason = cancelMatch ? cancelMatch[1].trim() : (row.cancellation_reason || null);
+  const cleanDescription = rawDesc
+    .replace(/<!-- RESTORED -->/g, '')
+    .replace(/\[RESTORED\]/g, '')
+    .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+    .trim();
+
   return {
     id: row.id,
     name: row.project_name,
-    description: row.project_description,
+    description: cleanDescription,
+    rawDescription: rawDesc,
+    isRestored,
+    cancellationReason,
     teamSize: row.team_size,
     duration: row.duration_days,
     startDate: row.start_date,
@@ -90,6 +131,7 @@ function transformProject(row) {
     status: row.status,
     createdBy: row.created_by,
     manpowerNeeded,
+    clientFeedback: clientFeedback || null,
     // ✅ kept for backward compatibility with any code still reading `requiredSkills`
     requiredSkills: [...new Set([...allPrimarySkills, ...allSecondarySkills])],
     requiredPrimarySkills: [...new Set(allPrimarySkills)],
@@ -167,6 +209,14 @@ function setCached(key, data) {
 }
 function invalidateProjectsCache() {
   projectsCache.clear();
+  try {
+    const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+    if (typeof clearDashboardCache === 'function') clearDashboardCache();
+  } catch (e) {}
+  try {
+    const { clearProjectsCache } = require('../ResourceManager/Projects');
+    if (typeof clearProjectsCache === 'function') clearProjectsCache();
+  } catch (e) {}
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────
@@ -192,13 +242,374 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const transformed = (data || []).map(transformProject);
+    const projectIds = (data || []).map(p => p.id);
+    let feedbackMap = {};
+
+    if (projectIds.length > 0) {
+      try {
+        const { data: feedbackData, error: feedbackError } = await supabase
+          .from('feedback_requests')
+          .select(`
+            id,
+            project_id,
+            client_name,
+            client_email,
+            status,
+            completed_at,
+            feedback_responses (
+              id,
+              profile_id,
+              rating,
+              project_feedback,
+              deliverables_feedback,
+              additional_comments
+            )
+          `)
+          .in('project_id', projectIds)
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false });
+
+        if (!feedbackError && feedbackData) {
+          for (const reqRow of feedbackData) {
+            if (!feedbackMap[reqRow.project_id]) {
+              const responses = reqRow.feedback_responses || [];
+              const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+              const extracted = extractProjectRatingAndFeedback(
+                primaryResponse.project_feedback,
+                responses
+              );
+
+              feedbackMap[reqRow.project_id] = {
+                requestId: reqRow.id,
+                clientName: reqRow.client_name,
+                clientEmail: reqRow.client_email,
+                completedAt: reqRow.completed_at,
+                rating: extracted.rating,
+                projectFeedback: extracted.feedback,
+                deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+                additionalComments: primaryResponse.additional_comments || null,
+              };
+            }
+          }
+        }
+      } catch (fbErr) {
+        console.error('Non-fatal error fetching feedback for projects:', fbErr);
+      }
+    }
+
+    const transformed = (data || []).map(row => transformProject(row, feedbackMap[row.id] || null));
     setCached(cacheKey, transformed);
 
     res.status(200).json({ success: true, data: transformed });
   } catch (error) {
     console.error('Error fetching projects:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch projects', error: error.message });
+  }
+});
+
+// ✅ GET /api/pm/projects/:id/history-details — comprehensive details for project history view
+router.get('/:id/history-details', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Fetch Project
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        project_name,
+        project_description,
+        team_size,
+        duration_days,
+        start_date,
+        end_date,
+        priority,
+        status,
+        created_by,
+        created_at,
+        updated_at
+      `)
+      .eq('id', id)
+      .single();
+
+    if (projectError || !project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // 2. Fetch Client Feedback
+    const { data: feedbackRequests, error: feedbackError } = await supabase
+      .from('feedback_requests')
+      .select(`
+        id,
+        client_name,
+        client_email,
+        completed_at,
+        status,
+        feedback_responses (
+          id,
+          profile_id,
+          rating,
+          technical_skills_rating,
+          communication_rating,
+          timeliness_rating,
+          quality_of_work_rating,
+          teamwork_rating,
+          problem_solving_rating,
+          strengths,
+          areas_for_improvement,
+          would_recommend,
+          project_feedback,
+          deliverables_feedback,
+          additional_comments
+        )
+      `)
+      .eq('project_id', id)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false });
+
+    let clientFeedback = null;
+    const employeeFeedbackMap = {};
+
+    if (!feedbackError && feedbackRequests && feedbackRequests.length > 0) {
+      const latestReq = feedbackRequests[0];
+      const responses = latestReq.feedback_responses || [];
+      const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+      const extracted = extractProjectRatingAndFeedback(primaryResponse.project_feedback, responses);
+
+      clientFeedback = {
+        requestId: latestReq.id,
+        clientName: latestReq.client_name,
+        clientEmail: latestReq.client_email,
+        completedAt: latestReq.completed_at,
+        rating: extracted.rating,
+        projectFeedback: extracted.feedback,
+        deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+        additionalComments: primaryResponse.additional_comments || null,
+      };
+
+      for (const resp of responses) {
+        employeeFeedbackMap[resp.profile_id] = {
+          rating: resp.rating,
+          strengths: resp.strengths,
+          areasForImprovement: resp.areas_for_improvement,
+          wouldRecommend: resp.would_recommend,
+          technicalSkillsRating: resp.technical_skills_rating,
+          communicationRating: resp.communication_rating,
+          timelinessRating: resp.timeliness_rating,
+          qualityOfWorkRating: resp.quality_of_work_rating,
+          teamworkRating: resp.teamwork_rating,
+          problemSolvingRating: resp.problem_solving_rating,
+        };
+      }
+    }
+
+    // 3. Fetch Project Assignments
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('project_assignments')
+      .select('id, profile_id, assigned_role, start_date, end_date, status, assigned_at')
+      .eq('project_id', id);
+
+    if (assignmentsError) throw assignmentsError;
+
+    // 4. Fetch Project Tasks
+    const { data: rawTasks, error: tasksError } = await supabase
+      .from('project_tasks')
+      .select(`
+        id,
+        project_id,
+        profile_id,
+        title,
+        description,
+        priority,
+        status,
+        due_date,
+        progress_logs,
+        created_at
+      `)
+      .eq('project_id', id)
+      .order('created_at', { ascending: true });
+
+    if (tasksError) throw tasksError;
+
+    // Collect all profile IDs across assignments, tasks, project creator, and client feedback evaluations
+    const profileIdSet = new Set();
+    (assignments || []).forEach(a => a.profile_id && profileIdSet.add(a.profile_id));
+    (rawTasks || []).forEach(t => t.profile_id && profileIdSet.add(t.profile_id));
+    if (project.created_by) profileIdSet.add(project.created_by);
+    (feedbackRequests || []).forEach(fr => {
+      (fr.employee_ids || []).forEach(eid => eid && profileIdSet.add(eid));
+      (fr.feedback_responses || []).forEach(r => r.profile_id && profileIdSet.add(r.profile_id));
+    });
+
+    const profileIds = Array.from(profileIdSet);
+    let profileMap = {};
+
+    if (profileIds.length > 0) {
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          employee_id,
+          first_name,
+          middle_name,
+          last_name,
+          role,
+          avatar_url,
+          positions ( id, position_name ),
+          departments ( id, department_name )
+        `)
+        .in('id', profileIds);
+
+      if (!profilesError && profilesData) {
+        for (const p of profilesData) {
+          profileMap[p.id] = p;
+        }
+      }
+    }
+
+    // Format tasks
+    const tasks = (rawTasks || []).map(task => {
+      const isCompleted = task.status === 'Completed' || task.status === 'Completed-Hidden';
+      const prof = profileMap[task.profile_id] || {};
+      const empName = [prof.first_name, prof.last_name].filter(Boolean).join(' ').trim()
+        || [prof.first_name, prof.middle_name, prof.last_name].filter(Boolean).join(' ').trim()
+        || (prof.employee_id ? `Employee (${prof.employee_id})` : 'Unassigned');
+
+      return {
+        id: task.id,
+        projectId: task.project_id,
+        profileId: task.profile_id,
+        employeeName: empName,
+        employeeRole: prof.positions?.position_name || prof.role || '',
+        employeeAvatar: prof.avatar_url || null,
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        rawStatus: task.status,
+        status: isCompleted ? 'Completed' : 'Pending',
+        isCompleted,
+        dueDate: task.due_date,
+        progressLogs: task.progress_logs || [],
+        createdAt: task.created_at,
+      };
+    });
+
+    const assignmentMap = {};
+    (assignments || []).forEach(a => {
+      assignmentMap[a.profile_id] = a;
+    });
+
+    // Compile employee list (anyone assigned, who has tasks, or was evaluated in client feedback)
+    const employeeIdsToDisplay = Array.from(profileIdSet).filter(pid => {
+      return (
+        assignmentMap[pid] ||
+        tasks.some(t => t.profileId === pid) ||
+        employeeFeedbackMap[pid]
+      );
+    });
+
+    const employees = employeeIdsToDisplay.map(pid => {
+      const p = profileMap[pid] || {};
+      const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim()
+        || [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(' ').trim()
+        || (p.employee_id ? `Employee (${p.employee_id})` : 'Employee');
+      const assignment = assignmentMap[pid];
+      const empTasks = tasks.filter(t => t.profileId === pid);
+      const completedTasks = empTasks.filter(t => t.isCompleted).length;
+      const pendingTasks = empTasks.filter(t => !t.isCompleted).length;
+      const totalTasks = empTasks.length;
+      const fb = employeeFeedbackMap[pid] || null;
+
+      // Resolve role: Prefer formal position name, avoid generic 'Employee' or 'Team Member'
+      let role = p.positions?.position_name;
+      if (!role) {
+        if (assignment?.assigned_role && assignment.assigned_role !== 'Employee' && assignment.assigned_role !== 'Team Member') {
+          role = assignment.assigned_role;
+        } else if (p.role && p.role !== 'Employee' && p.role !== 'Team Member') {
+          role = p.role;
+        } else {
+          role = assignment?.assigned_role || p.role || 'Team Member';
+        }
+      } else if (assignment?.assigned_role && assignment.assigned_role !== 'Employee' && assignment.assigned_role !== 'Team Member') {
+        role = assignment.assigned_role;
+      }
+
+      return {
+        id: pid,
+        name,
+        employeeId: p.employee_id || '',
+        role: role || 'Team Member',
+        department: p.departments?.department_name || '',
+        avatar: p.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
+        assignedAt: assignment?.assigned_at || null,
+        assignmentStatus: assignment?.status || 'Assigned',
+        clientRating: fb?.rating || null,
+        clientStrengths: fb?.strengths || null,
+        clientImprovements: fb?.areasForImprovement || null,
+        wouldRecommend: fb?.wouldRecommend ?? null,
+        totalTasks,
+        completedTasks,
+        pendingTasks,
+        completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+        tasks: empTasks,
+      };
+    });
+
+    const totalTasksCount = tasks.length;
+    const completedTasksCount = tasks.filter(t => t.isCompleted).length;
+    const pendingTasksCount = totalTasksCount - completedTasksCount;
+    const overallCompletionRate = totalTasksCount > 0
+      ? Math.round((completedTasksCount / totalTasksCount) * 100)
+      : 100;
+
+    const rawHistoryDesc = project.project_description || '';
+    const isHistoryRestored = rawHistoryDesc.includes('<!-- RESTORED -->') || rawHistoryDesc.includes('[RESTORED]');
+    const cancelMatch = rawHistoryDesc.match(/<!-- CANCELLED_REASON:\s*([\s\S]*?)\s*-->/);
+    const cancellationReason = cancelMatch ? cancelMatch[1].trim() : (project.cancellation_reason || null);
+    const cleanHistoryDescription = rawHistoryDesc
+      .replace(/<!-- RESTORED -->/g, '')
+      .replace(/\[RESTORED\]/g, '')
+      .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+      .trim();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        project: {
+          id: project.id,
+          name: project.project_name,
+          description: cleanHistoryDescription,
+          rawDescription: rawHistoryDesc,
+          isRestored: isHistoryRestored,
+          cancellationReason,
+          status: project.status,
+          priority: project.priority,
+          startDate: project.start_date,
+          endDate: project.end_date,
+          durationDays: project.duration_days,
+          teamSize: project.team_size,
+          createdAt: project.created_at,
+          updatedAt: project.updated_at,
+        },
+        clientFeedback,
+        summary: {
+          totalTeamMembers: employees.length,
+          totalTasks: totalTasksCount,
+          completedTasks: completedTasksCount,
+          pendingTasks: pendingTasksCount,
+          completionPercentage: overallCompletionRate,
+        },
+        employees,
+        tasks,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching project history details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch project history details',
+      error: error.message,
+    });
   }
 });
 
@@ -215,7 +626,56 @@ router.get('/:id', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Project not found' });
 
-    res.status(200).json({ success: true, data: transformProject(data) });
+    // Try to get latest feedback if completed
+    let clientFeedback = null;
+    try {
+      const { data: fbData } = await supabase
+        .from('feedback_requests')
+        .select(`
+          id,
+          project_id,
+          client_name,
+          client_email,
+          status,
+          completed_at,
+          feedback_responses (
+            id,
+            profile_id,
+            rating,
+            project_feedback,
+            deliverables_feedback,
+            additional_comments
+          )
+        `)
+        .eq('project_id', id)
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false })
+        .limit(1);
+
+      if (fbData && fbData.length > 0) {
+        const reqRow = fbData[0];
+        const responses = reqRow.feedback_responses || [];
+        const primaryResponse = responses.find(r => r.project_feedback) || responses[0] || {};
+        const extracted = extractProjectRatingAndFeedback(
+          primaryResponse.project_feedback,
+          responses
+        );
+        clientFeedback = {
+          requestId: reqRow.id,
+          clientName: reqRow.client_name,
+          clientEmail: reqRow.client_email,
+          completedAt: reqRow.completed_at,
+          rating: extracted.rating,
+          projectFeedback: extracted.feedback,
+          deliverablesFeedback: primaryResponse.deliverables_feedback || null,
+          additionalComments: primaryResponse.additional_comments || null,
+        };
+      }
+    } catch (fbErr) {
+      console.error('Non-fatal error fetching feedback for project:', fbErr);
+    }
+
+    res.status(200).json({ success: true, data: transformProject(data, clientFeedback) });
   } catch (error) {
     console.error('Error fetching project:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch project', error: error.message });
@@ -285,8 +745,8 @@ router.post('/', async (req, res) => {
           quantity_needed: parseInt(resource.quantity, 10) || 1,
           assignment_type: resource.assignment || 'Full-time',
           justification: resource.justification || null,
-          start_date: resource.startDate || null,
-          end_date: resource.endDate || null,
+          start_date: resource.startDate || startDate || null,
+          end_date: resource.endDate || endDate || null,
         })
         .select()
         .single();
@@ -359,6 +819,108 @@ router.put('/:id', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Project not found' });
 
+    const todayDate = new Date().toISOString().split('T')[0];
+
+    // ✅ Sync dates to project_assignments and requirements if changed
+    if (startDate !== undefined || endDate !== undefined) {
+      const assignmentDateUpdates = {};
+      if (startDate !== undefined) assignmentDateUpdates.start_date = startDate;
+      if (endDate !== undefined) assignmentDateUpdates.end_date = endDate;
+
+      await supabase
+        .from('project_assignments')
+        .update(assignmentDateUpdates)
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+
+      await supabase
+        .from('project_resource_requirements')
+        .update(assignmentDateUpdates)
+        .eq('project_id', id)
+        .in('status', ['Pending', 'Open']);
+    }
+
+    if (status === 'Completed') {
+      await supabase
+        .from('project_resource_requirements')
+        .update({ status: 'Completed' })
+        .eq('project_id', id)
+        .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+
+      // ✅ Update assignments to Completed when project completes
+      await supabase
+        .from('project_assignments')
+        .update({
+          status: 'Completed',
+          end_date: todayDate,
+        })
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+    }
+
+    // ✅ Cross-role notifications for RM and Assigned Employees
+    try {
+      const projectName = data.project_name || name || 'Project';
+      const pmName = [req.user?.first_name, req.user?.last_name].filter(Boolean).join(' ') || 'Project Manager';
+      const pmBranchId = req.user?.branch_id;
+
+      // 1. Fetch assigned employees
+      const { data: assignments } = await supabase
+        .from('project_assignments')
+        .select('profile_id')
+        .eq('project_id', id);
+
+      const employeeIds = [...new Set((assignments || []).map(a => a.profile_id).filter(Boolean))];
+
+      // 2. Fetch Resource Managers for this branch
+      let rmQuery = supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'Resource Manager')
+        .eq('status', 'Active');
+      if (pmBranchId) {
+        rmQuery = rmQuery.eq('branch_id', pmBranchId);
+      }
+      const { data: rmUsers } = await rmQuery;
+      const rmIds = (rmUsers || []).map(u => u.id).filter(rmId => rmId !== req.user?.id);
+
+      const notificationsToInsert = [];
+
+      const empMessage = status === 'Completed'
+        ? `Project "${projectName}" has been marked as Completed.`
+        : `Project "${projectName}" details have been updated (Status: ${data.status || 'Active'}, Priority: ${data.priority || 'Medium'}, Deadline: ${data.end_date || 'N/A'}).`;
+
+      employeeIds.forEach(empId => {
+        notificationsToInsert.push({
+          recipient_id: empId,
+          type: 'project',
+          text: empMessage,
+          read: false,
+        });
+      });
+
+      const rmMessage = status === 'Completed'
+        ? `Project "${projectName}" was marked as Completed by PM ${pmName}.`
+        : `Project "${projectName}" details were updated by PM ${pmName} (Status: ${data.status || 'Active'}, Priority: ${data.priority || 'Medium'}, Deadline: ${data.end_date || 'N/A'}).`;
+
+      rmIds.forEach(rmId => {
+        if (!employeeIds.includes(rmId)) {
+          notificationsToInsert.push({
+            recipient_id: rmId,
+            type: 'project',
+            text: rmMessage,
+            read: false,
+          });
+        }
+      });
+
+      if (notificationsToInsert.length > 0) {
+        await supabase.from('notifications').insert(notificationsToInsert);
+      }
+    } catch (notifErr) {
+      console.error('Non-fatal error generating project update notifications:', notifErr);
+    }
+
     await logAuditEvent({
       req,
       action: 'Updated',
@@ -374,33 +936,376 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// ✅ PATCH /api/pm/projects/:id/status — quick status change (e.g. approve -> Active)
+// ✅ PATCH /api/pm/projects/:id/status — quick status change (e.g. approve -> Active, or mark as Completed)
 router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, restoreMode = 'with_previous', reason } = req.body;
 
     if (!status) {
       return res.status(400).json({ success: false, message: 'Status is required' });
     }
 
+    // Fetch existing project to capture name, description, and creator
+    const { data: project, error: projErr } = await supabase
+      .from('projects')
+      .select('id, project_name, status, created_by, project_description')
+      .eq('id', id)
+      .single();
+
+    if (projErr || !project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const todayDate = nowIso.split('T')[0];
+    const reportEmployeeId = req.user?.id || project.created_by || null;
+    const reportEmployeeName = [req.user?.first_name, req.user?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim() || 'Project Manager';
+    const wasCompleted = project.status === 'Completed' || project.status === 'Cancelled';
+    const isRestoring = status === 'Active' && wasCompleted;
+    const isCancelling = status === 'Cancelled';
+
+    const updatePayload = { status, updated_at: nowIso };
+    if (isRestoring) {
+      const existingDesc = (project.project_description || '')
+        .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+        .trim();
+      if (!existingDesc.includes('<!-- RESTORED -->') && !existingDesc.includes('[RESTORED]')) {
+        updatePayload.project_description = `${existingDesc} <!-- RESTORED -->`.trim();
+      } else {
+        updatePayload.project_description = existingDesc;
+      }
+    } else if (isCancelling) {
+      const existingDesc = (project.project_description || '')
+        .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
+        .trim();
+      const reasonText = (reason || '').trim() || 'No reason provided';
+      updatePayload.project_description = `${existingDesc} <!-- CANCELLED_REASON: ${reasonText} -->`.trim();
+    }
+
     const { data, error } = await supabase
       .from('projects')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
 
+    // Handle project completion
+    if (status === 'Completed') {
+      // 1. Unassign all employees from this project:
+      // Set status = 'Completed' and record end_date on project_assignments so active queries treat them as unassigned
+      const { error: assignErr } = await supabase
+        .from('project_assignments')
+        .update({
+          status: 'Completed',
+          end_date: todayDate,
+        })
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+
+      if (assignErr) {
+        console.error('Non-fatal error updating project assignments on completion:', assignErr);
+      }
+
+      // 2. Conclude tasks & add completion progress log entry so Weekly Progress Report includes this project
+      const { data: projectTasks, error: tasksFetchErr } = await supabase
+        .from('project_tasks')
+        .select('*, profiles:profiles!project_tasks_profile_id_fkey(first_name, last_name)')
+        .eq('project_id', id);
+
+      if (!tasksFetchErr && projectTasks) {
+        if (projectTasks.length === 0) {
+          // If no tasks exist, insert a milestone completion task so Weekly Progress Report has the entry
+          const { data: insertedTask } = await supabase
+            .from('project_tasks')
+            .insert({
+              project_id: id,
+              profile_id: null,
+              title: `${project.project_name} - Final Completion Report`,
+              description: 'Project concluded and marked as completed.',
+              priority: 'Medium',
+              status: 'Completed',
+              due_date: todayDate,
+              progress_logs: [{
+                date: nowIso,
+                percentage: 100,
+                note: 'Project concluded and marked as completed.',
+                loggedBy: req.user?.id || project.created_by || null,
+              }],
+              created_by: req.user?.id || project.created_by || null,
+            })
+            .select()
+            .single();
+
+          if (insertedTask) {
+            try {
+              const { error: reportError } = await supabase.from('project_report').insert({
+                task_id: insertedTask.id,
+                project_id: id,
+                employee_id: reportEmployeeId,
+                task_title: insertedTask.title,
+                task_description: insertedTask.description,
+                employee_name: reportEmployeeName,
+                project_name: project.project_name,
+                percentage: 100,
+                log_date: todayDate,
+              });
+
+              if (reportError) {
+                console.error('Non-fatal error inserting milestone into project_report:', reportError);
+              }
+            } catch (rErr) {
+              console.error('Non-fatal error inserting milestone into project_report:', rErr);
+            }
+          }
+        } else {
+          for (const task of projectTasks) {
+            const existingLogs = Array.isArray(task.progress_logs) ? task.progress_logs : [];
+            const currentTotal = existingLogs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
+            const remaining = Math.max(0, 100 - currentTotal);
+
+            const completionLog = {
+              date: nowIso,
+              percentage: remaining > 0 ? remaining : 100,
+              note: 'Project concluded and marked as completed.',
+              loggedBy: req.user?.id || project.created_by || null,
+            };
+
+            const updatedLogs = [...existingLogs, completionLog];
+
+            await supabase
+              .from('project_tasks')
+              .update({
+                status: 'Completed',
+                progress_logs: updatedLogs,
+                updated_at: nowIso,
+              })
+              .eq('id', task.id);
+
+            // Record the PM who completed the project in the weekly report.
+            try {
+              const { error: reportError } = await supabase.from('project_report').insert({
+                task_id: task.id,
+                project_id: id,
+                employee_id: reportEmployeeId,
+                task_title: task.title,
+                task_description: task.description || '',
+                employee_name: reportEmployeeName,
+                project_name: project.project_name,
+                percentage: 100,
+                log_date: todayDate,
+              });
+
+              if (reportError) {
+                console.error('Non-fatal error inserting task completion into project_report:', reportError);
+              }
+            } catch (rErr) {
+              console.error('Non-fatal error inserting task completion into project_report:', rErr);
+            }
+          }
+        }
+      }
+
+      // 3. Mark all resource requirements as Completed so RM Pending Requests queue is clean
+      const { error: reqErr } = await supabase
+        .from('project_resource_requirements')
+        .update({
+          status: 'Completed',
+        })
+        .eq('project_id', id)
+        .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+
+      if (reqErr) {
+        console.error('Non-fatal error updating project resource requirements on completion:', reqErr);
+      }
+    } else if (status === 'Cancelled') {
+      // 1. Unassign all active employees from this project
+      const { error: assignErr } = await supabase
+        .from('project_assignments')
+        .update({
+          status: 'Cancelled',
+          end_date: todayDate,
+        })
+        .eq('project_id', id)
+        .eq('status', 'Assigned');
+
+      if (assignErr) {
+        console.error('Non-fatal error updating project assignments on cancellation:', assignErr);
+      }
+
+      // 2. Mark pending/open/approved/filled resource requirements as Cancelled
+      const { error: reqErr } = await supabase
+        .from('project_resource_requirements')
+        .update({
+          status: 'Cancelled',
+        })
+        .eq('project_id', id)
+        .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+
+      if (reqErr) {
+        console.error('Non-fatal error updating project resource requirements on cancellation:', reqErr);
+      }
+
+      // 3. Mark non-completed tasks as Cancelled
+      const { error: taskErr } = await supabase
+        .from('project_tasks')
+        .update({
+          status: 'Cancelled',
+          updated_at: nowIso,
+        })
+        .eq('project_id', id)
+        .neq('status', 'Completed');
+
+      if (taskErr) {
+        console.error('Non-fatal error updating project tasks on cancellation:', taskErr);
+      }
+    } else if (isRestoring) {
+      if (restoreMode === 'as_new') {
+        // Option B: Restore as New Project
+        // Non-destructive: mark previous assignments and previous tasks as 'Archived'
+        // Resource requirements are restored to 'Pending' so new staff can be requested/assigned
+        await supabase
+          .from('project_assignments')
+          .update({ status: 'Archived', updated_at: nowIso })
+          .eq('project_id', id);
+
+        await supabase
+          .from('project_tasks')
+          .update({ status: 'Archived', updated_at: nowIso })
+          .eq('project_id', id);
+
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Pending' })
+          .eq('project_id', id)
+          .in('status', ['Completed', 'Archived']);
+      } else {
+        // Option A: Restore with Previous Employees & Tasks (Default)
+        // Reactivate snapshot assignments and tasks linked to this project at completion
+        await supabase
+          .from('project_assignments')
+          .update({ status: 'Assigned', updated_at: nowIso })
+          .eq('project_id', id)
+          .eq('status', 'Completed');
+
+        await supabase
+          .from('project_tasks')
+          .update({ status: 'In Progress', updated_at: nowIso })
+          .eq('project_id', id)
+          .in('status', ['Completed', 'Completed-Hidden']);
+
+        // Check active assignments for this project to accurately set each requirement's status
+        const { data: activeAssignments } = await supabase
+          .from('project_assignments')
+          .select('id, requirement_id')
+          .eq('project_id', id)
+          .eq('status', 'Assigned');
+
+        const { data: projectRequirements } = await supabase
+          .from('project_resource_requirements')
+          .select('id, quantity_needed')
+          .eq('project_id', id)
+          .in('status', ['Completed', 'Archived']);
+
+        if (projectRequirements && projectRequirements.length > 0) {
+          for (const reqItem of projectRequirements) {
+            const qtyNeeded = reqItem.quantity_needed || 1;
+            const assignedCount = (activeAssignments || []).filter(a => a.requirement_id === reqItem.id).length;
+            const newReqStatus = assignedCount >= qtyNeeded ? 'Filled' : 'Pending';
+
+            await supabase
+              .from('project_resource_requirements')
+              .update({ status: newReqStatus })
+              .eq('id', reqItem.id);
+          }
+        }
+      }
+    }
+
+    // ✅ Cross-role notifications for RM and Assigned Employees on status change
+    try {
+      const projName = project.project_name || 'Project';
+      const pmBranchId = req.user?.branch_id;
+
+      const { data: assignments } = await supabase
+        .from('project_assignments')
+        .select('profile_id')
+        .eq('project_id', id);
+
+      const employeeIds = [...new Set((assignments || []).map(a => a.profile_id).filter(Boolean))];
+
+      let rmQuery = supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'Resource Manager')
+        .eq('status', 'Active');
+      if (pmBranchId) {
+        rmQuery = rmQuery.eq('branch_id', pmBranchId);
+      }
+      const { data: rmUsers } = await rmQuery;
+      const rmIds = (rmUsers || []).map(u => u.id).filter(rmId => rmId !== req.user?.id);
+
+      const notificationsToInsert = [];
+      const cancelReasonText = (reason || '').trim();
+      const reasonSuffix = cancelReasonText ? ` (Reason: ${cancelReasonText})` : '';
+      const statusMsg = status === 'Cancelled'
+        ? `Project "${projName}" has been cancelled${reasonSuffix}.`
+        : `Project "${projName}" status has been changed to ${status}.`;
+
+      employeeIds.forEach(empId => {
+        notificationsToInsert.push({
+          recipient_id: empId,
+          type: 'project',
+          text: statusMsg,
+          read: false,
+        });
+      });
+
+      const rmMsg = status === 'Cancelled'
+        ? `Project "${projName}" was cancelled by PM ${reportEmployeeName}${reasonSuffix}.`
+        : `Project "${projName}" status was updated to ${status} by PM ${reportEmployeeName}.`;
+      rmIds.forEach(rmId => {
+        if (!employeeIds.includes(rmId)) {
+          notificationsToInsert.push({
+            recipient_id: rmId,
+            type: 'project',
+            text: rmMsg,
+            read: false,
+          });
+        }
+      });
+
+      if (notificationsToInsert.length > 0) {
+        await supabase.from('notifications').insert(notificationsToInsert);
+      }
+    } catch (notifErr) {
+      console.error('Non-fatal error generating status change notifications:', notifErr);
+    }
+
     await logAuditEvent({
       req,
       action: 'Updated',
       systemCategory: 'Resource Management',
-      logDescription: `Updated project ${id} status to ${status}`,
+      logDescription: status === 'Cancelled'
+        ? `Cancelled project ${id} ("${project.project_name}")${(reason || '').trim() ? ` with reason: ${(reason || '').trim()}` : ''}`
+        : `Updated project ${id} status to ${status}`,
     });
 
     invalidateProjectsCache();
+    try {
+      const { invalidateTasksCache } = require('./tasks');
+      if (typeof invalidateTasksCache === 'function') invalidateTasksCache();
+    } catch (e) {}
+    try {
+      const { invalidateEmployeesCache } = require('./employees');
+      if (typeof invalidateEmployeesCache === 'function') invalidateEmployeesCache();
+    } catch (e) {}
+
     res.status(200).json({ success: true, message: 'Project status updated', data });
   } catch (error) {
     console.error('Error updating project status:', error);
@@ -412,8 +1317,39 @@ router.patch('/:id/status', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Fetch project and assigned employees before deleting
+    const { data: project } = await supabase
+      .from('projects')
+      .select('project_name, created_by')
+      .eq('id', id)
+      .maybeSingle();
+
+    const { data: assignments } = await supabase
+      .from('project_assignments')
+      .select('profile_id')
+      .eq('project_id', id);
+
     const { error } = await supabase.from('projects').delete().eq('id', id);
     if (error) throw error;
+
+    // Notify assigned employees about project deletion
+    if (project && assignments && assignments.length > 0) {
+      try {
+        const employeeIds = [...new Set(assignments.map(a => a.profile_id).filter(Boolean))];
+        const notifs = employeeIds.map(empId => ({
+          recipient_id: empId,
+          type: 'alert',
+          text: `Project "${project.project_name}" has been deleted by Project Manager.`,
+          read: false,
+        }));
+        if (notifs.length > 0) {
+          await supabase.from('notifications').insert(notifs);
+        }
+      } catch (nErr) {
+        console.error('Non-fatal error sending deletion notification:', nErr);
+      }
+    }
 
     await logAuditEvent({
       req,

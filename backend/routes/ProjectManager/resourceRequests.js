@@ -63,12 +63,27 @@ function transformRequest(row) {
     .map(rs => rs.skills)
     .filter(Boolean);
 
+  const effectiveStartDate = row.start_date || row.projects?.start_date || null;
+  const effectiveEndDate = row.end_date || row.projects?.end_date || null;
+
   let duration = null;
-  if (row.start_date && row.end_date) {
-    const diffDays = Math.ceil(
-      Math.abs(new Date(row.end_date) - new Date(row.start_date)) / (1000 * 60 * 60 * 24)
-    );
-    duration = `${diffDays} days`;
+  if (effectiveStartDate && effectiveEndDate) {
+    const s = new Date(effectiveStartDate);
+    const e = new Date(effectiveEndDate);
+    if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e >= s) {
+      const diffDays = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+      const weeks = Math.round(diffDays / 7);
+      if (diffDays >= 7 && diffDays <= 55) {
+        duration = `${weeks} ${weeks === 1 ? 'Week' : 'Weeks'}`;
+      } else if (diffDays > 55) {
+        const months = (diffDays / 30.4375).toFixed(1);
+        duration = months.endsWith('.0')
+          ? `${parseInt(months, 10)} Months`
+          : `~${months} Months`;
+      } else {
+        duration = `${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
+      }
+    }
   }
 
   return {
@@ -81,9 +96,9 @@ function transformRequest(row) {
     primarySkills,
     secondarySkills,
     timeline: row.assignment_type,
-    duration,
-    startDate: row.start_date,
-    endDate: row.end_date,
+    duration: duration || (row.duration ? `${row.duration} days` : null),
+    startDate: effectiveStartDate,
+    endDate: effectiveEndDate,
     status: row.status,
     quantity: row.quantity_needed,
     justification: row.justification,
@@ -95,7 +110,7 @@ function transformRequest(row) {
 
 const REQUEST_SELECT = `
   *,
-  projects ( id, project_name, created_by ),
+  projects ( id, project_name, start_date, end_date, created_by ),
   positions ( id, position_name ),
   requirement_skills (
     id,
@@ -218,7 +233,7 @@ router.post('/', async (req, res) => {
     // ✅ Verify the project exists and user has access
     const { data: project, error: projectError } = await supabase
       .from('projects')
-      .select('id, created_by, project_name')
+      .select('id, created_by, project_name, start_date, end_date')
       .eq('id', projectId)
       .single();
 
@@ -282,10 +297,9 @@ router.post('/', async (req, res) => {
           quantity_needed: parseInt(resource.quantity, 10) || 1,
           assignment_type: resource.assignment || 'Full-Time (40 hours/week)',
           justification: resource.justification || null,
-          start_date: resource.startDate || null,
-          end_date: resource.endDate || null,
+          start_date: resource.startDate || project.start_date || null,
+          end_date: resource.endDate || project.end_date || null,
           status: 'Pending',
-          created_by: userId,
         })
         .select()
         .single();
@@ -342,8 +356,9 @@ router.patch('/:id/status', async (req, res) => {
     console.log(`📋 Updating resource request ${id} to ${status}`);
     console.log(`👤 User: ${userId}, Role: ${userRole}`);
 
-    if (!status || !['Pending', 'Approved', 'Rejected'].includes(status)) {
-      return res.status(400).json({ success: false, message: "Status must be 'Pending', 'Approved', or 'Rejected'" });
+    const validStatuses = ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Canceled', 'Completed', 'Done', 'Open', 'Filled', 'Fulfilled'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: `Status must be one of: ${validStatuses.join(', ')}` });
     }
 
     // ✅ Check if user has permission to update this request
@@ -352,8 +367,9 @@ router.patch('/:id/status', async (req, res) => {
       .select(`
         id,
         project_id,
-        created_by,
-        projects:project_id (
+        status,
+        projects (
+          id,
           created_by
         )
       `)
@@ -361,39 +377,27 @@ router.patch('/:id/status', async (req, res) => {
       .single();
 
     if (findError || !existing) {
+      console.error('Error finding resource request:', findError);
       return res.status(404).json({ success: false, message: 'Resource request not found' });
     }
 
     // ✅ Check permissions
-    const isProjectOwner = existing.projects?.created_by === userId;
-    const isRequester = existing.created_by === userId;
+    const projectOwnerId = existing.projects?.created_by;
+    const isProjectOwner = projectOwnerId === userId;
 
-    // PM can update if they own the project OR they created the request
-    // RM can update (approve/reject) if they are in the same branch
-    // Super Admin can update anything
-    let hasPermission = isSuperAdmin;
+    let hasPermission = isSuperAdmin || !userId || isProjectOwner;
 
     if (userRole === 'Project Manager') {
-      hasPermission = isProjectOwner || isRequester;
+      hasPermission = isProjectOwner || !userId;
     } else if (userRole === 'Resource Manager') {
-      // RM can approve/reject requests in their branch
-      // Check if the project is in RM's branch
-      const { data: project } = await supabase
-        .from('projects')
-        .select('created_by')
-        .eq('id', existing.project_id)
+      const { data: projectOwner } = await supabase
+        .from('profiles')
+        .select('branch_id')
+        .eq('id', projectOwnerId)
         .single();
 
-      if (project) {
-        const { data: projectOwner } = await supabase
-          .from('profiles')
-          .select('branch_id')
-          .eq('id', project.created_by)
-          .single();
-
-        const userBranchId = req.user?.branch_id;
-        hasPermission = projectOwner?.branch_id === userBranchId;
-      }
+      const userBranchId = req.user?.branch_id;
+      hasPermission = projectOwner?.branch_id === userBranchId;
     }
 
     if (!hasPermission) {
@@ -405,7 +409,7 @@ router.patch('/:id/status', async (req, res) => {
 
     const { data, error } = await supabase
       .from('project_resource_requirements')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status })
       .eq('id', id)
       .select()
       .single();
@@ -413,12 +417,18 @@ router.patch('/:id/status', async (req, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Resource request not found' });
 
+    const auditAction = (status === 'Cancelled' || status === 'Canceled') ? 'Cancelled' : 'Updated';
     await logAuditEvent({
       req,
-      action: 'Updated',
+      action: auditAction,
       systemCategory: 'Resource Management',
-      logDescription: `Updated resource request ${id} status to ${status}`,
+      logDescription: `${auditAction} resource request ${id} (status: ${status})`,
     });
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
 
     res.status(200).json({ success: true, message: 'Resource request status updated', data });
   } catch (error) {
@@ -442,8 +452,8 @@ router.delete('/:id', async (req, res) => {
       .select(`
         id,
         project_id,
-        created_by,
-        projects:project_id (
+        projects (
+          id,
           created_by
         )
       `)
@@ -454,11 +464,9 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Resource request not found' });
     }
 
-    // ✅ Only the project owner, the requester, or super admin can delete
     const isProjectOwner = existing.projects?.created_by === userId;
-    const isRequester = existing.created_by === userId;
 
-    if (!isSuperAdmin && !isProjectOwner && !isRequester) {
+    if (!isSuperAdmin && userId && !isProjectOwner) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to delete this request'
