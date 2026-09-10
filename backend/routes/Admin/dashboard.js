@@ -233,6 +233,89 @@ router.get('/dashboard/activity', async (req, res) => {
   }
 });
 
+// ✅ NEW: GET /api/admin/dashboard/user-activity?days=30
+// Returns a day-by-day activity count (from audit_logs) for the last N days,
+// respecting the same branch filtering as /dashboard/activity. Used by the
+// dashboard chart. Every day in the range is included (with count: 0 for
+// days with no activity) so the chart doesn't have gaps.
+router.get('/dashboard/user-activity', async (req, res) => {
+  try {
+    // Clamp to a sane range — the frontend only offers 7/14/30/60/90.
+    let days = parseInt(req.query.days, 10) || 30;
+    days = Math.min(Math.max(days, 1), 365);
+
+    console.log(`📈 User activity requested by: ${req.user.employee_id} (${req.user.role}) for ${days} days`);
+    console.log(`🏢 Branch filter: ${req.user.is_super_admin ? 'ALL' : req.user.branch_id}`);
+
+    // Start of the range: `days` days ago, at 00:00:00 local-to-UTC.
+    const startDate = new Date();
+    startDate.setUTCHours(0, 0, 0, 0);
+    startDate.setUTCDate(startDate.getUTCDate() - (days - 1));
+
+    let logsQuery = supabase
+      .from('audit_logs')
+      .select('id, user_id, created_at')
+      .gte('created_at', startDate.toISOString());
+
+    if (!req.user.is_super_admin) {
+      // Regular admins only see activity from users in their own branch.
+      const { data: usersInBranch, error: userError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('branch_id', req.user.branch_id);
+
+      if (userError) {
+        console.error('Error fetching users in branch:', userError);
+        return res.status(500).json({ success: false, error: userError.message });
+      }
+
+      const userIds = usersInBranch?.map(u => u.id) || [];
+
+      if (userIds.length === 0) {
+        // No users in this branch — return a zero-filled series instead of
+        // erroring, so the chart still renders an empty-but-valid range.
+        const emptySeries = [];
+        for (let i = 0; i < days; i++) {
+          const d = new Date(startDate);
+          d.setUTCDate(startDate.getUTCDate() + i);
+          emptySeries.push({ date: d.toISOString().split('T')[0], count: 0 });
+        }
+        return res.json({ success: true, data: emptySeries });
+      }
+
+      logsQuery = logsQuery.in('user_id', userIds);
+    }
+
+    const { data, error } = await logsQuery;
+    if (error) throw error;
+
+    // Bucket logs by day (UTC date), pre-seeding every day in the range
+    // with 0 so the chart has a continuous series even on quiet days.
+    const countsByDate = {};
+    for (let i = 0; i < days; i++) {
+      const d = new Date(startDate);
+      d.setUTCDate(startDate.getUTCDate() + i);
+      countsByDate[d.toISOString().split('T')[0]] = 0;
+    }
+
+    (data || []).forEach((log) => {
+      const dateKey = new Date(log.created_at).toISOString().split('T')[0];
+      if (dateKey in countsByDate) {
+        countsByDate[dateKey] += 1;
+      }
+    });
+
+    const series = Object.entries(countsByDate)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([date, count]) => ({ date, count }));
+
+    res.json({ success: true, data: series });
+  } catch (err) {
+    console.error('Error fetching user activity:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ✅ NEW: Get branch-specific stats for Super Admin
 router.get('/dashboard/branch-stats', async (req, res) => {
   try {
