@@ -9,7 +9,7 @@ console.log('✅ HR Router initializing...');
 router.use(verifyToken);
 console.log('✅ Auth middleware applied');
 
-// ✅ Role check middleware for Human Resources
+// ✅ Role check middleware for Human Resources (strict — HR or Super Admin only)
 const requireHumanResources = (req, res, next) => {
   const userRole = req.user?.role;
   const isSuperAdmin = req.user?.is_super_admin || false;
@@ -26,6 +26,27 @@ const requireHumanResources = (req, res, next) => {
   }
 
   next();
+};
+
+// ✅ Role check middleware for the hiring pipeline (applications, interviews,
+// hired-employees) — also allows Admin, since Admins routinely manage hiring
+// decisions in this system. Several of these sub-routes already had their
+// own internal "Admin OK" logic (e.g. hasHrOrAdminRole()), but it was
+// unreachable because this outer gate rejected Admins before the request
+// ever got there. This middleware brings the gate in line with that
+// existing intent instead of changing it.
+const requireHumanResourcesOrAdmin = (req, res, next) => {
+  const userRole = req.user?.role;
+  const isSuperAdmin = req.user?.is_super_admin || false;
+
+  if (isSuperAdmin || userRole === 'Human Resources' || userRole === 'Admin') {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: 'Access denied. Human Resources or Admin role required.'
+  });
 };
 
 // Import routes with debug logs
@@ -65,10 +86,10 @@ console.log('✅ Branches route loaded');
 console.log('🔗 Registering routes...');
 router.use('/dashboard', requireHumanResources, dashboardRoutes);
 router.use('/job-postings', requireHumanResources, jobPostingsRoutes);
-router.use('/applications', requireHumanResources, applicationsRoutes);
+router.use('/applications', requireHumanResourcesOrAdmin, applicationsRoutes);
 router.use('/resource-requests', requireHumanResources, resourceRequestsRoutes);
-router.use('/interviews', requireHumanResources, interviewsRoutes);
-router.use('/hired-employees', requireHumanResources, hiredEmployeesRoutes);
+router.use('/interviews', requireHumanResourcesOrAdmin, interviewsRoutes);
+router.use('/hired-employees', requireHumanResourcesOrAdmin, hiredEmployeesRoutes);
 router.use('/departments', requireHumanResources, departmentsRoutes);
 router.use('/branches', requireHumanResources, branchesRoutes);
 console.log('✅ All routes registered');
