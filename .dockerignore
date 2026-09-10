@@ -1,6 +1,9 @@
 node_modules
 backend/node_modules
 main/
+!main/src
+!main/src/assets
+!main/src/assets/WEA_logo_bgremoved.png
 main/node_modules
 python/venv
 python/__pycache__

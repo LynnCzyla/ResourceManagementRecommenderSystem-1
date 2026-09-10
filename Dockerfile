@@ -43,6 +43,11 @@ RUN cd backend && npm ci --omit=dev
 COPY backend/ ./backend/
 COPY python/ ./python/
 
+# Logo asset used by transactional emails (mailer reads this path relative
+# to backend/utils), even though the rest of main/ (frontend) isn't needed
+# in this image since it's deployed separately on Vercel.
+COPY main/src/assets/WEA_logo_bgremoved.png ./main/src/assets/WEA_logo_bgremoved.png
+
 # Ensure the uploads directory exists (multer writes here)
 RUN mkdir -p backend/uploads
 
