@@ -56,6 +56,17 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme, onProfil
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('rmActiveTab') || 'dashboard';
   });
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([localStorage.getItem('rmActiveTab') || 'dashboard']));
+
+  useEffect(() => {
+    setVisitedTabs(prev => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
@@ -403,12 +414,12 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme, onProfil
         </header>
 
         <main style={styles.contentContainer}>
-          <div style={tabVisibility('dashboard')}><RMDashboardTab /></div>
-          <div style={tabVisibility('directory')}><RMEmployeeDirectoryTab /></div>
-          <div style={tabVisibility('projects')}><RMProjectsTab /></div>
-          <div style={tabVisibility('requests')}><RMRequestsTab /></div>
-          <div style={tabVisibility('requestForm')}><RMResourceRequestFormTab /></div>
-          <div style={tabVisibility('feedbackReport')}><RMFeedbackReportTab /></div>
+          {visitedTabs.has('dashboard') && <div style={tabVisibility('dashboard')}><RMDashboardTab /></div>}
+          {visitedTabs.has('directory') && <div style={tabVisibility('directory')}><RMEmployeeDirectoryTab /></div>}
+          {visitedTabs.has('projects') && <div style={tabVisibility('projects')}><RMProjectsTab /></div>}
+          {visitedTabs.has('requests') && <div style={tabVisibility('requests')}><RMRequestsTab /></div>}
+          {visitedTabs.has('requestForm') && <div style={tabVisibility('requestForm')}><RMResourceRequestFormTab /></div>}
+          {visitedTabs.has('feedbackReport') && <div style={tabVisibility('feedbackReport')}><RMFeedbackReportTab /></div>}
         </main>
       </div>
 

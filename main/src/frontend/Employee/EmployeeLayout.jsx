@@ -57,6 +57,17 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('employeeActiveTab') || 'dashboard';
   });
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([localStorage.getItem('employeeActiveTab') || 'dashboard']));
+
+  useEffect(() => {
+    setVisitedTabs(prev => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -400,10 +411,10 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
         </header>
 
         <main style={styles.contentContainer}>
-          <div style={tabVisibility('dashboard')}><EmployeeDashboardTab user={user} /></div>
-          <div style={tabVisibility('profile')}><EmployeeProfileTab user={user} /></div>
-          <div style={tabVisibility('assignments')}><EmployeeAssignmentsTab user={user} /></div>
-          <div style={tabVisibility('feedback')}><EmployeeFeedbackTab user={user} /></div>
+          {visitedTabs.has('dashboard') && <div style={tabVisibility('dashboard')}><EmployeeDashboardTab user={user} /></div>}
+          {visitedTabs.has('profile') && <div style={tabVisibility('profile')}><EmployeeProfileTab user={user} /></div>}
+          {visitedTabs.has('assignments') && <div style={tabVisibility('assignments')}><EmployeeAssignmentsTab user={user} /></div>}
+          {visitedTabs.has('feedback') && <div style={tabVisibility('feedback')}><EmployeeFeedbackTab user={user} /></div>}
         </main>
       </div>
     </div>

@@ -1,24 +1,15 @@
-//backend/controllers/feedbackController.js
+﻿//backend/controllers/feedbackController.js
 const { spawn } = require('child_process');
 const pythonService = require('../services/pythonService');
-const storageService = require('../services/storageService');
 const supabase = require('../supabase');
 const path = require('path');
-const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
-
-// ============ NORMALIZATION HELPERS (used everywhere below) ============
-const normalizeSkill = (skill) => {
-    if (typeof skill === 'string') return skill.trim();
-    if (typeof skill === 'object' && skill !== null) {
-        return (skill.skill_name || skill.skill_tag || skill.skill || String(skill)).trim();
-    }
-    return String(skill).trim();
-};
-
-// Canonical key used for ALL comparisons/dedup (case-insensitive,
-// whitespace-collapsed). Never used for display — only for matching.
-const skillKey = (skill) => normalizeSkill(skill).toLowerCase().replace(/\s+/g, ' ').trim();
+const {
+    normalizeSkill,
+    skillKey,
+    buildComparisonKeys,
+    addComparisonKeys,
+    hasComparisonKey
+} = require('../utils/skillNormalizer');
 
 // ============ ADD THIS HELPER FUNCTION ============
 async function updateLearningSystem(approved_skills, rejected_skills) {
@@ -37,7 +28,7 @@ async function updateLearningSystem(approved_skills, rejected_skills) {
             JSON.stringify(rejected_skills || [])
         ];
 
-        console.log('🧠 Updating learning system...');
+        console.log('ðŸ§  Updating learning system...');
         console.log(`   Approved: ${approved_skills?.length || 0}`);
         console.log(`   Rejected: ${rejected_skills?.length || 0}`);
 
@@ -55,19 +46,19 @@ async function updateLearningSystem(approved_skills, rejected_skills) {
 
         pythonProcess.stderr.on('data', (data) => {
             stderrData += data.toString();
-            console.log(`🐍 ${data.toString().trim()}`);
+            console.log(`ðŸ ${data.toString().trim()}`);
         });
 
         pythonProcess.on('close', (code) => {
             if (code !== 0) {
-                console.error('❌ Learning update error:', stderrData);
+                console.error('âŒ Learning update error:', stderrData);
                 reject(new Error(stderrData));
             } else {
                 try {
                     const result = JSON.parse(stdoutData);
-                    console.log(`✅ Learning system updated! ${result.skills_learned || 0} skills learned`);
+                    console.log(`âœ… Learning system updated! ${result.skills_learned || 0} skills learned`);
                     if (result.merged > 0) {
-                        console.log(`   ✅ ${result.merged} duplicate skills auto-merged!`);
+                        console.log(`   âœ… ${result.merged} duplicate skills auto-merged!`);
                     }
                     resolve(result);
                 } catch (e) {
@@ -84,7 +75,7 @@ async function updateLearningSystem(approved_skills, rejected_skills) {
 
 async function cleanupDatabaseDuplicates() {
     try {
-        console.log('🧹 Cleaning database duplicates...');
+        console.log('ðŸ§¹ Cleaning database duplicates...');
 
         const { data: allSkills, error: skillsError } = await supabase
             .from('skills')
@@ -110,7 +101,7 @@ async function cleanupDatabaseDuplicates() {
                 if (!updateError) {
                     toDelete.push(skill.id);
                     deletedCount++;
-                    console.log(`   ✅ Merged duplicate: ${skill.skill_name}`);
+                    console.log(`   âœ… Merged duplicate: ${skill.skill_name}`);
                 }
             }
         }
@@ -120,7 +111,7 @@ async function cleanupDatabaseDuplicates() {
             // duplicate skill rows, otherwise an employee who already had
             // BOTH the master and the duplicate skill linked ends up with
             // two employee_skills rows pointing at the same master id
-            // after the update above — still a duplicate in the portfolio.
+            // after the update above â€” still a duplicate in the portfolio.
             const { data: allLinks } = await supabase
                 .from('employee_skills')
                 .select('id, profile_id, skill_id')
@@ -139,7 +130,7 @@ async function cleanupDatabaseDuplicates() {
                 }
                 if (linkDupIds.length > 0) {
                     await supabase.from('employee_skills').delete().in('id', linkDupIds);
-                    console.log(`   ✅ Removed ${linkDupIds.length} duplicate employee_skills links`);
+                    console.log(`   âœ… Removed ${linkDupIds.length} duplicate employee_skills links`);
                 }
             }
             // ===================================================================
@@ -152,7 +143,7 @@ async function cleanupDatabaseDuplicates() {
             if (deleteError) {
                 console.error('Error deleting duplicates:', deleteError);
             } else {
-                console.log(`✅ Deleted ${toDelete.length} duplicate skills from database`);
+                console.log(`âœ… Deleted ${toDelete.length} duplicate skills from database`);
             }
         }
 
@@ -165,12 +156,12 @@ async function cleanupDatabaseDuplicates() {
 
 async function syncSkillsFromJsonToDatabase() {
     try {
-        console.log('🔄 Syncing skills from learned_skills.json to database...');
+        console.log('ðŸ”„ Syncing skills from learned_skills.json to database...');
 
         const jsonPath = path.join(__dirname, '../../shared-data/skills_db/learned_skills.json');
 
         if (!fs.existsSync(jsonPath)) {
-            console.log('⚠️ learned_skills.json not found, skipping sync');
+            console.log('âš ï¸ learned_skills.json not found, skipping sync');
             return { added: 0, updated: 0 };
         }
 
@@ -180,7 +171,7 @@ async function syncSkillsFromJsonToDatabase() {
         const learnedSkills = data.learned_skills || [];
         const dictionary = data.dictionary || {};
 
-        console.log(`📊 learned_skills.json has ${learnedSkills.length} skills`);
+        console.log(`ðŸ“Š learned_skills.json has ${learnedSkills.length} skills`);
 
         if (learnedSkills.length === 0) {
             return { added: 0, updated: 0 };
@@ -219,7 +210,7 @@ async function syncSkillsFromJsonToDatabase() {
 
                     if (!updateError) {
                         updated++;
-                        console.log(`   🔄 Updated: ${skillName} → ${category}`);
+                        console.log(`   ðŸ”„ Updated: ${skillName} â†’ ${category}`);
                     }
                 } else {
                     skipped++;
@@ -236,17 +227,17 @@ async function syncSkillsFromJsonToDatabase() {
                 if (!insertError) {
                     added++;
                     dbSkillMap.set(key, { id: null, category }); // avoid re-inserting in same run
-                    console.log(`   ✅ Added: ${skillName} (${category})`);
+                    console.log(`   âœ… Added: ${skillName} (${category})`);
                 }
             }
         }
 
-        console.log(`✅ Sync complete: +${added} added, ~${updated} updated, ${skipped} already exist`);
+        console.log(`âœ… Sync complete: +${added} added, ~${updated} updated, ${skipped} already exist`);
 
         return { added, updated, total: learnedSkills.length };
 
     } catch (error) {
-        console.error('❌ Sync error:', error);
+        console.error('âŒ Sync error:', error);
         return { added: 0, updated: 0, error: error.message };
     }
 }
@@ -282,7 +273,7 @@ async function retrainMLPython(texts, labels) {
 
         pythonProcess.stderr.on('data', (data) => {
             stderrData += data.toString();
-            console.log(`🐍 ${data.toString().trim()}`);
+            console.log(`ðŸ ${data.toString().trim()}`);
         });
 
         pythonProcess.on('close', (code) => {
@@ -333,7 +324,7 @@ async function getMLStatusPython() {
 
         pythonProcess.stderr.on('data', (data) => {
             stderrData += data.toString();
-            console.log(`🐍 ${data.toString().trim()}`);
+            console.log(`ðŸ ${data.toString().trim()}`);
         });
 
         pythonProcess.on('close', (code) => {
@@ -391,8 +382,8 @@ exports.cleanupDuplicateSkills = async (req, res) => {
             }
         }
 
-        console.log(`🔍 Found ${toDelete.length} duplicate skills`);
-        console.log(`📊 ${Object.keys(duplicates).length} duplicate groups`);
+        console.log(`ðŸ” Found ${toDelete.length} duplicate skills`);
+        console.log(`ðŸ“Š ${Object.keys(duplicates).length} duplicate groups`);
 
         for (const [key, dupList] of Object.entries(duplicates)) {
             for (const dup of dupList) {
@@ -404,7 +395,7 @@ exports.cleanupDuplicateSkills = async (req, res) => {
                 if (updateError) {
                     console.error(`Error updating skill ${dup.id}:`, updateError);
                 } else {
-                    console.log(`   ✅ Updated employee_skills: ${dup.name} → ${dup.master_id}`);
+                    console.log(`   âœ… Updated employee_skills: ${dup.name} â†’ ${dup.master_id}`);
                 }
             }
         }
@@ -430,7 +421,7 @@ exports.cleanupDuplicateSkills = async (req, res) => {
                 }
                 if (linkDupIds.length > 0) {
                     await supabase.from('employee_skills').delete().in('id', linkDupIds);
-                    console.log(`   ✅ Removed ${linkDupIds.length} duplicate employee_skills links`);
+                    console.log(`   âœ… Removed ${linkDupIds.length} duplicate employee_skills links`);
                 }
             }
         }
@@ -445,7 +436,7 @@ exports.cleanupDuplicateSkills = async (req, res) => {
             if (deleteError) {
                 console.error('Error deleting duplicates:', deleteError);
             } else {
-                console.log(`✅ Deleted ${toDelete.length} duplicate skills`);
+                console.log(`âœ… Deleted ${toDelete.length} duplicate skills`);
             }
         }
 
@@ -475,514 +466,13 @@ exports.cleanupDuplicateSkills = async (req, res) => {
     }
 };
 
-// ============ PROCESS DOCUMENT (UPDATED) ============
-exports.processDocument = async (req, res) => {
-    try {
-        const file = req.file;
-        if (!file) {
-            return res.status(400).json({ success: false, error: 'No file uploaded' });
-        }
-
-        const { documentType } = req.body;
-
-        const loggedInEmail = req.user.email;
-        const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('employee_id')
-            .eq('email', loggedInEmail)
-            .single();
-
-        if (profileError || !profileData) {
-            return res.status(403).json({ success: false, error: 'Profile not found for logged-in user' });
-        }
-
-        const employeeId = profileData.employee_id;
-
-        console.log(`📄 Processing: ${file.originalname}`);
-        console.log(`👤 Verified Employee: ${employeeId}`);
-
-        const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
-
-        const tempPath = path.join(__dirname, '../../shared-data/uploads', file.originalname);
-        const uploadDir = path.dirname(tempPath);
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        fs.writeFileSync(tempPath, file.buffer);
-
-        const result = await pythonService.processDocument(tempPath, employeeId, documentType);
-
-        try {
-            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-        } catch (e) {}
-
-        if (!result || !result.success) {
-            return res.status(500).json({ success: false, error: result?.error || 'Python processing failed' });
-        }
-
-        // ============ EXTRACT DATA ============
-        const nlpResult = result.nlp || {};
-        const allSkills = nlpResult.skills || [];
-        const categorizedSkills = nlpResult.categorized_skills || {};
-        const autoApproved = nlpResult.auto_approved || [];
-        const needsReview = nlpResult.needs_review || [];
-
-        console.log('🔍 RAW autoApproved:', JSON.stringify(autoApproved));
-        console.log('🔍 RAW needsReview (first 5):', JSON.stringify(needsReview.slice(0, 5)));
-        console.log('🔍 RAW allSkills count:', allSkills.length);
-
-        // ============ Normalize skills (using module-level normalizeSkill/skillKey) ============
-        const autoApprovedNormalized = autoApproved.map(normalizeSkill);
-        const needsReviewNormalized = needsReview.map(normalizeSkill);
-
-        // Case-insensitive Set for lookup
-        const autoApprovedSet = new Set(autoApprovedNormalized.map(skillKey));
-
-        const finalAutoApproved = autoApprovedNormalized;
-        const finalNeedsReview = needsReviewNormalized.filter(skill => {
-            return !autoApprovedSet.has(skillKey(skill)) && skill.length > 0;
-        });
-
-        console.log(`📊 Skill separation: ${finalAutoApproved.length} auto-approved, ${finalNeedsReview.length} needs review`);
-
-        // ============ CHECK FOR EXISTING DOCUMENT WITH FEEDBACK (using hash) ============
-        const documentHash = result.ocr?.document_hash || '';
-        console.log(`🔍 Document hash: ${documentHash || 'NOT AVAILABLE'}`);
-
-        let existingDoc = null;
-        if (documentHash) {
-            const { data: foundDoc, error: existingError } = await supabase
-                .from('documents')
-                .select('id, approved_skills, rejected_skills, feedback_pending, file_name')
-                .eq('employee_id', employeeId)
-                .eq('document_type', documentType)
-                .eq('document_hash', documentHash)
-                .maybeSingle();
-
-            if (!existingError && foundDoc) {
-                existingDoc = foundDoc;
-                console.log(`✅ Found existing document (by hash): ${foundDoc.file_name}`);
-            }
-        }
-
-        let documentId = existingDoc?.id;
-        let previouslyApproved = [];
-        let previouslyRejected = [];
-
-        // ============ METHOD 1: Check documents table ============
-        console.log(`🔍 [METHOD 1] Loading rejection history from previous documents...`);
-        const { data: allPreviousDocs, error: allDocsError } = await supabase
-            .from('documents')
-            .select('id, approved_skills, rejected_skills, file_name')
-            .eq('employee_id', employeeId)
-            .eq('document_type', documentType)
-            .order('created_at', { ascending: false });
-
-        if (!allDocsError && allPreviousDocs && allPreviousDocs.length > 0) {
-            allPreviousDocs.forEach(doc => {
-                if (doc.approved_skills && Array.isArray(doc.approved_skills)) {
-                    previouslyApproved.push(...doc.approved_skills.map(normalizeSkill));
-                }
-                if (doc.rejected_skills && Array.isArray(doc.rejected_skills)) {
-                    previouslyRejected.push(...doc.rejected_skills.map(normalizeSkill));
-                }
-            });
-
-            console.log(`   📝 Found ${allPreviousDocs.length} documents`);
-            console.log(`   ✅ From documents table: ${previouslyApproved.length} approved, ${previouslyRejected.length} rejected`);
-        } else {
-            console.log(`   ℹ️  No previous documents found`);
-        }
-
-        // ============ METHOD 2: FALLBACK - Check feedback_training table directly ============
-        console.log(`🔍 [METHOD 2] FALLBACK - Loading from feedback_training table...`);
-        console.log(`   Looking for employee_id: ${employeeId}, label: 'Not Skill'`);
-
-        const { data: feedbackRecords, error: feedbackError } = await supabase
-            .from('feedback_training')
-            .select('phrase, label')
-            .eq('employee_id', employeeId)
-            .eq('label', 'Not Skill');
-
-        if (feedbackError) {
-            console.error(`   ❌ ERROR querying feedback_training:`, feedbackError);
-        } else if (feedbackRecords && feedbackRecords.length > 0) {
-            const feedbackRejected = feedbackRecords.map(r => normalizeSkill(r.phrase));
-            previouslyRejected.push(...feedbackRejected);
-            console.log(`   ✅ From feedback_training: ${feedbackRecords.length} rejected skills`);
-            console.log(`   Samples: ${feedbackRejected.slice(0, 3).join(', ')}`);
-        } else {
-            console.log(`   ℹ️  No rejected skills found in feedback_training`);
-        }
-
-        // ============ ALSO PULL APPROVED FROM feedback_training (was missing — a
-        // skill approved once but never re-scanned via `documents` rows was not
-        // being recognized as "already reviewed" either) ============
-        const { data: approvedFeedbackRecords, error: approvedFeedbackError } = await supabase
-            .from('feedback_training')
-            .select('phrase, label')
-            .eq('employee_id', employeeId)
-            .eq('label', 'Skill');
-
-        if (!approvedFeedbackError && approvedFeedbackRecords && approvedFeedbackRecords.length > 0) {
-            previouslyApproved.push(...approvedFeedbackRecords.map(r => normalizeSkill(r.phrase)));
-        }
-
-        // ============ Deduplicate using canonical keys (CASE-INSENSITIVE FIX) ============
-        if (previouslyApproved.length > 0 || previouslyRejected.length > 0) {
-            previouslyApproved = [...new Set(previouslyApproved.map(skillKey))];
-            previouslyRejected = [...new Set(previouslyRejected.map(skillKey))];
-
-            console.log(`📊 FINAL REJECTION HISTORY:`);
-            console.log(`   ✅ Approved (total unique): ${previouslyApproved.length}`);
-            console.log(`   ❌ Rejected (total unique): ${previouslyRejected.length}`);
-        }
-
-        if (existingDoc && !documentId) {
-            documentId = existingDoc.id;
-        }
-
-        if (previouslyApproved.length > 0 || previouslyRejected.length > 0) {
-            const approvedSet = new Set(previouslyApproved); // already skillKey'd above
-            const rejectedSet = new Set(previouslyRejected);
-
-            // ============ FILTER OUT ALREADY-REVIEWED SKILLS (case-insensitive) ============
-            const filteredNeedsReview = finalNeedsReview.filter(skill => {
-                const key = skillKey(skill);
-                const isApproved = approvedSet.has(key);
-                const isRejected = rejectedSet.has(key);
-
-                if (isApproved) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already approved in previous scan)`);
-                }
-                if (isRejected) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already REJECTED in previous scan) ❌`);
-                }
-
-                return !isApproved && !isRejected;
-            });
-
-            console.log(`📊 After filtering: ${filteredNeedsReview.length} skills left to review`);
-
-            while (finalNeedsReview.length > 0) {
-                finalNeedsReview.pop();
-            }
-            finalNeedsReview.push(...filteredNeedsReview);
-
-            // ============ ALSO filter finalAutoApproved — a skill that is in the
-            // Knowledge Base AND was previously rejected by THIS employee should
-            // not silently auto-save again either. ============
-            const filteredAutoApproved = finalAutoApproved.filter(skill => !rejectedSet.has(skillKey(skill)));
-            while (finalAutoApproved.length > 0) {
-                finalAutoApproved.pop();
-            }
-            finalAutoApproved.push(...filteredAutoApproved);
-        }
-
-        // ============ SAVE TO DATABASE ============
-        if (!existingDoc) {
-            const { data: documentData, error: docError } = await supabase
-                .from('documents')
-                .insert({
-                    employee_id: employeeId,
-                    document_type: documentType,
-                    file_name: uploadResult.fileName,
-                    file_path: uploadResult.filePath,
-                    file_size: uploadResult.fileSize,
-                    mime_type: uploadResult.mimeType,
-                    raw_ocr_text: result.ocr?.raw_text || '',
-                    cleaned_ocr_text: result.ocr?.cleaned_text || '',
-                    ocr_confidence: result.ocr?.confidence || 0,
-                    word_count: result.ocr?.word_count || 0,
-                    char_count: result.ocr?.char_count || 0,
-                    document_hash: result.ocr?.document_hash || '',
-                    processed_at: new Date().toISOString(),
-                    extraction_method: result.ocr?.method || 'unknown',
-                    extracted_skills: allSkills,
-                    skills_approved: false,
-                    feedback_pending: true,
-                    approved_skills: [],
-                    rejected_skills: []
-                })
-                .select()
-                .single();
-
-            if (docError) console.error('Error saving document:', docError);
-            documentId = documentData?.id || result.document_id;
-        }
-
-        // ============ FILTER ALL SKILLS TOO (case-insensitive) ============
-        const finalAllSkills = allSkills
-            .map(normalizeSkill)
-            .filter(skill => {
-                return !autoApprovedSet.has(skillKey(skill)) && skill.length > 0;
-            });
-
-        // ============ RETURN RESPONSE ============
-        return res.json({
-            success: true,
-            data: {
-                documentId: documentId,
-                fileUrl: uploadResult.publicUrl,
-                ocr: result.ocr,
-                nlp: {
-                    skills: finalAllSkills,
-                    categorized_skills: categorizedSkills,
-                    auto_approved: finalAutoApproved,
-                    needs_review: finalNeedsReview,
-                    prc_license: nlpResult.prc_license || null,
-                    prc_verified: nlpResult.prc_verified || false
-                },
-                summary: result.summary,
-                feedback_required: finalNeedsReview.length > 0,
-                pending_skills: finalNeedsReview
-            },
-            message: finalNeedsReview.length > 0
-                ? `Document processed. Please review ${finalNeedsReview.length} skills.`
-                : previouslyApproved.length > 0 || previouslyRejected.length > 0
-                ? `Document processed. All skills have been reviewed! (${previouslyApproved.length} approved, ${previouslyRejected.length} rejected)`
-                : `Document processed. ${finalAutoApproved.length} skills auto-approved!`
-        });
-    } catch (error) {
-        console.error('Document processing error:', error);
-        res.status(500).json({ success: false, error: error.message || 'Internal server error' });
-    }
-};
-
-exports.getDocuments = async (req, res) => {
-    try {
-        const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('employee_id')
-            .eq('id', req.user.id)
-            .single();
-
-        if (profileError || !profileData) {
-            return res.status(403).json({ success: false, error: 'Profile not found' });
-        }
-
-        const { data, error } = await supabase
-            .from('documents')
-            .select(`
-                id,
-                employee_id,
-                document_type,
-                file_name,
-                file_path,
-                file_size,
-                mime_type,
-                created_at,
-                updated_at,
-                processed_at,
-                ocr_confidence,
-                word_count,
-                char_count,
-                document_hash,
-                extraction_method,
-                extracted_skills,
-                skills_approved,
-                feedback_pending,
-                approved_skills,
-                rejected_skills
-            `)
-            .eq('employee_id', profileData.employee_id)
-            .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        res.json({ success: true, data: data });
-
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
-// ✅ Get OCR text for a specific document (on-demand)
-exports.getDocumentOcrText = async (req, res) => {
-    try {
-        const { documentId } = req.params;
-
-        if (!documentId) {
-            return res.status(400).json({ success: false, error: 'Document ID is required' });
-        }
-
-        const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('employee_id')
-            .eq('id', req.user.id)
-            .single();
-
-        if (profileError || !profileData) {
-            return res.status(403).json({ success: false, error: 'Profile not found' });
-        }
-
-        const { data, error } = await supabase
-            .from('documents')
-            .select('id, raw_ocr_text, cleaned_ocr_text')
-            .eq('id', documentId)
-            .eq('employee_id', profileData.employee_id)
-            .single();
-
-        if (error) {
-            if (error.code === 'PGRST116') {
-                return res.status(404).json({ success: false, error: 'Document not found' });
-            }
-            throw error;
-        }
-
-        res.json({
-            success: true,
-            data: {
-                id: data.id,
-                raw_ocr_text: data.raw_ocr_text,
-                cleaned_ocr_text: data.cleaned_ocr_text
-            }
-        });
-
-    } catch (error) {
-        console.error('Error fetching OCR text:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
-exports.getProfile = async (req, res) => {
-    try {
-        const { employeeId } = req.params;
-
-        const { data: ownProfile, error: ownError } = await supabase
-            .from('profiles')
-            .select('employee_id')
-            .eq('id', req.user.id)
-            .single();
-
-        if (ownError || !ownProfile) {
-            return res.status(403).json({ success: false, error: 'Profile not found' });
-        }
-
-        if (ownProfile.employee_id !== employeeId) {
-            return res.status(403).json({ success: false, error: 'You can only view your own profile' });
-        }
-
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('employee_id', employeeId)
-            .single();
-
-        if (error) {
-            if (error.code === 'PGRST116') {
-                return res.json({
-                    success: true,
-                    data: {
-                        employee_id: employeeId,
-                        first_name: 'Employee',
-                        last_name: 'Not Found',
-                        email: '', department: '', role: '',
-                        avatar_url: '', status: 'Active',
-                        availability_status: 'Available'
-                    }
-                });
-            }
-            throw error;
-        }
-
-        res.json({ success: true, data: data });
-
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
-exports.updateProfile = async (req, res) => {
-    try {
-        const { data: ownProfile, error: ownError } = await supabase
-            .from('profiles')
-            .select('employee_id')
-            .eq('id', req.user.id)
-            .single();
-
-        if (ownError || !ownProfile) {
-            return res.status(403).json({ success: false, error: 'Profile not found' });
-        }
-
-        const employeeId = ownProfile.employee_id;
-        const {
-            first_name, last_name, email, department,
-            role, avatar_url, contact_number, location, years_experience
-        } = req.body;
-
-        const updateData = { updated_at: new Date().toISOString() };
-        if (first_name !== undefined) updateData.first_name = first_name;
-        if (last_name !== undefined) updateData.last_name = last_name;
-        if (email !== undefined) updateData.email = email;
-        if (department !== undefined) updateData.department = department;
-        if (role !== undefined) updateData.role = role;
-        if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
-        if (contact_number !== undefined) updateData.contact_number = contact_number;
-        if (location !== undefined) updateData.location = location;
-        if (years_experience !== undefined) updateData.years_experience = years_experience;
-
-        const { data, error } = await supabase
-            .from('profiles')
-            .update(updateData)
-            .eq('employee_id', employeeId)
-            .select()
-            .single();
-
-        if (error) throw error;
-        res.json({ success: true, data: data, message: 'Profile updated successfully' });
-
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
-exports.getSkills = async (req, res) => {
-    try {
-        const { data: ownProfile, error: profileError } = await supabase
-            .from('profiles')
-            .select('id, employee_id')
-            .eq('id', req.user.id)
-            .single();
-
-        if (profileError || !ownProfile) {
-            return res.json({ success: true, data: [] });
-        }
-
-        const { data, error } = await supabase
-            .from('employee_skills')
-            .select(`id, skill_id, skills ( id, skill_name, created_at )`)
-            .eq('profile_id', ownProfile.id);
-
-        if (error) throw error;
-
-        // ============ FIX: dedupe at read-time too, as a safety net, in case
-        // any duplicate links still exist from before this fix was deployed.
-        const seen = new Set();
-        const skills = [];
-        for (const item of data) {
-            if (!item.skills) continue;
-            const key = skillKey(item.skills.skill_name);
-            if (seen.has(key)) continue;
-            seen.add(key);
-            skills.push(item.skills);
-        }
-
-        res.json({ success: true, data: skills });
-
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
-exports.getStats = async (req, res) => {
-    try {
-        const stats = await pythonService.getStats();
-        res.json({ success: true, stats: stats });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
-
+// â”€â”€â”€ Dead/duplicate functions removed (Phase 1 clean-up) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// processDocument, getDocuments, getDocumentOcrText, getProfile, updateProfile,
+// getSkills, getStats were never mounted in any route. All live implementations
+// now reside exclusively in documentController.js where the routes point.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// ============ GET PENDING FEEDBACK ============
 exports.getPendingFeedback = async (req, res) => {
     try {
         const { documentId } = req.params;
@@ -1088,7 +578,7 @@ exports.saveSkillFeedback = async (req, res) => {
 
         // ============ SAVE SKILLS TO DATABASE (BATCHED, CASE-INSENSITIVE DEDUP) ============
         if (approved_skills && approved_skills.length > 0) {
-            console.log(`✅ Saving ${approved_skills.length} approved skills to database...`);
+            console.log(`âœ… Saving ${approved_skills.length} approved skills to database...`);
 
             // Normalize + dedupe the incoming batch itself first (in-memory,
             // free) so we never issue two DB calls for the same skill twice.
@@ -1119,7 +609,7 @@ exports.saveSkillFeedback = async (req, res) => {
                 (matchingSkills || []).forEach(s => skillMap.set(skillKey(s.skill_name), s.id));
             }
 
-            // BATCH insert whatever wasn't found — ONE call for all new
+            // BATCH insert whatever wasn't found â€” ONE call for all new
             // skills instead of one INSERT per missing skill.
             const toInsert = normalizedNames
                 .filter(({ key }) => !skillMap.has(key))
@@ -1132,9 +622,9 @@ exports.saveSkillFeedback = async (req, res) => {
                     .select('id, skill_name');
                 if (!insertSkillError && insertedSkills) {
                     insertedSkills.forEach(s => skillMap.set(skillKey(s.skill_name), s.id));
-                    console.log(`   ✅ Added ${insertedSkills.length} new skill(s)`);
+                    console.log(`   âœ… Added ${insertedSkills.length} new skill(s)`);
                 } else if (insertSkillError) {
-                    console.error('   ❌ Batch skill insert error:', insertSkillError.message);
+                    console.error('   âŒ Batch skill insert error:', insertSkillError.message);
                 }
             }
 
@@ -1153,7 +643,7 @@ exports.saveSkillFeedback = async (req, res) => {
                 linkedSkillIds = new Set((existingLinks || []).map(l => l.skill_id));
             }
 
-            // BATCH insert the missing links — ONE call for all of them.
+            // BATCH insert the missing links â€” ONE call for all of them.
             const linksToInsert = relevantSkillIds
                 .filter(id => !linkedSkillIds.has(id))
                 .map(id => ({ profile_id: profileData.id, skill_id: id }));
@@ -1163,12 +653,12 @@ exports.saveSkillFeedback = async (req, res) => {
                     .from('employee_skills')
                     .insert(linksToInsert);
                 if (linkError) {
-                    console.error('   ❌ Batch link insert error:', linkError.message);
+                    console.error('   âŒ Batch link insert error:', linkError.message);
                 } else {
-                    console.log(`   ✅ Linked ${linksToInsert.length} new skill(s) to profile`);
+                    console.log(`   âœ… Linked ${linksToInsert.length} new skill(s) to profile`);
                 }
             }
-            console.log(`✅ Skills saved to employee profile`);
+            console.log(`âœ… Skills saved to employee profile`);
         }
 
         // ============ UPDATE DOCUMENT ============
@@ -1204,7 +694,7 @@ exports.saveSkillFeedback = async (req, res) => {
                 approved_skills: approved_skills || [],
                 rejected_skills: rejected_skills || []
             },
-            message: `✅ ${approved_skills?.length || 0} skills saved!`
+            message: `âœ… ${approved_skills?.length || 0} skills saved!`
         });
 
         setImmediate(async () => {
@@ -1215,23 +705,23 @@ exports.saveSkillFeedback = async (req, res) => {
         try {
             const result = await updateLearningSystem(approved_skills || [], rejected_skills || []);
             merged = result?.merged || 0;
-            console.log(`✅ Learning system updated!`);
+            console.log(`âœ… Learning system updated!`);
         } catch (learningError) {
-            console.error('⚠️ Learning system update failed:', learningError.message);
+            console.error('âš ï¸ Learning system update failed:', learningError.message);
         }
 
         // ============ SYNC JSON TO DATABASE ============
         try {
-            console.log('🔄 Syncing learned_skills.json to database...');
+            console.log('ðŸ”„ Syncing learned_skills.json to database...');
             const syncResult = await syncSkillsFromJsonToDatabase();
-            console.log(`✅ Database sync: +${syncResult.added} added, ~${syncResult.updated} updated`);
+            console.log(`âœ… Database sync: +${syncResult.added} added, ~${syncResult.updated} updated`);
         } catch (syncError) {
-            console.error('⚠️ Database sync failed:', syncError.message);
+            console.error('âš ï¸ Database sync failed:', syncError.message);
         }
 
         // ============ SAVE TO FEEDBACK TRAINING TABLE (CASE-INSENSITIVE DEDUP) ============
         try {
-            console.log('📊 Saving feedback to training table...');
+            console.log('ðŸ“Š Saving feedback to training table...');
 
             // Pull existing feedback rows for THIS employee once, match by
             // skillKey in-memory. Old code did a per-skill exact `.eq('phrase', skill)`
@@ -1242,12 +732,15 @@ exports.saveSkillFeedback = async (req, res) => {
                 .select('phrase, label')
                 .eq('employee_id', profileData.employee_id);
 
-            const existingApprovedKeys = new Set(
-                (existingFeedback || []).filter(r => r.label === 'Skill').map(r => skillKey(r.phrase))
-            );
-            const existingRejectedKeys = new Set(
-                (existingFeedback || []).filter(r => r.label === 'Not Skill').map(r => skillKey(r.phrase))
-            );
+            // âœ… Phase 1: Use buildComparisonKeys for consistent plural/singular dedup.
+            // Previously used plain skillKey(), so "Electrical System" and
+            // "Electrical Systems" would both pass and be inserted as separate rows.
+            const existingApprovedKeys = new Set();
+            const existingRejectedKeys = new Set();
+            for (const r of (existingFeedback || [])) {
+                if (r.label === 'Skill') addComparisonKeys(existingApprovedKeys, r.phrase);
+                if (r.label === 'Not Skill') addComparisonKeys(existingRejectedKeys, r.phrase);
+            }
 
             // Both loops insert reviewed_at = now, since this row is being written
             // BECAUSE a human (profileData.id) just reviewed it. That's also what
@@ -1261,8 +754,8 @@ exports.saveSkillFeedback = async (req, res) => {
             for (const skillRaw of approved_skills) {
                 const skill = normalizeSkill(skillRaw);
                 if (!skill) continue;
-                const key = skillKey(skill);
-                if (existingApprovedKeys.has(key)) continue;
+                // âœ… hasComparisonKey checks all 4 variants (strict, compact, singular, singularCompact)
+                if (hasComparisonKey(existingApprovedKeys, skill)) continue;
 
                 // The human decision (label='Skill') and the original ML prediction/
                 // confidence are stored in separate columns and must never overwrite
@@ -1288,8 +781,7 @@ exports.saveSkillFeedback = async (req, res) => {
             for (const skillRaw of rejected_skills) {
                 const skill = normalizeSkill(skillRaw);
                 if (!skill) continue;
-                const key = skillKey(skill);
-                if (existingRejectedKeys.has(key)) continue;
+                if (hasComparisonKey(existingRejectedKeys, skill)) continue;
 
                 const mlMeta = getMlMeta(skill);
                 await supabase
@@ -1308,7 +800,7 @@ exports.saveSkillFeedback = async (req, res) => {
                 feedbackRowsWritten++;
             }
 
-            console.log(`✅ Feedback saved to training table!`);
+            console.log(`âœ… Feedback saved to training table!`);
 
             // ============ GATED ML RETRAINING ============
             // Only actually retrains when >= 20 NEW human-reviewed rows have
@@ -1323,32 +815,32 @@ exports.saveSkillFeedback = async (req, res) => {
                 try {
                     const retrainResult = await pythonService.retrainIfNeeded(20);
                     if (retrainResult?.retrained) {
-                        console.log(`🎓 ML retrained automatically: ${retrainResult.total_reviewed_count} human-reviewed rows`);
+                        console.log(`ðŸŽ“ ML retrained automatically: ${retrainResult.total_reviewed_count} human-reviewed rows`);
                     } else {
-                        console.log(`ℹ️  ML retrain check: ${retrainResult?.reason || 'not needed'} `
+                        console.log(`â„¹ï¸  ML retrain check: ${retrainResult?.reason || 'not needed'} `
                             + `(${retrainResult?.new_reviewed_count ?? '?'} new reviewed rows)`);
                     }
                 } catch (retrainError) {
-                    console.error('⚠️ ML retrain check failed:', retrainError.message);
+                    console.error('âš ï¸ ML retrain check failed:', retrainError.message);
                 }
             }
         } catch (feedbackError) {
-            console.error('⚠️ Error saving feedback to training table:', feedbackError.message);
+            console.error('âš ï¸ Error saving feedback to training table:', feedbackError.message);
         }
 
         // ============ AUTO-CLEAN DATABASE ============
         if (merged > 0 || approved_skills.length > 5) {
             try {
-                console.log('🧹 Auto-cleaning database duplicates...');
+                console.log('ðŸ§¹ Auto-cleaning database duplicates...');
                 const cleanupResult = await cleanupDatabaseDuplicates();
-                console.log(`✅ Database cleaned! (${cleanupResult.deleted} duplicates removed)`);
+                console.log(`âœ… Database cleaned! (${cleanupResult.deleted} duplicates removed)`);
             } catch (cleanupError) {
-                console.error('⚠️ Database cleanup failed:', cleanupError.message);
+                console.error('âš ï¸ Database cleanup failed:', cleanupError.message);
             }
         }
 
             } catch (backgroundError) {
-                console.error('⚠️ Post-save learning work failed:', backgroundError.message);
+                console.error('âš ï¸ Post-save learning work failed:', backgroundError.message);
             }
         });
 
@@ -1382,7 +874,7 @@ exports.syncSkills = async (req, res) => {
 // ============ RESET SKILLS ============
 exports.resetSkillsFromJson = async (req, res) => {
     try {
-        console.log('🔄 Resetting database to match learned_skills.json...');
+        console.log('ðŸ”„ Resetting database to match learned_skills.json...');
 
         const jsonPath = path.join(__dirname, '../../shared-data/skills_db/learned_skills.json');
 
@@ -1394,7 +886,7 @@ exports.resetSkillsFromJson = async (req, res) => {
         const data = JSON.parse(rawData);
         const normalizedSkills = data.learned_skills || [];
 
-        console.log(`📊 Found ${normalizedSkills.length} normalized skills in JSON`);
+        console.log(`ðŸ“Š Found ${normalizedSkills.length} normalized skills in JSON`);
 
         const { data: dbSkills, error: fetchError } = await supabase
             .from('skills')
@@ -1402,7 +894,7 @@ exports.resetSkillsFromJson = async (req, res) => {
 
         if (fetchError) throw fetchError;
 
-        console.log(`📊 Found ${dbSkills.length} skills in database`);
+        console.log(`ðŸ“Š Found ${dbSkills.length} skills in database`);
 
         const normalizedSet = new Set(normalizedSkills.map(skillKey));
         const dbSkillMap = {};
@@ -1417,7 +909,7 @@ exports.resetSkillsFromJson = async (req, res) => {
             const key = skillKey(skill.skill_name);
             if (!normalizedSet.has(key)) {
                 toDelete.push(skill.id);
-                console.log(`   🗑️ Marked for deletion: ${skill.skill_name}`);
+                console.log(`   ðŸ—‘ï¸ Marked for deletion: ${skill.skill_name}`);
             } else {
                 toKeep.push(skill.id);
             }
@@ -1439,7 +931,7 @@ exports.resetSkillsFromJson = async (req, res) => {
 
             if (!deleteError) {
                 deleted = toDelete.length;
-                console.log(`   ✅ Deleted ${deleted} skills`);
+                console.log(`   âœ… Deleted ${deleted} skills`);
             }
         }
 
@@ -1454,7 +946,7 @@ exports.resetSkillsFromJson = async (req, res) => {
                 if (!insertError) {
                     added++;
                     dbSkillMap[key] = true; // avoid dup insert in same run
-                    console.log(`   ✅ Added: ${skillName}`);
+                    console.log(`   âœ… Added: ${skillName}`);
                 }
             }
         }
@@ -1471,11 +963,11 @@ exports.resetSkillsFromJson = async (req, res) => {
                 total_in_json: normalizedSkills.length,
                 total_in_db: finalSkills?.length || 0
             },
-            message: `✅ Database reset: ${deleted} removed, ${added} added. Now has ${finalSkills?.length || 0} normalized skills!`
+            message: `âœ… Database reset: ${deleted} removed, ${added} added. Now has ${finalSkills?.length || 0} normalized skills!`
         });
 
     } catch (error) {
-        console.error('❌ Reset error:', error);
+        console.error('âŒ Reset error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -1506,7 +998,7 @@ exports.retrainML = async (req, res) => {
             });
         }
 
-        console.log(`📊 Manually retraining ML (${totalCount} human-reviewed feedback items available)...`);
+        console.log(`ðŸ“Š Manually retraining ML (${totalCount} human-reviewed feedback items available)...`);
 
         const labels = feedbackData.map(row => row.label === 'Skill' ? 1 : 0);
 
@@ -1527,8 +1019,8 @@ exports.retrainML = async (req, res) => {
                 retrained: !!result.retrained
             },
             message: result.retrained
-                ? `✅ ML retrained with ${result.total_reviewed_count ?? totalCount} human-reviewed feedback items!`
-                : `ℹ️ Retrain did not run: ${result.reason || result.error || 'unknown reason'}`
+                ? `âœ… ML retrained with ${result.total_reviewed_count ?? totalCount} human-reviewed feedback items!`
+                : `â„¹ï¸ Retrain did not run: ${result.reason || result.error || 'unknown reason'}`
         });
 
     } catch (error) {

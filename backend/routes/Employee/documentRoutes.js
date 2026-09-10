@@ -99,7 +99,7 @@ if (feedbackController) {
         console.log('✅ POST /retrain-ml route added');
     }
 
-    router.get('/documents/:documentId/ocr', verifyToken, feedbackController.getDocumentOcrText);
+    router.get('/documents/:documentId/ocr', verifyToken, documentController.getDocumentOcrText);
 }
 
 module.exports = router;

@@ -1,12 +1,13 @@
 """
-Module 1: Smart Text Extraction - Fast PDF + OCR Fallback
+Module 1: Smart Text Extraction - Fast PDF + Parallel OCR Fallback
 """
 import os
-import hashlib
 import sys
-from datetime import datetime
-import re
 import time
+import re
+import hashlib
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Redirect prints to stderr
 def debug_print(*args, **kwargs):
@@ -18,6 +19,7 @@ try:
     PDFPLUMBER_SUPPORT = True
     debug_print("[OK] pdfplumber loaded")
 except ImportError:
+    pdfplumber = None
     PDFPLUMBER_SUPPORT = False
     debug_print("[WARN] pdfplumber NOT installed")
 
@@ -26,6 +28,7 @@ try:
     PDF_SUPPORT = True
     debug_print("[OK] PyPDF2 loaded")
 except ImportError:
+    PyPDF2 = None
     PDF_SUPPORT = False
     debug_print("[WARN] PyPDF2 NOT installed")
 
@@ -38,6 +41,10 @@ try:
     OCR_SUPPORT = True
     debug_print("[OK] OCR libraries loaded")
 except ImportError:
+    cv2 = None
+    pytesseract = None
+    Image = None
+    np = None
     OCR_SUPPORT = False
     debug_print("[WARN] OCR libraries NOT installed")
 
@@ -46,6 +53,7 @@ try:
     PDF2IMAGE_SUPPORT = True
     debug_print("[OK] pdf2image loaded")
 except ImportError:
+    convert_from_path = None
     PDF2IMAGE_SUPPORT = False
     debug_print("[WARN] pdf2image NOT installed")
 
@@ -124,93 +132,98 @@ class OCRProcessor:
     # METHOD 2: Fast OCR for Scanned PDFs (OPTIMIZED)
     # ============================================================
     def extract_with_ocr_fast(self, file_path):
-        """Fast OCR - For scanned PDFs AND images"""
-        
+        """Parallel OCR — scanned PDFs and images.
+        Pages are processed concurrently (up to 3 workers) instead of serially.
+        """
         if not OCR_SUPPORT or not PDF2IMAGE_SUPPORT:
             debug_print("[OCR] OCR not available")
             return None
-        
-        debug_print("[OCR] Starting OCR...")
-        
+
+        debug_print("[OCR] Starting parallel OCR...")
+
+        def _ocr_page(args):
+            """Process a single page image and return (page_num, text)."""
+            page_num, image = args
+            try:
+                if not OCR_SUPPORT or pytesseract is None:
+                    return page_num, ''
+                img_arr = np.array(image)
+                img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
+                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                _, binary = cv2.threshold(gray, 0, 255,
+                                          cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                pil_img = Image.fromarray(binary)
+                text = pytesseract.image_to_string(
+                    pil_img, config='--oem 3 --psm 6'
+                )
+                debug_print(f"[OCR] Page {page_num}: {len(text)} chars")
+                return page_num, text.strip() if text else ''
+            except Exception as exc:
+                debug_print(f"[OCR] Page {page_num} error: {exc}")
+                return page_num, ''
+
         try:
             is_pdf = file_path.lower().endswith('.pdf')
-            all_text = []
             images = []
-            
+
             if is_pdf:
-                # ========== Convert PDF to images ==========
                 debug_print("[OCR] Converting PDF to images...")
                 images = convert_from_path(file_path, dpi=150, thread_count=4)
-                debug_print(f"[OCR] Converted {len(images)} pages from PDF")
+                debug_print(f"[OCR] Converted {len(images)} pages")
             else:
-                # ========== Load image directly ==========
-                debug_print("[OCR] Loading image file...")
-                from PIL import Image
                 img = Image.open(file_path)
-                images = [img]  # Single image
+                images = [img]
                 debug_print(f"[OCR] Loaded image: {img.size}")
-            
-            debug_print(f"[OCR] Processing {len(images)} pages...")
-            
-            for i, image in enumerate(images):
-                page_num = i + 1
-                debug_print(f"[OCR] Processing page {page_num}/{len(images)}...")
-                
-                # Convert PIL to OpenCV
-                import cv2
-                import numpy as np
-                img = np.array(image)
-                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                
-                # Preprocess for better OCR
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                
-                # OCR
-                from PIL import Image
-                pil_img = Image.fromarray(binary)
-                text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
-                
-                if text and text.strip():
-                    all_text.append(text)
-                    debug_print(f"[OCR] Page {page_num}: {len(text)} chars")
-                else:
-                    debug_print(f"[OCR] Page {page_num}: No text found")
-                
-                # Update progress
-                progress = int((page_num / len(images)) * 100)
-                debug_print(f"[OCR] Progress: {progress}%")
-            
+
+            debug_print(f"[OCR] Processing {len(images)} pages (parallel, max 3 workers)...")
+
+            # Run pages concurrently; preserve document order via page_num key
+            max_workers = min(3, len(images))
+            results = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_ocr_page, (i + 1, img)): i + 1
+                    for i, img in enumerate(images)
+                }
+                total = len(futures)
+                done = 0
+                for future in as_completed(futures):
+                    page_num, text = future.result()
+                    results[page_num] = text
+                    done += 1
+                    debug_print(f"[OCR] Progress: {int(done / total * 100)}%")
+
+            all_text = [results[k] for k in sorted(results) if results[k]]
             full_text = '\n\n'.join(all_text)
-            
+
             if full_text.strip():
                 debug_print(f"[OCR] Total: {len(full_text)} chars from {len(images)} pages")
                 return full_text
-            
+
         except Exception as e:
             debug_print(f"[OCR] Error: {e}")
             import traceback
             traceback.print_exc()
-        
+
         return None
         
-        # ============================================================
-        # SMART DETECTION: Check if PDF has text
-        # ============================================================
-        def pdf_has_text(self, pdf_path):
-            """Quick check if PDF has extractable text (NO OCR)"""
-            try:
-                import PyPDF2
-                with open(pdf_path, 'rb') as file:
-                    reader = PyPDF2.PdfReader(file)
-                    # Check first page only (fast)
-                    if reader.pages:
-                        text = reader.pages[0].extract_text()
-                        if text and len(text.strip()) > 50:
-                            return True
-                return False
-            except:
-                return True  # Assume it has text
+    # ============================================================
+    # SMART DETECTION: Check if PDF has text
+    # ============================================================
+    def pdf_has_text(self, pdf_path):
+        """Quick check if PDF has extractable text (NO OCR)"""
+        try:
+            import PyPDF2
+            with open(pdf_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                # Check first page only (fast)
+                if reader.pages:
+                    text = reader.pages[0].extract_text()
+                    if text and len(text.strip()) > 50:
+                        return True
+            return False
+        except:
+            return True  # Assume it has text
     
     # ============================================================
     # MAIN EXTRACT METHOD
@@ -237,15 +250,24 @@ class OCRProcessor:
             fast_start = time.time()
             text, method = self.extract_from_pdf_fast(file_path)
             fast_time = time.time() - fast_start
-            
+
             if text:
-                debug_print(f"[STEP 1] Fast extraction SUCCESS in {fast_time:.2f}s")
-                self.stats['pdf_extractions'] += 1
-            else:
+                # ─ Early-exit guard: only trust pdfplumber/PyPDF2 if the extracted
+                # text contains enough printable words to be a real native PDF.
+                # Scanned PDFs sometimes return a handful of garbled chars.
+                printable_words = len([w for w in text.split() if w.isalpha()])
+                if printable_words >= 50:
+                    debug_print(f"[STEP 1] Fast extraction SUCCESS ({printable_words} words) in {fast_time:.2f}s — skipping OCR")
+                    self.stats['pdf_extractions'] += 1
+                else:
+                    debug_print(f"[STEP 1] Fast text too sparse ({printable_words} words) — falling back to OCR")
+                    text = None  # force OCR fallback
+
+            if not text:
                 debug_print(f"[STEP 1] Fast extraction FAILED (PDF likely scanned)")
-                
-                # ========== STEP 3: Use OCR for scanned PDF ==========
-                debug_print("[STEP 2] Using OCR for scanned PDF...")
+
+                # ========== STEP 3: Use parallel OCR for scanned PDF ==========
+                debug_print("[STEP 2] Using parallel OCR for scanned PDF...")
                 ocr_start = time.time()
                 text = self.extract_with_ocr_fast(file_path)
                 ocr_time = time.time() - ocr_start
