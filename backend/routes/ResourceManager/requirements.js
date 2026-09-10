@@ -26,6 +26,7 @@ router.get('/', async (req, res) => {
                         id,
                         project_name,
                         project_code,
+                        status,
                         created_by,
                         profiles:created_by (
                             id,
@@ -35,6 +36,7 @@ router.get('/', async (req, res) => {
                         )
                     )
                 `)
+                .not('status', 'in', '("Cancelled","Canceled","Completed","Done")')
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -75,11 +77,13 @@ router.get('/', async (req, res) => {
             return res.json([]);
         }
 
-        // Step 2: Get projects created by users in this branch
+        // Step 2: Get active projects created by users in this branch
         const { data: branchProjects, error: projectError } = await supabase
             .from('projects')
-            .select('id')
-            .in('created_by', userIds);
+            .select('id, status')
+            .in('created_by', userIds)
+            .neq('status', 'Completed')
+            .neq('status', 'Archived');
 
         if (projectError) {
             console.error('❌ Error fetching branch projects:', projectError);
@@ -89,11 +93,11 @@ router.get('/', async (req, res) => {
             });
         }
 
-        const projectIds = branchProjects.map(p => p.id);
-        console.log(`📁 Found ${projectIds.length} projects in branch`);
+        const projectIds = (branchProjects || []).map(p => p.id);
+        console.log(`📁 Found ${projectIds.length} active projects in branch`);
 
         if (projectIds.length === 0) {
-            console.log('✅ No projects found in branch');
+            console.log('✅ No active projects found in branch');
             return res.json([]);
         }
 
@@ -106,6 +110,7 @@ router.get('/', async (req, res) => {
                     id,
                     project_name,
                     project_code,
+                    status,
                     created_by,
                     profiles:created_by (
                         id,
@@ -116,6 +121,7 @@ router.get('/', async (req, res) => {
                 )
             `)
             .in('project_id', projectIds)
+            .not('status', 'in', '("Cancelled","Canceled","Completed","Done")')
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -145,7 +151,17 @@ router.get('/', async (req, res) => {
 async function transformRequirements(data) {
     if (!data || data.length === 0) return [];
 
-    const transformedData = await Promise.all(data.map(async (item) => {
+    // Filter out requirements for completed or archived projects or completed/cancelled requirements
+    const activeData = (data || []).filter(item => {
+        const projStatus = item.projects?.status;
+        if (projStatus === 'Completed' || projStatus === 'Archived') return false;
+        if (['Cancelled', 'Canceled', 'Completed', 'Done'].includes(item.status)) return false;
+        return true;
+    });
+
+    if (activeData.length === 0) return [];
+
+    const transformedData = await Promise.all(activeData.map(async (item) => {
         // Get skills for this requirement
         let skills = [];
         try {
@@ -173,6 +189,7 @@ async function transformRequirements(data) {
             created_by: item.created_by || null,
             projectName: item.projects?.project_name || null,
             projectCode: item.projects?.project_code || null,
+            projectStatus: item.projects?.status || null,
             skills: skills,
             // Include branch info for debugging
             _branchId: item.projects?.profiles?.branch_id || null,
@@ -324,8 +341,7 @@ router.put('/:id/status', async (req, res) => {
         const { data, error } = await supabase
             .from('project_resource_requirements')
             .update({ 
-                status: status,
-                updated_at: new Date().toISOString()
+                status: status
             })
             .eq('id', id)
             .select()
@@ -334,9 +350,18 @@ router.put('/:id/status', async (req, res) => {
         if (error) {
             console.error('❌ Update error:', error);
             return res.status(500).json({ 
-                success: false,
+                success: false, 
                 error: error.message 
             });
+        }
+
+        try {
+            const { clearDashboardCache } = require('./Dashboard');
+            const { clearProjectsCache } = require('./Projects');
+            if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+            if (clearProjectsCache) clearProjectsCache(isSuperAdmin ? null : userBranchId);
+        } catch (cErr) {
+            console.warn('⚠️ Non-fatal error clearing cache after requirement status update:', cErr.message);
         }
 
         console.log(`✅ Requirement ${id} updated to ${status}`);

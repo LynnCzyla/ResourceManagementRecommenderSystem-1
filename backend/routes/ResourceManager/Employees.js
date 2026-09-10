@@ -82,19 +82,52 @@ router.get('/', async (req, res) => {
     if (profErr) throw profErr;
 
     const employeeIds = profiles.map(p => p.employee_id);
+    const profileIds = profiles.map(p => p.id);
     
     let documents = [];
+    let activeAssignments = [];
+    let activeTasks = [];
+
+    const asyncQueries = [];
     if (employeeIds.length > 0) {
-      const { data: docData, error: docErr } = await supabase
-        .from('documents')
-        .select('id, employee_id, file_name, created_at')
-        .eq('document_type', 'Certificate')
-        .in('employee_id', employeeIds);
-      
-      if (!docErr && docData) {
-        documents = docData;
-      }
+      asyncQueries.push(
+        supabase
+          .from('documents')
+          .select('id, employee_id, file_name, created_at')
+          .eq('document_type', 'Certificate')
+          .in('employee_id', employeeIds)
+          .then(res => { if (!res.error && res.data) documents = res.data; })
+      );
     }
+    if (profileIds.length > 0) {
+      asyncQueries.push(
+        supabase
+          .from('project_assignments')
+          .select(`
+            id,
+            profile_id,
+            project_id,
+            assigned_role,
+            status,
+            projects:project_id ( id, project_name, status )
+          `)
+          .in('profile_id', profileIds)
+          .eq('status', 'Assigned')
+          .then(res => { if (!res.error && res.data) activeAssignments = res.data; }),
+        supabase
+          .from('project_tasks')
+          .select('id, profile_id, project_id, priority, status')
+          .in('profile_id', profileIds)
+          .not('status', 'in', '("Completed","Completed-Hidden","Archived")')
+          .then(res => { if (!res.error && res.data) activeTasks = res.data; })
+      );
+    }
+
+    if (asyncQueries.length > 0) {
+      await Promise.all(asyncQueries);
+    }
+
+    const PRIORITY_WEIGHTS = { 'Low': 1, 'Medium': 2, 'High': 3 };
 
     const employees = (profiles || []).map((p) => {
       const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unnamed';
@@ -109,6 +142,38 @@ router.get('/', async (req, res) => {
           date: d.created_at ? d.created_at.split('T')[0] : '',
         }));
 
+      // Active assignments for this employee (only in Active projects)
+      const empAssignments = (activeAssignments || []).filter(
+        a => a.profile_id === p.id && a.projects?.status === 'Active'
+      );
+      const assignedProjects = [...new Set(empAssignments.map(a => a.projects?.project_name).filter(Boolean))];
+      const assignedProjectIds = [...new Set(empAssignments.map(a => a.project_id).filter(Boolean))];
+      const assignCount = empAssignments.length;
+      const isAssigned = assignCount > 0;
+
+      // Only count active tasks for projects where the employee is actually actively assigned
+      const empActiveTasks = (activeTasks || []).filter(
+        t => t.profile_id === p.id && assignedProjectIds.includes(t.project_id)
+      );
+      let score = 0;
+      for (const t of empActiveTasks) {
+        const weight = PRIORITY_WEIGHTS[t.priority] || 1;
+        score += weight;
+      }
+
+      let workloadStatus;
+      let utilizationRate;
+      if (score === 0 && assignCount === 0) {
+        workloadStatus = 'Available';
+        utilizationRate = 0;
+      } else if (score <= 3 && assignCount <= 1) {
+        workloadStatus = 'Limited Availability';
+        utilizationRate = Math.min(Math.round(((score + assignCount * 2) / 6) * 100), 80) || 50;
+      } else {
+        workloadStatus = 'Fully Utilized';
+        utilizationRate = 100;
+      }
+
       const isAssignable = true;
 
       return {
@@ -122,6 +187,13 @@ router.get('/', async (req, res) => {
         certifications,
         isVerified: p.is_verified || false,
         isAssignable,
+        isAssigned,
+        assignedProjects,
+        assignedProjectIds,
+        projectStatus: isAssigned ? 'Assigned' : 'Unassigned',
+        workloadStatus,
+        utilizationRate,
+        assignmentCount: assignCount,
         branch_id: p.branch_id,
       };
     });
@@ -450,7 +522,7 @@ router.patch('/:id/verify', async (req, res) => {
  */
 router.post('/:id/assign', async (req, res) => {
   const { id } = req.params;
-  const { projectId, startDate, role, notes } = req.body;
+  const { projectId, startDate, role, notes, requirementId } = req.body;
   const userBranchId = req.user.branch_id;
   const isSuperAdmin = req.user.is_super_admin;
 
@@ -461,7 +533,7 @@ router.post('/:id/assign', async (req, res) => {
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('profiles')
-      .select('branch_id, role')
+      .select('branch_id, role, first_name, last_name')
       .eq('id', id)
       .single();
     if (fetchErr) throw fetchErr;
@@ -480,11 +552,43 @@ router.post('/:id/assign', async (req, res) => {
       });
     }
 
+    // Check if employee is already assigned to this project
+    const { data: existingAssign, error: existAssignErr } = await supabase
+      .from('project_assignments')
+      .select('id')
+      .eq('project_id', projectId)
+      .eq('profile_id', id)
+      .eq('status', 'Assigned');
+    
+    if (existAssignErr) throw existAssignErr;
+    if (existingAssign && existingAssign.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'Employee is already assigned to this project'
+      });
+    }
+
+    // Attempt to auto-find requirement if requirementId is not provided
+    let finalRequirementId = requirementId || null;
+    if (!finalRequirementId && role) {
+      const { data: matchedReq } = await supabase
+        .from('project_resource_requirements')
+        .select('id')
+        .eq('project_id', projectId)
+        .ilike('role_title', role.trim())
+        .not('status', 'in', '("Filled","Fulfilled","Completed","Cancelled")')
+        .maybeSingle();
+      if (matchedReq?.id) {
+        finalRequirementId = matchedReq.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from('project_assignments')
       .insert({
         project_id: projectId,
         profile_id: id,
+        requirement_id: finalRequirementId,
         assigned_role: role || null,
         start_date: startDate,
         status: 'Assigned',
@@ -494,6 +598,69 @@ router.post('/:id/assign', async (req, res) => {
       .select()
       .single();
     if (error) throw error;
+
+    // Check if requirement should be marked as 'Filled'
+    if (finalRequirementId) {
+      const { data: activeAssignments } = await supabase
+        .from('project_assignments')
+        .select('id')
+        .eq('requirement_id', finalRequirementId)
+        .eq('status', 'Assigned');
+
+      const { data: reqData } = await supabase
+        .from('project_resource_requirements')
+        .select('quantity_needed')
+        .eq('id', finalRequirementId)
+        .single();
+
+      const needed = reqData?.quantity_needed || 1;
+      const currentCount = activeAssignments?.length || 0;
+
+      if (currentCount >= needed) {
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Filled' })
+          .eq('id', finalRequirementId);
+      }
+    }
+
+    // Activate project if it was not started
+    const { data: projectRow } = await supabase
+      .from('projects')
+      .select('status, project_name, created_by')
+      .eq('id', projectId)
+      .single();
+
+    if (projectRow && ['Draft', 'Planning', 'Pending Approval', 'Pending', 'Created'].includes(projectRow.status)) {
+      await supabase
+        .from('projects')
+        .update({ status: 'Active', updated_at: new Date().toISOString() })
+        .eq('id', projectId);
+    }
+
+    // Notifications
+    try {
+      const notifs = [
+        {
+          recipient_id: id,
+          type: 'assignment',
+          text: `You have been assigned to project "${projectRow?.project_name || 'a project'}" as ${role || 'team member'}.`,
+          read: false
+        }
+      ];
+      if (projectRow?.created_by && projectRow.created_by !== req.user?.id) {
+        const empName = `${existing.first_name || ''} ${existing.last_name || ''}`.trim();
+        notifs.push({
+          recipient_id: projectRow.created_by,
+          type: 'assignment',
+          text: `${empName || 'An employee'} has been assigned to your project "${projectRow.project_name}" as ${role || 'team member'}.`,
+          read: false
+        });
+      }
+      await supabase.from('notifications').insert(notifs);
+    } catch (nErr) {
+      console.warn('Non-fatal notification error on assignment:', nErr.message);
+    }
 
     if (notes) {
       await supabase.from('audit_logs').insert({
@@ -506,6 +673,14 @@ router.post('/:id/assign', async (req, res) => {
     }
 
     clearEmployeeCache(isSuperAdmin ? null : userBranchId);
+    try {
+      const { clearDashboardCache } = require('./Dashboard');
+      const { clearProjectsCache } = require('./Projects');
+      if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
+      if (clearProjectsCache) clearProjectsCache(isSuperAdmin ? null : userBranchId);
+    } catch (cErr) {
+      console.warn('Non-fatal cache clearing error:', cErr.message);
+    }
 
     res.json({ success: true, assignment: data });
   } catch (err) {

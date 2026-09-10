@@ -4,6 +4,29 @@ const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 
+// Helper to parse quantity and clean description
+function parsePostingQuantityAndDescription(row) {
+  let quantity = 1;
+  if (row.source_request_id && row.hr_resource_requests?.quantity_needed) {
+    quantity = Number(row.hr_resource_requests.quantity_needed) || 1;
+  }
+  let desc = row.description || '';
+  const match = desc.match(/\[VACANCY:\s*(\d+)\]/i) || (row.requirements || '').match(/\[VACANCY:\s*(\d+)\]/i);
+  if (match) {
+    quantity = parseInt(match[1], 10) || quantity;
+  }
+  const cleanDescription = desc.replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
+
+  // Count hired applications
+  const hiredCount = (row.job_applications || []).filter(a => a.status === 'Hired').length;
+
+  return {
+    quantity,
+    cleanDescription,
+    hiredCount,
+  };
+}
+
 // GET /api/hr/job-postings/resource-requests — Approved RM requests HR can post from.
 // IMPORTANT: this must be declared BEFORE '/:id' or Express will treat
 // "resource-requests" as an :id value.
@@ -94,9 +117,17 @@ router.get('/resource-requests', async (req, res) => {
       already_posted: usedIds.has(r.id),
     }));
 
-    console.log(`✅ Found ${shaped.length} resource requests in branch`);
+    // ✅ Filter out already posted requests so dropdown only shows unposted approved requests
+    const unposted = shaped.filter((r) => !r.already_posted);
 
-    res.status(200).json({ success: true, data: shaped });
+    console.log(`✅ Found ${unposted.length} unposted approved resource requests in branch (total approved: ${shaped.length})`);
+
+    res.status(200).json({ 
+      success: true, 
+      data: unposted,
+      unposted_count: unposted.length,
+      total_approved_count: shaped.length
+    });
   } catch (error) {
     console.error('Error fetching resource requests for job postings:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch resource requests.' });
@@ -123,7 +154,15 @@ router.get('/', async (req, res) => {
           departments ( id, department_name ),
           positions ( id, position_name ),
           profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
-          job_applications ( id )
+          hr_resource_requests:source_request_id ( 
+            id, 
+            quantity_needed,
+            request_title,
+            position_title,
+            requested_by,
+            requester:requested_by ( id, first_name, last_name )
+          ),
+          job_applications ( id, status )
         `)
         .order('posted_date', { ascending: false });
 
@@ -132,9 +171,32 @@ router.get('/', async (req, res) => {
       const { data, error } = await query;
       if (error) throw error;
 
-      const shaped = (data || []).map((row) => ({
-        ...row,
-        applications: row.job_applications?.length || 0,
+      const shaped = await Promise.all((data || []).map(async (row) => {
+        const { quantity, cleanDescription, hiredCount } = parsePostingQuantityAndDescription(row);
+        const rmReq = row.hr_resource_requests;
+        const requester = rmReq?.requester;
+        const requesterName = requester ? `${requester.first_name || ''} ${requester.last_name || ''}`.trim() : null;
+
+        const isFilled = hiredCount >= quantity;
+        let finalStatus = row.status;
+
+        // Auto-close in DB if quota is filled but status is still Active
+        if (isFilled && row.status === 'Active') {
+          await supabase.from('job_postings').update({ status: 'Closed' }).eq('id', row.id);
+          finalStatus = 'Closed';
+        }
+
+        return {
+          ...row,
+          status: finalStatus,
+          description: cleanDescription,
+          quantity,
+          hired_count: hiredCount,
+          applications: row.job_applications?.length || 0,
+          source_request_title: rmReq?.request_title || null,
+          source_position_title: rmReq?.position_title || null,
+          source_requester_name: requesterName,
+        };
       }));
 
       return res.status(200).json({ success: true, data: shaped });
@@ -169,7 +231,15 @@ router.get('/', async (req, res) => {
         departments ( id, department_name ),
         positions ( id, position_name ),
         profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
-        job_applications ( id )
+        hr_resource_requests:source_request_id ( 
+          id, 
+          quantity_needed,
+          request_title,
+          position_title,
+          requested_by,
+          requester:requested_by ( id, first_name, last_name )
+        ),
+        job_applications ( id, status )
       `)
       .in('created_by', userIds)
       .order('posted_date', { ascending: false });
@@ -179,9 +249,32 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const shaped = (data || []).map((row) => ({
-      ...row,
-      applications: row.job_applications?.length || 0,
+    const shaped = await Promise.all((data || []).map(async (row) => {
+      const { quantity, cleanDescription, hiredCount } = parsePostingQuantityAndDescription(row);
+      const rmReq = row.hr_resource_requests;
+      const requester = rmReq?.requester;
+      const requesterName = requester ? `${requester.first_name || ''} ${requester.last_name || ''}`.trim() : null;
+
+      const isFilled = hiredCount >= quantity;
+      let finalStatus = row.status;
+
+      // Auto-close in DB if quota is filled but status is still Active
+      if (isFilled && row.status === 'Active') {
+        await supabase.from('job_postings').update({ status: 'Closed' }).eq('id', row.id);
+        finalStatus = 'Closed';
+      }
+
+      return {
+        ...row,
+        status: finalStatus,
+        description: cleanDescription,
+        quantity,
+        hired_count: hiredCount,
+        applications: row.job_applications?.length || 0,
+        source_request_title: rmReq?.request_title || null,
+        source_position_title: rmReq?.position_title || null,
+        source_requester_name: requesterName,
+      };
     }));
 
     console.log(`✅ Found ${shaped.length} job postings in branch`);
@@ -206,7 +299,9 @@ router.get('/:id', async (req, res) => {
         *,
         departments ( id, department_name ),
         positions ( id, position_name ),
-        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location))
+        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+        hr_resource_requests:source_request_id ( id, quantity_needed ),
+        job_applications ( id, status )
       `)
       .eq('id', id)
       .single();
@@ -225,7 +320,15 @@ router.get('/:id', async (req, res) => {
       }
     }
 
-    res.status(200).json({ success: true, data });
+    const { quantity, cleanDescription, hiredCount } = parsePostingQuantityAndDescription(data);
+    const transformed = {
+      ...data,
+      description: cleanDescription,
+      quantity,
+      hired_count: hiredCount,
+    };
+
+    res.status(200).json({ success: true, data: transformed });
   } catch (error) {
     console.error('Error fetching job posting:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch job posting.' });
@@ -239,6 +342,7 @@ router.post('/', async (req, res) => {
       title, description, department_id, position_id, location,
       employment_type, salary_min, salary_max, requirements,
       responsibilities, benefits, status, closing_date, source_request_id,
+      quantity = 1,
     } = req.body;
 
     const userId = req.user?.id;
@@ -300,11 +404,15 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const numericQuantity = Math.max(1, parseInt(quantity, 10) || 1);
+    let rawDescription = (description || '').replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
+    rawDescription = `${rawDescription}\n\n[VACANCY: ${numericQuantity}]`.trim();
+
     const { data, error } = await supabase
       .from('job_postings')
       .insert({
         title: title.trim(),
-        description: description?.trim() || null,
+        description: rawDescription,
         department_id: department_id || null,
         position_id: position_id || null,
         location: locationValue,
@@ -328,10 +436,17 @@ router.post('/', async (req, res) => {
       req,
       action: 'Created',
       systemCategory: 'HR - Job Postings',
-      logDescription: `Created job posting: ${title.trim()}`,
+      logDescription: `Created job posting: ${title.trim()} (Vacancies: ${numericQuantity})`,
     });
 
-    res.status(201).json({ success: true, message: 'Job posting created successfully.', data });
+    const responseData = {
+      ...data,
+      description: (data.description || '').replace(/\[VACANCY:\s*\d+\]/gi, '').trim(),
+      quantity: numericQuantity,
+      hired_count: 0
+    };
+
+    res.status(201).json({ success: true, message: 'Job posting created successfully.', data: responseData });
   } catch (error) {
     console.error('Error creating job posting:', error);
     res.status(500).json({ success: false, error: 'Failed to create job posting.' });
@@ -346,6 +461,7 @@ router.put('/:id', async (req, res) => {
       title, description, department_id, position_id, location,
       employment_type, salary_min, salary_max, requirements,
       responsibilities, benefits, status, closing_date, source_request_id,
+      quantity,
     } = req.body;
 
     const userBranchId = req.user?.branch_id;
@@ -378,11 +494,17 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
     }
 
+    let rawDescription = (description || '').replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
+    if (quantity !== undefined && quantity !== null) {
+      const numericQuantity = Math.max(1, parseInt(quantity, 10) || 1);
+      rawDescription = `${rawDescription}\n\n[VACANCY: ${numericQuantity}]`.trim();
+    }
+
     const { data, error } = await supabase
       .from('job_postings')
       .update({
         title: title.trim(),
-        description: description?.trim() || null,
+        description: rawDescription,
         department_id: department_id || null,
         position_id: position_id || null,
         location: location || null,
@@ -410,7 +532,13 @@ router.put('/:id', async (req, res) => {
       logDescription: `Updated job posting: ${title.trim()}`,
     });
 
-    res.status(200).json({ success: true, message: 'Job posting updated successfully.', data });
+    const responseData = {
+      ...data,
+      description: (data.description || '').replace(/\[VACANCY:\s*\d+\]/gi, '').trim(),
+      quantity: quantity || 1
+    };
+
+    res.status(200).json({ success: true, message: 'Job posting updated successfully.', data: responseData });
   } catch (error) {
     console.error('Error updating job posting:', error);
     res.status(500).json({ success: false, error: 'Failed to update job posting.' });

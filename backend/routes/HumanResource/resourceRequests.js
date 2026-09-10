@@ -54,6 +54,20 @@ router.patch('/:id/approve', async (req, res) => {
     }
     if (!data) return res.status(404).json({ success: false, error: 'Request not found' });
 
+    // Cross-role notification: notify the RM requester
+    if (data.requested_by) {
+      try {
+        await supabase.from('notifications').insert({
+          recipient_id: data.requested_by,
+          type: 'resource_request',
+          text: `Your resource request for ${data.quantity || 1} ${data.role_needed || 'resource(s)'} has been approved by HR.${notes ? ` Note: ${notes}` : ''}`,
+          read: false
+        });
+      } catch (notifErr) {
+        console.error('Non-fatal notification error on approve request:', notifErr.message);
+      }
+    }
+
     res.json({ success: true, data });
   } catch (error) {
     console.error('❌ Error in approve resource request:', error);
@@ -85,6 +99,20 @@ router.patch('/:id/reject', async (req, res) => {
       return res.status(500).json({ success: false, error: error.message });
     }
     if (!data) return res.status(404).json({ success: false, error: 'Request not found' });
+
+    // Cross-role notification: notify the RM requester
+    if (data.requested_by) {
+      try {
+        await supabase.from('notifications').insert({
+          recipient_id: data.requested_by,
+          type: 'resource_request',
+          text: `Your resource request for ${data.quantity || 1} ${data.role_needed || 'resource(s)'} has been rejected by HR.${notes ? ` Reason: ${notes}` : ''}`,
+          read: false
+        });
+      } catch (notifErr) {
+        console.error('Non-fatal notification error on reject request:', notifErr.message);
+      }
+    }
 
     res.json({ success: true, data });
   } catch (error) {

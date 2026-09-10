@@ -120,14 +120,14 @@ export async function toggleEmployeeVerified(profileId) {
   }
 }
 
-export async function assignEmployeeFromDirectory(profileId, { projectId, startDate, role, notes }) {
+export async function assignEmployeeFromDirectory(profileId, { projectId, startDate, role, notes, requirementId }) {
   console.log(`📋 Assigning employee ${profileId} to project ${projectId}...`);
   try {
     const headers = await authHeaders();
     const res = await fetch(`${API_BASE}/employees/${profileId}/assign`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ projectId, startDate, role, notes }),
+      body: JSON.stringify({ projectId, startDate, role, notes, requirementId }),
     });
     return handle(res);
   } catch (error) {
@@ -149,14 +149,26 @@ export async function fetchProjects() {
   }
 }
 
-export async function assignEmployeeToProject(projectId, { employeeId, role }) {
+export async function fetchProjectHistoryDetails(projectId) {
+  console.log(`📋 Fetching project history details for ${projectId}...`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/projects/${projectId}/history-details`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Project history details fetch error:', error);
+    throw error;
+  }
+}
+
+export async function assignEmployeeToProject(projectId, { employeeId, role, requirementId }) {
   console.log(`📋 Assigning employee ${employeeId} to project ${projectId}...`);
   try {
     const headers = await authHeaders();
     const res = await fetch(`${API_BASE}/projects/${projectId}/assign`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ employeeId, role }),
+      body: JSON.stringify({ employeeId, role, requirementId }),
     });
     return handle(res);
   } catch (error) {

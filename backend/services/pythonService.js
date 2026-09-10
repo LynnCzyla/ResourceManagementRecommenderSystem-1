@@ -9,14 +9,17 @@ class PythonService {
             ? path.join(rootPath, 'python', 'venv', 'Scripts', 'python.exe')
             : path.join(rootPath, 'python', 'venv', 'bin', 'python');
         this.scriptPath = path.join(rootPath, 'python', 'scripts');
+
+        this.daemonUrl = process.env.PYTHON_DAEMON_URL || 'http://127.0.0.1:5001';
         
-        console.log('🐍 Python Service Initialized (using spawn)');
+        console.log('🐍 Python Service Initialized');
         console.log(`Python Path: ${this.pythonPath}`);
         console.log(`Script Path: ${this.scriptPath}`);
+        console.log(`Daemon URL: ${this.daemonUrl}`);
     }
 
     async processDocument(imagePath, employeeId, docType) {
-        console.log('🐍 Starting Python process...');
+        console.log('🐍 Starting Python document processing runner...');
         
         return new Promise((resolve, reject) => {
             const args = [
@@ -42,19 +45,21 @@ class PythonService {
             let stderrData = '';
             let resolved = false;
             
-            // --- Handle stdout (JSON result) ---
+            // --- Handle stdout (JSON result & progress) ---
             pythonProcess.stdout.on('data', (data) => {
                 const chunk = data.toString();
                 stdoutData += chunk;
-                console.log(`📊 Received ${chunk.length} bytes`);
-                console.log(`📄 Raw output: ${chunk.substring(0, 200)}${chunk.length > 200 ? '...' : ''}`);
+                // Stream non-JSON progress lines live to console
+                if (chunk.startsWith('[') || chunk.includes('\n[')) {
+                    process.stdout.write(chunk);
+                }
             });
             
-            // --- Handle stderr (debug logs) ---
+            // --- Handle stderr (live logs: OCR progress, NLP, aliases) ---
             pythonProcess.stderr.on('data', (data) => {
-                const chunk = data.toString().trim();
-                stderrData += chunk + '\n';
-                console.log(`🐍 ${chunk}`);
+                const chunk = data.toString();
+                stderrData += chunk;
+                process.stderr.write(chunk);
             });
             
             // --- Process exit ---
@@ -136,6 +141,26 @@ class PythonService {
 
     async retrainIfNeeded(threshold = 20) {
         console.log(`🎯 Checking whether ML needs retraining (threshold=${threshold})...`);
+
+        // ⚡ Try warm Python daemon first
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
+            const res = await fetch(`${this.daemonUrl}/retrain-if-needed`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ threshold }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            if (res.ok) {
+                const data = await res.json();
+                console.log('⚡ Retrain checked via warm Python daemon!');
+                return data;
+            }
+        } catch (daemonErr) {
+            // Fallback to spawn
+        }
 
         return new Promise((resolve, reject) => {
             const args = [

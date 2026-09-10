@@ -52,11 +52,13 @@ router.get('/', async (req, res) => {
             if (item.profile_id) {
                 const { data: profileData } = await supabase
                     .from('profiles')
-                    .select('name, email')
+                    .select('first_name, middle_name, last_name, employee_id')
                     .eq('id', item.profile_id)
                     .single();
-                employeeName = profileData?.name || null;
-                employeeEmail = profileData?.email || null;
+                employeeName = profileData
+                    ? `${profileData.first_name || ''}${profileData.middle_name ? ` ${profileData.middle_name}` : ''} ${profileData.last_name || ''}`.trim()
+                    : null;
+                employeeEmail = null;
             }
 
             return {
@@ -102,11 +104,11 @@ router.post('/', async (req, res) => {
 
         console.log(`📋 Creating assignment for requirement ${requirement_id}...`);
 
-        // Check if already assigned
+        // Check if already assigned to this project
         const { data: existing, error: checkError } = await supabase
             .from('project_assignments')
             .select('id')
-            .eq('requirement_id', requirement_id)
+            .eq('project_id', project_id)
             .eq('profile_id', profile_id)
             .eq('status', 'Assigned');
 
@@ -116,7 +118,7 @@ router.post('/', async (req, res) => {
         }
 
         if (existing && existing.length > 0) {
-            return res.status(400).json({ error: 'Employee already assigned to this requirement' });
+            return res.status(400).json({ error: 'Employee is already assigned to this project' });
         }
 
         // Create assignment
@@ -163,17 +165,82 @@ router.post('/', async (req, res) => {
             if (!reqError && requirement) {
                 const quantityNeeded = requirement?.quantity_needed || 1;
 
-                // Auto-approve if fully assigned
+                // Mark requirement as Filled if fully assigned
                 if (assignedCount >= quantityNeeded) {
-                    await supabase
+                    const { error: updateReqErr } = await supabase
                         .from('project_resource_requirements')
                         .update({ 
-                            status: 'Approved',
-                            updated_at: new Date().toISOString()
+                            status: 'Filled'
                         })
                         .eq('id', requirement_id);
+
+                    if (updateReqErr) {
+                        console.error('❌ Error updating requirement status to Filled:', updateReqErr);
+                    } else {
+                        console.log(`✅ Requirement ${requirement_id} marked as Filled`);
+                    }
                 }
             }
+        }
+
+        // Cross-role notifications: notify assigned employee & PM
+        try {
+            let projectName = 'a project';
+            let projectOwner = null;
+            if (project_id) {
+                const { data: proj } = await supabase
+                    .from('projects')
+                    .select('project_name, created_by')
+                    .eq('id', project_id)
+                    .single();
+                if (proj) {
+                    projectName = proj.project_name;
+                    projectOwner = proj.created_by;
+                }
+            }
+
+            let empName = 'An employee';
+            if (profile_id) {
+                const { data: empProf } = await supabase
+                    .from('profiles')
+                    .select('first_name, last_name')
+                    .eq('id', profile_id)
+                    .single();
+                if (empProf) {
+                    empName = `${empProf.first_name || ''} ${empProf.last_name || ''}`.trim();
+                }
+            }
+
+            const notifs = [
+                {
+                    recipient_id: profile_id,
+                    type: 'assignment',
+                    text: `You have been assigned to project "${projectName}" as ${assigned_role || 'team member'}.`,
+                    read: false
+                }
+            ];
+            if (projectOwner && projectOwner !== req.user?.id) {
+                notifs.push({
+                    recipient_id: projectOwner,
+                    type: 'assignment',
+                    text: `${empName} has been assigned to your project "${projectName}" as ${assigned_role || 'team member'}.`,
+                    read: false
+                });
+            }
+            await supabase.from('notifications').insert(notifs);
+        } catch (notifErr) {
+            console.error('Non-fatal error creating assignment notifications:', notifErr.message);
+        }
+
+        try {
+            const { clearDashboardCache } = require('./Dashboard');
+            const { clearEmployeeCache } = require('./Employees');
+            const { clearProjectsCache } = require('./Projects');
+            if (clearDashboardCache) clearDashboardCache();
+            if (clearEmployeeCache) clearEmployeeCache();
+            if (clearProjectsCache) clearProjectsCache();
+        } catch (cErr) {
+            console.warn('Non-fatal cache clearing error in assignments:', cErr.message);
         }
 
         res.status(201).json(data);

@@ -17,9 +17,14 @@ const mapPosting = (row) => ({
   salaryMax: row.salary_max ?? '',
   status: row.status || 'Active',
   applications: row.applications || 0,
+  quantity: row.quantity || 1,
+  hiredCount: row.hired_count || 0,
   postedDate: row.posted_date,
   closingDate: row.closing_date || '',
   sourceRequestId: row.source_request_id || null,
+  sourceRequestTitle: row.source_request_title || row.hr_resource_requests?.request_title || null,
+  sourcePositionTitle: row.source_position_title || row.hr_resource_requests?.position_title || null,
+  sourceRequesterName: row.source_requester_name || null,
   requirements: row.requirements || '',
   responsibilities: row.responsibilities || '',
   benefits: row.benefits || '',
@@ -54,6 +59,7 @@ const emptyForm = {
   status: 'Active',
   closingDate: '',
   sourceRequestId: '',
+  quantity: 1,
 };
 
 export default function HRJobPostingsTab() {
@@ -75,6 +81,13 @@ export default function HRJobPostingsTab() {
     loadDepartments();
     loadResourceRequests();
     fetchUserBranch();
+
+    const handleUpdate = () => {
+      loadResourceRequests();
+      loadJobPostings();
+    };
+    window.addEventListener('resourceRequestsUpdated', handleUpdate);
+    return () => window.removeEventListener('resourceRequestsUpdated', handleUpdate);
   }, []);
 
   // ✅ Fetch user's branch from my-branch endpoint
@@ -214,10 +227,10 @@ export default function HRJobPostingsTab() {
       title: req.positionTitle || prev.title,
       department_id: matchedDept ? String(matchedDept.id) : prev.department_id,
       location: prev.location || userBranch?.location || userBranch?.name || '',
-      requirements: req.requiredSkills
-        ? `Required skills: ${req.requiredSkills}\nExperience level: ${req.experienceLevel || 'N/A'}`
-        : prev.requirements,
-      description: req.reason ? `${req.requestTitle}\n\n${req.reason}` : prev.description,
+      quantity: req.quantity || 1,
+      // SKILLS ONLY in requirements — do NOT include Experience Level!
+      requirements: req.requiredSkills || prev.requirements,
+      description: req.reason || req.requestTitle || prev.description,
     }));
   };
 
@@ -236,12 +249,14 @@ export default function HRJobPostingsTab() {
     status: formData.status,
     closing_date: formData.closingDate || null,
     source_request_id: formData.sourceRequestId || null,
+    quantity: formData.quantity || 1,
   });
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     try {
       await hrClient.post(`/job-postings`, buildPayload());
+      window.dispatchEvent(new Event('resourceRequestsUpdated'));
       await loadJobPostings();
       await loadResourceRequests();
       setShowCreateModal(false);
@@ -310,6 +325,7 @@ export default function HRJobPostingsTab() {
       status: posting.status,
       closingDate: posting.closingDate || '',
       sourceRequestId: posting.sourceRequestId ? String(posting.sourceRequestId) : '',
+      quantity: posting.quantity || 1,
     });
     setShowEditModal(true);
   };
@@ -356,21 +372,40 @@ export default function HRJobPostingsTab() {
     return matchesSearch && matchesStatus;
   });
 
+  const availableRequests = resourceRequests.filter((r) => !r.alreadyPosted);
+
   const renderResourceRequestField = () => (
     <div style={styles.formGroup}>
-      <label style={styles.formLabel}>Create From Resource Request (optional)</label>
+      <label style={styles.formLabel}>
+        Create From Resource Request (optional)
+        {availableRequests.length > 0 && (
+          <span style={{
+            marginLeft: '8px',
+            backgroundColor: 'rgba(56, 189, 248, 0.15)',
+            color: '#38bdf8',
+            fontSize: '11px',
+            fontWeight: '700',
+            borderRadius: '10px',
+            padding: '2px 8px'
+          }}>
+            {availableRequests.length} available
+          </span>
+        )}
+      </label>
       <select
         value={formData.sourceRequestId}
         onChange={(e) => handleSelectResourceRequest(e.target.value)}
         style={styles.formInput}
       >
         <option value="">— None, start blank —</option>
-        {resourceRequests.map((r) => (
+        {availableRequests.map((r) => (
           <option key={r.id} value={r.id}>
-            {r.requestTitle} — {r.positionTitle} ({r.departmentName}) · {r.quantity}x · by {r.requestedBy}
-            {r.alreadyPosted ? ' [already posted]' : ''}
+            {r.positionTitle || r.requestTitle} ({r.quantity || 1}x) • {r.departmentName || ''}
           </option>
         ))}
+        {availableRequests.length === 0 && (
+          <option value="" disabled>— No unposted approved requests available —</option>
+        )}
       </select>
       <span style={styles.fieldHint}>
         Selecting a request only prefills the fields below — everything stays editable.
@@ -382,15 +417,29 @@ export default function HRJobPostingsTab() {
     <>
       {renderResourceRequestField()}
 
-      <div style={styles.formGroup}>
-        <label style={styles.formLabel}>Position Title *</label>
-        <input
-          type="text"
-          required
-          value={formData.title}
-          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-          style={styles.formInput}
-        />
+      <div style={styles.formRow}>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Position Title *</label>
+          <input
+            type="text"
+            required
+            value={formData.title}
+            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+            style={styles.formInput}
+          />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.formLabel}>Quantity / Vacancies Needed *</label>
+          <input
+            type="number"
+            min="1"
+            required
+            value={formData.quantity}
+            onChange={(e) => setFormData({ ...formData, quantity: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+            style={styles.formInput}
+            placeholder="e.g. 1"
+          />
+        </div>
       </div>
       <div style={styles.formRow}>
         <div style={styles.formGroup}>
@@ -571,6 +620,24 @@ export default function HRJobPostingsTab() {
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
             Create Job Posting
+            {availableRequests.length > 0 && (
+              <span style={{
+                marginLeft: '8px',
+                backgroundColor: '#ef4444',
+                color: '#ffffff',
+                fontSize: '11px',
+                fontWeight: '700',
+                borderRadius: '10px',
+                padding: '2px 7px',
+                lineHeight: 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+              }}>
+                {availableRequests.length}
+              </span>
+            )}
           </button>
         </div>
 
@@ -581,6 +648,7 @@ export default function HRJobPostingsTab() {
                 <th style={styles.th}>Position Title</th>
                 <th style={styles.th}>Department</th>
                 <th style={styles.th}>Location</th>
+                <th style={styles.th}>Vacancies</th>
                 <th style={styles.th}>Employment Type</th>
                 <th style={styles.th}>Salary Range</th>
                 <th style={styles.th}>Applications</th>
@@ -592,53 +660,117 @@ export default function HRJobPostingsTab() {
             </thead>
             <tbody>
               {filteredPostings.length === 0 ? (
-                <tr><td colSpan="10" style={styles.emptyRow}>No job postings found.</td></tr>
+                <tr><td colSpan="11" style={styles.emptyRow}>No job postings found.</td></tr>
               ) : (
-                filteredPostings.map((posting) => (
-                  <tr key={posting.id} style={styles.tableRow}>
-                    <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-text-primary)' }}>{posting.title}</td>
-                    <td style={styles.td}>{posting.department}</td>
-                    <td style={styles.td}>{posting.location}</td>
-                    <td style={styles.td}>{posting.employmentType}</td>
-                    <td style={styles.td}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}</td>
-                    <td style={styles.td}>
-                      <span style={{
-                        ...styles.badge,
-                        backgroundColor: 'var(--color-primary-light)',
-                        color: 'var(--color-primary)'
-                      }}>
-                        {posting.applications}
-                      </span>
-                    </td>
-                    <td style={styles.td}>
-                      <span style={{
-                        ...styles.statusBadge,
-                        backgroundColor: posting.status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-danger-light)',
-                        color: posting.status === 'Active' ? 'var(--color-primary)' : 'var(--color-danger)'
-                      }}>
-                        {posting.status}
-                      </span>
-                    </td>
-                    <td style={styles.td}>{posting.postedDate ? new Date(posting.postedDate).toLocaleDateString() : '—'}</td>
-                    <td style={styles.td}>{posting.closingDate ? new Date(posting.closingDate).toLocaleDateString() : '—'}</td>
-                    <td style={styles.td}>
-                      <div style={styles.actionCell}>
-                        <button onClick={() => openEditModal(posting)} style={styles.editBtn} title="Edit">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                          </svg>
-                        </button>
-                        <button onClick={() => handleDelete(posting.id)} style={styles.deleteBtn} title="Delete">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filteredPostings.map((posting) => {
+                  const isFilled = (posting.hiredCount || 0) >= (posting.quantity || 1);
+                  return (
+                    <tr key={posting.id} style={styles.tableRow}>
+                      <td style={styles.td}>
+                        <div style={{ fontWeight: '600', color: 'var(--color-text-primary)', fontSize: '14px' }}>
+                          {posting.title}
+                        </div>
+                        {posting.sourceRequestId ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                            <span style={{
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              fontWeight: '700',
+                              backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                              color: '#38bdf8',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              RM Request
+                            </span>
+                            <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }} title="Request Title created by RM">
+                              {posting.sourceRequestTitle || posting.sourcePositionTitle || `Req #${posting.sourceRequestId}`}
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                            <span style={{
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              fontWeight: '600',
+                              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                              color: 'var(--color-text-muted)',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              HR Direct Post
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td style={styles.td}>{posting.department}</td>
+                      <td style={styles.td}>{posting.location}</td>
+                      <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          ...styles.badge,
+                          backgroundColor: isFilled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                          color: isFilled ? '#22c55e' : '#38bdf8',
+                          border: isFilled ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(56, 189, 248, 0.3)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          whiteSpace: 'nowrap',
+                          padding: '5px 12px',
+                        }}>
+                          {posting.hiredCount || 0} / {posting.quantity || 1} {isFilled ? 'Filled' : 'Needed'}
+                        </span>
+                      </td>
+                      <td style={styles.td}>{posting.employmentType}</td>
+                      <td style={styles.td}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}</td>
+                      <td style={styles.td}>
+                        <span style={{
+                          ...styles.badge,
+                          backgroundColor: 'var(--color-primary-light)',
+                          color: 'var(--color-primary)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {posting.applications}
+                        </span>
+                      </td>
+                      <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          ...styles.statusBadge,
+                          backgroundColor: posting.status === 'Active' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                          color: posting.status === 'Active' ? '#22c55e' : '#ef4444',
+                          border: posting.status === 'Active' ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          whiteSpace: 'nowrap',
+                          padding: '5px 12px',
+                        }}>
+                          {posting.status} {isFilled && posting.status === 'Closed' ? '(Filled)' : ''}
+                        </span>
+                      </td>
+                      <td style={styles.td}>{posting.postedDate ? new Date(posting.postedDate).toLocaleDateString() : '—'}</td>
+                      <td style={styles.td}>{posting.closingDate ? new Date(posting.closingDate).toLocaleDateString() : '—'}</td>
+                      <td style={styles.td}>
+                        <div style={styles.actionCell}>
+                          <button onClick={() => openEditModal(posting)} style={styles.editBtn} title="Edit">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                              <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                          </button>
+                          <button onClick={() => handleDelete(posting.id)} style={styles.deleteBtn} title="Delete">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6"></polyline>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -823,16 +955,26 @@ const styles = {
     fontSize: '14px',
   },
   badge: {
-    padding: '4px 12px',
+    padding: '5px 12px',
     borderRadius: '20px',
     fontSize: '12px',
     fontWeight: '600',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    whiteSpace: 'nowrap',
+    lineHeight: '1.4',
   },
   statusBadge: {
-    padding: '4px 12px',
+    padding: '5px 12px',
     borderRadius: '20px',
     fontSize: '12px',
     fontWeight: '600',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    whiteSpace: 'nowrap',
+    lineHeight: '1.4',
   },
   actionCell: {
     display: 'flex',

@@ -52,6 +52,10 @@ function setTasksCached(key, data) {
 }
 function invalidateTasksCache() {
   tasksCache.clear();
+  try {
+    const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+    if (typeof clearDashboardCache === 'function') clearDashboardCache();
+  } catch (e) {}
 }
 
 // ✅ GET /api/pm/tasks — list tasks (optional ?projectId= / ?employeeId= filters)
@@ -73,6 +77,7 @@ router.get('/', async (req, res) => {
     let query = supabase
       .from('project_tasks')
       .select(TASK_SELECT)
+      .neq('status', 'Archived')
       .order('created_at', { ascending: false });
 
     if (projectId) query = query.eq('project_id', projectId);
@@ -291,6 +296,34 @@ router.post('/:id/progress', async (req, res) => {
 
     if (error) throw error;
 
+    // ✅ Also insert entry into public.project_report table
+    try {
+      const profile = data.profiles;
+      const employeeName = profile
+        ? [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim()
+        : 'Unassigned';
+
+      const reportDesc = (description || '').trim() || data.description || '';
+
+      const { error: reportInsertErr } = await supabase.from('project_report').insert({
+        task_id: data.id,
+        project_id: data.project_id,
+        employee_id: data.profile_id || null,
+        task_title: data.title,
+        task_description: reportDesc,
+        employee_name: employeeName,
+        project_name: data.projects?.project_name || 'Unnamed Project',
+        percentage: finalTotalPercentage,
+        log_date: new Date().toISOString().split('T')[0],
+      });
+
+      if (reportInsertErr) {
+        console.error('Non-fatal error inserting into project_report:', reportInsertErr);
+      }
+    } catch (reportInsertErr) {
+      console.error('Non-fatal error inserting into project_report:', reportInsertErr);
+    }
+
     await logAuditEvent({
       req,
       userId: loggedBy || null,
@@ -314,15 +347,20 @@ router.delete('/:id', async (req, res) => {
     const userId = req.user?.id;
     const userRole = req.user?.role;
 
-    // ✅ Verify the user owns the project (PM only)
-    if (userRole === 'Project Manager') {
+    const isSuperAdmin = req.user?.is_super_admin;
+
+    // ✅ Verify the user owns the project or created the task (PM only)
+    if (userRole === 'Project Manager' && !isSuperAdmin) {
       const { data: task } = await supabase
         .from('project_tasks')
-        .select('project_id, projects:project_id (created_by)')
+        .select('project_id, created_by, projects:project_id (created_by)')
         .eq('id', id)
         .single();
 
-      if (!task || task.projects?.created_by !== userId) {
+      const isCreator = task?.created_by === userId;
+      const isProjectOwner = task?.projects?.created_by === userId;
+
+      if (!task || (!isCreator && !isProjectOwner)) {
         return res.status(403).json({
           success: false,
           message: 'You can only delete tasks from your own projects'
@@ -348,3 +386,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.invalidateTasksCache = invalidateTasksCache;

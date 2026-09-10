@@ -365,6 +365,54 @@ router.put('/:id/status', async (req, res) => {
       }
     }
 
+    // If hiring, check quota against the job posting
+    let targetPosting = null;
+    let postingQuantity = 1;
+    let currentHiredCount = 0;
+
+    if (status === 'Hired' && interviewData.job_applications?.id) {
+      // Find the job_posting_id
+      const { data: fullApp } = await supabase
+        .from('job_applications')
+        .select('id, job_posting_id')
+        .eq('id', interviewData.job_applications.id)
+        .single();
+
+      if (fullApp?.job_posting_id) {
+        const { data: posting } = await supabase
+          .from('job_postings')
+          .select('id, title, status, description, source_request_id, hr_resource_requests:source_request_id ( id, quantity_needed )')
+          .eq('id', fullApp.job_posting_id)
+          .single();
+
+        if (posting) {
+          targetPosting = posting;
+          if (posting.source_request_id && posting.hr_resource_requests?.quantity_needed) {
+            postingQuantity = Number(posting.hr_resource_requests.quantity_needed) || 1;
+          }
+          const match = (posting.description || '').match(/\[VACANCY:\s*(\d+)\]/i);
+          if (match) {
+            postingQuantity = parseInt(match[1], 10) || postingQuantity;
+          }
+
+          const { count: alreadyHiredCount } = await supabase
+            .from('job_applications')
+            .select('id', { count: 'exact', head: true })
+            .eq('job_posting_id', posting.id)
+            .eq('status', 'Hired');
+
+          currentHiredCount = alreadyHiredCount || 0;
+
+          if (currentHiredCount >= postingQuantity) {
+            return res.status(400).json({
+              success: false,
+              error: `Hiring quota reached! This job posting ("${posting.title}") only needs ${postingQuantity} resource(s) and is already 100% filled (${currentHiredCount}/${postingQuantity}).`
+            });
+          }
+        }
+      }
+    }
+
     // Update interview status
     const { data, error } = await supabase
       .from('interviews')
@@ -428,6 +476,15 @@ router.put('/:id/status', async (req, res) => {
             status: 'Onboarding',
           });
         console.log(`✅ Created hired_employee record for ${fullName}`);
+      }
+
+      // Auto-close job posting if quota reached
+      if (targetPosting && (currentHiredCount + 1 >= postingQuantity)) {
+        await supabase
+          .from('job_postings')
+          .update({ status: 'Closed' })
+          .eq('id', targetPosting.id);
+        console.log(`🔒 Job posting "${targetPosting.title}" auto-Closed as hiring quota reached (${currentHiredCount + 1}/${postingQuantity})`);
       }
     } else if (status === 'Rejected') {
       // Update application status

@@ -1,7 +1,8 @@
 // D:\ResourceManagementRecommenderSystem\backend\server.js
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -13,7 +14,6 @@ const recommendationEngine = require("./services/recommendationService");
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-const path = require("path");
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============ IMPORT AUTH MIDDLEWARE ============
@@ -46,11 +46,11 @@ const superAdminBranchesRoutes  = require('./routes/SuperAdmin/branches');
 const superAdminAuditLogsRoutes = require('./routes/SuperAdmin/audit-logs');
 
 // ============ MOUNT SUPER ADMIN ROUTES ============
-app.use('/api/superadmin', superAdminDashboardRoutes);
-app.use('/api/superadmin', superAdminAccountsRoutes);
-app.use('/api/superadmin', superAdminAdminsRoutes);
-app.use('/api/superadmin', superAdminBranchesRoutes);
-app.use('/api/superadmin', superAdminAuditLogsRoutes);
+app.use('/api/superadmin', verifyToken, superAdminDashboardRoutes);
+app.use('/api/superadmin', verifyToken, superAdminAccountsRoutes);
+app.use('/api/superadmin', verifyToken, superAdminAdminsRoutes);
+app.use('/api/superadmin', verifyToken, superAdminBranchesRoutes);
+app.use('/api/superadmin', verifyToken, superAdminAuditLogsRoutes);
 
 // ============ MOUNT OTHER ROUTES ============
 app.use('/api/rm', require('./routes/ResourceManager/Index'));

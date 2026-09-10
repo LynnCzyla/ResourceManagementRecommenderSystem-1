@@ -151,7 +151,10 @@ exports.getRecommendations = async (req, res) => {
             historicalPerformance: candidate.historicalPerformance,
             status: candidate.status,
             skillMatchCount: candidate.skillMatchCount,
-            workloadScore: candidate.workloadScore
+            workloadScore: candidate.workloadScore,
+            breakdown: candidate.breakdown || null,
+            prereqFulfillment: candidate.prereqFulfillment ?? 100,
+            missingCoreSkills: Boolean(candidate.missingCoreSkills)
         }));
 
         res.json({
@@ -289,7 +292,10 @@ exports.getRecommendationsByRequirement = async (req, res) => {
             historicalPerformance: candidate.historicalPerformance,
             status: candidate.status,
             skillMatchCount: candidate.skillMatchCount,
-            workloadScore: candidate.workloadScore
+            workloadScore: candidate.workloadScore,
+            breakdown: candidate.breakdown || null,
+            prereqFulfillment: candidate.prereqFulfillment ?? 100,
+            missingCoreSkills: Boolean(candidate.missingCoreSkills)
         }));
         
         res.json({

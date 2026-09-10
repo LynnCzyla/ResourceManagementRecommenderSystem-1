@@ -424,12 +424,10 @@ export default function Login({ onLogin, isDark, toggleTheme, onApplicantPortal 
             <div style={{ marginTop: '12px', textAlign: 'center', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
               Looking for job opportunities?{' '}
               <a
-                href="#"
+                href="/applicant-portal"
+                target="_blank"
+                rel="noopener noreferrer"
                 style={{ color: 'var(--color-accent)', textDecoration: 'underline', fontWeight: '600' }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  onApplicantPortal();
-                }}
               >
                 Go to Applicant Portal
               </a>

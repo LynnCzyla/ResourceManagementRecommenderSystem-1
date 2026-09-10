@@ -24,28 +24,49 @@ router.get('/', async (req, res) => {
   try {
     const { search } = req.query;
     
-    console.log('📋 Fetching skills...');
+    console.log(`📋 Fetching skills (search: "${search || ''}")...`);
     
     let query = supabase
       .from('skills')
       .select('id, skill_name')
       .order('skill_name', { ascending: true });
 
-    if (search && search.length > 0) {
-      query = query.ilike('skill_name', `%${search}%`);
+    if (search && search.trim().length > 0) {
+      query = query.ilike('skill_name', `%${search.trim()}%`).limit(100);
+    } else {
+      query = query.limit(50);
     }
-
-    query = query.limit(50);
 
     const { data, error } = await query;
 
     if (error) throw error;
 
-    console.log(`✅ Found ${data?.length || 0} skills`);
+    let skillsList = data || [];
+    if (search && search.trim().length > 0) {
+      const term = search.trim().toLowerCase();
+      skillsList.sort((a, b) => {
+        const aName = (a.skill_name || '').toLowerCase();
+        const bName = (b.skill_name || '').toLowerCase();
+        const aStarts = aName.startsWith(term);
+        const bStarts = bName.startsWith(term);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+
+        const aWord = aName.includes(' ' + term);
+        const bWord = bName.includes(' ' + term);
+        if (aWord && !bWord) return -1;
+        if (!aWord && bWord) return 1;
+
+        return aName.localeCompare(bName);
+      });
+      skillsList = skillsList.slice(0, 50);
+    }
+
+    console.log(`✅ Found ${skillsList.length} skills`);
 
     res.json({
       success: true,
-      data: data || []
+      data: skillsList
     });
   } catch (error) {
     console.error('Error fetching skills:', error);
@@ -61,25 +82,43 @@ router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;
     
-    if (!q || q.length < 1) {
+    if (!q || q.trim().length < 1) {
       return res.json({
         success: true,
         data: []
       });
     }
 
+    const term = q.trim().toLowerCase();
     const { data, error } = await supabase
       .from('skills')
       .select('id, skill_name')
-      .ilike('skill_name', `%${q}%`)
+      .ilike('skill_name', `%${term}%`)
       .order('skill_name', { ascending: true })
-      .limit(20);
+      .limit(100);
 
     if (error) throw error;
 
+    let skillsList = data || [];
+    skillsList.sort((a, b) => {
+      const aName = (a.skill_name || '').toLowerCase();
+      const bName = (b.skill_name || '').toLowerCase();
+      const aStarts = aName.startsWith(term);
+      const bStarts = bName.startsWith(term);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+
+      const aWord = aName.includes(' ' + term);
+      const bWord = bName.includes(' ' + term);
+      if (aWord && !bWord) return -1;
+      if (!aWord && bWord) return 1;
+
+      return aName.localeCompare(bName);
+    });
+
     res.json({
       success: true,
-      data: data || []
+      data: skillsList.slice(0, 50)
     });
   } catch (error) {
     console.error('Error searching skills:', error);

@@ -126,6 +126,15 @@ export default function ApplicantApplicationFormTab() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate phone number: must have at least 7 digits and no letters
+    const cleanedPhone = (formData.phone || '').trim();
+    const digitsOnly = cleanedPhone.replace(/\D/g, '');
+    if (digitsOnly.length < 7 || /[a-zA-Z]/.test(cleanedPhone)) {
+      showErrorAlert('Please enter a valid phone number with numbers only.', 'Invalid Phone');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -344,7 +353,22 @@ export default function ApplicantApplicationFormTab() {
                     type="tel"
                     required
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    onChange={(e) => {
+                      const cleanVal = e.target.value.replace(/[^0-9+\-()\s]/g, '');
+                      setFormData({ ...formData, phone: cleanVal });
+                    }}
+                    onKeyDown={(e) => {
+                      if (
+                        !/[0-9+\-()\s]/.test(e.key) &&
+                        !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) &&
+                        !e.ctrlKey &&
+                        !e.metaKey
+                      ) {
+                        e.preventDefault();
+                      }
+                    }}
+                    pattern="[0-9+\-()\s]{7,20}"
+                    title="Please enter a valid phone number with numbers only"
                     style={styles.formInput}
                     placeholder="+63 XXX XXX XXXX"
                   />

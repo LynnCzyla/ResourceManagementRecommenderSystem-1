@@ -25,10 +25,13 @@ const TAB_META = {
 const mapHire = (row) => {
   let uiStatus = 'Hired';
   const notesStr = row.job_applications?.notes || row.notes || '';
+  const isAccepted = notesStr.includes('OFFER_ACCEPTED') || Boolean(row.offer_accepted) || row.status === 'Offer Accepted';
 
   if (row.status === 'Inactive' || row.status === 'Archived') {
     uiStatus = 'Archived';
-  } else if (row.status === 'Active' || notesStr.includes('OFFER_SENT') || notesStr.includes('OFFER_ACCEPTED')) {
+  } else if (isAccepted) {
+    uiStatus = 'Offer Accepted';
+  } else if (row.status === 'Active' || notesStr.includes('OFFER_SENT')) {
     uiStatus = 'Offer Sent';
   } else {
     uiStatus = 'Hired';
@@ -46,7 +49,7 @@ const mapHire = (row) => {
     status: uiStatus,
     rawStatus: row.status,
     notes: notesStr,
-    offerAccepted: notesStr.includes('OFFER_ACCEPTED'),
+    offerAccepted: isAccepted,
   };
 };
 
@@ -275,11 +278,11 @@ export default function HRHiredEmployeesTab() {
   // locally so the applicant keeps showing right where they are. The list is only
   // re-fetched from the server when the record is moved to Archived.
   const handleAcceptOffer = async (emp) => {
-    if (emp.offerAccepted) return;
+    if (emp.offerAccepted || emp.status === 'Offer Accepted') return;
 
     const confirm = await showConfirmationAlert(
       'Confirm Offer Acceptance',
-      `Confirm that ${emp.name} has formally accepted the job offer? Once confirmed, the Edit and Email actions will be locked for this record.`,
+      `Confirm that ${emp.name} has formally accepted the job offer? Once confirmed, the actions will be locked for this record.`,
       'Yes, Mark as Accepted'
     );
     if (!confirm.isConfirmed) return;
@@ -287,7 +290,7 @@ export default function HRHiredEmployeesTab() {
     try {
       await hrClient.put(`/hired-employees/${emp.id}/accept-offer`);
       setHiredEmployees(prev =>
-        prev.map(e => (e.id === emp.id ? { ...e, offerAccepted: true } : e))
+        prev.map(e => (e.id === emp.id ? { ...e, offerAccepted: true, status: 'Offer Accepted' } : e))
       );
       showSuccessAlert(`${emp.name}'s offer acceptance has been recorded.`);
     } catch (err) {
@@ -338,7 +341,7 @@ export default function HRHiredEmployeesTab() {
   };
 
   // Status breakdown counters
-  const hiredCount = hiredEmployees.filter(e => e.status === 'Hired' || e.status === 'Offer Sent').length;
+  const hiredCount = hiredEmployees.filter(e => e.status === 'Hired' || e.status === 'Offer Sent' || e.status === 'Offer Accepted').length;
   const archivedCount = hiredEmployees.filter(e => e.status === 'Archived' || e.status === 'Inactive').length;
   const employeeCount = employees.length;
 
@@ -351,7 +354,7 @@ export default function HRHiredEmployeesTab() {
 
     let matchesTab = false;
     if (activeSubTab === 'Hired') {
-      matchesTab = emp.status === 'Hired' || emp.status === 'Offer Sent';
+      matchesTab = emp.status === 'Hired' || emp.status === 'Offer Sent' || emp.status === 'Offer Accepted';
     } else if (activeSubTab === 'Archived') {
       matchesTab = emp.status === 'Archived' || emp.status === 'Inactive';
     }
@@ -561,16 +564,28 @@ export default function HRHiredEmployeesTab() {
                     <td style={styles.td}>
                       <span style={{
                         ...styles.statusBadge,
-                        backgroundColor: emp.status === 'Offer Sent' ? 'rgba(59, 130, 246, 0.15)' :
-                                       emp.status === 'Archived' ? 'rgba(148, 163, 184, 0.15)' : 'var(--color-accent-light)',
-                        color: emp.status === 'Offer Sent' ? '#3b82f6' :
-                               emp.status === 'Archived' ? '#94a3b8' : 'var(--color-accent)'
+                        backgroundColor: (emp.offerAccepted || emp.status === 'Offer Accepted')
+                          ? 'rgba(34, 197, 94, 0.15)'
+                          : emp.status === 'Offer Sent'
+                            ? 'rgba(59, 130, 246, 0.15)'
+                            : emp.status === 'Archived'
+                              ? 'rgba(148, 163, 184, 0.15)'
+                              : 'var(--color-accent-light)',
+                        color: (emp.offerAccepted || emp.status === 'Offer Accepted')
+                          ? '#22c55e'
+                          : emp.status === 'Offer Sent'
+                            ? '#3b82f6'
+                            : emp.status === 'Archived'
+                              ? '#94a3b8'
+                              : 'var(--color-accent)',
+                        fontWeight: '600'
                       }}>
-                        {emp.status === 'Offer Sent' ? 'Offer Sent ✓' : emp.status}
+                        {(emp.offerAccepted || emp.status === 'Offer Accepted')
+                          ? 'Offer Accepted'
+                          : emp.status === 'Offer Sent'
+                            ? 'Offer Sent ✓'
+                            : emp.status}
                       </span>
-                      {emp.offerAccepted && (
-                        <span style={styles.acceptedBadge}>✔ Accepted</span>
-                      )}
                     </td>
                     <td style={styles.td}>
                       <div style={styles.actionCell}>
@@ -588,49 +603,48 @@ export default function HRHiredEmployeesTab() {
 
                         {activeSubTab === 'Hired' && (
                           <>
-                            {!emp.offerAccepted && (
-                              <>
-                                <button
-                                  onClick={() => openOfferModal(emp)}
-                                  disabled={emp.offerAccepted}
-                                  style={{
-                                    ...styles.iconBtnEmail,
-                                    ...(emp.offerAccepted ? styles.iconBtnDisabled : {})
-                                  }}
-                                  title={emp.offerAccepted ? 'Locked — offer already accepted' : 'Send Job Offer Email'}
-                                >
-                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                                    <polyline points="22,6 12,13 2,6"></polyline>
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => handleAcceptOffer(emp)}
-                                  disabled={emp.offerAccepted || emp.status !== 'Offer Sent'}
-                                  style={{
-                                    ...styles.iconBtnCheck,
-                                    ...(emp.offerAccepted ? styles.iconBtnAccepted : {}),
-                                    ...(emp.status !== 'Offer Sent' && !emp.offerAccepted ? styles.iconBtnDisabled : {})
-                                  }}
-                                  title={
-                                    emp.offerAccepted 
-                                      ? 'Offer already accepted' 
-                                      : emp.status !== 'Offer Sent' 
-                                        ? 'Must send job offer email first' 
-                                        : 'Mark Offer as Accepted'
-                                  }
-                                >
-                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: emp.offerAccepted ? '4px' : '0' }}>
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                  </svg>
-                                  {emp.offerAccepted && 'Accepted'}
-                                </button>
-                              </>
-                            )}
+                            <button
+                              onClick={() => openOfferModal(emp)}
+                              disabled={emp.offerAccepted || emp.status === 'Offer Accepted'}
+                              style={{
+                                ...styles.iconBtnEmail,
+                                ...((emp.offerAccepted || emp.status === 'Offer Accepted') ? styles.iconBtnDisabled : {})
+                              }}
+                              title={(emp.offerAccepted || emp.status === 'Offer Accepted') ? 'Locked — offer already accepted' : 'Send Job Offer Email'}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                <polyline points="22,6 12,13 2,6"></polyline>
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleAcceptOffer(emp)}
+                              disabled={emp.offerAccepted || emp.status === 'Offer Accepted' || emp.status !== 'Offer Sent'}
+                              style={{
+                                ...styles.iconBtnCheck,
+                                ...((emp.offerAccepted || emp.status === 'Offer Accepted') ? styles.iconBtnDisabled : {}),
+                                ...(emp.status !== 'Offer Sent' && !(emp.offerAccepted || emp.status === 'Offer Accepted') ? styles.iconBtnDisabled : {})
+                              }}
+                              title={
+                                (emp.offerAccepted || emp.status === 'Offer Accepted')
+                                  ? 'Locked — offer already accepted' 
+                                  : emp.status !== 'Offer Sent' 
+                                    ? 'Must send job offer email first' 
+                                    : 'Mark Offer as Accepted'
+                              }
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                            </button>
                             <button
                               onClick={() => handleArchive(emp)}
-                              style={styles.iconBtnArchive}
-                              title="Archive Employee (offer not accepted)"
+                              disabled={emp.offerAccepted || emp.status === 'Offer Accepted'}
+                              style={{
+                                ...styles.iconBtnArchive,
+                                ...((emp.offerAccepted || emp.status === 'Offer Accepted') ? styles.iconBtnDisabled : {})
+                              }}
+                              title={(emp.offerAccepted || emp.status === 'Offer Accepted') ? 'Locked — offer already accepted' : 'Archive Employee (offer not accepted)'}
                             >
                               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '4px' }}>
                                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -1230,6 +1244,7 @@ const styles = {
   iconBtnDisabled: {
     opacity: 0.4,
     cursor: 'not-allowed',
+    pointerEvents: 'none',
   },
   iconBtnArchive: {
     background: 'rgba(239, 68, 68, 0.12)',

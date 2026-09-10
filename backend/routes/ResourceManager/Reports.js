@@ -83,7 +83,12 @@ router.post('/utilization', async (req, res) => {
 
     const employeeIds = employees.map(e => e.id);
 
-    const [assignmentsResult, tasksResult] = await Promise.all([
+    const [projectsResult, assignmentsResult, tasksResult] = await Promise.all([
+      supabase
+        .from('projects')
+        .select('id, project_name, status')
+        .eq('status', 'Active'),
+      
       supabase
         .from('project_assignments')
         .select('profile_id, project_id, status')
@@ -94,17 +99,23 @@ router.post('/utilization', async (req, res) => {
         .from('project_tasks')
         .select('profile_id, status, project_id, priority')
         .in('profile_id', employeeIds)
+        .not('status', 'in', '("Completed","Completed-Hidden","Archived")')
     ]);
 
+    if (projectsResult.error) throw projectsResult.error;
     if (assignmentsResult.error) throw assignmentsResult.error;
     if (tasksResult.error) throw tasksResult.error;
 
-    const assignments = assignmentsResult.data || [];
-    const tasks = tasksResult.data || [];
+    const activeProjects = projectsResult.data || [];
+    const activeProjectIds = new Set(activeProjects.map(p => p.id));
+
+    const assignments = (assignmentsResult.data || []).filter(a => activeProjectIds.has(a.project_id));
+    const tasks = (tasksResult.data || []).filter(t => activeProjectIds.has(t.project_id));
 
     console.log(`📊 Employees found: ${employees.length}`);
-    console.log(`📊 Assignments found: ${assignments.length}`);
-    console.log(`📊 Tasks found: ${tasks.length}`);
+    console.log(`📊 Active projects found: ${activeProjects.length}`);
+    console.log(`📊 Active assignments found: ${assignments.length}`);
+    console.log(`📊 Active tasks found: ${tasks.length}`);
 
     const assignmentCounts = {};
     for (const a of assignments) {

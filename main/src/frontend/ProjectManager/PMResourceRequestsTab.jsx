@@ -1,5 +1,42 @@
-import React, { useState, useEffect } from 'react';
-import { getResourceRequests, createResourceRequest, getProjects, getSkills } from './pmApi';
+import React, { useState, useEffect, useRef } from 'react';
+import Swal from 'sweetalert2';
+import { getResourceRequests, createResourceRequest, getProjects, getSkills, cancelResourceRequest } from './pmApi';
+
+// Helpers to format date range and dynamic duration nicely
+const formatDateRange = (startDate, endDate) => {
+  if (!startDate && !endDate) return 'N/A';
+  const formatSingle = (dStr) => {
+    if (!dStr) return '';
+    const d = new Date(dStr);
+    return isNaN(d.getTime()) ? dStr : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+  if (startDate && endDate) return `${formatSingle(startDate)} to ${formatSingle(endDate)}`;
+  if (startDate) return formatSingle(startDate);
+  if (endDate) return formatSingle(endDate);
+  return 'N/A';
+};
+
+const formatDurationDisplay = (duration, startDate, endDate) => {
+  if (startDate && endDate) {
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e >= s) {
+      const diffDays = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+      if (diffDays <= 0) return 'N/A';
+      if (diffDays === 1) return '1 Day';
+      if (diffDays < 7) return `${diffDays} Days`;
+      const weeks = Math.round(diffDays / 7);
+      if (diffDays < 30) return `${weeks} ${weeks === 1 ? 'Week' : 'Weeks'}`;
+      if (diffDays >= 30 && diffDays <= 55) return `${weeks} Weeks`;
+      const months = (diffDays / 30.4375).toFixed(1);
+      return months.endsWith('.0') ? `${parseInt(months, 10)} Months` : `~${months} Months`;
+    }
+  }
+  if (duration && duration !== '—' && duration !== '-' && duration !== 'null' && duration !== 'undefined') {
+    return duration;
+  }
+  return 'N/A';
+};
 
 export default function PMResourceRequestsTab({ user }) {
   const [requests, setRequests] = useState([]);
@@ -12,9 +49,19 @@ export default function PMResourceRequestsTab({ user }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageJumpValue, setPageJumpValue] = useState('');
+  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
+  const [cancellingId, setCancellingId] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const rowsPerPage = 10;
 
-  // Skills state for autocomplete
+  // Skills dynamic database search state
+  const skillCacheRef = useRef({});
+  const debounceTimerRef = useRef(null);
+  const [activeSkillFocus, setActiveSkillFocus] = useState(null); // { index, type: 'primary' | 'secondary' }
+  const [dynamicSuggestions, setDynamicSuggestions] = useState([]);
+  const [isSearchingSkills, setIsSearchingSkills] = useState(false);
+
+  // Initial skills loaded on mount as fallback
   const [allSkills, setAllSkills] = useState([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
 
@@ -37,13 +84,15 @@ export default function PMResourceRequestsTab({ user }) {
     resources: initialResources
   });
 
-  // ✅ Fetch all skills from database on mount, for autocomplete
+  // ✅ Fetch initial skills from database on mount
   useEffect(() => {
     const fetchSkills = async () => {
       setIsLoadingSkills(true);
       try {
         const data = await getSkills();
-        setAllSkills(data || []);
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        setAllSkills(list);
+        skillCacheRef.current[''] = list;
       } catch (error) {
         console.error('Error fetching skills:', error);
         setAllSkills([]);
@@ -73,6 +122,41 @@ export default function PMResourceRequestsTab({ user }) {
     loadData();
   }, [user]);
 
+  // ── Dynamic Skills Search Helper ────────────────────────────────────
+  const searchSkillsDynamic = (query, currentSelected = []) => {
+    const trimmed = (query || '').trim();
+    if (!trimmed) {
+      setDynamicSuggestions([]);
+      setIsSearchingSkills(false);
+      return;
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (skillCacheRef.current[lower]) {
+      const cached = skillCacheRef.current[lower];
+      setDynamicSuggestions(cached.filter(s => !currentSelected.includes(s.skill_name)));
+      return;
+    }
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    setIsSearchingSkills(true);
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const data = await getSkills(trimmed);
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        skillCacheRef.current[lower] = list;
+        setDynamicSuggestions(list.filter(s => !currentSelected.includes(s.skill_name)));
+      } catch (err) {
+        console.error('Error searching skills dynamically:', err);
+      } finally {
+        setIsSearchingSkills(false);
+      }
+    }, 150);
+  };
+
   // ── Skill tag helpers ───────────────────────────────────────────────
   // `type` is 'primary' or 'secondary'. Maps to the resource's
   // primarySkills/primarySkillInput or secondarySkills/secondarySkillInput fields.
@@ -84,6 +168,7 @@ export default function PMResourceRequestsTab({ user }) {
   // ✅ Handle skill input with comma separation
   const handleSkillInputChange = (index, type, value) => {
     const { skillsField, inputField } = fieldNames(type);
+    setActiveSkillFocus({ index, type });
 
     // Check if the last character is a comma
     if (value.endsWith(',')) {
@@ -100,6 +185,7 @@ export default function PMResourceRequestsTab({ user }) {
           updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
+        setDynamicSuggestions([]);
         return;
       }
     }
@@ -109,6 +195,9 @@ export default function PMResourceRequestsTab({ user }) {
       updated[index] = { ...updated[index], [inputField]: value };
       return { ...prev, resources: updated };
     });
+
+    const currentSelected = formData.resources[index]?.[skillsField] || [];
+    searchSkillsDynamic(value, currentSelected);
   };
 
   // ✅ Handle Enter key to add skill
@@ -130,6 +219,7 @@ export default function PMResourceRequestsTab({ user }) {
           updated[index][inputField] = '';
           return { ...prev, resources: updated };
         });
+        setDynamicSuggestions([]);
       }
     }
   };
@@ -150,6 +240,7 @@ export default function PMResourceRequestsTab({ user }) {
       updated[index][inputField] = '';
       return { ...prev, resources: updated };
     });
+    setDynamicSuggestions([]);
   };
 
   // ✅ Remove a skill from the selected list
@@ -196,7 +287,6 @@ export default function PMResourceRequestsTab({ user }) {
   };
 
   const handleRemoveResource = (index) => {
-    if (formData.resources.length <= 1) return;
     setFormData(prev => ({
       ...prev,
       resources: prev.resources.filter((_, i) => i !== index)
@@ -225,7 +315,9 @@ export default function PMResourceRequestsTab({ user }) {
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     if (!formData.projectId || !formData.resources.length) return;
+    if (isSubmitting) return;
 
+    setIsSubmitting(true);
     setSubmitError('');
     try {
       // Convert skill arrays to comma-separated strings for backend
@@ -246,25 +338,125 @@ export default function PMResourceRequestsTab({ user }) {
     } catch (err) {
       console.error('Failed to create resource request:', err);
       setSubmitError(err.message || 'Failed to create resource request');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const statusOptions = [...new Set(requests.map(r => r.status).filter(Boolean))];
+  // Helper to determine if a request belongs to History (filled/allocated, cancelled, rejected, or completed)
+  const isHistoryRequest = (status) => {
+    const s = String(status || '').trim().toLowerCase();
+    return ['filled', 'allocated', 'fulfilled', 'approved', 'completed', 'done', 'closed', 'cancelled', 'canceled', 'rejected'].includes(s);
+  };
 
-  // ✅ Search checks both primary and secondary skills (falls back to combined `skills` if present)
-  const filteredRequests = requests.filter(req => {
+  const activeRequests = requests.filter(r => !isHistoryRequest(r.status));
+  const historyRequests = requests.filter(r => isHistoryRequest(r.status));
+  const currentTabRequests = activeTab === 'history' ? historyRequests : activeRequests;
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setCurrentPage(1);
+    setStatusFilter('all');
+    setSearchQuery('');
+  };
+
+  const handleCancelRequest = async (req) => {
+    const roleText = req.role ? `"${req.role}"` : 'this resource request';
+    const projectText = req.projectName ? ` on project "${req.projectName}"` : '';
+
+    const result = await Swal.fire({
+      title: 'Cancel Resource Request?',
+      text: `Are you sure you want to cancel the request for ${roleText}${projectText}? It will be moved to the Request History tab.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, cancel request',
+      cancelButtonText: 'No, keep it',
+      background: 'var(--color-bg-card, #ffffff)',
+      color: 'var(--color-text-primary, #1e293b)',
+    });
+
+    if (!result.isConfirmed) return;
+
+    setCancellingId(req.id);
+    try {
+      await cancelResourceRequest(req.id);
+      await loadData();
+      setActiveTab('history');
+      Swal.fire({
+        title: 'Request Canceled',
+        text: 'The resource request has been marked as Canceled and moved to Request History.',
+        icon: 'success',
+        confirmButtonColor: 'var(--color-primary, #2563eb)',
+        timer: 2400,
+        showConfirmButton: false,
+        background: 'var(--color-bg-card, #ffffff)',
+        color: 'var(--color-text-primary, #1e293b)',
+      });
+    } catch (err) {
+      console.error('Failed to cancel resource request:', err);
+      Swal.fire({
+        title: 'Error',
+        text: err.message || 'Failed to cancel resource request.',
+        icon: 'error',
+        confirmButtonColor: 'var(--color-primary, #2563eb)',
+        background: 'var(--color-bg-card, #ffffff)',
+        color: 'var(--color-text-primary, #1e293b)',
+      });
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const getStatusBadgeStyle = (status) => {
+    const s = String(status || '').toLowerCase();
+    if (['approved', 'filled', 'fulfilled', 'completed', 'done'].includes(s)) {
+      return {
+        backgroundColor: 'rgba(34, 197, 94, 0.12)',
+        color: 'var(--color-success, #16a34a)',
+        border: '1px solid rgba(34, 197, 94, 0.25)',
+      };
+    }
+    if (['cancelled', 'canceled'].includes(s)) {
+      return {
+        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+        color: 'var(--color-danger, #ef4444)',
+        border: '1px solid rgba(239, 68, 68, 0.25)',
+      };
+    }
+    if (s === 'rejected') {
+      return {
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        color: 'var(--color-danger, #ef4444)',
+        border: '1px solid rgba(239, 68, 68, 0.3)',
+      };
+    }
+    // Pending, Open, In Progress
+    return {
+      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+      color: 'var(--color-warning, #d97706)',
+      border: '1px solid rgba(245, 158, 11, 0.25)',
+    };
+  };
+
+  const statusOptions = [...new Set(currentTabRequests.map(r => r.status).filter(Boolean))];
+
+  // ✅ Search checks project name, role, and primary/secondary skills
+  const filteredRequests = currentTabRequests.filter(req => {
     const allReqSkills = [
       ...(req.primarySkills || req.skills || []),
       ...(req.secondarySkills || [])
     ];
     const matchesSearch =
-      req.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (req.projectName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (req.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       allReqSkills.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesSearch && (statusFilter === 'all' || req.status === statusFilter);
   }).sort((a, b) => {
-    if (sortBy === 'status') return a.status.localeCompare(b.status);
-    if (sortBy === 'project') return a.projectName.localeCompare(b.projectName);
-    if (sortBy === 'quantity') return a.quantity - b.quantity;
+    if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
+    if (sortBy === 'project') return (a.projectName || '').localeCompare(b.projectName || '');
+    if (sortBy === 'quantity') return (a.quantity || 0) - (b.quantity || 0);
     return 0;
   });
 
@@ -277,7 +469,7 @@ export default function PMResourceRequestsTab({ user }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, sortBy]);
+  }, [searchQuery, statusFilter, sortBy, activeTab]);
 
   const goToPage = (page) => {
     const clamped = Math.min(Math.max(1, page), totalPages);
@@ -291,9 +483,9 @@ export default function PMResourceRequestsTab({ user }) {
     if (!isNaN(page)) goToPage(page);
   };
 
-  const totalQuantityNeeded = requests.reduce((sum, r) => sum + (parseInt(r.quantity, 10) || 0), 0);
-  const pendingCount = requests.filter(r => r.status === 'Pending').length;
-  const filledCount = requests.filter(r => r.status === 'Approved' || r.status === 'Filled').length;
+  const activeQuantityNeeded = activeRequests.reduce((sum, r) => sum + (parseInt(r.quantity, 10) || 0), 0);
+  const pendingCount = activeRequests.filter(r => r.status === 'Pending').length;
+  const historyCount = historyRequests.length;
 
   return (
     <div style={styles.container}>
@@ -311,7 +503,7 @@ export default function PMResourceRequestsTab({ user }) {
               </svg>
               <input
                 type="text"
-                placeholder="Search requests..."
+                placeholder={activeTab === 'history' ? "Search history..." : "Search requests..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={styles.searchInput}
@@ -337,10 +529,40 @@ export default function PMResourceRequestsTab({ user }) {
               <option value="quantity">Sort by Quantity</option>
             </select>
           </div>
-          <button onClick={() => setShowCreateModal(true)} style={styles.createBtn}>
+          <button
+            onClick={() => {
+              loadData();
+              setShowCreateModal(true);
+            }}
+            style={styles.createBtn}
+          >
             + New Request
           </button>
         </div>
+      </div>
+
+      {/* ✅ Sub-tabs: Active Requests / Request History */}
+      <div style={styles.tabsRow}>
+        <button
+          type="button"
+          onClick={() => handleTabChange('active')}
+          style={{ ...styles.tabBtn, ...(activeTab === 'active' ? styles.tabBtnActive : {}) }}
+        >
+          Active Requests
+          <span style={{ ...styles.tabCount, ...(activeTab === 'active' ? styles.tabCountActive : {}) }}>
+            {activeRequests.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTabChange('history')}
+          style={{ ...styles.tabBtn, ...(activeTab === 'history' ? styles.tabBtnActive : {}) }}
+        >
+          Request History
+          <span style={{ ...styles.tabCount, ...(activeTab === 'history' ? styles.tabCountActive : {}) }}>
+            {historyRequests.length}
+          </span>
+        </button>
       </div>
 
       {loadError && (
@@ -350,20 +572,20 @@ export default function PMResourceRequestsTab({ user }) {
       {/* Metric Cards */}
       <div style={styles.metricsGrid}>
         <div className="glass-card" style={styles.metricCard}>
-          <div style={styles.metricValue}>{requests.length}</div>
-          <div style={styles.metricLabel}>Total Requests</div>
+          <div style={styles.metricValue}>{activeRequests.length}</div>
+          <div style={styles.metricLabel}>Active Requests</div>
         </div>
         <div className="glass-card" style={styles.metricCard}>
-          <div style={styles.metricValue}>{totalQuantityNeeded}</div>
+          <div style={styles.metricValue}>{activeQuantityNeeded}</div>
           <div style={styles.metricLabel}>Employees Needed</div>
         </div>
         <div className="glass-card" style={styles.metricCard}>
           <div style={{ ...styles.metricValue, color: 'var(--color-warning)' }}>{pendingCount}</div>
-          <div style={styles.metricLabel}>Pending</div>
+          <div style={styles.metricLabel}>Pending Approval</div>
         </div>
         <div className="glass-card" style={styles.metricCard}>
-          <div style={{ ...styles.metricValue, color: 'var(--color-success)' }}>{filledCount}</div>
-          <div style={styles.metricLabel}>Filled</div>
+          <div style={{ ...styles.metricValue, color: 'var(--color-primary)' }}>{historyCount}</div>
+          <div style={styles.metricLabel}>In History</div>
         </div>
       </div>
 
@@ -373,26 +595,41 @@ export default function PMResourceRequestsTab({ user }) {
           <table style={styles.table}>
             <thead>
               <tr style={styles.trHeader}>
-                <th style={styles.th}>Project</th>
+                <th style={styles.th}>Project / Role</th>
                 <th style={styles.th}>Required Skills</th>
                 <th style={styles.th}>Duration</th>
                 <th style={styles.th}>Dates</th>
                 <th style={styles.th}>Qty</th>
                 <th style={styles.th}>Status</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {paginatedRequests.length === 0 ? (
                 <tr>
-                  <td colSpan="6" style={styles.emptyRow}>No resource requests found.</td>
+                  <td colSpan="7" style={styles.emptyRow}>
+                    {activeTab === 'history'
+                      ? 'No request history found. Completed or cancelled requests will appear here.'
+                      : (searchQuery || statusFilter !== 'all'
+                        ? 'No active requests match your filters.'
+                        : 'No active resource requests found. Click "+ New Request" to create one.')}
+                  </td>
                 </tr>
               ) : (
                 paginatedRequests.map(req => {
                   const primary = req.primarySkills || req.skills || [];
                   const secondary = req.secondarySkills || [];
+                  const isCancellable = activeTab === 'active' && (req.status === 'Pending' || req.status === 'Open');
                   return (
                     <tr key={req.id} style={styles.trRow}>
-                      <td style={{ ...styles.td, fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</td>
+                      <td style={styles.td}>
+                        <div style={{ fontWeight: '700', color: 'var(--color-text-primary)' }}>{req.projectName}</div>
+                        {req.role && (
+                          <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                            {req.role}
+                          </div>
+                        )}
+                      </td>
                       <td style={styles.td}>
                         <div style={styles.skillsGroup}>
                           {primary.length > 0 && (
@@ -411,17 +648,54 @@ export default function PMResourceRequestsTab({ user }) {
                           )}
                         </div>
                       </td>
-                      <td style={styles.td}>{req.duration}</td>
-                      <td style={styles.td}>{req.startDate} to {req.endDate}</td>
+                      <td style={styles.td}>{formatDurationDisplay(req.duration, req.startDate, req.endDate)}</td>
+                      <td style={styles.td}>{formatDateRange(req.startDate, req.endDate)}</td>
                       <td style={{ ...styles.td, fontWeight: '600' }}>{req.quantity}</td>
                       <td style={styles.td}>
                         <span style={{
                           ...styles.statusBadge,
-                          backgroundColor: req.status === 'Approved' ? 'var(--color-primary-light)' : 'rgba(245, 158, 11, 0.1)',
-                          color: req.status === 'Approved' ? 'var(--color-success)' : 'var(--color-warning)'
+                          ...getStatusBadgeStyle(req.status),
                         }}>
                           {req.status}
                         </span>
+                      </td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>
+                        {isCancellable ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelRequest(req)}
+                            disabled={cancellingId === req.id}
+                            style={{
+                              ...styles.cancelRequestBtn,
+                              ...(cancellingId === req.id ? styles.cancelRequestBtnDisabled : {})
+                            }}
+                            title="Cancel this resource request"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}>
+                              <line x1="18" y1="6" x2="6" y2="18"></line>
+                              <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                            {cancellingId === req.id ? 'Cancelling...' : 'Cancel Request'}
+                          </button>
+                        ) : (
+                          <span style={{
+                            ...styles.historyActionText,
+                            color: ['filled', 'allocated', 'completed', 'done'].includes(String(req.status || '').toLowerCase())
+                              ? 'var(--color-success, #16a34a)'
+                              : (['cancelled', 'canceled', 'rejected'].includes(String(req.status || '').toLowerCase())
+                                ? 'var(--color-danger, #ef4444)'
+                                : undefined),
+                            fontWeight: '600',
+                          }}>
+                            {['filled', 'allocated'].includes(String(req.status || '').toLowerCase())
+                              ? 'Allocated'
+                              : (['completed', 'done'].includes(String(req.status || '').toLowerCase())
+                                ? 'Completed'
+                                : (['cancelled', 'canceled'].includes(String(req.status || '').toLowerCase())
+                                  ? 'Cancelled'
+                                  : (String(req.status || '').toLowerCase() === 'rejected' ? 'Rejected' : 'Stored')))}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -434,7 +708,7 @@ export default function PMResourceRequestsTab({ user }) {
         {filteredRequests.length > 0 && (
           <div style={styles.paginationBar}>
             <span style={styles.paginationInfo}>
-              Showing {(safeCurrentPage - 1) * rowsPerPage + 1}
+              Showing {filteredRequests.length === 0 ? 0 : (safeCurrentPage - 1) * rowsPerPage + 1}
               -{Math.min(safeCurrentPage * rowsPerPage, filteredRequests.length)} of {filteredRequests.length}
             </span>
             <div style={styles.paginationControls}>
@@ -502,11 +776,20 @@ export default function PMResourceRequestsTab({ user }) {
                   style={styles.modalSelect}
                   required
                 >
-                  <option value="">Select a project</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                  <option value="">Select an active project</option>
+                  {projects
+                    .filter(p => !['Completed', 'Archived'].includes(p.status))
+                    .map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.isRestored ? ' (Restored)' : ''}
+                      </option>
+                    ))}
                 </select>
+                {projects.filter(p => !['Completed', 'Archived'].includes(p.status)).length === 0 && (
+                  <span style={{ fontSize: '11px', color: 'var(--color-warning)', marginTop: '4px', display: 'block' }}>
+                    No active projects available. Create or restore a project first.
+                  </span>
+                )}
               </div>
 
               {/* Resource Requirements Section */}
@@ -516,17 +799,11 @@ export default function PMResourceRequestsTab({ user }) {
                 </div>
 
                 {formData.resources.map((res, index) => {
-                  const primarySuggestions = allSkills.filter(skill =>
-                    skill.skill_name.toLowerCase().includes((res.primarySkillInput || '').toLowerCase()) &&
-                    !res.primarySkills.includes(skill.skill_name)
-                  ).slice(0, 10);
-                  const showPrimarySuggestions = res.primarySkillInput && res.primarySkillInput.length > 0 && primarySuggestions.length > 0;
+                  const isPrimaryActive = activeSkillFocus?.index === index && activeSkillFocus?.type === 'primary';
+                  const showPrimarySuggestions = isPrimaryActive && (res.primarySkillInput || '').trim().length > 0;
 
-                  const secondarySuggestions = allSkills.filter(skill =>
-                    skill.skill_name.toLowerCase().includes((res.secondarySkillInput || '').toLowerCase()) &&
-                    !res.secondarySkills.includes(skill.skill_name)
-                  ).slice(0, 10);
-                  const showSecondarySuggestions = res.secondarySkillInput && res.secondarySkillInput.length > 0 && secondarySuggestions.length > 0;
+                  const isSecondaryActive = activeSkillFocus?.index === index && activeSkillFocus?.type === 'secondary';
+                  const showSecondarySuggestions = isSecondaryActive && (res.secondarySkillInput || '').trim().length > 0;
 
                   return (
                     <div key={index} style={styles.resourceCard}>
@@ -564,7 +841,7 @@ export default function PMResourceRequestsTab({ user }) {
                         </div>
                       </div>
 
-                      {/* ✅ Primary Skills — required, tag input with autocomplete */}
+                      {/* ✅ Primary Skills — required, tag input with dynamic database autocomplete */}
                       <div style={styles.formGroup}>
                         <label style={styles.formLabel}>Primary Skills <span style={{ color: 'var(--color-danger)' }}>*</span></label>
 
@@ -591,6 +868,18 @@ export default function PMResourceRequestsTab({ user }) {
                             value={res.primarySkillInput || ''}
                             onChange={(e) => handleSkillInputChange(index, 'primary', e.target.value)}
                             onKeyDown={(e) => handleSkillKeyDown(index, 'primary', e)}
+                            onFocus={() => {
+                              setActiveSkillFocus({ index, type: 'primary' });
+                              const val = res.primarySkillInput || '';
+                              if (val.trim()) {
+                                searchSkillsDynamic(val, res.primarySkills);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveSkillFocus(prev => (prev?.index === index && prev?.type === 'primary' ? null : prev));
+                              }, 200);
+                            }}
                             style={styles.modalInput}
                             placeholder="Type skill and press comma or Enter..."
                             required={res.primarySkills.length === 0}
@@ -598,25 +887,35 @@ export default function PMResourceRequestsTab({ user }) {
 
                           {showPrimarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {primarySuggestions.map((skill) => (
+                              {isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                  Searching database skills...
+                                </div>
+                              )}
+                              {!isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-muted)', fontStyle: 'italic', cursor: 'default' }}>
+                                  No database skills found (press comma or Enter to add)
+                                </div>
+                              )}
+                              {dynamicSuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, 'primary', skill.skill_name)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handleSelectSkill(index, 'primary', skill.skill_name);
+                                  }}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
                                 </div>
                               ))}
-                              {isLoadingSkills && (
-                                <div style={styles.suggestionItem}>Loading skills...</div>
-                              )}
                             </div>
                           )}
                         </div>
                         <span style={styles.inputHelp}>Must-have skills. Type a skill and press <strong>comma ( , )</strong> or <strong>Enter</strong> to add.</span>
                       </div>
 
-                      {/* ✅ Secondary Skills — optional, tag input with autocomplete */}
+                      {/* ✅ Secondary Skills — optional, tag input with dynamic database autocomplete */}
                       <div style={styles.formGroup}>
                         <label style={styles.formLabel}>Secondary Skills</label>
 
@@ -643,24 +942,46 @@ export default function PMResourceRequestsTab({ user }) {
                             value={res.secondarySkillInput || ''}
                             onChange={(e) => handleSkillInputChange(index, 'secondary', e.target.value)}
                             onKeyDown={(e) => handleSkillKeyDown(index, 'secondary', e)}
+                            onFocus={() => {
+                              setActiveSkillFocus({ index, type: 'secondary' });
+                              const val = res.secondarySkillInput || '';
+                              if (val.trim()) {
+                                searchSkillsDynamic(val, res.secondarySkills);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveSkillFocus(prev => (prev?.index === index && prev?.type === 'secondary' ? null : prev));
+                              }, 200);
+                            }}
                             style={styles.modalInput}
                             placeholder="Type skill and press comma or Enter..."
                           />
 
                           {showSecondarySuggestions && (
                             <div style={styles.suggestionsDropdown}>
-                              {secondarySuggestions.map((skill) => (
+                              {isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                  Searching database skills...
+                                </div>
+                              )}
+                              {!isSearchingSkills && dynamicSuggestions.length === 0 && (
+                                <div style={{ ...styles.suggestionItem, color: 'var(--color-text-muted)', fontStyle: 'italic', cursor: 'default' }}>
+                                  No database skills found (press comma or Enter to add)
+                                </div>
+                              )}
+                              {dynamicSuggestions.map((skill) => (
                                 <div
                                   key={skill.id}
-                                  onMouseDown={() => handleSelectSkill(index, 'secondary', skill.skill_name)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handleSelectSkill(index, 'secondary', skill.skill_name);
+                                  }}
                                   style={styles.suggestionItem}
                                 >
                                   {skill.skill_name}
                                 </div>
                               ))}
-                              {isLoadingSkills && (
-                                <div style={styles.suggestionItem}>Loading skills...</div>
-                              )}
                             </div>
                           )}
                         </div>
@@ -709,8 +1030,48 @@ export default function PMResourceRequestsTab({ user }) {
               </div>
 
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowCreateModal(false)} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Submit Request</button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  disabled={isSubmitting}
+                  style={{
+                    ...styles.cancelBtn,
+                    opacity: isSubmitting ? 0.6 : 1,
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  style={{
+                    ...styles.saveBtn,
+                    opacity: isSubmitting ? 0.8 : 1,
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span style={{
+                        width: '14px',
+                        height: '14px',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: '#ffffff',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite',
+                      }} />
+                      Submitting Request...
+                    </>
+                  ) : (
+                    'Submit Request'
+                  )}
+                </button>
               </div>
             </form>
           </div>
@@ -724,13 +1085,73 @@ const styles = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '24px',
+    gap: '20px',
+  },
+  tabsRow: {
+    display: 'flex',
+    gap: '8px',
+    borderBottom: '1px solid var(--color-border)',
+    marginTop: '-4px',
+  },
+  tabBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  tabBtnActive: {
+    color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  tabCount: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '30px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-muted)',
+  },
+  tabCountActive: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+  },
+  cancelRequestBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    color: 'var(--color-danger, #ef4444)',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
+    borderRadius: '6px',
+    padding: '6px 12px',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  cancelRequestBtnDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  historyActionText: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '500',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '8px',
+    marginBottom: '4px',
   },
   headerActions: {
     display: 'flex',

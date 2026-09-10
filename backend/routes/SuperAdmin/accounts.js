@@ -4,6 +4,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { clearProfileCache } = require('../Middleware/auth');
 
 // GET /api/superadmin/accounts
 // Now shows ALL user accounts, not just admins
@@ -196,6 +197,16 @@ router.put('/accounts/:id', async (req, res) => {
 
     if (updateError) throw updateError;
 
+    // Invalidate profile cache and terminate sessions if deactivated or locked
+    clearProfileCache(id);
+    if (status === 'Inactive' || status === 'Deactivated' || status === 'Locked') {
+      try {
+        await supabase.auth.admin.signOut(id);
+      } catch (soErr) {
+        console.error('Non-fatal error signing out user:', soErr.message);
+      }
+    }
+
     // Log the action
     await supabase
       .from('audit_logs')
@@ -228,7 +239,7 @@ router.patch('/accounts/:id/status', async (req, res) => {
   if (!['Active', 'Inactive', 'Deactivated'].includes(status)) {
     return res.status(400).json({
       success: false,
-      error: "status must be 'Active' or 'Inactive'."
+      error: "Status must be 'Active', 'Inactive', or 'Deactivated'."
     });
   }
 
@@ -257,6 +268,16 @@ router.patch('/accounts/:id/status', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Invalidate profile cache and terminate session if deactivated or inactive
+    clearProfileCache(id);
+    if (status === 'Inactive' || status === 'Deactivated') {
+      try {
+        await supabase.auth.admin.signOut(id);
+      } catch (soErr) {
+        console.error('Non-fatal error signing out user:', soErr.message);
+      }
+    }
 
     await supabase
       .from('audit_logs')
@@ -313,6 +334,14 @@ router.patch('/accounts/:id/unlock', async (req, res) => {
       .maybeSingle();
 
     if (error) throw error;
+
+    // Also ensure profiles status is Active
+    await supabase
+      .from('profiles')
+      .update({ status: 'Active', updated_at: new Date().toISOString() })
+      .eq('id', id);
+
+    clearProfileCache(id);
 
     await supabase
       .from('audit_logs')
@@ -386,6 +415,19 @@ router.patch('/accounts/:id/lock', async (req, res) => {
         .single();
       if (error) throw error;
       result = data;
+    }
+
+    // Also update profiles table status to Locked
+    await supabase
+      .from('profiles')
+      .update({ status: 'Locked', updated_at: new Date().toISOString() })
+      .eq('id', id);
+
+    clearProfileCache(id);
+    try {
+      await supabase.auth.admin.signOut(id);
+    } catch (soErr) {
+      console.error('Non-fatal error signing out locked user:', soErr.message);
     }
 
     await supabase

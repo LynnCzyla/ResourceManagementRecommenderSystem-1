@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { getEmployees, getTasks, createTask, updateTask, getProjects, updateProject, assignEmployeeToProject } from './pmApi';
+import React, { useState, useEffect, useRef } from 'react';
+import Swal from 'sweetalert2';
+import { getEmployees, getTasks, createTask, updateTask, deleteTask, getProjects, updateProject, assignEmployeeToProject } from './pmApi';
 
 // Employees are only guaranteed a formal `project_assignments` row when
 // they were added to a project through the assignment flow. Tasks are
@@ -34,12 +35,34 @@ export default function PMProjectTrackingTab({ user }) {
   const [formError, setFormError] = useState('');
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [projectSearchQuery, setProjectSearchQuery] = useState('');
+  const [completedDropdownOpen, setCompletedDropdownOpen] = useState(false);
+  const [completedSearchQuery, setCompletedSearchQuery] = useState('');
+
+  const projectDropdownRef = useRef(null);
+  const completedDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        projectDropdownRef.current &&
+        !projectDropdownRef.current.contains(event.target) &&
+        completedDropdownRef.current &&
+        !completedDropdownRef.current.contains(event.target)
+      ) {
+        setProjectDropdownOpen(false);
+        setCompletedDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [showEditTaskModal, setShowEditTaskModal] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState(null);
   const [isRedoMode, setIsRedoMode] = useState(false);
+  const [deletingTask, setDeletingTask] = useState(false);
   // Employees assigned to the SPECIFIC project a task belongs to — used only
   // for the Edit/Redo Assignment modal, so the dropdown is correct even when
   // the header filter is set to "All Projects" (where `employees` is scoped
@@ -50,7 +73,8 @@ export default function PMProjectTrackingTab({ user }) {
     description: '',
     employeeId: '',
     priority: 'Medium',
-    dueDate: ''
+    dueDate: '',
+    projectId: ''
   });
   const [editTaskData, setEditTaskData] = useState({ 
     title: '', 
@@ -123,12 +147,17 @@ export default function PMProjectTrackingTab({ user }) {
 
   const handleCreateTask = async (e) => {
     e.preventDefault();
+    const targetProjectId = selectedProjectId !== 'all' ? selectedProjectId : newTaskData.projectId;
+    if (!targetProjectId) {
+      setFormError('Please select a project');
+      return;
+    }
     if (!newTaskData.title || !newTaskData.employeeId) return;
 
     setFormError('');
     try {
       await createTask({
-        projectId: selectedProjectId,
+        projectId: targetProjectId,
         employeeId: newTaskData.employeeId,
         title: newTaskData.title,
         description: newTaskData.description,
@@ -144,7 +173,8 @@ export default function PMProjectTrackingTab({ user }) {
         description: '',
         employeeId: '',
         priority: 'Medium',
-        dueDate: ''
+        dueDate: '',
+        projectId: ''
       });
     } catch (err) {
       console.error('Failed to create task:', err);
@@ -204,6 +234,66 @@ export default function PMProjectTrackingTab({ user }) {
     setTaskToEdit(null);
     setIsRedoMode(false);
     setTaskModalEmployees([]);
+  };
+
+  const handleDeleteTask = async () => {
+    if (!taskToEdit) return;
+
+    const result = await Swal.fire({
+      title: 'Remove Task?',
+      text: `Are you sure you want to permanently delete "${taskToEdit.title}"? This action cannot be undone.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, delete task',
+      cancelButtonText: 'Cancel',
+      reverseButtons: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      customClass: {
+        popup: 'swal-custom-popup',
+        title: 'swal-custom-title',
+        htmlContainer: 'swal-custom-text',
+        confirmButton: 'swal-custom-confirm',
+        cancelButton: 'swal-custom-cancel'
+      }
+    });
+
+    if (!result.isConfirmed) return;
+
+    setDeletingTask(true);
+    try {
+      await deleteTask(taskToEdit.id);
+      await loadTasks(selectedProjectId);
+      await loadEmployees(selectedProjectId);
+      handleCloseEditModal();
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Task Removed',
+        text: `Task "${taskToEdit.title}" was completely deleted.`,
+        timer: 2000,
+        showConfirmButton: false,
+        customClass: {
+          popup: 'swal-custom-popup',
+          title: 'swal-custom-title',
+          htmlContainer: 'swal-custom-text'
+        }
+      });
+    } catch (err) {
+      console.error('Failed to delete task:', err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Failed to Remove Task',
+        text: err.message || 'An error occurred while deleting the task.',
+        customClass: {
+          popup: 'swal-custom-popup',
+          title: 'swal-custom-title',
+          htmlContainer: 'swal-custom-text'
+        }
+      });
+    } finally {
+      setDeletingTask(false);
+    }
   };
 
   const handleSaveTaskEdit = async (e) => {
@@ -332,10 +422,26 @@ export default function PMProjectTrackingTab({ user }) {
   }
 };
 
-  // Filter tasks for current selected project
+  // Group projects into active and completed
+  const activeProjects = React.useMemo(() => 
+    projects.filter(p => !['Completed', 'Archived'].includes(p.status)),
+    [projects]
+  );
+  const completedProjects = React.useMemo(() => 
+    projects.filter(p => ['Completed', 'Archived'].includes(p.status)),
+    [projects]
+  );
+
+  const isViewingCompletedProject = Boolean(
+    selectedProjectId && completedProjects.some(p => p.id === selectedProjectId)
+  );
+
+  // Filter tasks for current selected project:
+  // When 'all' is selected, ONLY show tasks from active projects! Completed project tasks are excluded.
   const currentProjectTasks = selectedProjectId === 'all'
-    ? tasks.filter(t => projects.some(p => p.id === t.projectId))
+    ? tasks.filter(t => activeProjects.some(p => p.id === t.projectId))
     : tasks.filter(t => t.projectId === selectedProjectId);
+
   // `employees` only contains people with a formal project_assignments row.
   // Merge in anyone we can identify from their tasks too, so a real
   // assignee never disappears from "All Team Members" just because that
@@ -348,8 +454,12 @@ export default function PMProjectTrackingTab({ user }) {
   const modalProject = selectedProject || taskProject;
   const modalAssignableEmployees = showEditTaskModal && taskToEdit ? getModalAssignableEmployees() : [];
 
-  const filteredProjects = projects.filter(p => 
+  const filteredActiveProjects = activeProjects.filter(p => 
     p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
+  );
+
+  const filteredCompletedProjects = completedProjects.filter(p => 
+    p.name.toLowerCase().includes(completedSearchQuery.toLowerCase())
   );
 
   const deadlineUrgency = getDeadlineUrgency(selectedProject?.endDate);
@@ -369,84 +479,250 @@ export default function PMProjectTrackingTab({ user }) {
           <p style={styles.subtitle}>Review assigned employees and manage daily task distribution.</p>
         </div>
         <div style={styles.actions}>
-          <div style={styles.controls}>
-            <div style={styles.projectDropdownWrapper}>
-              <div 
-                style={styles.projectDropdownTrigger}
-                onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
-              >
-                <span style={styles.projectDropdownValue}>
-                  {selectedProjectId === 'all' ? 'All Projects' : selectedProject ? selectedProject.name : 'Select a project'}
-                </span>
-                <svg style={styles.dropdownArrow} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="6 9 12 15 18 9"></polyline>
+          {/* 1. Completed Projects Dropdown */}
+          <div ref={completedDropdownRef} style={styles.projectDropdownWrapper}>
+            <div 
+              style={{
+                ...styles.projectDropdownTrigger,
+                borderColor: isViewingCompletedProject ? 'var(--color-primary)' : 'var(--color-border)',
+                backgroundColor: isViewingCompletedProject ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+              }}
+              onClick={() => {
+                setCompletedDropdownOpen(!completedDropdownOpen);
+                setProjectDropdownOpen(false);
+              }}
+            >
+              <span style={{
+                ...styles.projectDropdownValue,
+                color: isViewingCompletedProject ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                fontWeight: isViewingCompletedProject ? '600' : 'normal',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-              </div>
-              {projectDropdownOpen && (
-                <div style={styles.projectDropdownMenu}>
-                  <div style={styles.projectDropdownSearch}>
-                    <svg style={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="11" cy="11" r="8"></circle>
-                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input
-                      type="text"
-                      placeholder="Search projects..."
-                      value={projectSearchQuery}
-                      onChange={(e) => setProjectSearchQuery(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={styles.projectDropdownInput}
-                    />
-                  </div>
-                  <div style={styles.projectDropdownList}>
-                    {projectSearchQuery === '' && (
+                {isViewingCompletedProject
+                  ? `${selectedProject?.name || 'Completed'} (Done)`
+                  : `Completed Projects (${completedProjects.length})`}
+              </span>
+              <svg style={styles.dropdownArrow} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            {completedDropdownOpen && (
+              <div style={styles.projectDropdownMenu}>
+                <div style={styles.projectDropdownSearch}>
+                  <svg style={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search completed projects..."
+                    value={completedSearchQuery}
+                    onChange={(e) => setCompletedSearchQuery(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={styles.projectDropdownInput}
+                  />
+                </div>
+                <div style={styles.projectDropdownList}>
+                  {filteredCompletedProjects.length === 0 ? (
+                    <div style={styles.noProjectsText}>
+                      {completedSearchQuery ? 'No matching completed projects' : 'No completed projects yet'}
+                    </div>
+                  ) : (
+                    filteredCompletedProjects.map(p => (
                       <div
+                        key={p.id}
                         style={{
                           ...styles.projectDropdownItem,
-                          backgroundColor: selectedProjectId === 'all' ? 'var(--color-primary-light)' : 'transparent',
-                          color: selectedProjectId === 'all' ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                          backgroundColor: selectedProjectId === p.id ? 'var(--color-primary-light)' : 'transparent',
+                          color: selectedProjectId === p.id ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
                         }}
                         onClick={() => {
-                          setSelectedProjectId('all');
-                          setProjectDropdownOpen(false);
+                          setSelectedProjectId(p.id);
+                          setCompletedDropdownOpen(false);
+                          setCompletedSearchQuery('');
                         }}
                       >
-                        All Projects
-                      </div>
-                    )}
-                    {filteredProjects.length === 0 && projectSearchQuery !== '' ? (
-                      <div style={styles.noProjectsText}>No projects found</div>
-                    ) : (
-                      filteredProjects.map(p => (
-                        <div
-                          key={p.id}
-                          style={{
-                            ...styles.projectDropdownItem,
-                            backgroundColor: selectedProjectId === p.id ? 'var(--color-primary-light)' : 'transparent',
-                            color: selectedProjectId === p.id ? 'var(--color-primary)' : 'var(--color-text-primary)',
-                          }}
-                          onClick={() => {
-                            setSelectedProjectId(p.id);
-                            setProjectDropdownOpen(false);
-                            setProjectSearchQuery('');
-                          }}
-                        >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {p.name}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                        </span>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                          color: '#10b981',
+                          flexShrink: 0,
+                        }}>
+                          Completed
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
-          {selectedProjectId !== 'all' && (
-            <button onClick={() => setShowCreateTaskModal(true)} style={styles.createBtn}>
+
+          {/* 2. All Active Projects Dropdown */}
+          <div ref={projectDropdownRef} style={styles.projectDropdownWrapper}>
+            <div 
+              style={{
+                ...styles.projectDropdownTrigger,
+                borderColor: (!isViewingCompletedProject && selectedProjectId !== 'all') ? 'var(--color-primary)' : 'var(--color-border)',
+              }}
+              onClick={() => {
+                setProjectDropdownOpen(!projectDropdownOpen);
+                setCompletedDropdownOpen(false);
+              }}
+            >
+              <span style={styles.projectDropdownValue}>
+                {isViewingCompletedProject
+                  ? 'All Active Projects'
+                  : selectedProjectId === 'all'
+                    ? 'All Active Projects'
+                    : selectedProject
+                      ? selectedProject.name
+                      : 'Select an Active Project'}
+              </span>
+              <svg style={styles.dropdownArrow} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            {projectDropdownOpen && (
+              <div style={styles.projectDropdownMenu}>
+                <div style={styles.projectDropdownSearch}>
+                  <svg style={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search active projects..."
+                    value={projectSearchQuery}
+                    onChange={(e) => setProjectSearchQuery(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={styles.projectDropdownInput}
+                  />
+                </div>
+                <div style={styles.projectDropdownList}>
+                  {projectSearchQuery === '' && (
+                    <div
+                      style={{
+                        ...styles.projectDropdownItem,
+                        backgroundColor: (!isViewingCompletedProject && selectedProjectId === 'all') ? 'var(--color-primary-light)' : 'transparent',
+                        color: (!isViewingCompletedProject && selectedProjectId === 'all') ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                        fontWeight: (!isViewingCompletedProject && selectedProjectId === 'all') ? '600' : 'normal',
+                      }}
+                      onClick={() => {
+                        setSelectedProjectId('all');
+                        setProjectDropdownOpen(false);
+                        setProjectSearchQuery('');
+                      }}
+                    >
+                      All Active Projects
+                    </div>
+                  )}
+                  {filteredActiveProjects.length === 0 && projectSearchQuery !== '' ? (
+                    <div style={styles.noProjectsText}>No active projects found</div>
+                  ) : filteredActiveProjects.length === 0 && projectSearchQuery === '' ? (
+                    <div style={styles.noProjectsText}>No active projects available</div>
+                  ) : (
+                    filteredActiveProjects.map(p => (
+                      <div
+                        key={p.id}
+                        style={{
+                          ...styles.projectDropdownItem,
+                          backgroundColor: selectedProjectId === p.id ? 'var(--color-primary-light)' : 'transparent',
+                          color: selectedProjectId === p.id ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                          fontWeight: selectedProjectId === p.id ? '600' : 'normal',
+                        }}
+                        onClick={() => {
+                          setSelectedProjectId(p.id);
+                          setProjectDropdownOpen(false);
+                          setProjectSearchQuery('');
+                        }}
+                      >
+                        {p.name}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. + Assign Task Button */}
+          {!isViewingCompletedProject && (
+            <button 
+              onClick={() => {
+                setFormError('');
+                setShowCreateTaskModal(true);
+              }} 
+              style={styles.createBtn}
+            >
               + Assign Task
             </button>
           )}
         </div>
       </div>
+
+      {isViewingCompletedProject && (
+        <div className="glass-card" style={{
+          marginBottom: '18px',
+          padding: '12px 18px',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(59, 130, 246, 0.08)',
+          border: '1px solid rgba(59, 130, 246, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+              color: '#10b981',
+              fontSize: '11px',
+              fontWeight: '700',
+              letterSpacing: '0.4px',
+            }}>
+              COMPLETED PROJECT
+            </span>
+            <span style={{ fontSize: '13px', color: 'var(--color-text-primary)' }}>
+              Viewing archived tasks for <strong>{selectedProject?.name}</strong>. This project is completed and task creation is locked.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedProjectId('all')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '6px',
+              border: '1px solid var(--color-primary)',
+              backgroundColor: 'transparent',
+              color: 'var(--color-primary)',
+              fontSize: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+          >
+            ← Back to Active Projects
+          </button>
+        </div>
+      )}
 
       <div style={styles.mainGrid}>
         {/* Team Members List */}
@@ -581,6 +857,33 @@ export default function PMProjectTrackingTab({ user }) {
               <button onClick={() => setShowCreateTaskModal(false)} style={styles.closeModalBtn}>&times;</button>
             </div>
             <form onSubmit={handleCreateTask} style={{ marginTop: 16 }}>
+              {formError && (
+                <div style={{ color: 'var(--color-danger)', fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+                  {formError}
+                </div>
+              )}
+              {selectedProjectId === 'all' && (
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Project</label>
+                  <select 
+                    value={newTaskData.projectId || ''} 
+                    onChange={(e) => {
+                      const pId = e.target.value;
+                      setNewTaskData(prev => ({ ...prev, projectId: pId, employeeId: '' }));
+                      if (pId) {
+                        loadEmployees(pId);
+                      }
+                    }} 
+                    style={styles.modalSelect}
+                    required
+                  >
+                    <option value="">-- Choose Project --</option>
+                    {filteredActiveProjects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>Task Title</label>
                 <input 
@@ -792,11 +1095,31 @@ export default function PMProjectTrackingTab({ user }) {
                   ))}
                 </div>
               </div>
-              <div style={styles.modalActions}>
-                <button type="button" onClick={handleCloseEditModal} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>
-                  {isRedoMode ? 'Confirm Redo' : 'Save Assignment'}
+              <div style={styles.modalActionsEdit}>
+                <button
+                  type="button"
+                  onClick={handleDeleteTask}
+                  disabled={deletingTask}
+                  style={styles.deleteTaskBtn}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                  {deletingTask ? 'Removing...' : 'Remove'}
                 </button>
+                <div style={styles.modalRightActions}>
+                  <button type="button" onClick={handleCloseEditModal} style={styles.cancelBtn}>Cancel</button>
+                  <button type="submit" style={styles.saveBtn}>
+                    {isRedoMode ? 'Confirm Redo' : 'Save Assignment'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -849,43 +1172,71 @@ const styles = {
     display: 'flex',
     gap: '12px',
     alignItems: 'center',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
+    flexShrink: 0,
   },
   projectDropdownWrapper: {
     position: 'relative',
+    flexShrink: 0,
   },
   projectDropdownTrigger: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '10px 14px',
+    padding: '9px 14px',
     borderRadius: 'var(--radius-md)',
     border: '1px solid var(--color-border)',
     background: 'var(--color-bg-card)',
     color: 'var(--color-text-primary)',
     fontWeight: '600',
     cursor: 'pointer',
-    minWidth: '250px',
+    minWidth: '220px',
+    height: '40px',
+    boxSizing: 'border-box',
+    gap: '8px',
   },
   projectDropdownValue: {
     fontSize: '14px',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '180px',
   },
   dropdownArrow: {
     transition: 'transform 0.2s',
+    flexShrink: 0,
   },
   projectDropdownMenu: {
     position: 'absolute',
-    top: '100%',
+    top: 'calc(100% + 4px)',
     left: 0,
-    right: 0,
-    marginTop: '4px',
+    width: '100%',
+    minWidth: '260px',
     backgroundColor: 'var(--color-bg-card)',
     border: '1px solid var(--color-border)',
     borderRadius: 'var(--radius-md)',
-    boxShadow: 'var(--shadow-md)',
-    zIndex: 100,
+    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.15)',
+    zIndex: 120,
     maxHeight: '300px',
     overflow: 'hidden',
+  },
+  createBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '9px 18px',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'var(--color-primary)',
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: '13px',
+    border: 'none',
+    cursor: 'pointer',
+    height: '40px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    boxSizing: 'border-box',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
   },
   projectDropdownSearch: {
     display: 'flex',
@@ -1318,6 +1669,32 @@ const styles = {
     justifyContent: 'flex-end',
     gap: '12px',
     marginTop: '24px',
+  },
+  modalActionsEdit: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '12px',
+    marginTop: '24px',
+  },
+  modalRightActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  deleteTaskBtn: {
+    background: 'transparent',
+    color: '#ef4444',
+    border: '1px solid rgba(239, 68, 68, 0.4)',
+    padding: '10px 16px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '600',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    transition: 'all 0.2s ease',
   },
   cancelBtn: {
     background: 'transparent',

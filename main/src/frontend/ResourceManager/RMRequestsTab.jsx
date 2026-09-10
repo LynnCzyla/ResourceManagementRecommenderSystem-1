@@ -55,7 +55,8 @@ export default function RMRequestsTab() {
       'Strongly Recommended': { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)', label: 'Strongly Recommended' },
       'Recommended': { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)', label: 'Recommended' },
       'Consider': { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', label: 'Consider' },
-      'Not Recommended': { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', label: 'Not Recommended' }
+      'Not Recommended': { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', label: 'Not Recommended' },
+      'Missing Core Skills': { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.2)', label: '⚠️ Missing Core Skills' }
     };
     return statusMap[status] || { color: '#6b7280', bg: 'rgba(107, 114, 128, 0.15)', label: status || 'Unknown' };
   };
@@ -175,6 +176,15 @@ export default function RMRequestsTab() {
   
   const filteredRequests = useMemo(() => {
     return requests.filter(req => {
+      // Exclude requests for completed/archived projects
+      if (req.projectStatus === 'Completed' || req.projectStatus === 'Archived') {
+        return false;
+      }
+      const statusLower = (req.status || '').toLowerCase();
+      // Exclude Cancelled / Canceled / Completed / Done requests unless explicitly filtered
+      if (['cancelled', 'canceled', 'completed', 'done'].includes(statusLower) && statusFilter !== req.status) {
+        return false;
+      }
       const matchesSearch =
         req.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.role_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -186,7 +196,7 @@ export default function RMRequestsTab() {
       const matchesUnassigned = showUnassignedOnly ? !isFullyAssigned : true;
       return matchesSearch && matchesStatus && matchesUnassigned;
     });
-  }, [requests, searchQuery, statusFilter, showUnassignedOnly]);
+  }, [requests, searchQuery, statusFilter, showUnassignedOnly, assignments]);
 
   const groupedProjects = useMemo(
     () => groupRequestsByProject(filteredRequests),
@@ -210,6 +220,11 @@ export default function RMRequestsTab() {
   
   useEffect(() => {
     fetchData();
+    const handleUpdate = () => {
+      fetchData();
+    };
+    window.addEventListener('rmDataUpdated', handleUpdate);
+    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
   }, []);
 
   useEffect(() => {
@@ -267,6 +282,7 @@ export default function RMRequestsTab() {
       });
       await fetchData();
       setActiveRequestDetails(null);
+      window.dispatchEvent(new CustomEvent('rmDataUpdated'));
       showSuccessAlert(`Allocated ${candidate.name} to ${request.projectName}`);
     } catch (error) {
       console.error('Error allocating:', error);
@@ -450,7 +466,9 @@ export default function RMRequestsTab() {
           <div style={styles.requestList}>
             {groupedProjects.length === 0 ? (
               <div style={styles.emptyState}>
-                {showUnassignedOnly ? 'No unassigned requests found.' : 'No requests found.'}
+                {showUnassignedOnly 
+                  ? 'No unassigned requests found.' 
+                  : 'No pending resource requests. All active requirements have been allocated or projects are completed.'}
               </div>
             ) : (
               groupedProjects.map(project => {
@@ -728,6 +746,49 @@ export default function RMRequestsTab() {
                             <div style={styles.recName}>{rec.employee.name}</div>
                             <div style={styles.recRole}>{rec.employee.role || 'Employee'}</div>
                             <div style={styles.recDepartment}>{rec.employee.department || ''}</div>
+                            {/* Score & Workload Pills */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                backgroundColor: rec.missingCoreSkills
+                                  ? 'rgba(239, 68, 68, 0.15)'
+                                  : (rec.score >= 70 ? 'rgba(34, 197, 94, 0.15)' : rec.score >= 40 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)'),
+                                color: rec.missingCoreSkills
+                                  ? '#ef4444'
+                                  : (rec.score >= 70 ? '#22c55e' : rec.score >= 40 ? '#3b82f6' : '#f59e0b')
+                              }}>
+                                {rec.score}% Score
+                              </span>
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: '500',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                backgroundColor: (rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0) >= 8
+                                  ? 'rgba(239, 68, 68, 0.12)'
+                                  : 'rgba(107, 114, 128, 0.12)',
+                                color: (rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0) >= 8
+                                  ? '#ef4444'
+                                  : 'var(--color-text-muted)'
+                              }}>
+                                {rec.breakdown?.availability?.status || 'Available'} ({rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0} pts)
+                              </span>
+                              {rec.breakdown?.primarySkills?.fulfillment && (
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: '600',
+                                  padding: '2px 6px',
+                                  borderRadius: '8px',
+                                  backgroundColor: rec.missingCoreSkills ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                                  color: rec.missingCoreSkills ? '#ef4444' : '#22c55e'
+                                }}>
+                                  Core: {rec.breakdown.primarySkills.fulfillment}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div style={styles.recStatus}>
                             <span style={{
@@ -743,39 +804,123 @@ export default function RMRequestsTab() {
                           </div>
                         </div>
 
-                        {rec.matchedSkills && rec.matchedSkills.length > 0 && (
-                          <div style={styles.recSkills}>
-                            <span style={styles.skillsLabel}>Matched Skills:</span>
-                            {rec.matchedSkills.slice(0, 4).map((skill, i) => (
-                              <span key={i} style={styles.matchingSkill}>
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
-                                  <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                                {skill}
-                              </span>
-                            ))}
-                            {rec.matchedSkills.length > 4 && (
-                              <span style={styles.moreSkills}>+{rec.matchedSkills.length - 4} more</span>
+                        {/* Explainable Skill Breakdown */}
+                        {rec.breakdown ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '6px 0' }}>
+                            {/* Required / Primary Skills */}
+                            {((rec.breakdown.primarySkills?.matched?.length || 0) > 0 || (rec.breakdown.primarySkills?.missing?.length || 0) > 0) && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                                <span style={{ ...styles.skillsLabel, fontWeight: '700', color: 'var(--color-text-primary)' }}>
+                                  Required:
+                                </span>
+                                {rec.breakdown.primarySkills?.matched?.map((skill, i) => {
+                                  const md = rec.breakdown?.matchDetails?.find(m => m.required?.toLowerCase() === skill?.toLowerCase());
+                                  const tooltip = md ? (md.type === 'alias' ? `Matched via alias: ${md.matchedWith} → ${skill}` : md.type === 'exact' ? 'Exact match' : `Matched via ${md.type}: ${md.matchedWith}`) : 'Primary requirement met';
+                                  return (
+                                    <span key={`p-m-${i}`} style={styles.matchingSkill} title={tooltip}>
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '3px' }}>
+                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                      </svg>
+                                      {skill}
+                                    </span>
+                                  );
+                                })}
+                                {rec.breakdown.primarySkills?.missing?.map((skill, i) => (
+                                  <span key={`p-miss-${i}`} style={{
+                                    ...styles.missingSkill,
+                                    border: '1px dashed #ef4444',
+                                    fontWeight: '600'
+                                  }} title="Missing mandatory prerequisite">
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '3px' }}>
+                                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                    {skill}
+                                  </span>
+                                ))}
+                              </div>
                             )}
-                          </div>
-                        )}
 
-                        {rec.missingSkills && rec.missingSkills.length > 0 && (
-                          <div style={styles.missingSkillsContainer}>
-                            <span style={styles.skillsLabel}>Missing Skills:</span>
-                            {rec.missingSkills.slice(0, 3).map((skill, i) => (
-                              <span key={i} style={styles.missingSkill}>
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
-                                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                                {skill.skill}
-                              </span>
-                            ))}
-                            {rec.missingSkills.length > 3 && (
-                              <span style={styles.moreSkills}>+{rec.missingSkills.length - 3} more</span>
+                            {/* Secondary / Nice-to-Have Skills */}
+                            {((rec.breakdown.secondarySkills?.matched?.length || 0) > 0 || (rec.breakdown.secondarySkills?.missing?.length || 0) > 0) && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                                <span style={styles.skillsLabel}>
+                                  Bonus:
+                                </span>
+                                {rec.breakdown.secondarySkills?.matched?.map((skill, i) => {
+                                  const md = rec.breakdown?.matchDetails?.find(m => m.required?.toLowerCase() === skill?.toLowerCase());
+                                  const tooltip = md ? (md.type === 'alias' ? `Matched via alias: ${md.matchedWith} → ${skill}` : md.type === 'exact' ? 'Exact match' : `Matched via ${md.type}: ${md.matchedWith}`) : 'Secondary skill bonus';
+                                  return (
+                                    <span key={`s-m-${i}`} style={{
+                                      fontSize: '10px',
+                                      color: '#3b82f6',
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                      padding: '2px 8px',
+                                      borderRadius: '4px',
+                                      fontWeight: '500'
+                                    }} title={tooltip}>
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '3px' }}>
+                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                      </svg>
+                                      {skill}
+                                    </span>
+                                  );
+                                })}
+                                {rec.breakdown.secondarySkills?.missing?.slice(0, 3).map((skill, i) => (
+                                  <span key={`s-miss-${i}`} style={{
+                                    fontSize: '10px',
+                                    color: 'var(--color-text-muted)',
+                                    backgroundColor: 'rgba(107, 114, 128, 0.08)',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px'
+                                  }} title="Optional skill not possessed">
+                                    {skill}
+                                  </span>
+                                ))}
+                                {(rec.breakdown.secondarySkills?.missing?.length || 0) > 3 && (
+                                  <span style={styles.moreSkills}>+{(rec.breakdown.secondarySkills.missing.length - 3)} more</span>
+                                )}
+                              </div>
                             )}
                           </div>
+                        ) : (
+                          /* Fallback when breakdown is absent */
+                          <>
+                            {rec.matchedSkills && rec.matchedSkills.length > 0 && (
+                              <div style={styles.recSkills}>
+                                <span style={styles.skillsLabel}>Matched Skills:</span>
+                                {rec.matchedSkills.slice(0, 4).map((skill, i) => (
+                                  <span key={i} style={styles.matchingSkill}>
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
+                                      <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                    {skill}
+                                  </span>
+                                ))}
+                                {rec.matchedSkills.length > 4 && (
+                                  <span style={styles.moreSkills}>+{rec.matchedSkills.length - 4} more</span>
+                                )}
+                              </div>
+                            )}
+
+                            {rec.missingSkills && rec.missingSkills.length > 0 && (
+                              <div style={styles.missingSkillsContainer}>
+                                <span style={styles.skillsLabel}>Missing Skills:</span>
+                                {rec.missingSkills.slice(0, 3).map((skill, i) => (
+                                  <span key={i} style={styles.missingSkill}>
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '4px' }}>
+                                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                    {typeof skill === 'object' ? skill.skill : skill}
+                                  </span>
+                                ))}
+                                {rec.missingSkills.length > 3 && (
+                                  <span style={styles.moreSkills}>+{rec.missingSkills.length - 3} more</span>
+                                )}
+                              </div>
+                            )}
+                          </>
                         )}
 
                         <div style={styles.recActions}>

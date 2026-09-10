@@ -224,6 +224,15 @@ const verifyToken = async (req, res, next) => {
       });
     }
 
+    // ✅ Enforce active account status — immediate real-time session invalidation
+    if (profile.status === 'Locked' || profile.status === 'Inactive' || profile.status === 'Deactivated') {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_LOCKED_OR_INACTIVE',
+        message: `Your account is ${profile.status.toLowerCase()}. Access is restricted. Please contact your administrator.`
+      });
+    }
+
     // ✅ Only check session timeout if not already checked
     if (!req._sessionChecked && !req.path.includes('/assets/') && !req.path.includes('/images/')) {
       const sessionTimeout = await getSessionTimeout();
