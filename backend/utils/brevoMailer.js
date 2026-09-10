@@ -12,7 +12,6 @@
 // getLogoDataUri() below.
 
 const fs = require("fs");
-const path = require("path");
 
 const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
@@ -125,33 +124,27 @@ const sendMail = async ({ from, to, subject, html, text, attachments }) => {
   }
 };
 
-// Reads the WEA logo from disk and returns it as a base64 data URI, for
-// embedding directly in <img src="..."> since Brevo can't do inline cid
-// attachments. Cached after first read.
-let cachedLogoDataUri = null;
-const getLogoDataUri = () => {
-  if (cachedLogoDataUri) return cachedLogoDataUri;
-  try {
-    const logoPath = path.join(__dirname, "../../main/src/assets/WEA_logo_bgremoved.png");
-    if (fs.existsSync(logoPath)) {
-      const base64 = fs.readFileSync(logoPath).toString("base64");
-      cachedLogoDataUri = `data:image/png;base64,${base64}`;
-      return cachedLogoDataUri;
-    }
-    console.error("❌ Logo file NOT FOUND for data URI embed:", logoPath);
-  } catch (error) {
-    console.error("❌ Could not create logo data URI:", error.message);
+// Public URL of the logo, served by Vercel as a static asset from main/public/.
+// Using a hosted URL instead of embedding the image as base64 keeps the
+// email small — Gmail (and other clients) clip/truncate emails around
+// ~102KB, and a base64-embedded PNG easily pushes an HTML email past that,
+// breaking the image and cutting off content ("[Message clipped]").
+const getLogoUrl = () => {
+  const appUrl = (process.env.APP_URL || "").replace(/\/+$/, "");
+  if (!appUrl) {
+    console.warn("⚠️ APP_URL not set — logo image link in emails will be broken");
+    return null;
   }
-  return null;
+  return `${appUrl}/wea-logo.png`;
 };
 
 // Ready-to-use <img> (or text fallback) HTML for email headers.
 const getLogoHtml = () => {
-  const dataUri = getLogoDataUri();
-  if (dataUri) {
-    return `<img src="${dataUri}" alt="WEA Logo" style="height: 65px; object-fit: contain; display: inline-block; max-width: 200px;" />`;
+  const logoUrl = getLogoUrl();
+  if (logoUrl) {
+    return `<img src="${logoUrl}" alt="WEA Logo" style="height: 65px; object-fit: contain; display: inline-block; max-width: 200px;" />`;
   }
   return `<div style="font-size: 28px; font-weight: 800; color: #3b82f6; letter-spacing: 3px; font-family: 'Outfit', sans-serif;">WEA</div>`;
 };
 
-module.exports = { sendMail, getLogoDataUri, getLogoHtml };
+module.exports = { sendMail, getLogoUrl, getLogoHtml };

@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../../supabase");
-const { sendMail, getLogoDataUri } = require("../../utils/brevoMailer");
+const { sendMail, getLogoUrl } = require("../../utils/brevoMailer");
 const { logAuditEvent } = require('../../utils/auditLogger');
 
 // Build and send the password-reset email via Brevo's API
@@ -20,7 +20,7 @@ const sendResetEmail = async (email, resetLink) => {
           <!-- Header -->
           <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
             <div style="margin-bottom: 16px;">
-              <img src="${getLogoDataUri()}" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
+              <img src="${getLogoUrl()}" alt="WEA Logo" style="height: 65px; object-fit: contain;" />
             </div>
             <h1 style="font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
               Reset Your Password
