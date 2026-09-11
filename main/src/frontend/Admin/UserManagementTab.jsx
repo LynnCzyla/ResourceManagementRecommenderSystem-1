@@ -43,8 +43,23 @@ const IconCreateAccount = () => (
   </svg>
 );
 
-export default function UserManagementTab({ activeSubTab: initialSubTab }) {
+const IconRefresh = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+    <polyline points="23 4 23 10 17 10"/>
+    <polyline points="1 20 1 14 7 14"/>
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+  </svg>
+);
+
+export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTabChange }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
+
+  const handleSubTabClick = (newSubTab) => {
+    setSubTab(newSubTab);
+    if (onSubTabChange) {
+      onSubTabChange(newSubTab);
+    }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(false);
@@ -1001,7 +1016,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       <div style={styles.subTabsContainer}>
         <button 
           onClick={() => {
-            setSubTab('accounts');
+            handleSubTabClick('accounts');
             fetchUsers();
           }} 
           onMouseEnter={(e) => {
@@ -1023,7 +1038,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </button>
         <button 
           onClick={() => {
-            setSubTab('create');
+            handleSubTabClick('create');
             fetchHiredEmployees();
             fetchUsers();
           }} 
@@ -1051,7 +1066,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           )}
         </button>
         <button 
-          onClick={() => setSubTab('requests')} 
+          onClick={() => handleSubTabClick('requests')} 
           onMouseEnter={(e) => {
             if (subTab !== 'requests') {
               e.currentTarget.style.background = 'var(--color-primary-light)';
@@ -1075,7 +1090,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           )}
         </button>
         <button 
-          onClick={() => setSubTab('locked')} 
+          onClick={() => handleSubTabClick('locked')} 
           onMouseEnter={(e) => {
             if (subTab !== 'locked') {
               e.currentTarget.style.background = 'var(--color-primary-light)';
@@ -1467,10 +1482,10 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             <h2 style={{ ...styles.tabSectionTitle, marginBottom: 0 }}>Locked Accounts</h2>
             <button 
               onClick={() => { fetchLockedAccounts(); fetchUsers(); }} 
-              style={styles.refreshBtn} 
+              style={{ ...styles.refreshBtn, display: 'inline-flex', alignItems: 'center', gap: '6px' }} 
               disabled={loadingLocked}
             >
-              🔄 Refresh
+              <IconRefresh /> Refresh
             </button>
           </div>
           <p style={styles.tabSectionSubtitle}>View and manage accounts locked due to failed login attempts or manual admin action.</p>
