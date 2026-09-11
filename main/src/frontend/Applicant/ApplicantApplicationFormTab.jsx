@@ -427,7 +427,7 @@ export default function ApplicantApplicationFormTab() {
                   value={formData.education}
                   onChange={(e) => setFormData({ ...formData, education: e.target.value })}
                   style={styles.formInput}
-                  placeholder="e.g., BS Computer Science, MS Data Science"
+                  placeholder="e.g., BS Civil Engineering, BS Electrical Engineering"
                 />
               </div>
               <div style={styles.formGroup}>
@@ -438,7 +438,7 @@ export default function ApplicantApplicationFormTab() {
                   value={formData.skills}
                   onChange={(e) => setFormData({ ...formData, skills: e.target.value })}
                   style={styles.formInput}
-                  placeholder="e.g., React, Node.js, Python, SQL"
+                  placeholder="e.g., CAD, Project Management, Quality Control, Documentation"
                 />
               </div>
             </div>

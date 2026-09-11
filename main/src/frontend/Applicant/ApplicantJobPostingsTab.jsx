@@ -745,7 +745,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                         value={applyForm.education}
                         onChange={(e) => setApplyForm({ ...applyForm, education: e.target.value })}
                         style={styles.input}
-                        placeholder="e.g., BS Computer Science"
+                        placeholder="e.g., BS Electrical Engineering"
                       />
                     </div>
                   </div>
@@ -757,7 +757,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                       value={applyForm.skills}
                       onChange={(e) => setApplyForm({ ...applyForm, skills: e.target.value })}
                       style={styles.input}
-                      placeholder="e.g., React, Node.js, Python"
+                      placeholder="e.g., CAD, Project Management, Quality Control, Documentation"
                     />
                   </div>
                 </div>
