@@ -8,15 +8,15 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
   return (
     <div style={styles.container}>
       {/* Header */}
-      <header style={styles.header}>
-        <div style={styles.headerLeft}>
+      <header className="applicant-header" style={styles.header}>
+        <div className="applicant-header-left" style={styles.headerLeft}>
           <img src={weaLogo} alt="WEA Logo" style={styles.logo} />
           <div style={styles.headerTitle}>
             <h1 style={styles.title}>WEA Careers</h1>
             <p style={styles.subtitle}>Find your next opportunity</p>
           </div>
         </div>
-        <div style={styles.headerRight}>
+        <div className="applicant-header-right" style={styles.headerRight}>
           <button
             onClick={() => setShowMyApplications(!showMyApplications)}
             style={{
@@ -56,7 +56,7 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
       </header>
 
       {/* Main Content */}
-      <main style={styles.main}>
+      <main className="applicant-main-container" style={styles.main}>
         <ApplicantJobPostingsTab showMyApplications={showMyApplications} />
       </main>
     </div>

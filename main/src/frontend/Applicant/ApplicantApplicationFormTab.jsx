@@ -295,7 +295,7 @@ export default function ApplicantApplicationFormTab() {
           </div>
         </>
       ) : (
-        <div className="glass-card" style={styles.formCard}>
+        <div className="glass-card applicant-modal" style={styles.formCard}>
           <div style={styles.formHeader}>
             <h2 style={styles.formTitle}>Job Application Form</h2>
             <button onClick={() => { setShowForm(false); resetForm(); }} style={styles.cancelFormBtn}>
