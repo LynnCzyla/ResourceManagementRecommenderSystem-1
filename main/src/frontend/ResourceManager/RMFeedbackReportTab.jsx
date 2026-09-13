@@ -31,7 +31,7 @@ export default function RMFeedbackReportTab() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({ projectId: '', pmId: '', empId: '', feedbackSource: '' });
-  const [expandedId, setExpandedId] = useState(null);
+  const [selectedRecord, setSelectedRecord] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -81,7 +81,7 @@ export default function RMFeedbackReportTab() {
           value={filters.empId}
           onChange={(e) => handleFilterChange('empId', e.target.value)}
         />
-        <button style={styles.select} onClick={load}>Apply Filters</button>
+        <button style={{ ...styles.select, cursor: 'pointer' }} onClick={load}>Apply Filters</button>
       </div>
 
       <div className="glass-card" style={styles.card}>
@@ -99,94 +99,238 @@ export default function RMFeedbackReportTab() {
                 <th style={styles.th}>Rating</th>
                 <th style={styles.th}>Status</th>
                 <th style={styles.th}>Date</th>
-                <th style={styles.th}></th>
+                <th style={styles.th}>Action</th>
               </tr>
             </thead>
             <tbody>
               {records.map(r => (
-                <React.Fragment key={r.id}>
-                  <tr>
-                    <td style={styles.td}>
-                      {r.subjectName}
-                      <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{r.subjectRole}</div>
-                    </td>
-                    <td style={styles.td}>{r.projectName}</td>
-                    <td style={styles.td}>
-                      <span style={styles.badge(r.evaluatorSource)}>
-                        {r.evaluatorSource === 'merged' ? 'PM & Client (Merged)' : r.evaluatorSource === 'client' ? `Client (${r.evaluatorName})` : `PM (${r.evaluatorName})`}
-                      </span>
-                    </td>
-                    <td style={styles.td}>{r.rating ?? '—'}/5</td>
-                    <td style={styles.td}>{r.status}</td>
-                    <td style={styles.td}>{r.ratedAt ? new Date(r.ratedAt).toLocaleDateString() : '—'}</td>
-                    <td style={styles.td}>
-                      <button
-                        style={{ ...styles.select, padding: '4px 10px', fontSize: 12 }}
-                        onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
-                      >
-                        {expandedId === r.id ? 'Hide' : 'Details'}
-                      </button>
-                    </td>
-                  </tr>
-                  {expandedId === r.id && (
-                    <tr style={styles.expandRow}>
-                      <td colSpan={7} style={styles.expandCell}>
-                        {r.isMerged ? (
-                          <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
-                            {/* Client Evaluation */}
-                            <div style={{ flex: '1 1 300px', padding: '12px', borderRight: '1px solid var(--color-border)' }}>
-                              <h4 style={{ margin: '0 0 8px 0', color: '#3b82f6', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>
-                                Client Evaluation ({r.client?.evaluatorName})
-                              </h4>
-                              <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>Rating: {r.client?.rating}/5</div>
-                              {r.client?.strengths && <div style={{ marginBottom: '6px' }}><strong>Strengths:</strong> {r.client?.strengths}</div>}
-                              {r.client?.areasForImprovement && <div style={{ marginBottom: '6px' }}><strong>Areas for Improvement:</strong> {r.client?.areasForImprovement}</div>}
-                              {r.client?.clientFeedback && <div><strong>Feedback:</strong> {r.client?.clientFeedback}</div>}
-                            </div>
-                            
-                            {/* PM Evaluation */}
-                            <div style={{ flex: '1 1 300px', padding: '12px' }}>
-                              <h4 style={{ margin: '0 0 8px 0', color: '#10b981', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>
-                                PM Evaluation ({r.pm?.evaluatorName})
-                              </h4>
-                              <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>Rating: {r.pm?.rating}/5</div>
-                              {r.pm?.strengths && <div style={{ marginBottom: '6px' }}><strong>Strengths:</strong> {r.pm?.strengths}</div>}
-                              {r.pm?.areasForImprovement && <div style={{ marginBottom: '6px' }}><strong>Areas for Improvement:</strong> {r.pm?.areasForImprovement}</div>}
-                              {r.pm?.pmAssessment && <div><strong>Assessment:</strong> {r.pm?.pmAssessment}</div>}
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ padding: '12px' }}>
-                            <h4 style={{ margin: '0 0 8px 0', color: r.evaluatorSource === 'client' ? '#3b82f6' : '#10b981', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>
-                              {r.evaluatorSource === 'client' ? `Client Evaluation (${r.evaluatorName})` : `PM Evaluation (${r.evaluatorName})`}
-                            </h4>
-                            {r.client && (
-                              <>
-                                <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>Rating: {r.client.rating}/5</div>
-                                {r.client.strengths && <div style={{ marginBottom: '6px' }}><strong>Strengths:</strong> {r.client.strengths}</div>}
-                                {r.client.areasForImprovement && <div style={{ marginBottom: '6px' }}><strong>Areas for Improvement:</strong> {r.client.areasForImprovement}</div>}
-                                {r.client.clientFeedback && <div><strong>Feedback:</strong> {r.client.clientFeedback}</div>}
-                              </>
-                            )}
-                            {r.pm && (
-                              <>
-                                <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>Rating: {r.pm.rating}/5</div>
-                                {r.pm.strengths && <div style={{ marginBottom: '6px' }}><strong>Strengths:</strong> {r.pm.strengths}</div>}
-                                {r.pm.areasForImprovement && <div style={{ marginBottom: '6px' }}><strong>Areas for Improvement:</strong> {r.pm.areasForImprovement}</div>}
-                                {r.pm.pmAssessment && <div><strong>Assessment:</strong> {r.pm.pmAssessment}</div>}
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
+                <tr key={r.id}>
+                  <td style={styles.td}>
+                    {r.subjectName}
+                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{r.subjectRole}</div>
+                  </td>
+                  <td style={styles.td}>{r.projectName}</td>
+                  <td style={styles.td}>
+                    <span style={styles.badge(r.evaluatorSource)}>
+                      {r.evaluatorSource === 'merged' ? 'PM & Client (Merged)' : r.evaluatorSource === 'client' ? `Client (${r.evaluatorName})` : `PM (${r.evaluatorName})`}
+                    </span>
+                  </td>
+                  <td style={styles.td}>{r.rating ?? '—'}/5</td>
+                  <td style={styles.td}>{r.status}</td>
+                  <td style={styles.td}>{r.ratedAt ? new Date(r.ratedAt).toLocaleDateString() : '—'}</td>
+                  <td style={styles.td}>
+                    <button
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        border: '1px solid var(--color-border)',
+                        background: 'var(--color-primary-light)',
+                        color: 'var(--color-primary)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                      onClick={() => setSelectedRecord(r)}
+                    >
+                      Details
+                    </button>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* ── Feedback Details Modal ── */}
+      {selectedRecord && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '20px',
+          }}
+          onClick={() => setSelectedRecord(null)}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: '100%',
+              maxWidth: selectedRecord.isMerged ? '800px' : '550px',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              padding: '28px',
+              borderRadius: '16px',
+              boxShadow: 'var(--shadow-lg)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--color-border)', paddingBottom: '14px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: '700', color: 'var(--color-text-primary)' }}>
+                  Feedback Details
+                </h3>
+                <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                  {selectedRecord.subjectName} ({selectedRecord.subjectRole}) • {selectedRecord.projectName}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedRecord(null)}
+                style={{ background: 'transparent', border: 'none', fontSize: '24px', color: 'var(--color-text-muted)', cursor: 'pointer', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            {selectedRecord.isMerged ? (
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+                {/* Client Evaluation */}
+                <div style={{ flex: '1 1 320px', padding: '16px', borderRadius: '12px', background: 'rgba(59, 130, 246, 0.06)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', color: '#3b82f6', fontSize: '16px', borderBottom: '1px solid rgba(59, 130, 246, 0.2)', paddingBottom: '8px' }}>
+                    Client Evaluation ({selectedRecord.client?.evaluatorName})
+                  </h4>
+                  <div style={{ marginBottom: '10px', fontSize: '15px', fontWeight: 'bold', color: 'var(--color-text-primary)' }}>
+                    Rating: <span style={{ color: '#3b82f6' }}>{selectedRecord.client?.rating}/5</span>
+                  </div>
+                  {selectedRecord.client?.strengths && (
+                    <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      <strong style={{ color: 'var(--color-text-secondary)' }}>Strengths:</strong>
+                      <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.client?.strengths}</p>
+                    </div>
+                  )}
+                  {selectedRecord.client?.areasForImprovement && (
+                    <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      <strong style={{ color: 'var(--color-text-secondary)' }}>Areas for Improvement:</strong>
+                      <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.client?.areasForImprovement}</p>
+                    </div>
+                  )}
+                  {selectedRecord.client?.clientFeedback && (
+                    <div style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      <strong style={{ color: 'var(--color-text-secondary)' }}>Feedback:</strong>
+                      <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.client?.clientFeedback}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* PM Evaluation */}
+                <div style={{ flex: '1 1 320px', padding: '16px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', color: '#10b981', fontSize: '16px', borderBottom: '1px solid rgba(16, 185, 129, 0.2)', paddingBottom: '8px' }}>
+                    PM Evaluation ({selectedRecord.pm?.evaluatorName})
+                  </h4>
+                  <div style={{ marginBottom: '10px', fontSize: '15px', fontWeight: 'bold', color: 'var(--color-text-primary)' }}>
+                    Rating: <span style={{ color: '#10b981' }}>{selectedRecord.pm?.rating}/5</span>
+                  </div>
+                  {selectedRecord.pm?.strengths && (
+                    <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      <strong style={{ color: 'var(--color-text-secondary)' }}>Strengths:</strong>
+                      <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.pm?.strengths}</p>
+                    </div>
+                  )}
+                  {selectedRecord.pm?.areasForImprovement && (
+                    <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      <strong style={{ color: 'var(--color-text-secondary)' }}>Areas for Improvement:</strong>
+                      <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.pm?.areasForImprovement}</p>
+                    </div>
+                  )}
+                  {selectedRecord.pm?.pmAssessment && (
+                    <div style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      <strong style={{ color: 'var(--color-text-secondary)' }}>Assessment:</strong>
+                      <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.pm?.pmAssessment}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '16px', borderRadius: '12px', background: selectedRecord.evaluatorSource === 'client' ? 'rgba(59, 130, 246, 0.06)' : 'rgba(16, 185, 129, 0.06)', border: `1px solid ${selectedRecord.evaluatorSource === 'client' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}` }}>
+                <h4 style={{ margin: '0 0 12px 0', color: selectedRecord.evaluatorSource === 'client' ? '#3b82f6' : '#10b981', fontSize: '16px', borderBottom: `1px solid ${selectedRecord.evaluatorSource === 'client' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`, paddingBottom: '8px' }}>
+                  {selectedRecord.evaluatorSource === 'client' ? `Client Evaluation (${selectedRecord.evaluatorName})` : `PM Evaluation (${selectedRecord.evaluatorName})`}
+                </h4>
+                {selectedRecord.client && (
+                  <>
+                    <div style={{ marginBottom: '10px', fontSize: '15px', fontWeight: 'bold', color: 'var(--color-text-primary)' }}>
+                      Rating: <span style={{ color: '#3b82f6' }}>{selectedRecord.client.rating}/5</span>
+                    </div>
+                    {selectedRecord.client.strengths && (
+                      <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                        <strong style={{ color: 'var(--color-text-secondary)' }}>Strengths:</strong>
+                        <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.client.strengths}</p>
+                      </div>
+                    )}
+                    {selectedRecord.client.areasForImprovement && (
+                      <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                        <strong style={{ color: 'var(--color-text-secondary)' }}>Areas for Improvement:</strong>
+                        <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.client.areasForImprovement}</p>
+                      </div>
+                    )}
+                    {selectedRecord.client.clientFeedback && (
+                      <div style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                        <strong style={{ color: 'var(--color-text-secondary)' }}>Feedback:</strong>
+                        <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.client.clientFeedback}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+                {selectedRecord.pm && (
+                  <>
+                    <div style={{ marginBottom: '10px', fontSize: '15px', fontWeight: 'bold', color: 'var(--color-text-primary)' }}>
+                      Rating: <span style={{ color: '#10b981' }}>{selectedRecord.pm.rating}/5</span>
+                    </div>
+                    {selectedRecord.pm.strengths && (
+                      <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                        <strong style={{ color: 'var(--color-text-secondary)' }}>Strengths:</strong>
+                        <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.pm.strengths}</p>
+                      </div>
+                    )}
+                    {selectedRecord.pm.areasForImprovement && (
+                      <div style={{ marginBottom: '10px', fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                        <strong style={{ color: 'var(--color-text-secondary)' }}>Areas for Improvement:</strong>
+                        <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.pm.areasForImprovement}</p>
+                      </div>
+                    )}
+                    {selectedRecord.pm.pmAssessment && (
+                      <div style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                        <strong style={{ color: 'var(--color-text-secondary)' }}>Assessment:</strong>
+                        <p style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{selectedRecord.pm.pmAssessment}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Modal Footer */}
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setSelectedRecord(null)}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-primary)',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

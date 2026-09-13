@@ -481,8 +481,8 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     <div style={styles.container}>
       {error && <div style={styles.errorBanner}>{error}</div>}
 
-      <div style={styles.searchSection}>
-        <div style={styles.searchBar}>
+      <div className="applicant-search-section" style={styles.searchSection}>
+        <div className="applicant-search-bar" style={styles.searchBar}>
           <svg style={styles.searchIcon} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -527,8 +527,8 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
           </div>
         ) : (
           filteredPostings.map(posting => (
-            <div key={posting.id} className="glass-card" style={styles.jobCard}>
-              <div style={styles.jobCardHeader}>
+            <div key={posting.id} className="glass-card applicant-job-card" style={styles.jobCard}>
+              <div className="applicant-job-card-header" style={styles.jobCardHeader}>
                 <div style={styles.jobCardLeft}>
                   <h3 style={styles.jobTitle}>{posting.title}</h3>
                   <div style={styles.jobMeta}>
@@ -539,13 +539,13 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                     <span style={styles.jobMetaItem}>{posting.employmentType}</span>
                   </div>
                 </div>
-                <div style={styles.jobCardRight}>
+                <div className="applicant-job-card-right" style={styles.jobCardRight}>
                   <span style={styles.salary}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}/mo</span>
                   <span style={styles.postedDate}>Posted {posting.postedDate}</span>
                 </div>
               </div>
               <p style={styles.jobDescription}>{posting.description}</p>
-              <div style={styles.jobCardFooter}>
+              <div className="applicant-job-card-footer" style={styles.jobCardFooter}>
                 <button onClick={() => openDetailsModal(posting)} style={styles.viewDetailsBtn}>
                   View Details
                 </button>
@@ -561,7 +561,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
       {/* Details Modal */}
       {showDetailsModal && selectedPosting && (
         <div style={styles.modalOverlay}>
-          <div className="glass-card" style={styles.modal}>
+          <div className="glass-card applicant-modal" style={styles.modal}>
             <div style={styles.modalHeader}>
               <h3 style={styles.modalTitle}>{selectedPosting.title}</h3>
               <button onClick={() => setShowDetailsModal(false)} style={styles.closeBtn}>×</button>
@@ -569,7 +569,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
             <div style={styles.modalBody}>
               <div style={styles.detailsSection}>
                 <h4 style={styles.detailsSectionTitle}>Job Overview</h4>
-                <div style={styles.detailsGrid}>
+                <div className="applicant-details-grid" style={styles.detailsGrid}>
                   <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Department:</span>
                     <span style={styles.detailValue}>{selectedPosting.department}</span>
@@ -631,7 +631,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
       {/* Application Form Modal */}
       {showApplicationModal && selectedPosting && (
         <div style={styles.modalOverlay}>
-          <div className="glass-card" style={styles.modal}>
+          <div className="glass-card applicant-modal" style={styles.modal}>
             <div style={styles.modalHeader}>
               <h3 style={styles.modalTitle}>Apply for {selectedPosting.title}</h3>
               <button onClick={() => setShowApplicationModal(false)} style={styles.closeBtn}>×</button>
@@ -641,7 +641,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                 {/* Form fields - same as before */}
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Personal Information</h4>
-                  <div style={styles.formGrid}>
+                  <div className="applicant-form-grid" style={styles.formGrid}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>First Name *</label>
                       <input
@@ -745,7 +745,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                         value={applyForm.education}
                         onChange={(e) => setApplyForm({ ...applyForm, education: e.target.value })}
                         style={styles.input}
-                        placeholder="e.g., BS Computer Science"
+                        placeholder="e.g., BS Electrical Engineering"
                       />
                     </div>
                   </div>
@@ -757,7 +757,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
                       value={applyForm.skills}
                       onChange={(e) => setApplyForm({ ...applyForm, skills: e.target.value })}
                       style={styles.input}
-                      placeholder="e.g., React, Node.js, Python"
+                      placeholder="e.g., CAD, Project Management, Quality Control, Documentation"
                     />
                   </div>
                 </div>
