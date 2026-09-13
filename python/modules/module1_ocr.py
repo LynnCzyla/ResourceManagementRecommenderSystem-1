@@ -141,6 +141,61 @@ class OCRProcessor:
 
         debug_print("[OCR] Starting parallel OCR...")
 
+        def _deskew(gray):
+            """Estimate and correct page skew/tilt before OCR.
+            Uses minAreaRect over foreground (text) pixels to find the
+            dominant text angle, then rotates the page to straighten it.
+            Skips correction if too little text is found or the detected
+            angle looks unreliable (avoids over-rotating near-blank pages).
+            """
+            try:
+                inv = cv2.threshold(gray, 0, 255,
+                                     cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+                coords = np.column_stack(np.where(inv > 0))
+                if coords.shape[0] < 100:
+                    return gray  # not enough text pixels to estimate angle safely
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45:
+                    angle = -(90 + angle)
+                else:
+                    angle = -angle
+                if abs(angle) < 0.1 or abs(angle) > 15:
+                    return gray  # ignore no-op or implausible angles
+                (h, w) = gray.shape[:2]
+                M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                return cv2.warpAffine(gray, M, (w, h),
+                                       flags=cv2.INTER_CUBIC,
+                                       borderMode=cv2.BORDER_REPLICATE)
+            except Exception:
+                return gray
+
+        def _ocr_with_confidence(pil_img, page_num):
+            """Run OCR and return (text, mean_word_confidence).
+            Uses image_to_data instead of image_to_string so we get a
+            per-word confidence score, AND so we can drop very-low-confidence
+            tokens (Tesseract's way of saying "I'm basically guessing here"),
+            which is what silently produced the 9000+-word garbage output on
+            a noisy page before this fix — image_to_string just joins
+            whatever Tesseract outputs, hallucinated tokens included.
+            """
+            data = pytesseract.image_to_data(
+                pil_img, config='--oem 3 --psm 6',
+                output_type=pytesseract.Output.DICT
+            )
+            words, confs = [], []
+            for word, conf in zip(data['text'], data['conf']):
+                word = word.strip()
+                try:
+                    conf = float(conf)
+                except (ValueError, TypeError):
+                    conf = -1
+                if conf >= 0:
+                    confs.append(conf)
+                if word and conf >= 40:  # discard low-confidence hallucinated tokens
+                    words.append(word)
+            mean_conf = sum(confs) / len(confs) if confs else 0.0
+            return ' '.join(words), mean_conf
+
         def _ocr_page(args):
             """Process a single page image and return (page_num, text)."""
             page_num, image = args
@@ -150,12 +205,104 @@ class OCRProcessor:
                 img_arr = np.array(image)
                 img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
                 gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-                _, binary = cv2.threshold(gray, 0, 255,
-                                          cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                pil_img = Image.fromarray(binary)
-                text = pytesseract.image_to_string(
-                    pil_img, config='--oem 3 --psm 6'
-                )
+
+                # NEW: Normalize contrast/lighting BEFORE anything else. CLAHE
+                # (adaptive histogram equalization) evens out brightness variance
+                # across the page — uneven scanner lighting, phone-camera exposure
+                # jitter — so deskew and thresholding downstream get a cleaner
+                # signal to work with instead of fighting a washed-out or muddy scan.
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                gray = clahe.apply(gray)
+
+                # Straighten the page (corrects the skew/rotation typical of
+                # scans and camera photos) before any other processing.
+                gray = _deskew(gray)
+
+                # Light denoise — smooths JPEG/scanner-sensor noise without
+                # eroding thin character strokes the way a stronger filter would.
+                gray = cv2.medianBlur(gray, 3)
+
+                # NEW: Counter-sharpen — but ONLY if the page is actually blurry.
+                # Sharpening a page that ISN'T blurry just amplifies whatever
+                # noise/texture is already there (this is what blew up cv_09:
+                # a noisy-but-not-blurry page got sharpened anyway, and the
+                # amplified noise got read as thousands of fake "words").
+                # Variance of the Laplacian is a standard blur metric — low
+                # variance means few sharp edges, i.e. the page IS blurry.
+                laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                BLUR_THRESHOLD = 150  # empirical: below this, page reads as blurry
+                if laplacian_var < BLUR_THRESHOLD:
+                    blurred = cv2.GaussianBlur(gray, (0, 0), sigmaX=3)
+                    gray = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
+                    debug_print(f"[OCR] Page {page_num}: laplacian_var={laplacian_var:.1f}, sharpened (page looked blurry)")
+                else:
+                    debug_print(f"[OCR] Page {page_num}: laplacian_var={laplacian_var:.1f}, skipped sharpening (page already sharp/noisy)")
+
+                # Upscale small/blurry pages — Tesseract reads noticeably
+                # better on higher-resolution input, especially for pages
+                # rendered at low DPI or shot at a distance.
+                h, w = gray.shape[:2]
+                if max(h, w) < 1600:
+                    scale = min(1.6, 3000 / max(h, w))
+                    gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
+                                       interpolation=cv2.INTER_CUBIC)
+
+                # Binarize. Otsu works well for evenly-lit pages, but on scans
+                # with lighting gradients CLAHE only partially corrected, it can
+                # collapse into a near-all-black or near-all-white result.
+                _, otsu_binary = cv2.threshold(gray, 0, 255,
+                                               cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                otsu_text, otsu_conf = _ocr_with_confidence(Image.fromarray(otsu_binary), page_num)
+
+                fg_ratio = np.mean(otsu_binary < 128)
+                if fg_ratio < 0.02 or fg_ratio > 0.6:
+                    # FIXED: previously this branch switched to adaptive
+                    # thresholding unconditionally whenever Otsu's foreground
+                    # ratio looked off. On a noisy/hard page, adaptive
+                    # thresholding turned background speckle into fake
+                    # "text" blobs, and Tesseract hallucinated ~9000 garbage
+                    # words from it (the cv_09 regression). Now we: (1) apply
+                    # a morphological open to strip speckle noise before OCR,
+                    # and (2) only USE the adaptive result if its mean
+                    # confidence actually beats Otsu's — otherwise we keep
+                    # the Otsu output, which is a safe fallback even if
+                    # imperfect.
+                    adaptive_binary = cv2.adaptiveThreshold(
+                        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                        cv2.THRESH_BINARY, blockSize=31, C=15
+                    )
+                    kernel = np.ones((2, 2), np.uint8)
+                    adaptive_binary = cv2.morphologyEx(adaptive_binary, cv2.MORPH_OPEN, kernel)
+                    adaptive_text, adaptive_conf = _ocr_with_confidence(Image.fromarray(adaptive_binary), page_num)
+
+                    if adaptive_conf > otsu_conf:
+                        text = adaptive_text
+                        debug_print(f"[OCR] Page {page_num}: fg_ratio={fg_ratio:.3f}, used adaptive threshold (conf {adaptive_conf:.1f} > otsu {otsu_conf:.1f})")
+                    else:
+                        text = otsu_text
+                        debug_print(f"[OCR] Page {page_num}: fg_ratio={fg_ratio:.3f}, adaptive conf ({adaptive_conf:.1f}) didn't beat otsu ({otsu_conf:.1f}) — kept otsu")
+                else:
+                    text = otsu_text
+
+                # NEW: Sanity guard — a resume page realistically has maybe
+                # 100-400 words. If the pipeline above produced something
+                # absurd (this is what happened on cv_09: 10,000+ words from
+                # one page), the CLAHE/threshold combo malfunctioned on this
+                # specific page's noise pattern. Rather than trust it, redo
+                # OCR with the simplest possible pipeline (no CLAHE, no
+                # sharpening — just deskew + Otsu) as a safe fallback.
+                MAX_SANE_WORDS_PER_PAGE = 1000
+                if len(text.split()) > MAX_SANE_WORDS_PER_PAGE:
+                    debug_print(f"[OCR] Page {page_num}: {len(text.split())} words looks like a hallucination — retrying with minimal preprocessing")
+                    safe_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                    safe_gray = _deskew(safe_gray)
+                    _, safe_binary = cv2.threshold(safe_gray, 0, 255,
+                                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    text = pytesseract.image_to_string(
+                        Image.fromarray(safe_binary), config='--oem 3 --psm 6'
+                    )
+                    debug_print(f"[OCR] Page {page_num}: fallback produced {len(text.split())} words")
+
                 debug_print(f"[OCR] Page {page_num}: {len(text)} chars")
                 return page_num, text.strip() if text else ''
             except Exception as exc:
@@ -168,7 +315,14 @@ class OCRProcessor:
 
             if is_pdf:
                 debug_print("[OCR] Converting PDF to images...")
-                images = convert_from_path(file_path, dpi=150, thread_count=4)
+                try:
+                    images = convert_from_path(file_path, dpi=200, thread_count=4)
+                except Exception as dpi_exc:
+                    # Very large page canvases at 200 DPI can trip Pillow's
+                    # decompression-bomb safety check. Fall back to the old
+                    # default rather than failing the whole document.
+                    debug_print(f"[OCR] 200 DPI conversion failed ({dpi_exc}), retrying at 150 DPI...")
+                    images = convert_from_path(file_path, dpi=150, thread_count=4)
                 debug_print(f"[OCR] Converted {len(images)} pages")
             else:
                 img = Image.open(file_path)
