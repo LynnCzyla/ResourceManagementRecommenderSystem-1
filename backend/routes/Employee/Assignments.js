@@ -157,8 +157,30 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
       });
     }
 
+    // Check if the selected date range overlaps with any existing log
+    if (startDate && endDate) {
+      const newStart = new Date(startDate + 'T00:00:00');
+      const newEnd = new Date(endDate + 'T00:00:00');
+
+      for (const log of logs) {
+        const prevStartStr = log.startDate || log.date;
+        const prevEndStr = log.endDate || log.date;
+        if (prevStartStr && prevEndStr) {
+          const pStart = new Date(prevStartStr + 'T00:00:00');
+          const pEnd = new Date(prevEndStr + 'T00:00:00');
+          if (newStart <= pEnd && newEnd >= pStart) {
+            return res.status(400).json({
+              success: false,
+              error: `The selected dates (${startDate} to ${endDate}) overlap with an already reported week (${prevStartStr} to ${prevEndStr}). Please select a subsequent week.`
+            });
+          }
+        }
+      }
+    }
+
+    const weekNumber = logs.length + 1;
     const logDate = endDate || startDate || new Date().toISOString().split('T')[0];
-    const logWeek = week || (startDate && endDate ? `${startDate} to ${endDate}` : null);
+    const logWeek = week || (startDate && endDate ? `Week ${weekNumber} (${startDate} to ${endDate})` : `Week ${weekNumber}`);
 
     const newLog = {
       id: Date.now(),
@@ -191,30 +213,49 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
 
     // ✅ Also insert into public.project_report table
     try {
-      const profile = data.profiles;
-      const employeeName = profile
-        ? [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim()
-        : 'Unassigned';
+      let employeeName = [data.profiles?.first_name, data.profiles?.last_name].filter(Boolean).join(' ').trim();
+      let projectName = data.projects?.project_name;
+      const empId = data.profile_id || req.user?.id || null;
+
+      // Fallback: if employeeName is empty, fetch directly from profiles
+      if (!employeeName && empId) {
+        const { data: prof } = await supabase.from('profiles').select('first_name, last_name').eq('id', empId).maybeSingle();
+        if (prof) {
+          employeeName = [prof.first_name, prof.last_name].filter(Boolean).join(' ').trim();
+        }
+      }
+      if (!employeeName) employeeName = 'Employee';
+
+      // Fallback: if projectName is empty, fetch directly from projects
+      if (!projectName && data.project_id) {
+        const { data: proj } = await supabase.from('projects').select('project_name').eq('id', data.project_id).maybeSingle();
+        if (proj) {
+          projectName = proj.project_name;
+        }
+      }
+      if (!projectName) projectName = 'Unnamed Project';
 
       const reportDesc = (description || '').trim() || data.description || '';
 
-      const { error: reportInsertErr } = await supabase.from('project_report').insert({
+      const { data: insertedReport, error: reportInsertErr } = await supabase.from('project_report').insert({
         task_id: data.id,
         project_id: data.project_id,
-        employee_id: data.profile_id || req.user?.id || null,
+        employee_id: empId,
         task_title: data.title,
         task_description: reportDesc,
         employee_name: employeeName,
-        project_name: data.projects?.project_name || 'Unnamed Project',
+        project_name: projectName,
         percentage: finalTotalPercentage,
         log_date: logDate,
-      });
+      }).select().single();
 
       if (reportInsertErr) {
-        console.error('Non-fatal error inserting into project_report from employee:', reportInsertErr);
+        console.error('❌ Error inserting into project_report from employee:', JSON.stringify(reportInsertErr, null, 2));
+      } else {
+        console.log('✅ Successfully inserted weekly report into project_report. ID:', insertedReport?.id);
       }
     } catch (reportInsertErr) {
-      console.error('Non-fatal error inserting into project_report from employee:', reportInsertErr);
+      console.error('❌ Exception inserting into project_report from employee:', reportInsertErr);
     }
 
     // Cross-role notification: notify PM

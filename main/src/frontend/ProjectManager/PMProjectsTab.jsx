@@ -1215,7 +1215,7 @@ export default function PMProjectsTab({ user, onNavigate }) {
                             value={res.role} 
                             onChange={(e) => handleResourceChange(index, 'role', e.target.value)} 
                             style={styles.modalInput} 
-                            placeholder="e.g., Frontend Developer"
+                            placeholder="e.g., Design Engineer, Project Engineer, CAD Operator"
                             required
                           />
                         </div>

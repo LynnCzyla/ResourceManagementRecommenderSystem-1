@@ -288,4 +288,68 @@ button:active {
 @media (max-width: 768px) {
   .stats-grid { grid-template-columns: 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }
+
+  /* ── Applicant Portal Mobile View Styles ── */
+  .applicant-header {
+    padding: 12px 16px !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+  }
+  .applicant-header-left {
+    justify-content: space-between !important;
+    width: 100% !important;
+  }
+  .applicant-header-right {
+    justify-content: space-between !important;
+    width: 100% !important;
+  }
+  .applicant-main-container {
+    padding: 16px 12px !important;
+  }
+  .applicant-search-section {
+    margin-bottom: 20px !important;
+  }
+  .applicant-search-bar input {
+    font-size: 14px !important;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+  }
+  .applicant-job-card {
+    padding: 16px !important;
+  }
+  .applicant-job-card-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .applicant-job-card-right {
+    text-align: left !important;
+    min-width: 100% !important;
+  }
+  .applicant-job-card-footer {
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  .applicant-job-card-footer button {
+    width: 100% !important;
+  }
+  .applicant-modal {
+    padding: 16px !important;
+    max-height: 95vh !important;
+    margin: 10px !important;
+    width: calc(100% - 20px) !important;
+  }
+  .applicant-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .applicant-details-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .applicant-landing-card {
+    padding: 24px 16px !important;
+  }
+  .applicant-features-grid {
+    grid-template-columns: 1fr !important;
+  }
 }

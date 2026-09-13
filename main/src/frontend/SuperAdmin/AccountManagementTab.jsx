@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 const API_BASE = `${API_BASE_URL}/api/superadmin`;
 
@@ -8,6 +9,8 @@ export default function AccountManagementTab() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('All');
@@ -45,7 +48,7 @@ export default function AccountManagementTab() {
   ];
 
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
@@ -336,6 +339,56 @@ export default function AccountManagementTab() {
     return { backgroundColor: 'rgba(107, 114, 128, 0.15)', color: '#6b7280' };
   };
 
+  const handleExport = async (format = 'pdf') => {
+    const isPdf = format === 'pdf';
+    if (isPdf) setExportingPdf(true);
+    else setExportingExcel(true);
+
+    try {
+      const headers = getAuthHeaders();
+      const params = new URLSearchParams({
+        format,
+        role: roleFilter,
+        status: statusFilter,
+        locked: lockedFilter,
+        branch_id: branchFilter,
+      });
+      if (searchQuery.trim()) {
+        params.append('search', searchQuery.trim());
+      }
+
+      const res = await fetch(`${API_BASE}/accounts/export?${params.toString()}`, {
+        headers,
+      });
+
+      if (!res.ok) {
+        let errMessage = 'Failed to export accounts';
+        try {
+          const errData = await res.json();
+          errMessage = errData.error || errData.message || errMessage;
+        } catch (_) {}
+        throw new Error(errMessage);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.download = isPdf ? `WEA_EnterpriseAccounts_${dateStr}.pdf` : `WEA_EnterpriseAccounts_${dateStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting accounts:', err);
+      showErrorAlert(err.message || 'Export failed. Please try again.');
+    } finally {
+      if (isPdf) setExportingPdf(false);
+      else setExportingExcel(false);
+    }
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -399,6 +452,73 @@ export default function AccountManagementTab() {
             <option key={b.id} value={b.id}>{b.name}</option>
           ))}
         </select>
+
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            id="btn-generate-pdf-superadmin-accounts"
+            type="button"
+            onClick={() => handleExport('pdf')}
+            disabled={exportingPdf || loading}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              background: 'linear-gradient(135deg, #0b1220 0%, #1e3a5f 100%)',
+              color: '#ffffff',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: exportingPdf || loading ? 'not-allowed' : 'pointer',
+              opacity: exportingPdf || loading ? 0.6 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'all 0.2s ease',
+            }}
+            title="Generate PDF of Enterprise Accounts"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            {exportingPdf ? 'Generating PDF...' : 'Generate PDF'}
+          </button>
+
+          <button
+            id="btn-export-excel-superadmin-accounts"
+            type="button"
+            onClick={() => handleExport('excel')}
+            disabled={exportingExcel || loading}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid #10b981',
+              background: 'linear-gradient(135deg, #065f46 0%, #059669 100%)',
+              color: '#ffffff',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: exportingExcel || loading ? 'not-allowed' : 'pointer',
+              opacity: exportingExcel || loading ? 0.6 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 4px rgba(16,185,129,0.2)',
+              transition: 'all 0.2s ease',
+            }}
+            title="Export Enterprise Accounts as Excel spreadsheet"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="8" y1="13" x2="16" y2="17" />
+              <line x1="8" y1="17" x2="16" y2="13" />
+            </svg>
+            {exportingExcel ? 'Exporting Excel...' : 'Export Excel'}
+          </button>
+        </div>
       </div>
 
       {error && <div style={styles.errorBanner}>{error}</div>}

@@ -824,7 +824,7 @@ export default function PMResourceRequestsTab({ user }) {
                             value={res.role}
                             onChange={(e) => handleResourceChange(index, 'role', e.target.value)}
                             style={styles.modalInput}
-                            placeholder="e.g., Frontend Developer"
+                            placeholder="e.g., Design Engineer, Project Engineer, CAD Operator"
                             required
                           />
                         </div>
@@ -1237,7 +1237,7 @@ const styles = {
   },
   pageBtnActive: {
     background: 'var(--color-primary)',
-    borderColor: 'var(--color-primary)',
+    border: '1px solid var(--color-primary)',
     color: '#ffffff',
     fontWeight: '700',
   },

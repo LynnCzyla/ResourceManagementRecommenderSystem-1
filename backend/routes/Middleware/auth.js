@@ -132,15 +132,23 @@ const verifyToken = async (req, res, next) => {
     }
 
     const authHeader = req.headers.authorization;
-    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ 
         success: false, 
-        message: 'No token provided' 
+        message: 'No token provided',
+        error: 'No token provided'
       });
     }
 
     const token = authHeader.split(' ')[1];
+
+    if (!token || token === 'null' || token === 'undefined') {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'No token provided',
+        error: 'No token provided'
+      });
+    }
 
     // Check if it is a local dev/testing token
     if (token && token.startsWith('hr-token-')) {
@@ -220,7 +228,8 @@ const verifyToken = async (req, res, next) => {
       console.error('❌ Profile not found for user:', userId);
       return res.status(401).json({
         success: false,
-        message: 'User profile not found'
+        message: 'User profile not found',
+        error: 'User profile not found'
       });
     }
 

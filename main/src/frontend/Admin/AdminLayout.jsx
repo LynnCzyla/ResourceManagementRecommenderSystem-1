@@ -176,13 +176,13 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme, onPro
       case 'dashboard':
         return <DashboardTab setActiveTab={setActiveTab} setUserMgmtOpen={setUserMgmtOpen} />;
       case 'user-accounts':
-        return <UserManagementTab activeSubTab="accounts" />;
+        return <UserManagementTab activeSubTab="accounts" onSubTabChange={(sub) => handleNavClick(sub === 'accounts' ? 'user-accounts' : sub === 'create' ? 'create-accounts' : sub === 'requests' ? 'contact-requests' : 'locked-accounts')} />;
       case 'create-accounts':
-        return <UserManagementTab activeSubTab="create" />;
+        return <UserManagementTab activeSubTab="create" onSubTabChange={(sub) => handleNavClick(sub === 'accounts' ? 'user-accounts' : sub === 'create' ? 'create-accounts' : sub === 'requests' ? 'contact-requests' : 'locked-accounts')} />;
       case 'contact-requests':
-        return <UserManagementTab activeSubTab="requests" />;
+        return <UserManagementTab activeSubTab="requests" onSubTabChange={(sub) => handleNavClick(sub === 'accounts' ? 'user-accounts' : sub === 'create' ? 'create-accounts' : sub === 'requests' ? 'contact-requests' : 'locked-accounts')} />;
       case 'locked-accounts':
-        return <UserManagementTab activeSubTab="locked" />;
+        return <UserManagementTab activeSubTab="locked" onSubTabChange={(sub) => handleNavClick(sub === 'accounts' ? 'user-accounts' : sub === 'create' ? 'create-accounts' : sub === 'requests' ? 'contact-requests' : 'locked-accounts')} />;
       case 'audit-logs':
         return <LogsTab />; // ✅ Admins can see their branch logs
       case 'departments':

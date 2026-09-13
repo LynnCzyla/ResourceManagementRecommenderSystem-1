@@ -84,7 +84,7 @@ export default function ApplicantPortal({ isDark, toggleTheme }) {
         </label>
       </div>
 
-      <div className="glass-card" style={styles.card}>
+      <div className="glass-card applicant-landing-card" style={styles.card}>
         <div style={styles.logoContainer}>
           <img src={weaLogo} alt="WEA Logo" style={styles.logo} />
         </div>
@@ -100,7 +100,7 @@ export default function ApplicantPortal({ isDark, toggleTheme }) {
           </p>
         </div>
 
-        <div style={styles.features}>
+        <div className="applicant-features-grid" style={styles.features}>
           <div style={styles.feature}>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" style={styles.featureIcon}>
               <rect x="2" y="7" width="20" height="14" rx="2"></rect>

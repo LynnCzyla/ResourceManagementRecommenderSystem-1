@@ -9,42 +9,14 @@ const supabase = require('../../supabase');
  */
 router.get('/', async (req, res) => {
   try {
-    const userId = req.user?.id;
-    const isSuperAdmin = req.user?.is_super_admin || req.user?.role === 'Super Admin' || req.user?.role === 'Admin';
-    const { projectId, employeeId } = req.query;
+    const { projectId, employeeId, startDate, endDate } = req.query;
 
-    // 1. Fetch relevant projects to determine scope if non-super-admin
-    let projectsQuery = supabase
-      .from('projects')
-      .select('id, created_by');
-
-    if (!isSuperAdmin && userId) {
-      projectsQuery = projectsQuery.eq('created_by', userId);
-    }
-
-    if (projectId) {
-      projectsQuery = projectsQuery.eq('id', projectId);
-    }
-
-    const { data: userProjects, error: projErr } = await projectsQuery;
-    if (projErr) throw projErr;
-
-    const projectIds = (userProjects || []).map(p => p.id);
-
-    if (!isSuperAdmin && projectIds.length === 0) {
-      return res.status(200).json({ success: true, data: [], count: 0 });
-    }
-
-    // 2. Query ONLY public.project_report table
+    // Query directly from public.project_report table
     let reportQuery = supabase
       .from('project_report')
       .select('*')
       .order('log_date', { ascending: false })
       .order('id', { ascending: false });
-
-    if (!isSuperAdmin && projectIds.length > 0) {
-      reportQuery = reportQuery.in('project_id', projectIds);
-    }
 
     if (projectId) {
       reportQuery = reportQuery.eq('project_id', projectId);
@@ -52,6 +24,14 @@ router.get('/', async (req, res) => {
 
     if (employeeId) {
       reportQuery = reportQuery.eq('employee_id', employeeId);
+    }
+
+    if (startDate) {
+      reportQuery = reportQuery.gte('log_date', startDate);
+    }
+
+    if (endDate) {
+      reportQuery = reportQuery.lte('log_date', endDate);
     }
 
     const { data: reports, error: repErr } = await reportQuery;

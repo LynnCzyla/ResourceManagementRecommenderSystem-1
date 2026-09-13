@@ -915,7 +915,7 @@ export default function PMProjectTrackingTab({ user }) {
                   style={styles.modalSelect}
                   required
                 >
-                  <option value="">-- Choose Developer --</option>
+                  <option value="">-- Choose Resource --</option>
                   {employees.map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
                   ))}

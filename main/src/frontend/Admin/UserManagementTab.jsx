@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
+  const token = getStoredToken();
   return {
     'Content-Type': 'application/json',
     'Authorization': token ? `Bearer ${token}` : '',
@@ -43,12 +44,29 @@ const IconCreateAccount = () => (
   </svg>
 );
 
-export default function UserManagementTab({ activeSubTab: initialSubTab }) {
+const IconRefresh = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+    <polyline points="23 4 23 10 17 10"/>
+    <polyline points="1 20 1 14 7 14"/>
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+  </svg>
+);
+
+export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTabChange }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
+
+  const handleSubTabClick = (newSubTab) => {
+    setSubTab(newSubTab);
+    if (onSubTabChange) {
+      onSubTabChange(newSubTab);
+    }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -975,6 +993,55 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   };
 
+  const handleExport = async (format = 'pdf') => {
+    const isPdf = format === 'pdf';
+    if (isPdf) setExportingPdf(true);
+    else setExportingExcel(true);
+
+    try {
+      const token = getStoredToken();
+      const params = new URLSearchParams({
+        format,
+        status: statusFilter,
+      });
+      if (searchQuery.trim()) {
+        params.append('search', searchQuery.trim());
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/users/export?${params.toString()}`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+      });
+
+      if (!res.ok) {
+        let errMessage = 'Failed to export accounts';
+        try {
+          const errData = await res.json();
+          errMessage = errData.error || errData.message || errMessage;
+        } catch (_) {}
+        throw new Error(errMessage);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.download = isPdf ? `WEA_UserAccounts_${dateStr}.pdf` : `WEA_UserAccounts_${dateStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting users:', err);
+      showErrorAlert(err.message || 'Export failed. Please try again.');
+    } finally {
+      if (isPdf) setExportingPdf(false);
+      else setExportingExcel(false);
+    }
+  };
+
   return (
     <div>
       {error && (
@@ -1001,7 +1068,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
       <div style={styles.subTabsContainer}>
         <button 
           onClick={() => {
-            setSubTab('accounts');
+            handleSubTabClick('accounts');
             fetchUsers();
           }} 
           onMouseEnter={(e) => {
@@ -1023,7 +1090,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
         </button>
         <button 
           onClick={() => {
-            setSubTab('create');
+            handleSubTabClick('create');
             fetchHiredEmployees();
             fetchUsers();
           }} 
@@ -1051,7 +1118,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           )}
         </button>
         <button 
-          onClick={() => setSubTab('requests')} 
+          onClick={() => handleSubTabClick('requests')} 
           onMouseEnter={(e) => {
             if (subTab !== 'requests') {
               e.currentTarget.style.background = 'var(--color-primary-light)';
@@ -1075,7 +1142,7 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
           )}
         </button>
         <button 
-          onClick={() => setSubTab('locked')} 
+          onClick={() => handleSubTabClick('locked')} 
           onMouseEnter={(e) => {
             if (subTab !== 'locked') {
               e.currentTarget.style.background = 'var(--color-primary-light)';
@@ -1134,6 +1201,73 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
                 <option value="Deactivated">Deactivated ({statusCounts.Deactivated})</option>
                 <option value="Pending">Pending ({statusCounts.Pending})</option>
               </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                id="btn-generate-pdf-user-accounts"
+                type="button"
+                onClick={() => handleExport('pdf')}
+                disabled={exportingPdf || loading}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #0b1220 0%, #1e3a5f 100%)',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  cursor: exportingPdf || loading ? 'not-allowed' : 'pointer',
+                  opacity: exportingPdf || loading ? 0.6 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  transition: 'all 0.2s ease',
+                }}
+                title="Generate PDF of User Accounts"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+                {exportingPdf ? 'Generating PDF...' : 'Generate PDF'}
+              </button>
+
+              <button
+                id="btn-export-excel-user-accounts"
+                type="button"
+                onClick={() => handleExport('excel')}
+                disabled={exportingExcel || loading}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid #10b981',
+                  background: 'linear-gradient(135deg, #065f46 0%, #059669 100%)',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  cursor: exportingExcel || loading ? 'not-allowed' : 'pointer',
+                  opacity: exportingExcel || loading ? 0.6 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(16,185,129,0.2)',
+                  transition: 'all 0.2s ease',
+                }}
+                title="Export User Accounts as Excel spreadsheet"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="8" y1="13" x2="16" y2="17" />
+                  <line x1="8" y1="17" x2="16" y2="13" />
+                </svg>
+                {exportingExcel ? 'Exporting Excel...' : 'Export Excel'}
+              </button>
             </div>
           </div>
 
@@ -1467,10 +1601,10 @@ export default function UserManagementTab({ activeSubTab: initialSubTab }) {
             <h2 style={{ ...styles.tabSectionTitle, marginBottom: 0 }}>Locked Accounts</h2>
             <button 
               onClick={() => { fetchLockedAccounts(); fetchUsers(); }} 
-              style={styles.refreshBtn} 
+              style={{ ...styles.refreshBtn, display: 'inline-flex', alignItems: 'center', gap: '6px' }} 
               disabled={loadingLocked}
             >
-              🔄 Refresh
+              <IconRefresh /> Refresh
             </button>
           </div>
           <p style={styles.tabSectionSubtitle}>View and manage accounts locked due to failed login attempts or manual admin action.</p>
@@ -2251,7 +2385,7 @@ const styles = {
   },
   pageBtnActive: {
     background: 'var(--color-primary)',
-    borderColor: 'var(--color-primary)',
+    border: '1px solid var(--color-primary)',
     color: '#ffffff',
   },
   pageBtnDisabled: {

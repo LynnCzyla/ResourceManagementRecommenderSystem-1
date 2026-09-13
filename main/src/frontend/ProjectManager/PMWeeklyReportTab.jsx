@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { getWeeklyReports } from './pmApi';
+import { supabase } from '../../lib/supabaseClient'; // ⬅ adjust path if your file lives elsewhere
 
 export default function PMWeeklyReportTab({ user }) {
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [sessionReady, setSessionReady] = useState(false); // ⬅ NEW
     const [loadError, setLoadError] = useState('');
     const [exporting, setExporting] = useState(false);
 
@@ -32,22 +34,63 @@ export default function PMWeeklyReportTab({ user }) {
         }
     };
 
+    // ============ Wait for Supabase session to be restored before fetching ============
+    // Without this, a page refresh (or coming back to this tab after the app
+    // remounts) can fire loadData() before Supabase finishes restoring the
+    // session from storage. The request then goes out with a missing/stale
+    // token, silently fails, and `reports` is left as [] — which is exactly
+    // the "No progress logs match your filters" symptom.
     useEffect(() => {
-        loadData();
-    }, [user]);
+        let cancelled = false;
+
+        const setupAuth = async () => {
+            const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+                if (cancelled) return;
+                if (session || localStorage.getItem('token')) {
+                    setSessionReady(true);
+                }
+            });
+
+            const { data: { session } } = await supabase.auth.getSession();
+            if (cancelled) return;
+
+            if (session || localStorage.getItem('token')) {
+                setSessionReady(true);
+            }
+
+            return () => {
+                subscription?.unsubscribe();
+            };
+        };
+
+        setupAuth();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (sessionReady) {
+            loadData();
+        }
+    }, [sessionReady, user]);
 
     // Rows mapped directly from public.project_report table records
     const reportRows = useMemo(() => {
-        return reports.map(r => ({
-            id: r.id,
-            taskTitle: r.task_title || 'Untitled Task',
-            taskDesc: r.task_description || '',
-            percentage: r.percentage != null ? r.percentage : null,
-            date: r.log_date ? new Date(r.log_date + 'T00:00:00').toLocaleDateString() : '—',
-            rawDate: r.log_date || null,
-            employee: r.employee_name || 'Unassigned',
-            project: r.project_name || 'Unnamed Project',
-        }));
+        return reports.map(r => {
+            const rawDateStr = r.log_date ? (r.log_date.includes('T') ? r.log_date.split('T')[0] : r.log_date) : '';
+            return {
+                id: r.id,
+                taskTitle: r.task_title || 'Untitled Task',
+                taskDesc: r.task_description || '',
+                percentage: r.percentage != null ? r.percentage : null,
+                date: rawDateStr ? new Date(rawDateStr + 'T00:00:00').toLocaleDateString() : '—',
+                rawDate: rawDateStr || null,
+                employee: r.employee_name || 'Unassigned',
+                project: r.project_name || 'Unnamed Project',
+            };
+        });
     }, [reports]);
 
     const employeeOptions = useMemo(() => {
@@ -350,6 +393,10 @@ export default function PMWeeklyReportTab({ user }) {
           color: var(--color-text-muted);
           border: 1px solid var(--color-border);
         }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
       `}</style>
 
             <div style={styles.header}>
@@ -358,7 +405,10 @@ export default function PMWeeklyReportTab({ user }) {
             </div>
 
             {loadError && (
-                <div className="glass-card" style={styles.errorBanner}>{loadError}</div>
+                <div className="glass-card" style={styles.errorBanner}>
+                    {loadError}
+                    <button onClick={loadData} style={styles.retryLink} className="hover-sidebar-item">Retry</button>
+                </div>
             )}
 
             <div className="glass-card" style={styles.card}>
@@ -401,8 +451,22 @@ export default function PMWeeklyReportTab({ user }) {
                         />
                     </div>
                     <button onClick={clearFilters} style={styles.clearBtn} className="hover-sidebar-item">Clear Filters</button>
-                    <button onClick={exportExcel} disabled={exporting} style={{ ...styles.exportBtn, opacity: exporting ? 0.6 : 1, cursor: exporting ? 'wait' : 'pointer' }}>
-                        {exporting ? 'Generating...' : 'Export Excel'}
+                    <button onClick={loadData} disabled={loading} style={{ ...styles.clearBtn, display: 'inline-flex', alignItems: 'center', gap: '6px' }} title="Refresh reports" className="hover-sidebar-item">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}>
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                        {loading ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                    <button onClick={exportExcel} disabled={exporting} style={{ ...styles.exportBtn, opacity: exporting ? 0.6 : 1, cursor: exporting ? 'wait' : 'pointer' }} title="Export Weekly Progress Report as Excel spreadsheet">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="8" y1="13" x2="16" y2="17" />
+                            <line x1="8" y1="17" x2="16" y2="13" />
+                        </svg>
+                        {exporting ? 'Exporting Excel...' : 'Export Excel'}
                     </button>
                 </div>
 
@@ -518,7 +582,26 @@ const styles = {
     header: { marginBottom: '8px' },
     title: { fontSize: '28px', fontWeight: '800', letterSpacing: '-0.75px', marginBottom: '4px' },
     subtitle: { fontSize: '15px', color: 'var(--color-text-secondary)' },
-    errorBanner: { padding: '12px 16px', color: 'var(--color-danger)', fontSize: '13px', fontWeight: '600' },
+    errorBanner: {
+        padding: '12px 16px',
+        color: 'var(--color-danger)',
+        fontSize: '13px',
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '12px',
+    },
+    retryLink: {
+        background: 'none',
+        border: 'none',
+        color: 'var(--color-danger)',
+        textDecoration: 'underline',
+        fontWeight: '700',
+        fontSize: '12px',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+    },
     card: { padding: '24px' },
     controls: { display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' },
     searchInput: {
@@ -531,8 +614,10 @@ const styles = {
         background: 'var(--color-bg-root)', color: 'var(--color-text-primary)', fontSize: '13px', outline: 'none',
     },
     exportBtn: {
-        padding: '8px 16px', borderRadius: 'var(--radius-md)', border: 'none',
-        backgroundColor: 'var(--color-primary)', color: '#fff', fontWeight: '700', fontSize: '13px', cursor: 'pointer',
+        padding: '8px 14px', borderRadius: 'var(--radius-md)', border: '1px solid #10b981',
+        background: 'linear-gradient(135deg, #065f46 0%, #059669 100%)', color: '#fff',
+        fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center',
+        gap: '6px', boxShadow: '0 2px 4px rgba(16,185,129,0.2)', transition: 'all 0.2s ease',
     },
     tableWrapper: { overflowX: 'auto', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', background: 'var(--color-bg-card)' },
     table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '850px' },
@@ -592,7 +677,7 @@ const styles = {
     },
     pageBtnActive: {
         background: 'var(--color-primary)',
-        borderColor: 'var(--color-primary)',
+        border: '1px solid var(--color-primary)',
         color: '#ffffff',
         fontWeight: '700',
     },

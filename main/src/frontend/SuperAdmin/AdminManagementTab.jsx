@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 const API_BASE = `${API_BASE_URL}/api/superadmin`;
 
@@ -180,13 +181,20 @@ export default function AdminManagementTab() {
     });
   };
 
+  const getAuthHeaders = () => {
+    const token = getStoredToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // ============================================
   // DATA LOADING WITH SMART CACHE
   // ============================================
 
   const loadBranches = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/branches?limit=100`);
+      const res = await fetch(`${API_BASE}/branches?limit=100`, {
+        headers: getAuthHeaders(),
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load branches');
       if (isMounted.current) {
@@ -199,12 +207,16 @@ export default function AdminManagementTab() {
 
   const loadAllEmployeeIds = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/accounts?limit=999999`);
+      const res = await fetch(`${API_BASE}/accounts?limit=999999`, {
+        headers: getAuthHeaders(),
+      });
       const json = await res.json();
       
       if (!json.success) {
         console.error('Failed to load accounts:', json.error);
-        const adminRes = await fetch(`${API_BASE}/admins?limit=999999`);
+        const adminRes = await fetch(`${API_BASE}/admins?limit=999999`, {
+          headers: getAuthHeaders(),
+        });
         const adminJson = await adminRes.json();
         if (adminJson.success) {
           const ids = adminJson.data.map(admin => admin.employee_id).filter(Boolean);
@@ -226,7 +238,9 @@ export default function AdminManagementTab() {
     } catch (err) {
       console.error('Error loading employee IDs:', err);
       try {
-        const adminRes = await fetch(`${API_BASE}/admins?limit=999999`);
+        const adminRes = await fetch(`${API_BASE}/admins?limit=999999`, {
+          headers: getAuthHeaders(),
+        });
         const adminJson = await adminRes.json();
         if (adminJson.success) {
           const ids = adminJson.data.map(admin => admin.employee_id).filter(Boolean);
@@ -302,7 +316,9 @@ export default function AdminManagementTab() {
       if (lockFilter !== '') params.set('locked', lockFilter);
       if (branchFilter) params.set('branch_id', branchFilter);
 
-      const res = await fetch(`${API_BASE}/admins?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/admins?${params.toString()}`, {
+        headers: getAuthHeaders(),
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load admins');
       
@@ -455,7 +471,7 @@ export default function AdminManagementTab() {
     try {
       const res = await fetch(`${API_BASE}/admins`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(formData),
       });
       const json = await res.json();
@@ -512,7 +528,7 @@ export default function AdminManagementTab() {
     try {
       const res = await fetch(`${API_BASE}/admins/${selectedAdmin.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(formData),
       });
       const json = await res.json();
@@ -543,7 +559,10 @@ export default function AdminManagementTab() {
     if (!result.isConfirmed) return;
 
     try {
-      const res = await fetch(`${API_BASE}/admins/${admin.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/admins/${admin.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to delete admin');
       
@@ -575,7 +594,7 @@ export default function AdminManagementTab() {
     try {
       const res = await fetch(`${API_BASE}/admins/${admin.id}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ status: newStatus }),
       });
       const json = await res.json();
@@ -603,7 +622,7 @@ export default function AdminManagementTab() {
       try {
         const res = await fetch(`${API_BASE}/admins/${admin.id}/unlock`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         });
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'Failed to unlock account');
@@ -627,7 +646,7 @@ export default function AdminManagementTab() {
       try {
         const res = await fetch(`${API_BASE}/admins/${admin.id}/lock`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         });
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'Failed to lock account');

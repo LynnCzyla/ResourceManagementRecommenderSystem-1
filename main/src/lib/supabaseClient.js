@@ -130,10 +130,38 @@ export const getCurrentUser = async () => {
   }
 };
 
+export const getStoredToken = () => {
+  try {
+    let token = localStorage.getItem('token');
+    if (token && token !== 'undefined' && token !== 'null') return token;
+    token = localStorage.getItem('access_token');
+    if (token && token !== 'undefined' && token !== 'null') return token;
+    
+    // Check Supabase session stored in localStorage
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') && key.endsWith('-auth-token'))) {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(key));
+          if (parsed?.access_token) {
+            localStorage.setItem('token', parsed.access_token);
+            return parsed.access_token;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return null;
+};
+
 export const getAuthHeaders = async () => {
   try {
-    const session = await getSession();
-    const token = session?.access_token || localStorage.getItem('token');
+    let token = getStoredToken();
+    if (!token) {
+      const session = await getSession();
+      token = session?.access_token || null;
+      if (token) localStorage.setItem('token', token);
+    }
     return {
       'Content-Type': 'application/json',
       'Authorization': token ? `Bearer ${token}` : '',

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../../config/api';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 const API_BASE = `${API_BASE_URL}/api/superadmin`;
 const ROWS_PER_PAGE = 10;
@@ -24,10 +25,11 @@ export default function SuperAdminAuditLogsTab() {
   const [totalCount, setTotalCount] = useState(0);
 
   const [stats, setStats] = useState({ total: 0, today: 0, week: 0 });
-  const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
@@ -178,11 +180,13 @@ export default function SuperAdminAuditLogsTab() {
     };
   }, [searchQuery, actionFilter, roleFilter, branchFilter, dateFilter, currentPage]);
 
-  const handleExport = async () => {
-    setExporting(true);
+  const handleExport = async (format) => {
+    const setLoading = format === 'pdf' ? setExportingPdf : setExportingExcel;
+    setLoading(true);
     try {
       const { startDate, endDate } = dateFilterToRange(dateFilter);
       const params = new URLSearchParams();
+      params.append('format', format);
       if (searchQuery.trim()) params.append('search', searchQuery.trim());
       if (actionFilter !== 'All') params.append('action', actionFilter);
       if (roleFilter !== 'All') params.append('role', roleFilter);
@@ -199,7 +203,7 @@ export default function SuperAdminAuditLogsTab() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `audit_logs_${new Date().toISOString().split('T')[0]}.csv`;
+      a.download = format === 'pdf' ? `WEA_AuditTrail_${new Date().toISOString().split('T')[0]}.pdf` : `WEA_AuditTrail_${new Date().toISOString().split('T')[0]}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -208,7 +212,7 @@ export default function SuperAdminAuditLogsTab() {
       console.error('Error exporting audit logs:', err);
       alert('Failed to export audit logs.');
     } finally {
-      setExporting(false);
+      setLoading(false);
     }
   };
 
@@ -356,13 +360,33 @@ export default function SuperAdminAuditLogsTab() {
           <option value="Last 30 Days">Last 30 Days</option>
         </select>
 
-        <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}>
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
+        <button
+          id="btn-generate-pdf-superadmin-audit"
+          style={{ ...styles.exportBtn, background: 'linear-gradient(135deg, #0b1220 0%, #1e3a5f 100%)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', opacity: exportingPdf ? 0.7 : 1, cursor: exportingPdf ? 'not-allowed' : 'pointer' }}
+          onClick={() => handleExport('pdf')}
+          disabled={exportingPdf || exportingExcel}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
           </svg>
-          {exporting ? 'Exporting...' : 'Export CSV'}
+          {exportingPdf ? 'Generating...' : 'Generate PDF'}
+        </button>
+        <button
+          id="btn-export-excel-superadmin-audit"
+          style={{ ...styles.exportBtn, background: 'linear-gradient(135deg, #15803d 0%, #166534 100%)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', opacity: exportingExcel ? 0.7 : 1, cursor: exportingExcel ? 'not-allowed' : 'pointer' }}
+          onClick={() => handleExport('excel')}
+          disabled={exportingPdf || exportingExcel}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          {exportingExcel ? 'Exporting...' : 'Export Excel'}
         </button>
       </div>
 
