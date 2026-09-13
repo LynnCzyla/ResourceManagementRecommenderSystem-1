@@ -23,9 +23,9 @@ router.use(verifyToken);
 router.get('/', async (req, res) => {
   try {
     const { search } = req.query;
-    
+
     console.log(`📋 Fetching skills (search: "${search || ''}")...`);
-    
+
     let query = supabase
       .from('skills')
       .select('id, skill_name')
@@ -81,7 +81,7 @@ router.get('/', async (req, res) => {
 router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;
-    
+
     if (!q || q.trim().length < 1) {
       return res.json({
         success: true,
