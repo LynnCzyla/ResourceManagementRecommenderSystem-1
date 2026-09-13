@@ -38,7 +38,7 @@ const getBranchName = async (branchId) => {
  */
 router.post('/utilization', async (req, res) => {
   try {
-    const { format = 'pdf', departmentFilter = null } = req.body;
+    const { format = 'pdf', departmentFilter = null, workloadFilter = null } = req.body;
     const userBranchId = req.user.branch_id;
     const isSuperAdmin = req.user.is_super_admin;
 
@@ -48,7 +48,7 @@ router.post('/utilization', async (req, res) => {
     }
 
     console.log(`📊 Generating utilization report by: ${req.user.employee_id}`);
-    console.log(`📊 Format: ${format}, Branch: ${branchName}`);
+    console.log(`📊 Format: ${format}, Branch: ${branchName}, Workload Filter: ${workloadFilter || 'All'}`);
 
     let employeeQuery = supabase
       .from('profiles')
@@ -108,6 +108,10 @@ router.post('/utilization', async (req, res) => {
 
     const activeProjects = projectsResult.data || [];
     const activeProjectIds = new Set(activeProjects.map(p => p.id));
+    const projectMap = {};
+    for (const p of activeProjects) {
+      projectMap[p.id] = p.project_name;
+    }
 
     const assignments = (assignmentsResult.data || []).filter(a => activeProjectIds.has(a.project_id));
     const tasks = (tasksResult.data || []).filter(t => activeProjectIds.has(t.project_id));
@@ -118,8 +122,14 @@ router.post('/utilization', async (req, res) => {
     console.log(`📊 Active tasks found: ${tasks.length}`);
 
     const assignmentCounts = {};
+    const employeeProjects = {};
     for (const a of assignments) {
       assignmentCounts[a.profile_id] = (assignmentCounts[a.profile_id] || 0) + 1;
+      if (!employeeProjects[a.profile_id]) employeeProjects[a.profile_id] = [];
+      const pName = projectMap[a.project_id];
+      if (pName && !employeeProjects[a.profile_id].includes(pName)) {
+        employeeProjects[a.profile_id].push(pName);
+      }
     }
 
     const taskCounts = {};
@@ -136,6 +146,8 @@ router.post('/utilization', async (req, res) => {
     const reportData = employees.map(emp => {
       const taskCount = taskCounts[emp.id] || 0;
       const assignmentCount = assignmentCounts[emp.id] || 0;
+      const assignedList = employeeProjects[emp.id] || [];
+      const assignedProjects = assignedList.length > 0 ? assignedList.join(', ') : 'Unassigned';
       const workloadScore = workloadScores[emp.id] || 0;
       
       let workloadStatus;
@@ -158,6 +170,7 @@ router.post('/utilization', async (req, res) => {
         position: emp.positions?.position_name || 'Unassigned',
         department: emp.departments?.department_name || 'Unassigned',
         departmentId: emp.departments?.id || null,
+        assignedProjects,
         assignmentCount,
         taskCount,
         workloadScore,
@@ -168,27 +181,39 @@ router.post('/utilization', async (req, res) => {
       };
     });
 
-    const finalStats = { Available: 0, 'Limited Availability': 0, 'Fully Utilized': 0 };
-    for (const emp of reportData) {
-      finalStats[emp.workloadStatus] = (finalStats[emp.workloadStatus] || 0) + 1;
-    }
-    console.log('📊 Report Workload Distribution:', finalStats);
-
     reportData.sort((a, b) => b.workloadScore - a.workloadScore);
+
+    const summaryStats = {
+      total: reportData.length,
+      available: reportData.filter(d => d.workloadStatus === 'Available').length,
+      limited: reportData.filter(d => d.workloadStatus === 'Limited Availability').length,
+      fullyLoaded: reportData.filter(d => d.workloadStatus === 'Fully Utilized').length,
+      avgUtilization: reportData.length > 0 ? Math.round(reportData.reduce((sum, d) => sum + d.utilizationRate, 0) / reportData.length) : 0,
+      avgWorkloadScore: reportData.length > 0 ? Math.round(reportData.reduce((sum, d) => sum + d.workloadScore, 0) / reportData.length) : 0,
+      activeProjectsCount: activeProjects.length,
+    };
+    console.log('📊 Report Workload Distribution:', summaryStats);
+
+    let filteredReportData = reportData;
+    if (workloadFilter && workloadFilter !== 'All') {
+      filteredReportData = reportData.filter(emp => emp.workloadStatus === workloadFilter);
+    }
 
     // ✅ Generate report based on format
     if (format === 'pdf') {
-      return await generatePDFReport(res, reportData, req.user, branchName);
+      return await generatePDFReport(res, filteredReportData, req.user, branchName, workloadFilter, summaryStats);
     } else if (format === 'excel') {
-      return await generateExcelReport(res, reportData, req.user, branchName);
+      return await generateExcelReport(res, filteredReportData, req.user, branchName, workloadFilter, summaryStats);
     } else {
       return res.json({
         success: true,
-        data: reportData,
+        data: filteredReportData,
+        summary: summaryStats,
         meta: {
-          totalEmployees: reportData.length,
+          totalEmployees: filteredReportData.length,
           generatedAt: new Date().toISOString(),
           branch: branchName,
+          filter: workloadFilter || 'All',
         }
       });
     }
@@ -290,332 +315,408 @@ router.get('/summary', async (req, res) => {
 });
 
 // ============================================
-// PDF GENERATION - FIXED SPACING
+// PDF GENERATION - EXECUTIVE WEA DESIGN
 // ============================================
-const generatePDFReport = async (res, data, user, branchName) => {
-  const doc = new PDFDocument({ margin: 40, size: 'A4' });
-  
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename=Utilization_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-  
-  doc.pipe(res);
+const generatePDFReport = async (res, data, user, branchName, workloadFilter, summaryStats) => {
+  try {
+    const doc = new PDFDocument({ margin: 35, size: 'A4', bufferPages: true });
 
-  // ✅ Header
-  doc.fontSize(20)
-     .font('Helvetica-Bold')
-     .text('Employee Utilization Report', { align: 'center' });
-  
-  doc.moveDown();
-  
-  doc.fontSize(10)
-     .font('Helvetica')
-     .text(`Generated: ${new Date().toLocaleString()}`);
-  doc.text(`Branch: ${branchName || 'All Branches'}`);
-  doc.text(`Total Employees: ${data.length}`);
-  
-  doc.moveDown();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=WEA_Utilization_Report_${new Date().toISOString().split('T')[0]}.pdf`);
 
-  // ✅ Summary Stats
-  const available = data.filter(d => d.workloadStatus === 'Available').length;
-  const limited = data.filter(d => d.workloadStatus === 'Limited Availability').length;
-  const fullyLoaded = data.filter(d => d.workloadStatus === 'Fully Utilized').length;
-  const avgUtilization = data.length > 0 ? Math.round(data.reduce((sum, d) => sum + d.utilizationRate, 0) / data.length) : 0;
-  const avgWorkloadScore = data.length > 0 ? Math.round(data.reduce((sum, d) => sum + d.workloadScore, 0) / data.length) : 0;
+    doc.pipe(res);
 
-  doc.fontSize(12)
-     .font('Helvetica-Bold')
-     .text('Summary', { underline: true });
-  
-  doc.moveDown(0.5);
-  
-  // ✅ Summary in two columns - wider labels
-  const summaryX1 = 50;
-  const summaryX2 = 220;
-  let summaryY = doc.y;
-  
-  doc.fontSize(10)
-     .font('Helvetica')
-     .text('Available:', summaryX1, summaryY, { width: 120 })
-     .text(`${available} employees`, summaryX2, summaryY, { width: 100, align: 'right' });
-  
-  summaryY += 16;
-  doc.text('Limited Availability:', summaryX1, summaryY, { width: 120 })
-     .text(`${limited} employees`, summaryX2, summaryY, { width: 100, align: 'right' });
-  
-  summaryY += 16;
-  doc.text('Fully Utilized:', summaryX1, summaryY, { width: 120 })
-     .text(`${fullyLoaded} employees`, summaryX2, summaryY, { width: 100, align: 'right' });
-  
-  summaryY += 16;
-  doc.text('Average Utilization:', summaryX1, summaryY, { width: 120 })
-     .text(`${avgUtilization}%`, summaryX2, summaryY, { width: 100, align: 'right' });
-  
-  summaryY += 16;
-  doc.text('Average Workload Score:', summaryX1, summaryY, { width: 120 })
-     .text(`${avgWorkloadScore}`, summaryX2, summaryY, { width: 100, align: 'right' });
-  
-  doc.moveDown(2);
+    const drawHeaderBanner = () => {
+      // Dark navy corporate banner
+      doc.rect(0, 0, 595.28, 50).fill('#0b1220');
+      // Gold accent bar
+      doc.rect(0, 50, 595.28, 3.5).fill('#f5b700');
 
-  // ✅ Employee Table - Wide enough for all columns
-  doc.fontSize(10)
-     .font('Helvetica-Bold')
-     .text('Employee Details', { underline: true });
-  
-  doc.moveDown(0.5);
+      doc.fillColor('#ffffff').fontSize(12.5).font('Helvetica-Bold').text('WEA  •  RESOURCE MANAGEMENT SYSTEM', 35, 14);
+      doc.fillColor('#94a3b8').fontSize(8.5).font('Helvetica').text('EMPLOYEE UTILIZATION & WORKLOAD REPORT', 35, 30);
+      doc.fillColor('#64748b').fontSize(7.5).font('Helvetica').text('CONFIDENTIAL  |  INTERNAL REPORT', 35, 20, { width: 525, align: 'right' });
+    };
 
-  // ✅ Table with wider columns
-  const col1 = 20;   // #
-  const col2 = 75;   // Employee ID
-  const col3 = 105;  // Name
-  const col4 = 95;   // Position (wider)
-  const col5 = 40;   // Score
-  const col6 = 50;   // Utilization
-  const col7 = 80;   // Status (wider)
-  
-  const yStart = doc.y;
-  
-  // ✅ Table Header with background
-  const headerY = yStart;
-  doc.rect(30, headerY - 2, 500, 16).fill('#e5e7eb');
-  
-  doc.fontSize(7.5)
-     .font('Helvetica-Bold')
-     .fillColor('#1f2937')
-     .text('#', col1, headerY, { width: 18, align: 'center' })
-     .text('Employee ID', col1 + 22, headerY, { width: 65, align: 'center' })
-     .text('Name', col1 + 90, headerY, { width: 95, align: 'left' })
-     .text('Position', col1 + 190, headerY, { width: 90, align: 'left' })
-     .text('Score', col1 + 285, headerY, { width: 35, align: 'center' })
-     .text('Utilization', col1 + 325, headerY, { width: 45, align: 'center' })
-     .text('Status', col1 + 375, headerY, { width: 75, align: 'center' });
+    // Draw main header banner on page 1
+    drawHeaderBanner();
 
-  let y = yStart + 20;
-  
-  data.forEach((emp, index) => {
-    if (y > 720) {
-      doc.addPage();
-      y = 40;
-      doc.rect(30, y - 2, 500, 16).fill('#e5e7eb');
-      doc.fontSize(7.5)
-         .font('Helvetica-Bold')
-         .fillColor('#1f2937')
-         .text('#', col1, y, { width: 18, align: 'center' })
-         .text('Employee ID', col1 + 22, y, { width: 65, align: 'center' })
-         .text('Name', col1 + 90, y, { width: 95, align: 'left' })
-         .text('Position', col1 + 190, y, { width: 90, align: 'left' })
-         .text('Score', col1 + 285, y, { width: 35, align: 'center' })
-         .text('Utilization', col1 + 325, y, { width: 45, align: 'center' })
-         .text('Status', col1 + 375, y, { width: 75, align: 'center' });
-      y += 20;
+    // Metadata Subtitle Strip
+    doc.roundedRect(35, 64, 525, 22, 3).fill('#f1f5f9');
+    doc.fillColor('#475569').fontSize(8).font('Helvetica');
+    const filterInfo = `Generated: ${new Date().toLocaleString()}   |   Branch: ${branchName || 'All Branches'}   |   Filter: ${workloadFilter || 'All'}   |   Employees: ${data.length}`;
+    doc.text(filterInfo, 45, 70, { width: 505, align: 'left' });
+
+    // Executive KPI Summary Cards
+    const kpiY = 94;
+    const kpiW = 123;
+    const kpiH = 40;
+    const kpiGap = 11;
+
+    const stats = summaryStats || {
+      available: data.filter(d => d.workloadStatus === 'Available').length,
+      limited: data.filter(d => d.workloadStatus === 'Limited Availability').length,
+      fullyLoaded: data.filter(d => d.workloadStatus === 'Fully Utilized').length,
+      avgUtilization: data.length > 0 ? Math.round(data.reduce((sum, d) => sum + (d.utilizationRate || 0), 0) / data.length) : 0,
+    };
+
+    const kpiCards = [
+      { label: 'AVAILABLE', val: String(stats.available), bg: '#f0fdf4', border: '#bbf7d0', color: '#15803d' },
+      { label: 'LIMITED AVAILABILITY', val: String(stats.limited), bg: '#fffbeb', border: '#fde68a', color: '#b45309' },
+      { label: 'FULLY UTILIZED', val: String(stats.fullyLoaded), bg: '#fef2f2', border: '#fecaca', color: '#b91c1c' },
+      { label: 'AVG UTILIZATION', val: `${stats.avgUtilization}%`, bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8' },
+    ];
+
+    kpiCards.forEach((kpi, idx) => {
+      const cardX = 35 + idx * (kpiW + kpiGap);
+      doc.lineWidth(0.75).strokeColor(kpi.border).fillColor(kpi.bg).roundedRect(cardX, kpiY, kpiW, kpiH, 4).fillAndStroke();
+      doc.fillColor(kpi.color).fontSize(6.5).font('Helvetica-Bold').text(kpi.label, cardX + 8, kpiY + 6, { width: kpiW - 16 });
+      doc.fillColor(kpi.color).fontSize(14).font('Helvetica-Bold').text(kpi.val, cardX + 8, kpiY + 18, { width: kpiW - 16 });
+    });
+
+    // Table Column Definitions (total width = 525 pt)
+    const columns = [
+      { header: 'ID', x: 35, w: 60, align: 'center' },
+      { header: 'Employee Name', x: 95, w: 92, align: 'left' },
+      { header: 'Role / Position', x: 187, w: 92, align: 'left' },
+      { header: 'Assigned Project', x: 279, w: 86, align: 'left' },
+      { header: 'Tasks', x: 365, w: 26, align: 'center' },
+      { header: 'Score', x: 391, w: 26, align: 'center' },
+      { header: 'Utilization', x: 417, w: 42, align: 'center' },
+      { header: 'Status', x: 459, w: 101, align: 'center' },
+    ];
+
+    const drawTableHeader = (yPos) => {
+      doc.rect(35, yPos, 525, 20).fill('#1e3a5f');
+      doc.fillColor('#ffffff').fontSize(7.5).font('Helvetica-Bold');
+      columns.forEach(col => {
+        const textX = col.align === 'left' ? col.x + 4 : col.x;
+        doc.text(col.header, textX, yPos + 6, { width: col.align === 'left' ? col.w - 8 : col.w, align: col.align });
+      });
+    };
+
+    let tableY = 144;
+    drawTableHeader(tableY);
+
+    let y = tableY + 20;
+
+    data.forEach((emp, index) => {
+      // Check page overflow
+      if (y + 22 > 785) {
+        doc.addPage();
+        // Mini corporate header on subsequent pages
+        doc.rect(0, 0, 595.28, 30).fill('#0b1220');
+        doc.rect(0, 30, 595.28, 2).fill('#f5b700');
+        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold').text('WEA  •  EMPLOYEE UTILIZATION & WORKLOAD REPORT (CONT.)', 35, 10);
+
+        tableY = 42;
+        drawTableHeader(tableY);
+        y = tableY + 20;
+      }
+
+      // Zebra striping
+      const rowBg = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+      doc.rect(35, y, 525, 19).fill(rowBg);
+
+      // Hairline bottom row divider
+      doc.lineWidth(0.5).strokeColor('#e2e8f0').moveTo(35, y + 19).lineTo(560, y + 19).stroke();
+
+      // Employee ID
+      doc.fillColor('#475569').fontSize(7).font('Helvetica').text(emp.employeeId || '—', 35, y + 5.5, { width: 60, align: 'center' });
+
+      // Employee Name
+      doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica-Bold').text(emp.name || '—', 95 + 4, y + 5.5, { width: 84, align: 'left', lineBreak: false, ellipsis: true });
+
+      // Role / Position
+      doc.fillColor('#475569').fontSize(7).font('Helvetica').text(emp.position || '—', 187 + 4, y + 5.5, { width: 84, align: 'left', lineBreak: false, ellipsis: true });
+
+      // Project
+      doc.fillColor('#334155').fontSize(7).font('Helvetica').text(emp.assignedProjects || 'Unassigned', 279 + 4, y + 5.5, { width: 78, align: 'left', lineBreak: false, ellipsis: true });
+
+      // Tasks
+      doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica').text(String(emp.taskCount || 0), 365, y + 5.5, { width: 26, align: 'center' });
+
+      // Workload Score
+      doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica-Bold').text(String(emp.workloadScore || 0), 391, y + 5.5, { width: 26, align: 'center' });
+
+      // Utilization Rate with soft text coloring
+      const uRate = emp.utilizationRate || 0;
+      const utilColor = uRate >= 80 ? '#b91c1c' : uRate >= 60 ? '#15803d' : '#1d4ed8';
+      doc.fillColor(utilColor).fontSize(7.5).font('Helvetica-Bold').text(`${uRate}%`, 417, y + 5.5, { width: 42, align: 'center' });
+
+      // Workload Status Pill Badge
+      let badgeBg = '#f1f5f9';
+      let badgeText = '#475569';
+      if (emp.workloadStatus === 'Available') {
+        badgeBg = '#dcfce7';
+        badgeText = '#15803d';
+      } else if (emp.workloadStatus === 'Limited Availability') {
+        badgeBg = '#fef3c7';
+        badgeText = '#b45309';
+      } else if (emp.workloadStatus === 'Fully Utilized') {
+        badgeBg = '#fee2e2';
+        badgeText = '#b91c1c';
+      }
+
+      doc.roundedRect(472, y + 2.5, 75, 14, 3).fill(badgeBg);
+      doc.fillColor(badgeText).fontSize(6.5).font('Helvetica-Bold').text(emp.workloadStatus || '—', 472, y + 5.5, { width: 75, align: 'center' });
+
+      y += 19;
+    });
+
+    // Outer table border
+    doc.lineWidth(1).strokeColor('#1e3a5f').rect(35, tableY, 525, y - tableY).stroke();
+
+    // Numbered Footer on every buffered page
+    const pageRange = doc.bufferedPageRange();
+    for (let i = pageRange.start; i < pageRange.start + pageRange.count; i++) {
+      doc.switchToPage(i);
+      doc.lineWidth(0.5).strokeColor('#e2e8f0').moveTo(35, 808).lineTo(560, 808).stroke();
+      doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
+         .text(`WEA Resource Management System  •  Generated on ${new Date().toLocaleDateString()}`, 35, 814, { align: 'left' });
+      doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
+         .text(`Page ${i + 1} of ${pageRange.count}`, 35, 814, { width: 525, align: 'right' });
     }
-    
-    if (index % 2 === 0) {
-      doc.rect(30, y - 2, 500, 14).fill('#f9fafb');
+
+    doc.end();
+  } catch (err) {
+    console.error('❌ Error generating PDF report:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
     }
-    
-    let statusColor = '#22c55e';
-    if (emp.workloadStatus === 'Limited Availability') statusColor = '#f59e0b';
-    if (emp.workloadStatus === 'Fully Utilized') statusColor = '#ef4444';
-    
-    let scoreColor = '#22c55e';
-    if (emp.workloadScore >= 2) scoreColor = '#f59e0b';
-    if (emp.workloadScore >= 4) scoreColor = '#ef4444';
-    
-    doc.fontSize(7)
-       .font('Helvetica')
-       .fillColor('#111827')
-       .text(String(index + 1), col1, y, { width: 18, align: 'center' })
-       .text(emp.employeeId || '—', col1 + 22, y, { width: 65, align: 'center' })
-       .text(emp.name, col1 + 90, y, { width: 95, align: 'left' })
-       .text(emp.position, col1 + 190, y, { width: 90, align: 'left' })
-       .fillColor(scoreColor)
-       .text(String(emp.workloadScore), col1 + 285, y, { width: 35, align: 'center' })
-       .fillColor(statusColor)
-       .text(`${emp.utilizationRate}%`, col1 + 325, y, { width: 45, align: 'center' })
-       .text(emp.workloadStatus, col1 + 375, y, { width: 75, align: 'center' });
-    
-    y += 14;
-  });
-
-  doc.moveDown();
-  doc.fontSize(8)
-     .fillColor('#6b7280')
-     .text(`Generated by WEA Resource Management System • Page ${doc.pageNumber}`, { align: 'center' });
-
-  doc.end();
+  }
 };
 
 // ============================================
-// EXCEL GENERATION - FIXED (DATA NOW SHOWS)
+// EXCEL GENERATION - CLEAN WEA PALETTE & LAYOUT
 // ============================================
-const generateExcelReport = async (res, data, user, branchName) => {
+const generateExcelReport = async (res, data, user, branchName, workloadFilter, summaryStats) => {
   try {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Utilization Report');
+    workbook.creator = user?.name || user?.employee_id || 'WEA Resource Management System';
+    workbook.created = new Date();
 
-    // ✅ Title Section
-    worksheet.addRow(['Employee Utilization Report']);
-    worksheet.mergeCells(`A${worksheet.rowCount}:L${worksheet.rowCount}`);
-    worksheet.getRow(worksheet.rowCount).font = { size: 18, bold: true, color: { argb: 'FF1F2937' } };
-    worksheet.getRow(worksheet.rowCount).alignment = { horizontal: 'center' };
-    
-    worksheet.addRow([]);
-    worksheet.addRow([`Generated: ${new Date().toLocaleString()}`]);
-    worksheet.addRow([`Branch: ${branchName || 'All Branches'}`]);
-    worksheet.addRow([]);
-
-    // ✅ Summary Section
-    const available = data.filter(d => d.workloadStatus === 'Available').length;
-    const limited = data.filter(d => d.workloadStatus === 'Limited Availability').length;
-    const fullyLoaded = data.filter(d => d.workloadStatus === 'Fully Utilized').length;
-    const avgUtil = data.length > 0 ? Math.round(data.reduce((sum, d) => sum + d.utilizationRate, 0) / data.length) : 0;
-    const avgScore = data.length > 0 ? Math.round(data.reduce((sum, d) => sum + d.workloadScore, 0) / data.length) : 0;
-
-    const summaryRow = worksheet.addRow(['📊 SUMMARY']);
-    summaryRow.font = { bold: true, size: 12, color: { argb: 'FF1F2937' } };
-    
-    // ✅ Make sure all summary data is added correctly
-    worksheet.addRow(['Available:', available]);
-    worksheet.addRow(['Limited Availability:', limited]);
-    worksheet.addRow(['Fully Utilized:', fullyLoaded]);
-    worksheet.addRow(['Average Utilization:', `${avgUtil}%`]);
-    worksheet.addRow(['Average Workload Score:', avgScore]);
-    worksheet.addRow([]);
-
-    // ✅ Employee Table Headers
-    const headerRow = worksheet.addRow([
-      '#', 
-      'Employee ID', 
-      'Full Name', 
-      'Position', 
-      'Department',
-      'Assignments', 
-      'Tasks', 
-      'Workload Score', 
-      'Utilization Rate', 
-      'Workload Status',
-      'Status',
-      'Joined Date'
-    ]);
-    
-    // ✅ Style headers
-    headerRow.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
-    headerRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF1F2937' }
-    };
-    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
-    
-    // ✅ Set column widths
-    worksheet.getColumn(1).width = 5;
-    worksheet.getColumn(2).width = 15;
-    worksheet.getColumn(3).width = 25;
-    worksheet.getColumn(4).width = 22;
-    worksheet.getColumn(5).width = 22;
-    worksheet.getColumn(6).width = 12;
-    worksheet.getColumn(7).width = 10;
-    worksheet.getColumn(8).width = 16;
-    worksheet.getColumn(9).width = 16;
-    worksheet.getColumn(10).width = 22;
-    worksheet.getColumn(11).width = 12;
-    worksheet.getColumn(12).width = 15;
-
-    // ✅ Add data rows
-    data.forEach((emp, index) => {
-      const row = worksheet.addRow([
-        index + 1,
-        emp.employeeId || '—',
-        emp.name,
-        emp.position,
-        emp.department,
-        emp.assignmentCount || 0,
-        emp.taskCount || 0,
-        emp.workloadScore || 0,
-        `${emp.utilizationRate}%`,
-        emp.workloadStatus,
-        emp.status || 'Active',
-        emp.joinedDate ? new Date(emp.joinedDate).toLocaleDateString() : '—',
-      ]);
-
-      // ✅ Color-code Workload Score
-      const scoreCell = row.getCell(8);
-      if (emp.workloadScore >= 4) {
-        scoreCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
-        scoreCell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      } else if (emp.workloadScore >= 2) {
-        scoreCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-      } else {
-        scoreCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00FF00' } };
-      }
-
-      // ✅ Color-code Workload Status
-      const statusCell = row.getCell(10);
-      if (emp.workloadStatus === 'Available') {
-        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF22C55E' } };
-        statusCell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      } else if (emp.workloadStatus === 'Limited Availability') {
-        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF59E0B' } };
-        statusCell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      } else if (emp.workloadStatus === 'Fully Utilized') {
-        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF4444' } };
-        statusCell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      }
-
-      // ✅ Color-code Utilization Rate
-      const utilCell = row.getCell(9);
-      if (emp.utilizationRate >= 80) {
-        utilCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
-        utilCell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      } else if (emp.utilizationRate >= 50) {
-        utilCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-      } else {
-        utilCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00FF00' } };
-      }
+    const worksheet = workbook.addWorksheet('Utilization & Workload', {
+      views: [{ state: 'frozen', ySplit: 5, showGridLines: false }],
     });
 
-    // ✅ Add alternating row colors
-    for (let i = 1; i <= data.length; i++) {
-      const row = worksheet.getRow(i + 12); // Starting after headers + summary
-      if (i % 2 === 0) {
-        row.eachCell((cell) => {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFF9FAFB' }
-          };
-        });
-      }
-    }
+    // Clean Corporate Palette matching Weekly Report
+    const XLSX_COLORS = {
+      titleBg: 'FF0B1220',       // near-black navy
+      titleAccent: 'FFF5B700',   // gold accent bar
+      titleText: 'FFFFFFFF',
+      subBg: 'FFF1F5F9',
+      subText: 'FF475569',
+      headerBg: 'FF1E3A5F',      // deep navy blue
+      headerText: 'FFFFFFFF',
+      rowEven: 'FFFFFFFF',
+      rowOdd: 'FFF6F8FA',
+      border: 'FFD9DEE4',
+      outerBorder: 'FF1E3A5F',
+      // Status pill colors
+      availableBg: 'FFDCFCE7',
+      availableText: 'FF15803D',
+      limitedBg: 'FFFEF3C7',
+      limitedText: 'FFB45309',
+      fullyLoadedBg: 'FFFEE2E2',
+      fullyLoadedText: 'FFB91C1C',
+      // Util colors
+      utilLowBg: 'FFDBEAFE',
+      utilLowText: 'FF1D4ED8',
+      utilMidBg: 'FFDCFCE7',
+      utilMidText: 'FF15803D',
+      utilHighBg: 'FFFEE2E2',
+      utilHighText: 'FFB91C1C',
+    };
 
-    // ✅ Add borders
-    worksheet.eachRow((row) => {
-      row.eachCell((cell) => {
+    const columns = [
+      { header: 'Employee ID', width: 16, key: 'id', align: 'center' },
+      { header: 'Employee Name', width: 26, key: 'name', align: 'left', indent: 1 },
+      { header: 'Role / Position', width: 26, key: 'position', align: 'left', indent: 1 },
+      { header: 'Department', width: 22, key: 'department', align: 'left', indent: 1 },
+      { header: 'Active Projects', width: 34, key: 'projects', align: 'left', indent: 1, wrap: true },
+      { header: 'Tasks', width: 12, key: 'tasks', align: 'center' },
+      { header: 'Workload Score', width: 16, key: 'score', align: 'center' },
+      { header: 'Utilization', width: 14, key: 'util', align: 'center' },
+      { header: 'Workload Status', width: 22, key: 'status', align: 'center' },
+    ];
+
+    worksheet.columns = columns.map(c => ({ width: c.width }));
+    const totalCols = columns.length;
+
+    // --- Row 1: Title band with navy background ---
+    worksheet.mergeCells(1, 1, 1, totalCols);
+    const titleCell = worksheet.getCell(1, 1);
+    titleCell.value = 'WEA  •  EMPLOYEE UTILIZATION & WORKLOAD REPORT';
+    titleCell.font = { bold: true, size: 15, color: { argb: XLSX_COLORS.titleText }, name: 'Calibri' };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    worksheet.getRow(1).height = 30;
+    worksheet.getRow(1).eachCell({ includeEmpty: true }, cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_COLORS.titleBg } };
+    });
+
+    // --- Row 2: Thin gold accent bar ---
+    worksheet.mergeCells(2, 1, 2, totalCols);
+    worksheet.getRow(2).height = 4;
+    worksheet.getRow(2).eachCell({ includeEmpty: true }, cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_COLORS.titleAccent } };
+    });
+
+    // --- Row 3: Subtitle metadata row ---
+    const dateStr = `Generated ${new Date().toLocaleString()}`;
+    const scopeStr = `Branch: ${branchName || 'All Branches'}   |   Filter: ${workloadFilter || 'All'}   |   Total Employees: ${data.length}`;
+    worksheet.mergeCells(3, 1, 3, totalCols);
+    const subCell = worksheet.getCell(3, 1);
+    subCell.value = `${dateStr}      ${scopeStr}`;
+    subCell.font = { italic: true, size: 10, color: { argb: XLSX_COLORS.subText }, name: 'Calibri' };
+    subCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    worksheet.getRow(3).height = 20;
+    worksheet.getRow(3).eachCell({ includeEmpty: true }, cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_COLORS.subBg } };
+    });
+
+    // --- Row 4: Blank spacer ---
+    worksheet.getRow(4).height = 8;
+
+    // --- Row 5: Table Header row ---
+    const headerRowIdx = 5;
+    const headerRow = worksheet.getRow(headerRowIdx);
+    columns.forEach((col, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = col.header;
+      cell.font = { bold: true, size: 11, color: { argb: XLSX_COLORS.headerText }, name: 'Calibri' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_COLORS.headerBg } };
+      cell.alignment = { vertical: 'middle', horizontal: col.align, indent: col.indent || 0 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: XLSX_COLORS.outerBorder } },
+        bottom: { style: 'medium', color: { argb: XLSX_COLORS.outerBorder } },
+        left: { style: 'thin', color: { argb: XLSX_COLORS.outerBorder } },
+        right: { style: 'thin', color: { argb: XLSX_COLORS.outerBorder } },
+      };
+    });
+    headerRow.height = 24;
+
+    // --- Data rows ---
+    data.forEach((emp, idx) => {
+      const excelRowIdx = headerRowIdx + 1 + idx;
+      const dataRow = worksheet.getRow(excelRowIdx);
+      const baseFill = idx % 2 === 0 ? XLSX_COLORS.rowEven : XLSX_COLORS.rowOdd;
+
+      const cellDefs = [
+        { value: emp.employeeId || '—', align: 'center' },
+        { value: emp.name || '—', align: 'left', indent: 1, bold: true },
+        { value: emp.position || '—', align: 'left', indent: 1 },
+        { value: emp.department || '—', align: 'left', indent: 1 },
+        { value: emp.assignedProjects || 'Unassigned', align: 'left', indent: 1, wrap: true },
+        { value: emp.taskCount || 0, align: 'center' },
+        { value: emp.workloadScore || 0, align: 'center', bold: true },
+        { value: (emp.utilizationRate || 0) / 100, align: 'center', numFmt: '0%', isUtil: true },
+        { value: emp.workloadStatus || 'Available', align: 'center', isStatus: true },
+      ];
+
+      cellDefs.forEach((def, colIdx) => {
+        const cell = dataRow.getCell(colIdx + 1);
+        cell.value = def.value;
+        cell.font = { size: 11, bold: !!def.bold, name: 'Calibri' };
+        if (def.numFmt) cell.numFmt = def.numFmt;
+        cell.alignment = { vertical: 'middle', horizontal: def.align, wrapText: !!def.wrap, indent: def.indent || 0 };
+
         cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          top: { style: 'hair', color: { argb: XLSX_COLORS.border } },
+          bottom: { style: 'hair', color: { argb: XLSX_COLORS.border } },
+          left: { style: 'thin', color: { argb: XLSX_COLORS.outerBorder } },
+          right: { style: 'thin', color: { argb: XLSX_COLORS.outerBorder } },
+        };
+
+        // Standard zebra striping
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: baseFill } };
+
+        // Color-code Utilization Rate
+        if (def.isUtil) {
+          const rate = emp.utilizationRate || 0;
+          let utilBg = XLSX_COLORS.utilLowBg;
+          let utilText = XLSX_COLORS.utilLowText;
+          if (rate >= 80) {
+            utilBg = XLSX_COLORS.utilHighBg;
+            utilText = XLSX_COLORS.utilHighText;
+          } else if (rate >= 60) {
+            utilBg = XLSX_COLORS.utilMidBg;
+            utilText = XLSX_COLORS.utilMidText;
+          }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: utilBg } };
+          cell.font = { bold: true, size: 11, color: { argb: utilText }, name: 'Calibri' };
+        }
+
+        // Color-code Workload Status Pill Badge
+        if (def.isStatus) {
+          let statusBg = XLSX_COLORS.availableBg;
+          let statusText = XLSX_COLORS.availableText;
+          if (emp.workloadStatus === 'Limited Availability') {
+            statusBg = XLSX_COLORS.limitedBg;
+            statusText = XLSX_COLORS.limitedText;
+          } else if (emp.workloadStatus === 'Fully Utilized') {
+            statusBg = XLSX_COLORS.fullyLoadedBg;
+            statusText = XLSX_COLORS.fullyLoadedText;
+          }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusBg } };
+          cell.font = { bold: true, size: 10, color: { argb: statusText }, name: 'Calibri' };
+        }
+      });
+
+      // Dynamic row height if projects wrap
+      const projectLines = emp.assignedProjects ? Math.ceil(emp.assignedProjects.length / 32) : 1;
+      dataRow.height = Math.max(22, projectLines * 14 + 6);
+    });
+
+    // Solid outer border around the table
+    const lastDataRow = headerRowIdx + data.length;
+    for (let r = headerRowIdx; r <= lastDataRow; r++) {
+      const row = worksheet.getRow(r);
+      [1, totalCols].forEach(colIdx => {
+        const cell = row.getCell(colIdx);
+        cell.border = {
+          ...cell.border,
+          left: colIdx === 1 ? { style: 'medium', color: { argb: XLSX_COLORS.outerBorder } } : cell.border.left,
+          right: colIdx === totalCols ? { style: 'medium', color: { argb: XLSX_COLORS.outerBorder } } : cell.border.right,
         };
       });
-    });
+    }
 
-    // ✅ Set response headers
+    if (data.length > 0) {
+      worksheet.getRow(lastDataRow).eachCell(cell => {
+        cell.border = { ...cell.border, bottom: { style: 'medium', color: { argb: XLSX_COLORS.outerBorder } } };
+      });
+    }
+
+    // AutoFilter on header row
+    worksheet.autoFilter = {
+      from: { row: headerRowIdx, column: 1 },
+      to: { row: headerRowIdx, column: totalCols },
+    };
+
+    // --- Footer: Employee count & summary metrics ---
+    const footerRowIdx = lastDataRow + 2;
+    worksheet.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
+    const footerCell = worksheet.getCell(footerRowIdx, 1);
+    const stats = summaryStats || {
+      available: data.filter(d => d.workloadStatus === 'Available').length,
+      limited: data.filter(d => d.workloadStatus === 'Limited Availability').length,
+      fullyLoaded: data.filter(d => d.workloadStatus === 'Fully Utilized').length,
+      avgUtilization: data.length > 0 ? Math.round(data.reduce((sum, d) => sum + (d.utilizationRate || 0), 0) / data.length) : 0,
+    };
+    footerCell.value = `${data.length} employee(s)   |   Available: ${stats.available}   |   Limited Availability: ${stats.limited}   |   Fully Utilized: ${stats.fullyLoaded}   |   Avg Utilization: ${stats.avgUtilization}%`;
+    footerCell.font = { italic: true, size: 9, color: { argb: XLSX_COLORS.subText }, name: 'Calibri' };
+    footerCell.alignment = { horizontal: 'left', indent: 1 };
+
+    // Set response headers
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=Utilization_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=WEA_Utilization_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
 
-    // ✅ Write to response
-    await workbook.xlsx.write(res);
-    res.end();
-
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.send(buffer);
   } catch (error) {
     console.error('❌ Error generating Excel report:', error);
-    // If Excel fails, send error response
     if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: error.message
-      });
+      res.status(500).json({ success: false, error: error.message });
     }
   }
 };
