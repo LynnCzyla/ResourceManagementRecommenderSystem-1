@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../../config/api';
+import { supabase } from '../../lib/supabaseClient'; // ⬅ adjust path if your file lives elsewhere
 //
 // Thin fetch wrapper around the backend's Project Manager API
 // (backend/routes/ProjectManager/*) plus the shared notifications
@@ -12,16 +13,32 @@ import { API_BASE_URL } from '../../config/api';
 // 4. Automatic retry on network errors (max 1 retry)
 // 5. Request timeout
 // 6. Cache invalidation after mutations
+// 7. Session-aware auth: always pull the live Supabase token first,
+//    falling back to localStorage only if no Supabase session exists yet.
+//    This fixes the "works on first login, breaks on refresh/tab switch"
+//    bug, which happened because localStorage['token'] can be stale for
+//    a moment while Supabase is still restoring the session on boot.
 
 const PM_BASE = `${API_BASE_URL}/api/pm`;
 const NOTIF_BASE = `${API_BASE_URL}/api/notifications`;
 
 // ── Auth Helper ──────────────────────────────────────────────────────────
 
-// ✅ Get auth token from localStorage
-function getAuthToken() {
-  const token = localStorage.getItem('token');
-  return token || null;
+// ✅ Get auth token — prefer the live Supabase session, fall back to
+// whatever is cached in localStorage (e.g. a token set by a non-Supabase
+// login flow). This mirrors EmployeeAssignmentsTab's getAuthHeader().
+async function getAuthToken() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      // Keep localStorage in sync so other non-async consumers stay correct.
+      localStorage.setItem('token', session.access_token);
+      return session.access_token;
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not read Supabase session, falling back to localStorage token:', err.message);
+  }
+  return localStorage.getItem('token') || localStorage.getItem('access_token') || null;
 }
 
 // ── Caching & Deduplication ──────────────────────────────────────────
@@ -64,24 +81,24 @@ async function request(base, path, options = {}) {
   const url = `${base}${path}`;
   const method = options.method || 'GET';
   const cacheKey = getCacheKey(url, options);
-  
-  // ✅ Get auth token
-  const token = getAuthToken();
-  
+
+  // ✅ Get auth token (now session-aware, async)
+  const token = await getAuthToken();
+
   // ✅ Build headers with Authorization
   const headers = {
     'Content-Type': 'application/json',
     ...options.headers,
   };
-  
+
   // ✅ Add Authorization header if token exists
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
+
   // Log token status (don't log the actual token)
   console.log(`🔑 Auth token ${token ? 'present' : 'missing'}`);
-  
+
   // For GET requests, check cache first
   if (method === 'GET' && !options.skipCache) {
     const cached = getCached(cacheKey);
@@ -90,23 +107,23 @@ async function request(base, path, options = {}) {
       return cached;
     }
   }
-  
+
   // For GET requests, deduplicate pending requests
   if (method === 'GET' && pendingRequests.has(cacheKey)) {
     console.log(`🔄 Deduplicating request: ${url}`);
     return pendingRequests.get(cacheKey);
   }
-  
+
   // Create abort controller for timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, 30000); // 30 second timeout
-  
+
   const requestPromise = (async () => {
     try {
       console.log(`🌐 API Request: ${method} ${url}`);
-      
+
       const res = await fetch(url, {
         headers,
         signal: options.signal || controller.signal,
@@ -125,11 +142,18 @@ async function request(base, path, options = {}) {
         console.log(`  → No JSON body`);
       }
 
-      // ✅ Handle 401 specifically - token expired or invalid
-      if (res.status === 401) {
-        console.error('🔑 Token expired or invalid. Please login again.');
-        // You could redirect to login here if needed
-        // window.location.href = '/login';
+      // ✅ Handle 401 specifically - token expired or invalid.
+      // Try ONE forced session refresh + retry before giving up, since the
+      // very first request after a page reload can race Supabase's session
+      // restoration and grab a stale/missing token.
+      if (res.status === 401 && !options._retriedAfter401) {
+        console.warn('🔑 Got 401, forcing a Supabase session refresh and retrying once...');
+        try {
+          await supabase.auth.refreshSession();
+        } catch (refreshErr) {
+          console.warn('⚠️ Session refresh failed:', refreshErr.message);
+        }
+        return request(base, path, { ...options, _retriedAfter401: true });
       }
 
       if (!res.ok || (body && body.success === false)) {
@@ -139,41 +163,41 @@ async function request(base, path, options = {}) {
       }
 
       const data = body ? body.data : null;
-      
+
       // Cache GET responses
       if (method === 'GET' && !options.skipCache) {
         setCache(cacheKey, data);
       }
-      
+
       return data;
-      
+
     } catch (err) {
       clearTimeout(timeoutId);
-      
+
       // Don't treat aborted requests as errors
       if (err.name === 'AbortError') {
         console.log(`🛑 Request aborted: ${url}`);
         throw err;
       }
-      
+
       // Only retry on network errors, not auth errors
       if (!options.retry && (err.message.includes('fetch') || err.message.includes('network'))) {
         console.log(`🔁 Retrying request (attempt 2): ${url}`);
         await new Promise(resolve => setTimeout(resolve, 1000));
         return request(base, path, { ...options, retry: true });
       }
-      
+
       throw err;
     } finally {
       pendingRequests.delete(cacheKey);
     }
   })();
-  
+
   // Store pending request for deduplication
   if (method === 'GET') {
     pendingRequests.set(cacheKey, requestPromise);
   }
-  
+
   return requestPromise;
 }
 
@@ -264,8 +288,8 @@ export function getProjectHistoryDetails(id, signal) {
 
 export function createProject(payload) {
   clearCacheForEndpoints(['/projects', '/dashboard']);
-  return pm('/projects', { 
-    method: 'POST', 
+  return pm('/projects', {
+    method: 'POST',
     body: JSON.stringify(payload),
     skipCache: true
   });
@@ -273,8 +297,8 @@ export function createProject(payload) {
 
 export function updateProject(id, payload) {
   clearCacheForEndpoints(['/projects', '/dashboard']);
-  return pm(`/projects/${id}`, { 
-    method: 'PUT', 
+  return pm(`/projects/${id}`, {
+    method: 'PUT',
     body: JSON.stringify(payload),
     skipCache: true
   });
@@ -282,8 +306,8 @@ export function updateProject(id, payload) {
 
 export function updateProjectStatus(id, status, restoreMode, reason) {
   clearCacheForEndpoints(['/projects', '/dashboard', '/employees', '/tasks']);
-  return pm(`/projects/${id}/status`, { 
-    method: 'PATCH', 
+  return pm(`/projects/${id}/status`, {
+    method: 'PATCH',
     body: JSON.stringify({ status, restoreMode, reason }),
     skipCache: true
   });
@@ -291,7 +315,7 @@ export function updateProjectStatus(id, status, restoreMode, reason) {
 
 export function deleteProject(id) {
   clearCacheForEndpoints(['/projects', '/dashboard', '/employees']);
-  return pm(`/projects/${id}`, { 
+  return pm(`/projects/${id}`, {
     method: 'DELETE',
     skipCache: true
   });
@@ -323,8 +347,8 @@ export function getResourceRequests(projectId, signal) {
 
 export function createResourceRequest(payload) {
   clearCacheForEndpoints(['/resource-requests', '/dashboard']);
-  return pm('/resource-requests', { 
-    method: 'POST', 
+  return pm('/resource-requests', {
+    method: 'POST',
     body: JSON.stringify(payload),
     skipCache: true
   });
@@ -332,8 +356,8 @@ export function createResourceRequest(payload) {
 
 export function updateResourceRequestStatus(id, status) {
   clearCacheForEndpoints(['/resource-requests', '/dashboard']);
-  return pm(`/resource-requests/${id}/status`, { 
-    method: 'PATCH', 
+  return pm(`/resource-requests/${id}/status`, {
+    method: 'PATCH',
     body: JSON.stringify({ status }),
     skipCache: true
   });
@@ -345,8 +369,8 @@ export function cancelResourceRequest(id) {
 
 export function deleteResourceRequest(id) {
   clearCacheForEndpoints(['/resource-requests', '/dashboard']);
-  return pm(`/resource-requests/${id}`, { 
-    method: 'DELETE', 
+  return pm(`/resource-requests/${id}`, {
+    method: 'DELETE',
     skipCache: true
   });
 }
@@ -363,8 +387,8 @@ export function getTasks(filters = {}, signal) {
 
 export function createTask(payload) {
   clearCacheForEndpoints(['/tasks', '/dashboard']);
-  return pm('/tasks', { 
-    method: 'POST', 
+  return pm('/tasks', {
+    method: 'POST',
     body: JSON.stringify(payload),
     skipCache: true
   });
@@ -372,8 +396,8 @@ export function createTask(payload) {
 
 export function updateTask(id, payload) {
   clearCacheForEndpoints(['/tasks', '/dashboard']);
-  return pm(`/tasks/${id}`, { 
-    method: 'PUT', 
+  return pm(`/tasks/${id}`, {
+    method: 'PUT',
     body: JSON.stringify(payload),
     skipCache: true
   });
@@ -381,8 +405,8 @@ export function updateTask(id, payload) {
 
 export function logTaskProgress(id, payload) {
   clearCacheForEndpoints(['/tasks', '/dashboard']);
-  return pm(`/tasks/${id}/progress`, { 
-    method: 'POST', 
+  return pm(`/tasks/${id}/progress`, {
+    method: 'POST',
     body: JSON.stringify(payload),
     skipCache: true
   });
@@ -390,7 +414,7 @@ export function logTaskProgress(id, payload) {
 
 export function deleteTask(id) {
   clearCacheForEndpoints(['/tasks', '/dashboard']);
-  return pm(`/tasks/${id}`, { 
+  return pm(`/tasks/${id}`, {
     method: 'DELETE',
     skipCache: true
   });
@@ -410,8 +434,8 @@ export function getNotifications(userId, signal) {
 
 export function markAllNotificationsRead(userId) {
   clearCacheForEndpoints(['/notifications']);
-  return notif('/mark-all-read', { 
-    method: 'PATCH', 
+  return notif('/mark-all-read', {
+    method: 'PATCH',
     body: JSON.stringify({ userId }),
     skipCache: true
   });
@@ -419,7 +443,7 @@ export function markAllNotificationsRead(userId) {
 
 export function deleteNotification(id) {
   clearCacheForEndpoints(['/notifications']);
-  return notif(`/${id}`, { 
+  return notif(`/${id}`, {
     method: 'DELETE',
     skipCache: true
   });
