@@ -3,6 +3,48 @@ const recommendationEngine = require('../services/recommendationService');
 const supabase = require('../supabase');
 
 /**
+ * ✅ NEW: single source of truth for "does this user have branch access to
+ * this resource" — used by every endpoint below instead of each endpoint
+ * re-implementing its own (previously inconsistent) check.
+ *
+ * Returns { allowed: true } or { allowed: false, statusCode, error }.
+ *
+ * Critical fix vs. the old per-endpoint checks: this ALWAYS evaluates the
+ * branch comparison for non-super-admins. The old pattern
+ * `if (!isSuperAdmin && userBranchId) { ...check... }` silently skipped
+ * the entire check — and therefore granted access — whenever the
+ * requesting user had no branch_id assigned (null/undefined). That is
+ * closed here: no userBranchId now results in an explicit denial.
+ */
+function checkBranchAccess({ isSuperAdmin, userBranchId, resourceBranchId, resourceLabel = 'resource' }) {
+    if (isSuperAdmin) {
+        return { allowed: true, reason: 'Super Admin' };
+    }
+    if (!resourceBranchId) {
+        return {
+            allowed: false,
+            statusCode: 403,
+            error: `This ${resourceLabel}'s owner is not assigned to any branch. Please contact an administrator.`
+        };
+    }
+    if (!userBranchId) {
+        return {
+            allowed: false,
+            statusCode: 403,
+            error: 'Your account is not assigned to any branch. Please contact an administrator.'
+        };
+    }
+    if (resourceBranchId !== userBranchId) {
+        return {
+            allowed: false,
+            statusCode: 403,
+            error: `You can only access ${resourceLabel}s from your branch`
+        };
+    }
+    return { allowed: true, reason: 'Same Branch' };
+}
+
+/**
  * Get recommendations for a project
  */
 exports.getRecommendations = async (req, res) => {
@@ -12,7 +54,6 @@ exports.getRecommendations = async (req, res) => {
 
         console.log(`🔍 Getting recommendations for project: ${projectId}`);
 
-        // Get user's branch info
         const userBranchId = req.user?.branch_id;
         const isSuperAdmin = req.user?.is_super_admin || false;
         const userRole = req.user?.role;
@@ -20,7 +61,14 @@ exports.getRecommendations = async (req, res) => {
         console.log(`👤 User: ${req.user?.employee_id} (${userRole})`);
         console.log(`🏢 User Branch: ${isSuperAdmin ? 'ALL' : userBranchId}`);
 
-        // Check if project exists and get creator's branch
+        if (!req.user) {
+            console.warn('⚠️ No user authenticated');
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+
         const { data: project, error } = await supabase
             .from('projects')
             .select(`
@@ -54,55 +102,37 @@ exports.getRecommendations = async (req, res) => {
         console.log(`🏢 Project creator's branch: ${projectBranchId || 'No branch assigned'}`);
 
         // ============================================
-        // ✅ PERMISSION CHECK WITH BRANCH FILTERING
+        // ✅ UNIFIED PERMISSION CHECK (see checkBranchAccess above)
         // ============================================
         let hasPermission = false;
         let permissionReason = '';
 
-        if (!req.user) {
-            console.warn('⚠️ No user authenticated');
-            return res.status(401).json({
-                success: false,
-                error: 'Authentication required'
-            });
-        }
-
-        // ✅ Super Admin - Full Access
         if (isSuperAdmin) {
             hasPermission = true;
             permissionReason = 'Super Admin';
             console.log('✅ Super Admin - Full access');
-        }
-        // ✅ Project creator's profile has no branch - Only Super Admin can access
-        else if (!projectBranchId) {
-            console.warn(`⚠️ Project creator ${projectCreatorId} has no branch assigned`);
-            return res.status(403).json({
-                success: false,
-                error: 'This project\'s creator is not assigned to any branch. Please contact an administrator.'
+        } else if (userRole === 'resource_manager' || userRole === 'admin' || userRole === 'Administrator') {
+            const access = checkBranchAccess({
+                isSuperAdmin,
+                userBranchId,
+                resourceBranchId: projectBranchId,
+                resourceLabel: 'project'
             });
-        }
-        // ✅ Check branch access for Resource Manager, Admin, etc.
-        else if (userRole === 'resource_manager' || userRole === 'admin' || userRole === 'Administrator') {
-            if (projectBranchId === userBranchId) {
-                hasPermission = true;
-                permissionReason = `${userRole} (Same Branch)`;
-                console.log(`✅ ${userRole} - Same branch access`);
-            } else {
-                console.warn(`❌ ${userRole} denied: Project creator's branch ${projectBranchId} != User branch ${userBranchId}`);
-                return res.status(403).json({
+            if (!access.allowed) {
+                console.warn(`❌ ${userRole} denied: ${access.error}`);
+                return res.status(access.statusCode).json({
                     success: false,
-                    error: 'You can only access projects from your branch'
+                    error: access.error
                 });
             }
-        }
-        // ✅ Project Creator - Can access their own project
-        else if (projectCreatorId === req.user.id) {
+            hasPermission = true;
+            permissionReason = `${userRole} (Same Branch)`;
+            console.log(`✅ ${userRole} - Same branch access`);
+        } else if (projectCreatorId === req.user.id) {
             hasPermission = true;
             permissionReason = 'Project Creator';
             console.log('✅ Project Creator - Own project access');
-        }
-        // ❌ No permission
-        else {
+        } else {
             console.warn(`❌ Access denied for user ${req.user.id} to project ${projectId}`);
             return res.status(403).json({
                 success: false,
@@ -112,7 +142,6 @@ exports.getRecommendations = async (req, res) => {
 
         console.log(`✅ Permission granted: ${permissionReason}`);
 
-        // Get recommendations from engine with branch filtering
         const result = await recommendationEngine.getCandidatesForProject(
             projectId,
             {
@@ -131,7 +160,6 @@ exports.getRecommendations = async (req, res) => {
 
         const projectName = project.project_name || 'Unknown Project';
 
-        // Transform data for frontend
         const transformedCandidates = (result.data.candidates || []).map(candidate => ({
             employee: {
                 id: candidate.profileId,
@@ -188,18 +216,23 @@ exports.getRecommendationsByRequirement = async (req, res) => {
         const { requirementId } = req.params;
         console.log(`🔍 ===== GET RECOMMENDATIONS BY REQUIREMENT =====`);
         console.log(`📋 Requirement ID from params: ${requirementId}`);
-        
-        // Get user's branch info
+
         const userBranchId = req.user?.branch_id;
         const isSuperAdmin = req.user?.is_super_admin || false;
-        
-        // Get the requirement to find project_id
+
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+
         const { data: requirement, error: reqError } = await supabase
             .from('project_resource_requirements')
             .select('project_id, role_title')
             .eq('id', requirementId)
             .single();
-        
+
         if (reqError || !requirement) {
             console.error('❌ Requirement not found:', reqError);
             return res.status(404).json({
@@ -207,10 +240,9 @@ exports.getRecommendationsByRequirement = async (req, res) => {
                 error: 'Requirement not found'
             });
         }
-        
+
         console.log(`📋 Found project_id: ${requirement.project_id} for requirement ${requirementId}`);
-        
-        // Get the project details with creator's branch
+
         const { data: project, error: projectError } = await supabase
             .from('projects')
             .select(`
@@ -228,7 +260,7 @@ exports.getRecommendationsByRequirement = async (req, res) => {
             `)
             .eq('id', requirement.project_id)
             .single();
-        
+
         if (projectError || !project) {
             console.error('❌ Project not found:', projectError);
             return res.status(404).json({
@@ -239,20 +271,28 @@ exports.getRecommendationsByRequirement = async (req, res) => {
 
         const projectBranchId = project.profiles?.branch_id;
 
-        // ✅ PERMISSION CHECK: Only allow access if user belongs to the project creator's branch
-        if (!isSuperAdmin && projectBranchId !== userBranchId) {
-            console.warn(`❌ Access denied: Project creator's branch ${projectBranchId} != User branch ${userBranchId}`);
-            return res.status(403).json({
+        // ✅ SAME helper as getRecommendations above — previously this
+        // endpoint had its own, looser inline check
+        // (`projectBranchId !== userBranchId`) that granted access when
+        // BOTH were null/undefined (null !== null is false). Now it goes
+        // through the identical, explicit checkBranchAccess() logic.
+        const access = checkBranchAccess({
+            isSuperAdmin,
+            userBranchId,
+            resourceBranchId: projectBranchId,
+            resourceLabel: 'project'
+        });
+        if (!access.allowed) {
+            console.warn(`❌ Access denied: ${access.error}`);
+            return res.status(access.statusCode).json({
                 success: false,
-                error: 'You do not have permission to view recommendations for this project'
+                error: access.error
             });
         }
-        
-        // Parse the requirement ID to a number
+
         const parsedRequirementId = parseInt(requirementId);
         console.log(`📋 Parsed requirementId: ${parsedRequirementId}`);
-        
-        // Get recommendations using BOTH project_id AND requirement_id with branch filtering
+
         const result = await recommendationEngine.getCandidatesForProject(
             requirement.project_id,
             {
@@ -263,16 +303,15 @@ exports.getRecommendationsByRequirement = async (req, res) => {
             userBranchId,
             isSuperAdmin
         );
-        
+
         if (!result.success) {
             return res.status(500).json(result);
         }
-        
+
         console.log(`✅ Found ${result.data.candidates?.length || 0} candidates for requirement ${requirementId}`);
-        
+
         const projectName = project.project_name || 'Unknown Project';
-        
-        // Transform data for frontend
+
         const transformedCandidates = (result.data.candidates || []).map(candidate => ({
             employee: {
                 id: candidate.profileId,
@@ -297,7 +336,7 @@ exports.getRecommendationsByRequirement = async (req, res) => {
             prereqFulfillment: candidate.prereqFulfillment ?? 100,
             missingCoreSkills: Boolean(candidate.missingCoreSkills)
         }));
-        
+
         res.json({
             success: true,
             data: {
@@ -312,7 +351,7 @@ exports.getRecommendationsByRequirement = async (req, res) => {
             },
             message: `Found ${result.data.totalCandidates || 0} candidates for requirement ${requirementId}`
         });
-        
+
     } catch (error) {
         console.error('❌ Error in recommendations by requirement:', error);
         res.status(500).json({
@@ -331,22 +370,29 @@ exports.getEmployeeWorkload = async (req, res) => {
 
         console.log(`📊 Getting workload for employee: ${profileId}`);
 
-        // Get user's branch info
         const userBranchId = req.user?.branch_id;
         const isSuperAdmin = req.user?.is_super_admin || false;
 
-        // ✅ Check if employee belongs to user's branch
-        if (!isSuperAdmin && userBranchId) {
+        // ✅ FIXED: same class of bug as the project checks — previously
+        // `if (!isSuperAdmin && userBranchId)` skipped the check entirely
+        // (and therefore allowed access) when the requester had no branch.
+        if (!isSuperAdmin) {
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('branch_id')
                 .eq('id', profileId)
                 .single();
 
-            if (profile && profile.branch_id !== userBranchId) {
-                return res.status(403).json({
+            const access = checkBranchAccess({
+                isSuperAdmin,
+                userBranchId,
+                resourceBranchId: profile?.branch_id,
+                resourceLabel: "employee's workload"
+            });
+            if (!access.allowed) {
+                return res.status(access.statusCode).json({
                     success: false,
-                    error: 'You do not have permission to view this employee\'s workload'
+                    error: access.error
                 });
             }
         }
@@ -411,11 +457,9 @@ exports.assignEmployee = async (req, res) => {
 
         console.log(`📋 Assigning employee ${profileId} to project ${projectId}`);
 
-        // Get user's branch info
         const userBranchId = req.user?.branch_id;
         const isSuperAdmin = req.user?.is_super_admin || false;
 
-        // Validate
         if (!profileId) {
             return res.status(400).json({
                 success: false,
@@ -423,7 +467,6 @@ exports.assignEmployee = async (req, res) => {
             });
         }
 
-        // Check if employee exists and belongs to the same branch
         const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('id, employee_id, first_name, last_name, branch_id')
@@ -437,15 +480,20 @@ exports.assignEmployee = async (req, res) => {
             });
         }
 
-        // ✅ Check if employee belongs to user's branch
-        if (!isSuperAdmin && profile.branch_id !== userBranchId) {
-            return res.status(403).json({
+        // ✅ FIXED: unified helper, no more silent bypass when userBranchId is null
+        const employeeAccess = checkBranchAccess({
+            isSuperAdmin,
+            userBranchId,
+            resourceBranchId: profile.branch_id,
+            resourceLabel: 'employee'
+        });
+        if (!employeeAccess.allowed) {
+            return res.status(employeeAccess.statusCode).json({
                 success: false,
-                error: 'You can only assign employees from your branch'
+                error: employeeAccess.error
             });
         }
 
-        // Check if project exists and get creator's branch
         const { data: project, error: projectError } = await supabase
             .from('projects')
             .select(`
@@ -467,17 +515,22 @@ exports.assignEmployee = async (req, res) => {
 
         const projectBranchId = project.profiles?.branch_id;
 
-        // ✅ Check if project belongs to user's branch
-        if (!isSuperAdmin && projectBranchId !== userBranchId) {
-            return res.status(403).json({
+        // ✅ FIXED: unified helper here too
+        const projectAccess = checkBranchAccess({
+            isSuperAdmin,
+            userBranchId,
+            resourceBranchId: projectBranchId,
+            resourceLabel: 'project'
+        });
+        if (!projectAccess.allowed) {
+            return res.status(projectAccess.statusCode).json({
                 success: false,
-                error: 'You can only assign to projects from your branch'
+                error: projectAccess.error
             });
         }
 
         const projectName = project.project_name || 'Unnamed Project';
 
-        // Check if already assigned
         const { data: existing } = await supabase
             .from('project_assignments')
             .select('id')
@@ -493,7 +546,6 @@ exports.assignEmployee = async (req, res) => {
             });
         }
 
-        // Check workload
         const workload = await recommendationEngine._getWorkloadScore(profileId);
         const availability = recommendationEngine._calculateAvailability(workload);
 
@@ -508,7 +560,6 @@ exports.assignEmployee = async (req, res) => {
             });
         }
 
-        // Create assignment
         const { data: assignment, error: assignError } = await supabase
             .from('project_assignments')
             .insert({
@@ -526,7 +577,6 @@ exports.assignEmployee = async (req, res) => {
             throw assignError;
         }
 
-        // Create task
         const { data: task, error: taskError } = await supabase
             .from('project_tasks')
             .insert({
@@ -583,31 +633,36 @@ exports.assignEmployee = async (req, res) => {
 exports.getEmployeePerformance = async (req, res) => {
     try {
         const { profileId } = req.params;
-        
-        // Get user's branch info
+
         const userBranchId = req.user?.branch_id;
         const isSuperAdmin = req.user?.is_super_admin || false;
 
-        // ✅ Check if employee belongs to user's branch
-        if (!isSuperAdmin && userBranchId) {
+        // ✅ FIXED: same unified helper
+        if (!isSuperAdmin) {
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('branch_id')
                 .eq('id', profileId)
                 .single();
 
-            if (profile && profile.branch_id !== userBranchId) {
-                return res.status(403).json({
+            const access = checkBranchAccess({
+                isSuperAdmin,
+                userBranchId,
+                resourceBranchId: profile?.branch_id,
+                resourceLabel: "employee's performance"
+            });
+            if (!access.allowed) {
+                return res.status(access.statusCode).json({
                     success: false,
-                    error: 'You do not have permission to view this employee\'s performance'
+                    error: access.error
                 });
             }
         }
-        
+
         console.log(`📊 Getting performance details for employee: ${profileId}`);
-        
+
         const performance = await recommendationEngine._getPerformanceDetails(profileId);
-        
+
         res.json({
             success: true,
             data: performance
