@@ -300,10 +300,10 @@ export default function HRJobPostingsTab() {
     if (!result.isConfirmed) return;
 
     try {
-      await hrClient.delete(`/job-postings/${id}`);
-      setJobPostings(jobPostings.filter(p => p.id !== id));
+      const response = await hrClient.delete(`/job-postings/${id}`);
+      setJobPostings((currentPostings) => currentPostings.filter((posting) => posting.id !== id));
       loadResourceRequests();
-      showSuccessAlert('Job posting deleted successfully!');
+      showSuccessAlert(response.data?.message || 'Job posting deleted successfully!');
     } catch (err) {
       showErrorAlert(err.response?.data?.error || 'Failed to delete job posting');
       console.error(err);
