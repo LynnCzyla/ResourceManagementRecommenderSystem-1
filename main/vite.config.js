@@ -7,9 +7,15 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     open: true
   },
-  esbuild: {
-    // only strips console/debugger during `vite build` (production),
-    // `vite dev` (local) is untouched
-    drop: command === 'build' ? ['console', 'debugger'] : []
+  build: {
+    // Vite 8 defaults to the Oxc minifier, which doesn't support drop_console
+    // yet — switch to terser explicitly so we can strip console/debugger.
+    minify: command === 'build' ? 'terser' : false,
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true
+      }
+    }
   }
 }))
