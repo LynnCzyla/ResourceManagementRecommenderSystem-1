@@ -3,13 +3,20 @@ import axios from 'axios';
 import { supabase } from '../../lib/supabaseClient';
 import { API_BASE_URL } from '../../config/api';
 
+function toLocalISODate(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Monday of the current week, in YYYY-MM-DD.
 function getWeekStart() {
   const now = new Date();
   const day = now.getDay() || 7;
   const monday = new Date(now);
   monday.setDate(now.getDate() - day + 1);
-  return monday.toISOString().split('T')[0];
+  return toLocalISODate(monday);
 }
 
 // Friday of the current week, in YYYY-MM-DD.
@@ -18,7 +25,96 @@ function getWeekEnd() {
   const day = now.getDay() || 7;
   const friday = new Date(now);
   friday.setDate(now.getDate() - day + 5);
-  return friday.toISOString().split('T')[0];
+  return toLocalISODate(friday);
+}
+
+function getLatestLoggedEndDate(logs) {
+  if (!logs || !logs.length) return null;
+  let latest = null;
+  logs.forEach(log => {
+    const rawEnd = log.endDate || log.date || log.startDate;
+    if (rawEnd) {
+      const endStr = rawEnd.includes('T') ? rawEnd.split('T')[0] : rawEnd;
+      if (!latest || endStr > latest) {
+        latest = endStr;
+      }
+    }
+  });
+  return latest;
+}
+
+function getMinChoosableStartDate(task) {
+  const latestEnd = getLatestLoggedEndDate(task?.progressLogs);
+  if (!latestEnd) return undefined;
+
+  const [y, m, d] = latestEnd.split('-').map(Number);
+  const nextDay = new Date(y, m - 1, d + 1);
+  return toLocalISODate(nextDay);
+}
+
+function getNextSuggestedDates(task) {
+  const latestEnd = getLatestLoggedEndDate(task?.progressLogs);
+  if (!latestEnd) {
+    return {
+      start: getWeekStart(),
+      end: getWeekEnd()
+    };
+  }
+
+  const [y, m, d] = latestEnd.split('-').map(Number);
+  const nextStart = new Date(y, m - 1, d + 1);
+  const dayOfWeek = nextStart.getDay();
+  if (dayOfWeek === 6) {
+    nextStart.setDate(nextStart.getDate() + 2);
+  } else if (dayOfWeek === 0) {
+    nextStart.setDate(nextStart.getDate() + 1);
+  }
+
+  const nextEnd = new Date(nextStart);
+  nextEnd.setDate(nextStart.getDate() + 4);
+
+  return {
+    start: toLocalISODate(nextStart),
+    end: toLocalISODate(nextEnd)
+  };
+}
+
+function getLogWeekLabel(log, idx) {
+  const weekPrefix = `Week ${idx + 1}`;
+  if (log.startDate && log.endDate) {
+    return `${weekPrefix} (${log.startDate} → ${log.endDate})`;
+  }
+  if (log.week && log.week !== 'N/A') {
+    return log.week.toLowerCase().startsWith('week') ? log.week : `${weekPrefix} (${log.week})`;
+  }
+  if (log.date) {
+    return `${weekPrefix} (${log.date})`;
+  }
+  return weekPrefix;
+}
+
+function isDateRangeOverlapping(startStr, endStr, existingLogs) {
+  if (!startStr || !endStr || !existingLogs || !existingLogs.length) return false;
+  const start = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+
+  for (const log of existingLogs) {
+    const logStartStr = log.startDate || log.date;
+    const logEndStr = log.endDate || log.date;
+    if (logStartStr && logEndStr) {
+      const eStart = new Date(logStartStr + 'T00:00:00');
+      const eEnd = new Date(logEndStr + 'T00:00:00');
+      if (start <= eEnd && end >= eStart) {
+        return true;
+      }
+    } else if (logEndStr) {
+      const eEnd = new Date(logEndStr + 'T00:00:00');
+      if (start <= eEnd) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function cumulativePercentage(logs) {
@@ -175,14 +271,17 @@ export default function EmployeeAssignmentsTab({ user }) {
     }
   };
 
-  const openLogForm = (taskId) => {
+  const openLogForm = (taskOrId) => {
+    const task = typeof taskOrId === 'object' && taskOrId ? taskOrId : tasks.find(t => t.id === taskOrId);
+    const taskId = task ? task.id : taskOrId;
     if (activeLogTaskId === taskId) {
       setActiveLogTaskId(null);
       return;
     }
     setActiveLogTaskId(taskId);
-    setLogStartDate(getWeekStart());
-    setLogEndDate(getWeekEnd());
+    const { start, end } = getNextSuggestedDates(task);
+    setLogStartDate(start);
+    setLogEndDate(end);
     setLogPercentage('');
     setLogDesc('');
     setLogFormError('');
@@ -200,16 +299,27 @@ export default function EmployeeAssignmentsTab({ user }) {
     }
 
     const task = tasks.find(t => t.id === taskId);
-    let willComplete = false;
-    if (task) {
-      const currentTotal = cumulativePercentage(task.progressLogs);
-      const newPercentageVal = parseInt(logPercentage, 10) || 0;
-      if (currentTotal + newPercentageVal > 100) {
-        setLogFormError(`Cannot log progress. Total would be ${currentTotal + newPercentageVal}%, which exceeds 100%. Maximum you can log is ${100 - currentTotal}%.`);
-        return;
-      }
-      willComplete = currentTotal + newPercentageVal >= 100;
+    if (!task) return;
+
+    const minDate = getMinChoosableStartDate(task);
+    if (minDate && logStartDate < minDate) {
+      setLogFormError(`Cannot choose a date from an already reported week. The earliest available start date is ${minDate}.`);
+      return;
     }
+
+    if (isDateRangeOverlapping(logStartDate, logEndDate, task.progressLogs)) {
+      setLogFormError('The selected week or date range overlaps with an already submitted weekly report. Please select a subsequent week.');
+      return;
+    }
+
+    let willComplete = false;
+    const currentTotal = cumulativePercentage(task.progressLogs);
+    const newPercentageVal = parseInt(logPercentage, 10) || 0;
+    if (currentTotal + newPercentageVal > 100) {
+      setLogFormError(`Cannot log progress. Total would be ${currentTotal + newPercentageVal}%, which exceeds 100%. Maximum you can log is ${100 - currentTotal}%.`);
+      return;
+    }
+    willComplete = currentTotal + newPercentageVal >= 100;
 
     setSubmitting(true);
     try {
@@ -361,6 +471,9 @@ export default function EmployeeAssignmentsTab({ user }) {
                   const total = cumulativePercentage(task.progressLogs);
                   const remaining = 100 - total;
                   const isLogging = activeLogTaskId === task.id;
+                  const minStartDate = getMinChoosableStartDate(task);
+                  const latestEnd = getLatestLoggedEndDate(task.progressLogs);
+                  const nextWeekNum = (task.progressLogs ? task.progressLogs.length : 0) + 1;
 
                   return (
                     <div key={task.id} style={{ ...styles.taskCard, borderLeft: `3px solid ${statusColor(task.status)}` }}>
@@ -401,7 +514,7 @@ export default function EmployeeAssignmentsTab({ user }) {
                                 <div key={log.id} style={styles.logItem}>
                                   <div style={styles.logMetaRow}>
                                     <span style={styles.logWeekBadge}>
-                                      {log.startDate && log.endDate ? `${log.startDate} → ${log.endDate}` : (log.week || 'N/A')}
+                                      {getLogWeekLabel(log, idx)}
                                     </span>
                                     <span style={styles.logPercentBadge}>{log.percentage}% this period (Total: {cumulative}%)</span>
                                   </div>
@@ -421,7 +534,7 @@ export default function EmployeeAssignmentsTab({ user }) {
                         <div style={styles.statusSelectWrapper}>
                           <button
                             type="button"
-                            onClick={() => openLogForm(task.id)}
+                            onClick={() => openLogForm(task)}
                             style={styles.toggleLogBtn}
                           >
                             {isLogging ? 'Cancel' : (
@@ -454,13 +567,37 @@ export default function EmployeeAssignmentsTab({ user }) {
                       {/* Collapsible log form */}
                       {isLogging && (
                         <form onSubmit={(e) => handleLogProgress(e, task.id)} style={styles.logForm}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              background: 'var(--color-primary-light)',
+                              color: 'var(--color-primary)'
+                            }}>
+                              Logging: Week {nextWeekNum}
+                            </span>
+                            {latestEnd && (
+                              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                🔒 Earlier weeks up to <strong>{latestEnd}</strong> are already reported and cannot be selected.
+                              </span>
+                            )}
+                          </div>
                           <div style={styles.logFormRow}>
                             <div style={{ width: '160px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                               <label style={styles.logLabel}>Start Date</label>
                               <input
                                 type="date"
                                 value={logStartDate}
-                                onChange={(e) => setLogStartDate(e.target.value)}
+                                min={minStartDate}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setLogStartDate(val);
+                                  if (logEndDate && val && logEndDate < val) {
+                                    setLogEndDate(val);
+                                  }
+                                }}
                                 style={styles.logInput}
                                 required
                               />
@@ -470,7 +607,7 @@ export default function EmployeeAssignmentsTab({ user }) {
                               <input
                                 type="date"
                                 value={logEndDate}
-                                min={logStartDate || undefined}
+                                min={logStartDate || minStartDate}
                                 onChange={(e) => setLogEndDate(e.target.value)}
                                 style={styles.logInput}
                                 required
@@ -625,7 +762,7 @@ export default function EmployeeAssignmentsTab({ user }) {
                                     <div key={log.id} style={styles.logItem}>
                                       <div style={styles.logMetaRow}>
                                         <span style={styles.logWeekBadge}>
-                                          {log.startDate && log.endDate ? `${log.startDate} → ${log.endDate}` : (log.week || 'N/A')}
+                                          {getLogWeekLabel(log, idx)}
                                         </span>
                                         <span style={styles.logPercentBadge}>{log.percentage}% (Total: {cumulative}%)</span>
                                       </div>
