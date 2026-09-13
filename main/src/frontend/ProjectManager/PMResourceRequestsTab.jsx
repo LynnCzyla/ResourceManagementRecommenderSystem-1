@@ -1237,7 +1237,7 @@ const styles = {
   },
   pageBtnActive: {
     background: 'var(--color-primary)',
-    borderColor: 'var(--color-primary)',
+    border: '1px solid var(--color-primary)',
     color: '#ffffff',
     fontWeight: '700',
   },
