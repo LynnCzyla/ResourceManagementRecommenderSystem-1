@@ -4,6 +4,8 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const PDFDocument = require('pdfkit');
+const ExcelJS = require('exceljs');
 
 // Helper to get role display name
 const getRoleDisplayName = (role) => {
@@ -305,11 +307,12 @@ router.get('/audit-logs/filters', async (req, res) => {
   }
 });
 
-// GET /api/superadmin/audit-logs/export
+// GET /api/superadmin/audit-logs/export?format=pdf|excel
 router.get('/audit-logs/export', async (req, res) => {
   try {
     console.log('📊 Exporting audit logs...');
     
+    const format = (req.query.format || 'pdf').toLowerCase();
     const search = (req.query.search || '').trim();
     const action = req.query.action;
     const role = req.query.role;
@@ -379,84 +382,253 @@ router.get('/audit-logs/export', async (req, res) => {
       throw error;
     }
 
-    // Get all unique user IDs
+    // Get all unique user IDs and build profile map
     const userIds = [...new Set((logs || []).map(log => log.user_id).filter(Boolean))];
     let profileMap = new Map();
 
     if (userIds.length > 0) {
-      const { data: profiles, error: profileError } = await supabase
+      const { data: profiles } = await supabase
         .from('profiles')
-        .select(`
-          id,
-          first_name,
-          middle_name,
-          last_name,
-          role,
-          branch_id,
-          branches:profiles_branch_id_fkey (
-            name
-          )
-        `)
+        .select(`id, first_name, middle_name, last_name, role, branch_id, branches:profiles_branch_id_fkey (name)`)
         .in('id', userIds);
 
-      if (!profileError && profiles) {
-        profiles.forEach(profile => {
-          profileMap.set(profile.id, profile);
-        });
+      if (profiles) {
+        profiles.forEach(profile => profileMap.set(profile.id, profile));
       }
     }
 
-    // Format for CSV
-    const csvData = (logs || []).map(log => {
+    const rows = (logs || []).map(log => {
       const profile = profileMap.get(log.user_id) || {};
       const branch = profile.branches || {};
-      
       const firstName = profile.first_name || '';
       const middleName = profile.middle_name ? ` ${profile.middle_name}` : '';
       const lastName = profile.last_name || '';
       const fullName = `${firstName}${middleName} ${lastName}`.trim() || 'System';
-
       return {
-        'Timestamp': new Date(log.created_at).toLocaleString(),
-        'Actor': fullName,
-        'Role': getRoleDisplayName(profile.role),
-        'Branch': branch.name || '',
-        'Action': log.action || '',
-        'Category': log.system_category || 'General',
-        'Description': log.log_description || '',
+        timestamp: new Date(log.created_at).toLocaleString(),
+        actor: fullName,
+        role: getRoleDisplayName(profile.role),
+        branch: branch.name || '—',
+        action: log.action || '—',
+        category: log.system_category || 'General',
+        desc: log.log_description || '—',
       };
     });
 
-    // Generate CSV
-    const headers = ['Timestamp', 'Actor', 'Role', 'Branch', 'Action', 'Category', 'Description'];
-    let csvContent = headers.join(',') + '\n';
-    
-    if (csvData.length === 0) {
-      csvContent += '"No audit logs found for the selected filters",,,,,';
-    } else {
-      csvData.forEach(row => {
-        const rowData = headers.map(header => {
-          const value = row[header] || '';
-          const escaped = value.toString().replace(/"/g, '""');
-          return escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') 
-            ? `"${escaped}"` 
-            : escaped;
-        });
-        csvContent += rowData.join(',') + '\n';
+    const dateStr = new Date().toISOString().split('T')[0];
+
+    // ── EXCEL ────────────────────────────────────────────────────────────────
+    if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'WEA Resource Management System';
+      workbook.created = new Date();
+
+      const ws = workbook.addWorksheet('Audit Trail', {
+        views: [{ state: 'frozen', ySplit: 5, showGridLines: false }],
       });
+
+      const COLORS = {
+        titleBg:    'FF0B1220', titleText:  'FFFFFFFF',
+        accent:     'FFF5B700',
+        subBg:      'FFF1F5F9', subText:    'FF475569',
+        headerBg:   'FF1E3A5F', headerText: 'FFFFFFFF',
+        rowEven:    'FFFFFFFF', rowOdd:     'FFF6F8FA',
+        border:     'FFD9DEE4', outerBorder:'FF1E3A5F',
+      };
+
+      const cols = [
+        { header: 'Timestamp',   width: 22, align: 'left'   },
+        { header: 'Actor',       width: 24, align: 'left'   },
+        { header: 'Role',        width: 20, align: 'left'   },
+        { header: 'Branch',      width: 18, align: 'left'   },
+        { header: 'Action',      width: 22, align: 'left'   },
+        { header: 'Category',    width: 20, align: 'center' },
+        { header: 'Description', width: 44, align: 'left', wrap: true },
+      ];
+
+      ws.columns = cols.map(c => ({ width: c.width }));
+      const totalCols = cols.length;
+
+      // Row 1 – Title band
+      ws.mergeCells(1, 1, 1, totalCols);
+      const titleCell = ws.getCell(1, 1);
+      titleCell.value = 'WEA  •  SYSTEM AUDIT TRAIL REPORT';
+      titleCell.font = { bold: true, size: 15, color: { argb: COLORS.titleText }, name: 'Calibri' };
+      titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+      ws.getRow(1).height = 30;
+      ws.getRow(1).eachCell({ includeEmpty: true }, c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.titleBg } };
+      });
+
+      // Row 2 – Gold accent bar
+      ws.mergeCells(2, 1, 2, totalCols);
+      ws.getRow(2).height = 4;
+      ws.getRow(2).eachCell({ includeEmpty: true }, c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
+      });
+
+      // Row 3 – Subtitle metadata
+      ws.mergeCells(3, 1, 3, totalCols);
+      const subCell = ws.getCell(3, 1);
+      const scopeParts = [];
+      if (role && role !== 'All') scopeParts.push(`Role: ${role}`);
+      if (branchId && branchId !== 'All') scopeParts.push(`Branch filtered`);
+      if (action && action !== 'All') scopeParts.push(`Action: ${action}`);
+      subCell.value = `Generated ${new Date().toLocaleString()}      Total Records: ${rows.length}${scopeParts.length ? '   |   ' + scopeParts.join('   |   ') : ''}`;
+      subCell.font = { italic: true, size: 10, color: { argb: COLORS.subText }, name: 'Calibri' };
+      subCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+      ws.getRow(3).height = 20;
+      ws.getRow(3).eachCell({ includeEmpty: true }, c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subBg } };
+      });
+
+      // Row 4 – Spacer
+      ws.getRow(4).height = 8;
+
+      // Row 5 – Header
+      const headerRow = ws.getRow(5);
+      cols.forEach((col, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = col.header;
+        cell.font = { bold: true, size: 11, color: { argb: COLORS.headerText }, name: 'Calibri' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.headerBg } };
+        cell.alignment = { vertical: 'middle', horizontal: col.align, indent: 1 };
+        cell.border = {
+          top:    { style: 'thin', color: { argb: COLORS.outerBorder } },
+          bottom: { style: 'medium', color: { argb: COLORS.outerBorder } },
+          left:   { style: 'thin', color: { argb: COLORS.outerBorder } },
+          right:  { style: 'thin', color: { argb: COLORS.outerBorder } },
+        };
+      });
+      headerRow.height = 24;
+
+      // Data rows
+      rows.forEach((row, idx) => {
+        const rowIdx = 6 + idx;
+        const dataRow = ws.getRow(rowIdx);
+        const baseFill = idx % 2 === 0 ? COLORS.rowEven : COLORS.rowOdd;
+        const values = [row.timestamp, row.actor, row.role, row.branch, row.action, row.category, row.desc];
+
+        values.forEach((val, colIdx) => {
+          const cell = dataRow.getCell(colIdx + 1);
+          cell.value = val;
+          cell.font = { size: 10, name: 'Calibri' };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: baseFill } };
+          cell.alignment = { vertical: 'middle', horizontal: cols[colIdx].align, wrapText: !!cols[colIdx].wrap, indent: 1 };
+          cell.border = {
+            top:    { style: 'hair', color: { argb: COLORS.border } },
+            bottom: { style: 'hair', color: { argb: COLORS.border } },
+            left:   { style: 'thin', color: { argb: COLORS.outerBorder } },
+            right:  { style: 'thin', color: { argb: COLORS.outerBorder } },
+          };
+        });
+        dataRow.height = 18;
+      });
+
+      // AutoFilter
+      ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: totalCols } };
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=WEA_AuditTrail_${dateStr}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      return res.send(buffer);
     }
 
-    // Send as CSV
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=audit_logs_${new Date().toISOString().split('T')[0]}.csv`);
-    res.send(csvContent);
+    // ── PDF ──────────────────────────────────────────────────────────────────
+    const doc = new PDFDocument({ margin: 35, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=WEA_AuditTrail_${dateStr}.pdf`);
+    doc.pipe(res);
+
+    const drawPageHeader = (isFirstPage) => {
+      doc.rect(0, 0, 595.28, isFirstPage ? 50 : 30).fill('#0b1220');
+      doc.rect(0, isFirstPage ? 50 : 30, 595.28, 3).fill('#f5b700');
+      doc.fillColor('#ffffff').fontSize(isFirstPage ? 12.5 : 9)
+        .font('Helvetica-Bold')
+        .text(isFirstPage ? 'WEA  •  RESOURCE MANAGEMENT SYSTEM' : 'WEA  •  SYSTEM AUDIT TRAIL REPORT (CONT.)', 35, isFirstPage ? 14 : 9);
+      if (isFirstPage) {
+        doc.fillColor('#94a3b8').fontSize(8.5).font('Helvetica').text('SYSTEM AUDIT TRAIL REPORT', 35, 30);
+        doc.fillColor('#64748b').fontSize(7.5).font('Helvetica').text('CONFIDENTIAL  |  INTERNAL REPORT', 35, 20, { width: 525, align: 'right' });
+      }
+    };
+
+    drawPageHeader(true);
+
+    // Subtitle strip
+    doc.roundedRect(35, 64, 525, 22, 3).fill('#f1f5f9');
+    doc.fillColor('#475569').fontSize(8).font('Helvetica');
+    const filterLabel = [
+      `Generated: ${new Date().toLocaleString()}`,
+      `Records: ${rows.length}`,
+      role && role !== 'All' ? `Role: ${role}` : null,
+      action && action !== 'All' ? `Action: ${action}` : null,
+    ].filter(Boolean).join('   |   ');
+    doc.text(filterLabel, 45, 70, { width: 505, align: 'left' });
+
+    // Table columns
+    const columns = [
+      { header: 'Timestamp',  x: 35,  w: 88, align: 'left'   },
+      { header: 'Actor',      x: 123, w: 80, align: 'left'   },
+      { header: 'Role',       x: 203, w: 70, align: 'left'   },
+      { header: 'Branch',     x: 273, w: 58, align: 'left'   },
+      { header: 'Action',     x: 331, w: 64, align: 'left'   },
+      { header: 'Category',   x: 395, w: 54, align: 'center' },
+      { header: 'Description',x: 449, w: 111, align: 'left'  },
+    ];
+
+    const drawTableHeader = (y) => {
+      doc.rect(35, y, 525, 18).fill('#1e3a5f');
+      doc.fillColor('#ffffff').fontSize(7).font('Helvetica-Bold');
+      columns.forEach(col => {
+        doc.text(col.header, col.x + 2, y + 5, { width: col.w - 4, align: col.align });
+      });
+    };
+
+    let tableY = 96;
+    drawTableHeader(tableY);
+    let y = tableY + 18;
+
+    rows.forEach((row, i) => {
+      const rowValues = [row.timestamp, row.actor, row.role, row.branch, row.action, row.category, row.desc];
+      const rowH = 17;
+      if (y + rowH > 800) {
+        doc.addPage();
+        drawPageHeader(false);
+        tableY = 42;
+        drawTableHeader(tableY);
+        y = tableY + 18;
+      }
+      const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+      doc.rect(35, y, 525, rowH).fill(bg);
+      doc.lineWidth(0.4).strokeColor('#e2e8f0').moveTo(35, y + rowH).lineTo(560, y + rowH).stroke();
+      doc.fillColor('#334155').fontSize(6.5).font('Helvetica');
+      columns.forEach((col, ci) => {
+        const val = String(rowValues[ci] || '—');
+        doc.text(val, col.x + 2, y + 4, { width: col.w - 4, align: col.align, lineBreak: false, ellipsis: true });
+      });
+      y += rowH;
+    });
+
+    doc.lineWidth(1).strokeColor('#1e3a5f').rect(35, tableY, 525, y - tableY).stroke();
+
+    // Footer on all pages
+    const pageRange = doc.bufferedPageRange();
+    for (let p = pageRange.start; p < pageRange.start + pageRange.count; p++) {
+      doc.switchToPage(p);
+      doc.lineWidth(0.5).strokeColor('#e2e8f0').moveTo(35, 808).lineTo(560, 808).stroke();
+      doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
+         .text(`WEA Resource Management System  •  Generated ${new Date().toLocaleDateString()}`, 35, 814, { align: 'left' });
+      doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
+         .text(`Page ${p + 1} of ${pageRange.count}`, 35, 814, { width: 525, align: 'right' });
+    }
+
+    doc.end();
 
   } catch (err) {
     console.error('❌ Error exporting audit logs:', err);
-    res.status(500).json({
-      success: false,
-      error: err.message || 'Failed to export audit logs',
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to export audit logs' });
+    }
   }
 });
 
