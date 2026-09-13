@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../../config/api';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 const API_BASE = `${API_BASE_URL}/api/superadmin`;
 
@@ -70,7 +71,7 @@ export default function DashboardTab({ setActiveTab }) {
   const backgroundRefreshTimeout = useRef(null);
 
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
