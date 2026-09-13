@@ -180,9 +180,9 @@ export default function RMRequestsTab() {
       if (req.projectStatus === 'Completed' || req.projectStatus === 'Archived') {
         return false;
       }
+      // Exclude Cancelled / Canceled / Completed / Done / Rejected requests from Resource Allocation Requests
       const statusLower = (req.status || '').toLowerCase();
-      // Exclude Cancelled / Canceled / Completed / Done requests unless explicitly filtered
-      if (['cancelled', 'canceled', 'completed', 'done'].includes(statusLower) && statusFilter !== req.status) {
+      if (['cancelled', 'canceled', 'completed', 'done', 'rejected'].includes(statusLower)) {
         return false;
       }
       const matchesSearch =
@@ -366,6 +366,11 @@ export default function RMRequestsTab() {
     if (!result.isConfirmed) return;
     try {
       await updateRequirementStatus(reqId, 'Rejected');
+      setRequests(prev => prev.filter(r => r.id !== reqId));
+      if (activeRequestDetails?.id === reqId) {
+        setActiveRequestDetails(null);
+        setRecommendations({ recommended: [], all: [] });
+      }
       await fetchData();
       showSuccessAlert('Request has been rejected.');
     } catch (error) {
@@ -458,7 +463,6 @@ export default function RMRequestsTab() {
                 <option value="All">All Status</option>
                 <option value="Pending">Pending</option>
                 <option value="Approved">Approved</option>
-                <option value="Rejected">Rejected</option>
               </select>
             </div>
           </div>
