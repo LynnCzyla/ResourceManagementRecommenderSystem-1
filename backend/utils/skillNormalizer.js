@@ -59,20 +59,84 @@ const buildComparisonKeys = (skill) => {
 };
 
 // ─── Helpers that work with a Set of comparison keys ────────────────────────
-/**
- * Add all four comparison-key variants for `skill` into `set`.
- */
 const addComparisonKeys = (set, skill) => {
     for (const key of buildComparisonKeys(skill)) {
         set.add(key);
     }
 };
 
-/**
- * Return true if ANY comparison-key variant of `skill` is present in `set`.
- */
 const hasComparisonKey = (set, skill) =>
     buildComparisonKeys(skill).some(key => set.has(key));
+
+// =============================================================
+// TOKEN-SUBSET MATCHING — solves compound-skill matching
+// e.g. "gas and oil planning" (employee) ⊇ "gas planning" (required)
+// =============================================================
+
+// Connector / filler words that don't carry meaning for skill matching.
+// Deliberately conservative — never add real technical terms here
+// (e.g. never add "c", "r", "go" — those are language names).
+const STOPWORDS = new Set([
+    'and', 'or', 'the', 'a', 'an', 'of', 'for', 'with', 'in', 'on', 'to', '&'
+]);
+
+/**
+ * Break a skill string into a normalized, stopword-filtered, singularized
+ * token array. Splits on whitespace, commas, slashes, ampersands, hyphens.
+ */
+const tokenizeSkill = (skill) => {
+    const key = skillKey(skill);
+    return key
+        .split(/[\s,/&-]+/)
+        .map(t => t.replace(/[^a-z0-9]/g, ''))
+        .filter(t => t.length > 0 && !STOPWORDS.has(t))
+        .map(singularizeToken);
+};
+
+const tokenSetOf = (skill) => new Set(tokenizeSkill(skill));
+
+/**
+ * True if EVERY meaningful token of `requiredSkill` is present in
+ * `candidateSkill`'s token set. This lets a compound employee skill like
+ * "gas and oil planning" satisfy a narrower requirement like "gas planning",
+ * regardless of word order or connector words.
+ *
+ * minReqTokens guards against 1-word requirements matching too broadly
+ * (e.g. requirement "management" matching any skill that merely contains
+ * that word, like "risk management").
+ */
+const isSubsetMatch = (requiredSkill, candidateSkill, { minReqTokens = 2 } = {}) => {
+    const reqTokens = tokenSetOf(requiredSkill);
+    if (reqTokens.size < minReqTokens) return false;
+    const candTokens = tokenSetOf(candidateSkill);
+    for (const t of reqTokens) {
+        if (!candTokens.has(t)) return false;
+    }
+    return true;
+};
+
+/**
+ * Token-level Jaccard similarity between two skill strings (0..1).
+ * Used only as a last-resort fallback tier, after exact/alias/subset.
+ * Deliberately does NOT use edit-distance/fuzzy string matching — that
+ * approach produces dangerous false positives on short technical terms
+ * (e.g. "php" vs "sap", "react" vs "redact" are 1-2 edits apart).
+ */
+const jaccardSimilarity = (skillA, skillB) => {
+    const a = tokenSetOf(skillA);
+    const b = tokenSetOf(skillB);
+    if (a.size === 0 || b.size === 0) return 0;
+    let inter = 0;
+    for (const t of a) if (b.has(t)) inter++;
+    const union = new Set([...a, ...b]).size;
+    return union === 0 ? 0 : inter / union;
+};
+
+// =============================================================
+// Safe UUID validation (prevents SQL-injection via interpolated id lists)
+// =============================================================
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (value) => typeof value === 'string' && UUID_RE.test(value);
 
 module.exports = {
     normalizeSkill,
@@ -83,5 +147,10 @@ module.exports = {
     singularCompactSkillKey,
     buildComparisonKeys,
     addComparisonKeys,
-    hasComparisonKey
+    hasComparisonKey,
+    tokenizeSkill,
+    tokenSetOf,
+    isSubsetMatch,
+    jaccardSimilarity,
+    isUuid
 };
