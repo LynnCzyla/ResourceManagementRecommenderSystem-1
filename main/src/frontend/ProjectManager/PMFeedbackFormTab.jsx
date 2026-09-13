@@ -51,7 +51,7 @@ function resolvePmDisplayName(user) {
     const stored = JSON.parse(localStorage.getItem('user') || 'null');
     const fromStorage = stored?.name || [stored?.first_name, stored?.last_name].filter(Boolean).join(' ');
     if (fromStorage) return fromStorage;
-  } catch (err) {}
+  } catch (err) { }
   return 'Project Manager (You)';
 }
 
@@ -114,9 +114,9 @@ export default function PMFeedbackFormTab({ user }) {
     }
   };
 
-  useEffect(() => { 
+  useEffect(() => {
     if (effectiveUserId) {
-      loadHistory(); 
+      loadHistory();
     }
   }, [effectiveUserId]);
 
@@ -319,7 +319,7 @@ export default function PMFeedbackFormTab({ user }) {
         background: 'var(--color-bg-card)',
         color: 'var(--color-text-primary)',
       });
-    } catch {}
+    } catch { }
   };
 
   const selectedProject = useMemo(
