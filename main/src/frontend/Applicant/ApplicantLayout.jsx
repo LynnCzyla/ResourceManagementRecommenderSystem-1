@@ -17,7 +17,7 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
           </div>
         </div>
         <div style={styles.headerRight}>
-          <button
+          <button 
             onClick={() => setShowMyApplications(!showMyApplications)}
             style={{
               ...styles.navButton,
@@ -73,10 +73,12 @@ const styles = {
   header: {
     backgroundColor: 'var(--color-bg-sidebar)',
     borderBottom: '1px solid var(--color-border)',
-    padding: '16px 32px',
+    padding: 'clamp(12px, 2vw, 16px) clamp(16px, 3vw, 32px)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: '12px',
     boxShadow: 'var(--shadow-sm)',
     position: 'sticky',
     top: 0,
@@ -85,10 +87,11 @@ const styles = {
   headerLeft: {
     display: 'flex',
     alignItems: 'center',
-    gap: '16px',
+    gap: '12px',
+    flexWrap: 'wrap',
   },
   logo: {
-    height: '48px',
+    height: '42px',
     width: 'auto',
   },
   headerTitle: {
@@ -96,42 +99,45 @@ const styles = {
     flexDirection: 'column',
   },
   title: {
-    fontSize: '24px',
+    fontSize: 'clamp(18px, 4vw, 24px)',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
     margin: 0,
     letterSpacing: '-0.5px',
   },
   subtitle: {
-    fontSize: '14px',
+    fontSize: '13px',
     color: 'var(--color-text-secondary)',
     margin: 0,
   },
   headerRight: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
+    gap: '8px',
+    flexWrap: 'wrap',
   },
   navButton: {
-    padding: '10px 20px',
+    padding: '8px 16px',
     borderRadius: '8px',
     border: '1px solid var(--color-border)',
     backgroundColor: 'transparent',
     color: 'var(--color-text-primary)',
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '600',
     cursor: 'pointer',
+    minHeight: '40px',
     transition: 'all 0.2s',
   },
   logoutButton: {
-    padding: '10px 20px',
+    padding: '8px 16px',
     borderRadius: '8px',
     border: '1px solid var(--color-danger)',
     backgroundColor: 'transparent',
     color: 'var(--color-danger)',
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '600',
     cursor: 'pointer',
+    minHeight: '40px',
     transition: 'all 0.2s',
   },
   themeToggle: {
@@ -167,9 +173,10 @@ const styles = {
   },
   main: {
     flex: 1,
-    padding: '32px',
+    padding: 'clamp(14px, 2.5vw, 32px)',
     maxWidth: '1400px',
     margin: '0 auto',
     width: '100%',
+    boxSizing: 'border-box',
   },
 };
