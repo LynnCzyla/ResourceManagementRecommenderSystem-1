@@ -39,6 +39,8 @@ const clearDashboardCache = (branchId = null) => {
   }
 };
 
+const CLOSED_TASK_STATUSES = ['Completed', 'Completed-Hidden', 'Archived'];
+
 /**
  * GET /api/rm/dashboard
  * Powers RMDashboardTab.jsx - WITH BRANCH FILTERING & WORKLOAD SCORE
@@ -108,7 +110,7 @@ router.get('/', async (req, res) => {
       projectsQuery,
       supabase
         .from('project_tasks')
-        .select('profile_id, status, project_id, priority') // ✅ Removed task_name and weight
+        .select('profile_id, status, project_id, priority')
     ]);
 
     if (employeesResult.error) throw employeesResult.error;
@@ -130,6 +132,7 @@ router.get('/', async (req, res) => {
 
     // ✅ Get employee IDs for this branch
     const employeeIds = employees.map(e => e.id);
+    const employeeIdSet = new Set(employeeIds);
 
     // ✅ Filter active projects map
     const activeProjectMap = new Map();
@@ -141,9 +144,9 @@ router.get('/', async (req, res) => {
     const activeProjectIds = new Set(activeProjectMap.keys());
 
     // ✅ Filter assignments to active projects for this branch's employees
-    const assignments = allAssignments.filter(a => 
-      employeeIds.includes(a.profile_id) && 
-      activeProjectIds.has(a.project_id) && 
+    const assignments = allAssignments.filter(a =>
+      employeeIdSet.has(a.profile_id) &&
+      activeProjectIds.has(a.project_id) &&
       a.status === 'Assigned'
     );
 
@@ -170,12 +173,12 @@ router.get('/', async (req, res) => {
       assignments.map(a => `${a.profile_id}_${a.project_id}`)
     );
 
-    // ✅ Filter active tasks for employees in this branch (only active projects, actively assigned employees, and non-completed tasks)
-    const activeTasks = allTasks.filter(t => 
-      employeeIds.includes(t.profile_id) && 
-      activeProjectIds.has(t.project_id) && 
+    // ✅ Filter active tasks for employees in this branch
+    const activeTasks = allTasks.filter(t =>
+      employeeIdSet.has(t.profile_id) &&
+      activeProjectIds.has(t.project_id) &&
       activeAssignmentKeys.has(`${t.profile_id}_${t.project_id}`) &&
-      !['Completed', 'Completed-Hidden', 'Archived'].includes(t.status)
+      !CLOSED_TASK_STATUSES.includes(t.status)
     );
 
     console.log(`📊 Data: ${employees.length} employees, ${assignments.length} active assignments, ${projects.length} active projects, ${activeTasks.length} active tasks`);
@@ -212,15 +215,15 @@ router.get('/', async (req, res) => {
     let availableCount = 0;
     let limitedCount = 0;
     let fullyLoadedCount = 0;
+    let assignedToProjectCount = 0; // ✅ real "has an active project assignment" count
 
     for (const emp of employees) {
       const taskCount = taskCounts[emp.id] || 0;
       const workloadScore = workloadScores[emp.id] || 0;
-      
+
       let workloadStatus;
       let utilizationRate;
-      
-      // ✅ Workload status based on Workload Score (weighted)
+
       if (workloadScore === 0) {
         workloadStatus = 'Available';
         utilizationRate = 0;
@@ -235,7 +238,6 @@ router.get('/', async (req, res) => {
         fullyLoadedCount++;
       }
 
-      // ✅ Get position name
       const positionName = emp.positions?.position_name || null;
       const rawPosition = positionName?.trim();
       const rawRole = (emp.role || '').trim();
@@ -257,6 +259,8 @@ router.get('/', async (req, res) => {
       const assignedProjects = employeeProjectMap.get(emp.id) || [];
       const hasProject = assignedProjects.length > 0;
       const projectName = hasProject ? assignedProjects.join(', ') : 'Unassigned';
+
+      if (hasProject) assignedToProjectCount++;
 
       employeeRows.push({
         id: emp.id,
@@ -280,8 +284,8 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // ✅ Log workload distribution
     console.log(`📊 Workload Distribution: Available: ${availableCount}, Limited: ${limitedCount}, Fully Loaded: ${fullyLoadedCount}`);
+    console.log(`📊 Actually assigned to a project: ${assignedToProjectCount}`);
 
     // ✅ Resource Utilization by Department
     const deptStats = {};
@@ -321,24 +325,23 @@ router.get('/', async (req, res) => {
     sixMonthsAgo.setDate(1);
     sixMonthsAgo.setHours(0, 0, 0, 0);
 
-    // ✅ Monthly Resource Requests Trend
+    // ✅ Monthly Resource Requests Trend (unchanged — total requests created per month)
     let monthlyTrend = [];
     try {
-      let reqQuery = supabase
+      let reqTrendQuery = supabase
         .from('project_resource_requirements')
         .select('created_at, quantity_needed, role_title, project_id')
         .gte('created_at', sixMonthsAgo.toISOString());
 
       if (!isSuperAdmin && userBranchId) {
         if (projectIdsFromAssignments.length > 0) {
-          reqQuery = reqQuery.in('project_id', projectIdsFromAssignments);
+          reqTrendQuery = reqTrendQuery.in('project_id', projectIdsFromAssignments);
         } else {
-          reqQuery = reqQuery.eq('project_id', 0);
+          reqTrendQuery = reqTrendQuery.eq('project_id', 0);
         }
       }
 
-      const { data: requestsData, error: requestsError } = await reqQuery;
-
+      const { data: requestsData, error: requestsError } = await reqTrendQuery;
       if (requestsError) throw requestsError;
 
       const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
@@ -366,42 +369,90 @@ router.get('/', async (req, res) => {
     }
 
     // ✅ Demand vs. Available Capacity
+    // Ginagamit na ang project_resource_requirements_history table (kung meron nang
+    // history entries ang isang requirement) para malaman ang totoong status niya
+    // noong bawat buwan. Kung wala pang history entries (bagong requirement, wala
+    // pang nagbabago ang status), fallback sa current status + created_at
+    // (parang yung dating simpleng snapshot logic).
     let demandVsAvailableCapacity = [];
     try {
-      let pendingQuery = supabase
+      let reqQuery = supabase
         .from('project_resource_requirements')
-        .select('created_at, quantity_needed, role_title, project_id')
-        .eq('status', 'Pending')
+        .select('id, created_at, status, quantity_needed, role_title, project_id')
         .gte('created_at', sixMonthsAgo.toISOString());
 
       if (!isSuperAdmin && userBranchId) {
         if (projectIdsFromAssignments.length > 0) {
-          pendingQuery = pendingQuery.in('project_id', projectIdsFromAssignments);
+          reqQuery = reqQuery.in('project_id', projectIdsFromAssignments);
         } else {
-          pendingQuery = pendingQuery.eq('project_id', 0);
+          reqQuery = reqQuery.eq('project_id', 0);
         }
       }
 
-      const { data: pendingReqs, error: reqsError } = await pendingQuery;
-
+      const { data: allReqs, error: reqsError } = await reqQuery;
       if (reqsError) throw reqsError;
 
       const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
-      const filteredPending = (pendingReqs || []).filter((r) => {
+      const filteredReqs = (allReqs || []).filter((r) => {
         const title = (r.role_title || '').trim().toLowerCase();
         return !excludedKeywords.some((kw) => title.includes(kw));
       });
 
+      // ✅ Kunin ang history entries ng mga requirements na ito (kung meron)
+      const reqIds = filteredReqs.map(r => r.id);
+      let historyByReqId = {};
+      if (reqIds.length > 0) {
+        const { data: historyRows, error: historyError } = await supabase
+          .from('project_resource_requirements_history')
+          .select('requirement_id, status, changed_at')
+          .in('requirement_id', reqIds)
+          .order('changed_at', { ascending: true });
+
+        if (historyError) {
+          // Hindi natin gustong bumagsak ang buong dashboard kung may isyu lang
+          // sa history table (halimbawa, bagong-bago pa ito). Mag-log na lang
+          // at gamitin ang fallback logic.
+          console.warn('⚠️ History table read error, falling back to current-status only:', historyError.message);
+        } else {
+          for (const h of (historyRows || [])) {
+            if (!historyByReqId[h.requirement_id]) historyByReqId[h.requirement_id] = [];
+            historyByReqId[h.requirement_id].push(h);
+          }
+        }
+      }
+
+      // ✅ Helper: alamin ang status ng isang requirement as-of a given cutoff date
+      const statusAsOf = (req, cutoffDate) => {
+        const history = historyByReqId[req.id];
+        if (!history || history.length === 0) {
+          // Walang history entries -> fallback: gamitin ang current status,
+          // basta't existed na siya bago ang cutoff.
+          return new Date(req.created_at) <= cutoffDate ? req.status : null;
+        }
+        // May history: hanapin ang huling entry na naganap on/before ang cutoff
+        let statusAtCutoff = null;
+        for (const h of history) {
+          if (new Date(h.changed_at) <= cutoffDate) {
+            statusAtCutoff = h.status;
+          } else {
+            break;
+          }
+        }
+        return statusAtCutoff; // null kung wala pang existed as of cutoff
+      };
+
+      // Available/Limited employees (current snapshot — walang task history table pa)
       const availableCapacityEmployees = employeeRows.filter((e) => {
         const roleMatch = (e.rawRole || '').trim().toLowerCase() === 'employee';
         const isAvailable = e.workloadStatus === 'Available' || e.workloadStatus === 'Limited Availability';
         return roleMatch && isAvailable;
       });
 
-      demandVsAvailableCapacity = monthMeta.map(({ key, label, endOfMonth }) => {
-        const openDemand = filteredPending
-          .filter((r) => new Date(r.created_at) <= endOfMonth)
-          .reduce((sum, r) => sum + (r.quantity_needed || r.quantity || 1), 0);
+      demandVsAvailableCapacity = monthMeta.map(({ label, endOfMonth }) => {
+        const openDemand = filteredReqs.reduce((sum, r) => {
+          const statusThen = statusAsOf(r, endOfMonth);
+          return statusThen === 'Pending' ? sum + (r.quantity_needed || r.quantity || 1) : sum;
+        }, 0);
 
         const availableCapacity = availableCapacityEmployees
           .filter((e) => e.createdAt ? new Date(e.createdAt) <= endOfMonth : true)
@@ -455,7 +506,7 @@ router.get('/', async (req, res) => {
         .select('id, name, location')
         .eq('id', userBranchId)
         .single();
-      
+
       if (!branchError && branch) {
         branchInfo = branch;
       }
@@ -473,6 +524,7 @@ router.get('/', async (req, res) => {
         limited: limitedCount,
         fullyLoaded: fullyLoadedCount,
       },
+      assignedToProjectCount,
       employees: employeeRows,
       departmentUtilization,
       workloadDistributionPct,
