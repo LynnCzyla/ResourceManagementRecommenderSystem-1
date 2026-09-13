@@ -1,6 +1,11 @@
 // backend/services/recommendationService.js
 const supabase = require('../supabase');
-const { buildComparisonKeys, addComparisonKeys, hasComparisonKey } = require('../utils/skillNormalizer');
+const {
+    skillKey,
+    isSubsetMatch,
+    jaccardSimilarity,
+    isUuid
+} = require('../utils/skillNormalizer');
 
 class RecommendationEngine {
     constructor() {
@@ -34,10 +39,12 @@ class RecommendationEngine {
     }
 
     /**
-     * ✅ NEW: consistent normalization used everywhere skills are compared.
+     * Consistent normalization used everywhere skills are compared.
+     * Delegates to the shared skillNormalizer so recommendationService,
+     * documentController, and feedbackController never drift apart.
      */
     _normalize(str) {
-        return (str || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        return skillKey(str);
     }
 
     _splitSkillIntoComponents(skill) {
@@ -93,7 +100,10 @@ class RecommendationEngine {
 
     /**
      * Main method: Get ranked candidates for a project
-     * ✅ FIXED: Uses creator's branch for filtering
+     * ✅ FIXED: branch check no longer skips entirely when the requesting
+     * user has no branch_id assigned (previously: `if (!isSuperAdmin &&
+     * userBranchId)` silently granted access to ANY project when
+     * userBranchId was null/undefined).
      */
     async getCandidatesForProject(projectId, options = {}, userBranchId = null, isSuperAdmin = false) {
         const {
@@ -116,11 +126,18 @@ class RecommendationEngine {
     
         const projectBranchId = project.profiles?.branch_id;
     
-        // ✅ Check if project creator belongs to user's branch
-        if (!isSuperAdmin && userBranchId) {
+        // ✅ SECURITY FIX: this check now runs for every non-super-admin,
+        // regardless of whether userBranchId is truthy. Previously a user
+        // with NO branch assigned skipped this block entirely and could
+        // view recommendations for ANY project in ANY branch.
+        if (!isSuperAdmin) {
             if (!projectBranchId) {
                 console.warn(`⚠️ Project creator ${project.created_by} has no branch assigned`);
                 throw new Error('Project creator not assigned to any branch');
+            }
+            if (!userBranchId) {
+                console.warn(`⚠️ Requesting user has no branch assigned — denying access`);
+                throw new Error('Your account is not assigned to any branch. Please contact an administrator.');
             }
             if (projectBranchId !== userBranchId) {
                 console.warn(`⚠️ Project creator's branch ${projectBranchId} != User branch ${userBranchId}`);
@@ -302,6 +319,13 @@ class RecommendationEngine {
     
         // 8. Return top candidates
         const topCandidates = candidates.slice(0, maxCandidates);
+        // ==== VALIDATOR HOOK (optional, safe to delete — see recommendationValidator.js) ====
+        try {
+            require('../utils/recommendationValidator').validateAndPrint(
+                project.project_name, requiredSkills, topCandidates, this.COMPOSITE_WEIGHTS
+            );
+        } catch (e) { /* validator missing or errored — never break real recommendations */ }
+        // ==== END VALIDATOR HOOK ====
         
         console.log(`✅ Found ${candidates.length} candidates`);
         console.log(`🏆 Top ${topCandidates.length} candidates returned`);
@@ -347,8 +371,9 @@ class RecommendationEngine {
 
     /**
      * Calculate scores for a single employee
-     * ✅ REWRITTEN: real ordered matching tiers (EXACT → ALIAS → COMPONENT → PARTIAL),
-     * primary/secondary weighted scoring, and matchDetails-driven missingSkills.
+     * Ordered matching tiers: EXACT → ALIAS → ALIAS-VIA-COMPONENT →
+     * COMPONENT EXACT → TOKEN SUBSET (NEW) → TOKEN JACCARD (fallback).
+     * Primary/secondary weighted scoring, matchDetails-driven missingSkills.
      */
     async _calculateScore(employee, requiredSkills, context = null) {
         const employeeSkills = context?.preloaded
@@ -387,15 +412,9 @@ class RecommendationEngine {
                     components.indexOf(component) === index
                 );
 
-        // 🔍 TEMPORARY DEBUG: same logic as before, but now returns WHY a
-        // relationship was considered aliased instead of just true/false,
-        // so we can see the exact DB relationship behind each alias match.
-        // Priority order and match outcome are UNCHANGED — this only adds
-        // visibility.
         const isAliasRelated = (empSkill, reqSkill) => {
             if (!empSkill || !reqSkill) return null;
 
-            // Employee skill is an alias of requirement's master
             if (aliasMap[empSkill] === reqSkill) {
                 return {
                     related: true,
@@ -403,7 +422,6 @@ class RecommendationEngine {
                 };
             }
 
-            // Requirement is an alias of employee skill's master
             if (aliasMap[reqSkill] === empSkill) {
                 return {
                     related: true,
@@ -411,7 +429,6 @@ class RecommendationEngine {
                 };
             }
 
-            // Employee skill is a master and requirement is one of its aliases
             if (
                 masterAliases[empSkill] &&
                 masterAliases[empSkill].includes(reqSkill)
@@ -422,7 +439,6 @@ class RecommendationEngine {
                 };
             }
 
-            // Requirement is a master and employee skill is one of its aliases
             if (
                 masterAliases[reqSkill] &&
                 masterAliases[reqSkill].includes(empSkill)
@@ -544,36 +560,49 @@ class RecommendationEngine {
             }
 
             // ==========================================
-            // TIER 4 — TOKEN-LEVEL JACCARD MATCH
-            // Replaces naive substring includes() which caused false positives
-            // (e.g. "Java" matching "JavaScript", "Art" matching "Smart").
-            // Two skill strings match if their word-token sets share
-            // >= 0.75 Jaccard similarity.
+            // TIER 4 — TOKEN SUBSET MATCH (NEW)
+            // Handles compound employee skills that fully cover a
+            // narrower requirement, e.g. employee "gas and oil planning"
+            // satisfies requirement "gas planning" — regardless of word
+            // order or connector words ("and", "&", commas, hyphens).
+            // Deliberately NOT edit-distance/fuzzy: fuzzy matching on
+            // short technical terms produces false positives (e.g.
+            // "php"~"sap", "react"~"redact" are 1-2 edits apart).
+            // Requires >=2 meaningful tokens in the requirement so a
+            // single-word requirement never loose-matches (see
+            // isSubsetMatch's minReqTokens guard).
             // ==========================================
 
             if (!matchType) {
-                const _tokenSet = (s) => new Set(s.split(/\s+/).filter(t => t.length >= 3));
-                const _jaccard = (a, b) => {
-                    const inter = [...a].filter(t => b.has(t)).length;
-                    const union = new Set([...a, ...b]).size;
-                    return union === 0 ? 0 : inter / union;
-                };
-                const reqTokens = _tokenSet(reqLower);
+                for (const empSkill of employeeSkills) {
+                    if (isSubsetMatch(reqSkill, empSkill)) {
+                        matchType = 'subset';
+                        matchedEmpSkill = this._normalize(empSkill);
+                        break;
+                    }
+                }
+            }
 
+            // ==========================================
+            // TIER 5 — TOKEN-LEVEL JACCARD MATCH (fallback, last resort)
+            // Two skill strings match if their word-token sets share
+            // >= 0.75 Jaccard similarity. Kept as a loose safety net for
+            // cases Tiers 1-4 miss (different word order + extra filler,
+            // synonyms not yet in the alias table, etc.)
+            // ==========================================
+
+            if (!matchType) {
                 const partialCandidates = [
-                    ...normalizedEmployeeSkills,
-                    ...normalizedComponents
+                    ...employeeSkills,
+                    ...employeeComponents,
+                    ...derivedEmployeeComponents
                 ];
 
-                for (const skill of partialCandidates) {
-                    if (skill.length < 3) continue;
-                    const empTokens = _tokenSet(skill);
-                    // Avoid substring false-positives: one skill must have >= 2 tokens,
-                    // OR the shorter one must be a complete word boundary match.
-                    const sim = _jaccard(reqTokens, empTokens);
+                for (const candidate of partialCandidates) {
+                    const sim = jaccardSimilarity(reqSkill, candidate);
                     if (sim >= 0.75) {
                         matchType = 'partial';
-                        matchedEmpSkill = skill;
+                        matchedEmpSkill = this._normalize(candidate);
                         break;
                     }
                 }
@@ -615,7 +644,6 @@ class RecommendationEngine {
                 match_type:
                     matchType || 'none',
                 matched,
-                // 🔍 TEMPORARY DEBUG: only populated for match_type === 'alias'
                 alias_reason: matchType === 'alias' ? aliasReason : null
             });
 
@@ -628,6 +656,7 @@ class RecommendationEngine {
                     exact: 'EXACT MATCH',
                     alias: 'ALIAS MATCH',
                     component: 'COMPONENT MATCH',
+                    subset: 'SUBSET MATCH',
                     partial: 'PARTIAL MATCH'
                 };
 
@@ -655,8 +684,6 @@ class RecommendationEngine {
                 detail.matched_employee_skill
             );
 
-        // ✅ FIX: missing skills derived from matchDetails (match_type === 'none'),
-        // never from re-comparing strings against matchedSkills.
         const missingSkills = matchDetails
             .filter(detail => !detail.matched)
             .map(detail => ({
@@ -670,10 +697,6 @@ class RecommendationEngine {
                 : 0;
 
         // ─── Mandatory Prerequisite Factor (F_req) ───────────────────────────
-        // If fewer than 50% of PRIMARY (mandatory) skills are matched,
-        // the candidate is flagged as "Missing Core Skills" regardless of
-        // secondary matches. This prevents secondary bonuses from masking
-        // fundamental incompetencies.
         const prereqFulfillment = primaryTotal > 0 ? primaryMatched / primaryTotal : 1;
         const missingCoreSkills = prereqFulfillment < 0.5;
 
@@ -701,18 +724,12 @@ class RecommendationEngine {
             ? (context.workloadByProfile[employee.id] ?? 0)
             : await this._getWorkloadScore(employee.id);
 
-        // ─── Sigmoid Availability (replaces zero-cutoff linear) ──────────────
-        // At workload 0-4: ~95-85%. At workload 7: ~50%. At 10+: ~15-20%.
-        // Highly-loaded candidates remain VISIBLE as skilled backups rather
-        // than disappearing entirely from the list.
         const availabilityFactor = this._calculateAvailability(workload);
 
         const historicalPerformance = context?.preloaded
             ? (context.perfByProfile[employee.id] ?? this.DEFAULT_HP)
             : await this._getHistoricalPerformance(employee.id);
 
-        // ─── Weighted Composite Score ────────────────────────────────────────
-        // skillMatch(60%) + availability(25%) + performance(15%)
         const { skill: ws, availability: wa, performance: wp } = this.COMPOSITE_WEIGHTS;
         const recommendationScore =
             (ws * matchingScore) +
@@ -778,7 +795,6 @@ class RecommendationEngine {
 
             matchDetails,
 
-            // Breakdown fields for the explainable UI
             breakdown: {
                 skillMatchScore: Math.round(matchingScore * 100),
                 primarySkills: {
@@ -882,6 +898,12 @@ class RecommendationEngine {
 
     /**
      * Get alias map: alias → master
+     * ✅ FIXED: removed hardcoded DEBUG_SKILL / console.table block.
+     * ✅ FIXED: alias collisions (one alias name mapping to more than one
+     * master) are now resolved deterministically — alphabetically-first
+     * master name wins, instead of "whichever row Supabase returned last".
+     * Recommend also adding a UNIQUE constraint on
+     * skill_aliases.alias_skill_id as the permanent, DB-level fix.
      */
     async _getAliasMap() {
         if (this._aliasMap !== null && this._aliasCacheTime !== null) {
@@ -912,37 +934,29 @@ class RecommendationEngine {
             const aliasMap = {};
             const masterAliases = {};
 
-            // 🔍 TEMPORARY DEBUG: dump every raw skill_aliases row touching
-            // "client technical communication and support" (either side),
-            // so we can see the exact master/alias pairing in the DB instead
-            // of inferring it. Safe to delete once root cause is confirmed.
-            const DEBUG_SKILL = 'client technical communication and support';
-            const debugRows = [];
-            
             (data || []).forEach(item => {
                 const masterName = item.master?.skill_name?.toLowerCase().trim();
                 const aliasName = item.alias?.skill_name?.toLowerCase().trim();
-                
+
                 if (masterName && aliasName) {
-                    if (masterName === DEBUG_SKILL || aliasName === DEBUG_SKILL) {
-                        debugRows.push({
-                            row_id: item.id,
-                            master_skill_id: item.master_skill_id,
-                            master_skill_name: masterName,
-                            alias_skill_id: item.alias_skill_id,
-                            alias_skill_name: aliasName
-                        });
-                    }
-
                     if (aliasMap[aliasName] && aliasMap[aliasName] !== masterName) {
-                        // A single alias name pointing to more than one master
-                        // is itself a data-quality smell worth knowing about.
-                        console.warn(
-                            `⚠️ Alias "${aliasName}" already mapped to master "${aliasMap[aliasName]}", now also mapped to "${masterName}" — only the last one wins in aliasMap (masterAliases still records both).`
-                        );
+                        // Deterministic tie-break: keep the alphabetically
+                        // first master name so results are stable across
+                        // requests, regardless of DB row order.
+                        if (masterName < aliasMap[aliasName]) {
+                            console.warn(
+                                `⚠️ Alias "${aliasName}" maps to multiple masters ("${aliasMap[aliasName]}", "${masterName}"). Keeping "${masterName}" (alphabetically first). Add a UNIQUE constraint on skill_aliases.alias_skill_id to prevent this at the data level.`
+                            );
+                            aliasMap[aliasName] = masterName;
+                        } else {
+                            console.warn(
+                                `⚠️ Alias "${aliasName}" maps to multiple masters ("${aliasMap[aliasName]}", "${masterName}"). Keeping "${aliasMap[aliasName]}" (alphabetically first). Add a UNIQUE constraint on skill_aliases.alias_skill_id to prevent this at the data level.`
+                            );
+                        }
+                    } else {
+                        aliasMap[aliasName] = masterName;
                     }
 
-                    aliasMap[aliasName] = masterName;
                     if (!masterAliases[masterName]) {
                         masterAliases[masterName] = [];
                     }
@@ -951,11 +965,6 @@ class RecommendationEngine {
                     }
                 }
             });
-
-            if (debugRows.length > 0) {
-                console.log(`🔍 DEBUG — raw skill_aliases rows touching "${DEBUG_SKILL}":`);
-                console.table(debugRows);
-            }
 
             this._aliasMap = aliasMap;
             this._masterAliases = masterAliases;
@@ -1005,7 +1014,11 @@ class RecommendationEngine {
     }
 
     /**
-     * ✅ FIXED: Get available employees with BRANCH FILTERING
+     * Get available employees with BRANCH FILTERING.
+     * ✅ FIXED: excludeIds are now validated as real UUIDs before being
+     * interpolated into the PostgREST filter string, closing a SQL/filter
+     * injection surface (a malformed or malicious id could previously
+     * corrupt or hijack the `.not('id','in', ...)` clause).
      */
     async _getAvailableEmployees(excludeIds = [], userBranchId = null, isSuperAdmin = false) {
         console.log(`📋 Getting available employees...`);
@@ -1029,14 +1042,19 @@ class RecommendationEngine {
                 .eq('status', 'Active')
                 .eq('role', 'Employee');
 
-            // ✅ Apply branch filter for non-super admins
             if (!isSuperAdmin && userBranchId) {
                 query = query.eq('branch_id', userBranchId);
                 console.log(`🔍 Filtering employees by branch: ${userBranchId}`);
             }
 
             if (excludeIds.length > 0) {
-                query = query.not('id', 'in', `(${excludeIds.map(id => `'${id}'`).join(',')})`);
+                const safeIds = excludeIds.filter(isUuid);
+                if (safeIds.length !== excludeIds.length) {
+                    console.warn(`⚠️ Dropped ${excludeIds.length - safeIds.length} non-UUID id(s) from exclude list`);
+                }
+                if (safeIds.length > 0) {
+                    query = query.not('id', 'in', `(${safeIds.join(',')})`);
+                }
             }
 
             const { data, error } = await query;
@@ -1065,7 +1083,6 @@ class RecommendationEngine {
     }
 
     /**
-     * ✅ REWRITTEN: no longer pre-maps requirements to alias masters.
      * Returns [{ skill, skill_type }] preserving the ORIGINAL requirement text.
      */
     async _getRequiredSkills(requirementId) {
@@ -1112,8 +1129,6 @@ class RecommendationEngine {
                 }
             });
 
-            // Remove duplicate requirement skills while preserving the first
-            // occurrence and its skill_type.
             const seen = new Set();
             const uniqueSkills = [];
 
@@ -1142,7 +1157,7 @@ class RecommendationEngine {
     }
 
     /**
-     * ✅ REWRITTEN (legacy path): also retrieves and preserves skill_type.
+     * Legacy path: also retrieves and preserves skill_type.
      */
     async _getRequiredSkillsForProject(projectId) {
         console.log(`📋 Getting required skills for project ${projectId} (legacy method)`);
@@ -1298,7 +1313,6 @@ class RecommendationEngine {
      * Highly-loaded employees remain visible (never zeroed out).
      */
     _calculateAvailability(workload) {
-        // Sigmoid: 1 / (1 + e^(0.4*(workload-7)))
         return 1 / (1 + Math.exp(0.4 * (workload - 7)));
     }
 
