@@ -14,7 +14,8 @@ export default function LogsTab() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const ROWS_PER_PAGE = 10;
   const [currentPage, setCurrentPage] = useState(1);
@@ -101,13 +102,15 @@ export default function LogsTab() {
     };
   }, [searchQuery, categoryFilter, actionFilter, startDate, endDate, currentPage]);
 
-  const handleExport = async () => {
-    setExporting(true);
+  const handleExport = async (format) => {
+    const setLoading = format === 'pdf' ? setExportingPdf : setExportingExcel;
+    setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
       const params = new URLSearchParams();
+      params.append('format', format);
       if (searchQuery.trim()) params.append('search', searchQuery.trim());
       if (categoryFilter) params.append('category', categoryFilter);
       if (actionFilter) params.append('action', actionFilter);
@@ -121,7 +124,7 @@ export default function LogsTab() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'audit_logs.pdf';
+      a.download = format === 'pdf' ? `WEA_AuditTrail_${new Date().toISOString().split('T')[0]}.pdf` : `WEA_AuditTrail_${new Date().toISOString().split('T')[0]}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -130,7 +133,7 @@ export default function LogsTab() {
       console.error('Error exporting audit logs:', err);
       alert('Failed to export audit logs.');
     } finally {
-      setExporting(false);
+      setLoading(false);
     }
   };
 
@@ -216,14 +219,37 @@ export default function LogsTab() {
             )}
           </div>
 
-          <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}>
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            {exporting ? 'Exporting PDF...' : 'Export Audit Trail'}
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              id="btn-generate-pdf-audit"
+              style={{ ...styles.exportBtn, background: 'linear-gradient(135deg, #0b1220 0%, #1e3a5f 100%)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', opacity: exportingPdf ? 0.7 : 1, cursor: exportingPdf ? 'not-allowed' : 'pointer' }}
+              onClick={() => handleExport('pdf')}
+              disabled={exportingPdf || exportingExcel}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+              {exportingPdf ? 'Generating...' : 'Generate PDF'}
+            </button>
+            <button
+              id="btn-export-excel-audit"
+              style={{ ...styles.exportBtn, background: 'linear-gradient(135deg, #15803d 0%, #166534 100%)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', opacity: exportingExcel ? 0.7 : 1, cursor: exportingExcel ? 'not-allowed' : 'pointer' }}
+              onClick={() => handleExport('excel')}
+              disabled={exportingPdf || exportingExcel}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+              {exportingExcel ? 'Exporting...' : 'Export Excel'}
+            </button>
+          </div>
         </div>
 
         {loading && <p style={styles.stateText}>Loading audit logs...</p>}
