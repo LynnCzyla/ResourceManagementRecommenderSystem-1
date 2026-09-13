@@ -1983,7 +1983,7 @@ class NLPProcessor:
                     if words and words[0].lower() in LEADING_CONNECTORS:
                         continue
                     final_candidates.add(c)
-                return final_candidates
+                return final_candidates, set()  # flat list: no trusted sections
         # ==================================================================================
         
         # ============ STEP 1: Learn section names from this document ============
@@ -2045,7 +2045,12 @@ class NLPProcessor:
             EXPLICIT_SKILL_HEADERS = (
                 'skills', 'technical skills', 'core competencies', 'key skills',
                 'competencies', 'areas of expertise', 'software skills',
-                'technical competencies', 'tools & technologies', 'proficiencies'
+                'technical competencies', 'tools & technologies', 'proficiencies',
+                # ============ WEA ECP-FORM-01 section headers ============
+                'software proficiency', 'industry experience',
+                'areas of specialization', 'product and technical knowledge',
+                'product knowledge', 'technical knowledge',
+                # ==========================================================
             )
             if any(h in section_lower for h in EXPLICIT_SKILL_HEADERS):
                 score += 5
@@ -2086,27 +2091,47 @@ class NLPProcessor:
                 'relevant project experience', 'project name',
                 'education', 'educational background', 'academic history',
                 'character reference', 'references', 'personal reference',
-                'personal details', 'personal information', 'contact information'
+                'personal details', 'personal information', 'contact information',
+                # ============ WEA ECP prose & metadata sections ============
+                'professional summary', 'competency classification',
+                'manager remarks', 'employee identification',
+                'professional license', 'training & certifications',
+                'training and certifications',
+                # ===========================================================
             )
             if any(marker in section_lower for marker in METADATA_SECTION_MARKERS):
                 score -= 10
             # ============================================================================
 
+            is_explicit = any(h in section_lower for h in EXPLICIT_SKILL_HEADERS)
             scored_sections[section_name] = {
                 'content': content,
                 'score': score,
-                'is_skill_section': score >= 3  # Threshold learned from data
+                'is_skill_section': score >= 3,  # Threshold learned from data
+                'is_trusted': is_explicit,  # True = bullets auto-approved, bypass ML
             }
         
         # ============ STEP 3: Extract from skill sections ============
+        # Track which candidates came from trusted (EXPLICIT_SKILL_HEADERS) sections
+        # so they can bypass ML rejection later.
+        trusted_candidates = set()
+
         for section_name, section_data in scored_sections.items():
             if not section_data['is_skill_section']:
                 continue
             
             content = section_data['content']
+            is_trusted = section_data.get('is_trusted', False)
             
-            # Extract bullet points
-            bullet_items = re.findall(r'[•\-\*]\s*([^\n•\-\*]+)', content)
+            # Extract bullet points — LINE-START anchored to prevent
+            # splitting compound-hyphenated words like "Entry-Level" into
+            # fragments ("Level Engineering Documentation") and prevent
+            # page-header artifacts like "WEA-ECP-FORM-01" → "FORM".
+            bullet_items = []
+            for _ln in content.split('\n'):
+                _ln = _ln.strip()
+                if _ln and _ln[0] in '•-*' and len(_ln) > 2:
+                    bullet_items.append(_ln[1:].strip())
 
             # ============ FIX: only fall back to plain lines for list-style sections ============
             # A section is "list-style" if it's short, punchy lines (skills/tools),
@@ -2128,6 +2153,8 @@ class NLPProcessor:
                 for clean in plain_lines:
                     if 3 < len(clean) < 100 and not self._is_non_skill(clean):
                         whole_phrase_candidates.add(clean)
+                        if is_trusted:
+                            trusted_candidates.add(clean)
             # ==============================================================================================
             
             if bullet_items:
@@ -2136,7 +2163,9 @@ class NLPProcessor:
                     if 3 < len(clean) < 100 and clean:
                         # Filter out non-skills
                         if not self._is_non_skill(clean):
-                            whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
+                            whole_phrase_candidates.add(clean)
+                            if is_trusted:
+                                trusted_candidates.add(clean)
             else:
                 # If no bullet points, split by newlines or commas
                 items = re.split(r'\n|,', content)
@@ -2144,7 +2173,9 @@ class NLPProcessor:
                     clean = item.strip()
                     if 3 < len(clean) < 100 and clean:
                         if not self._is_non_skill(clean):
-                            whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
+                            whole_phrase_candidates.add(clean)
+                            if is_trusted:
+                                trusted_candidates.add(clean)
         
         # ============ STEP 4: Extract from bullet points anywhere ============
         # ============ FIX: bullet marker must be at LINE START only ============
@@ -2159,7 +2190,7 @@ class NLPProcessor:
         # right before a parenthetical, e.g. "Uninterruptible Power Supply
         # (UPS) Systems" no longer gets cut to "Uninterruptible Power Supply".
         bullet_matches = re.findall(
-            r'^[ \t]*[•\-\*][ \t]+([A-Za-z0-9 \t,&()\-]+)',
+            r'^[ \t]*[•\-\*][ \t]+([A-Za-z0-9 \t,&()\-/#+.]+)',
             text,
             re.MULTILINE
         )
@@ -2230,10 +2261,13 @@ class NLPProcessor:
             words = cleaned.split()
             if words and words[0].lower() in LEADING_CONNECTORS:
                 continue
-            if '/' in cleaned:
-                continue
+            # NOTE: Removed the blanket '/' in cleaned rejection here.
+            # Forward slashes are valid in skill names like "ERP / Bid Management Tools".
 
             candidates.add(cleaned)  # kept whole, regardless of word count
+            # Carry over trust status from source section to the cleaned version
+            if candidate in trusted_candidates:
+                trusted_candidates.add(cleaned)
         # ================================================================================================
 
         # ============ FIX: final pass - drop anything still starting with a connector ============
@@ -2244,8 +2278,10 @@ class NLPProcessor:
                 continue
             if words[0].lower() in LEADING_CONNECTORS:
                 continue
-            if '/' in c:  # ← NEW: table/list separator artifact, never a real skill
-                continue
+            # NOTE: Removed the blanket '/' rejection. Forward slashes are
+            # valid in real skill names ("ERP / Bid Management Tools").
+            # Table-separator artifacts are already filtered by _is_non_skill
+            # and the section-header exclusion logic above.
             final_candidates.add(c)
 
         # ============ NEW: drop truncated-prefix duplicates ============
@@ -2269,7 +2305,59 @@ class NLPProcessor:
         final_candidates = set(deduped)
         # ======================================================================
 
-        return final_candidates  # ← ONLY cleaned candidates, NO long phrases, NO leading connectors, NO stray "/", NO truncated duplicates
+        # ============ DIAGNOSTIC: trace 5 persistently missing skills ============
+        _TRACE_SKILLS = [
+            'electrical engineering services',
+            'power systems and transformer supply projects',
+            'industrial proposal and tender engineering',
+            'proposal engineering and bid preparation',
+            'power and distribution transformers',
+        ]
+        import sys
+        print(f"\n[DIAG] ======= EXTRACTION PIPELINE TRACE =======", file=sys.stderr)
+        print(f"[DIAG] Sections detected: {list(scored_sections.keys())}", file=sys.stderr)
+        for sname, sdata in scored_sections.items():
+            if sdata['is_skill_section']:
+                print(f"[DIAG] SKILL SECTION '{sname}': score={sdata['score']}, trusted={sdata.get('is_trusted')}", file=sys.stderr)
+                # Show first 200 chars of content
+                print(f"[DIAG]   content preview: {sdata['content'][:200]}", file=sys.stderr)
+        
+        for trace_skill in _TRACE_SKILLS:
+            # Check whole_phrase_candidates
+            in_wpc = any(trace_skill in c.lower() for c in whole_phrase_candidates)
+            # Check candidates
+            in_cand = any(trace_skill in c.lower() for c in candidates)
+            # Check final_candidates
+            in_final = any(trace_skill in c.lower() for c in final_candidates)
+            # Check trusted
+            in_trusted = any(trace_skill in c.lower() for c in trusted_candidates)
+            
+            if not in_final:
+                print(f"[DIAG] MISSING '{trace_skill}':", file=sys.stderr)
+                print(f"[DIAG]   whole_phrase_candidates: {in_wpc}", file=sys.stderr)
+                print(f"[DIAG]   candidates (after clean): {in_cand}", file=sys.stderr)
+                print(f"[DIAG]   final_candidates: {in_final}", file=sys.stderr)
+                print(f"[DIAG]   trusted_candidates: {in_trusted}", file=sys.stderr)
+            else:
+                print(f"[DIAG] FOUND '{trace_skill}' in final_candidates (trusted={in_trusted})", file=sys.stderr)
+        
+        # Also dump the raw text lines around "Industry Experience" for inspection
+        for i, line in enumerate(text.split('\n')):
+            line_stripped = line.strip().lower()
+            if 'industry experience' in line_stripped or 'electrical engineering services' in line_stripped:
+                context_start = max(0, i-1)
+                context_end = min(len(text.split('\n')), i+6)
+                print(f"[DIAG] Text around line {i} ('{line.strip()[:50]}'):", file=sys.stderr)
+                for j in range(context_start, context_end):
+                    print(f"[DIAG]   L{j}: '{text.split(chr(10))[j].strip()}'", file=sys.stderr)
+                break
+        print(f"[DIAG] =======================================\n", file=sys.stderr)
+        # ============ END DIAGNOSTIC ============
+
+        # Also return trusted candidates (from EXPLICIT_SKILL_HEADERS sections)
+        # so the caller can bypass ML rejection for them.
+        trusted_final = trusted_candidates & final_candidates
+        return final_candidates, trusted_final
     
     def _clean_candidate_text(self, text):
         """Clean extracted candidate text"""
@@ -2375,13 +2463,19 @@ class NLPProcessor:
         months = {'january', 'february', 'march', 'april', 'may', 'june',
                   'july', 'august', 'september', 'october', 'november', 'december',
                   'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'}
-        if text_lower in months or any(month in text_lower for month in months):
+        # Use word-boundary matching for short month abbreviations to avoid
+        # false positives like 'mar' in 'marketing' or 'sep' in 'separate'
+        if text_lower in months:
+            return True
+        months_pattern = r'\b(' + '|'.join(re.escape(m) for m in months) + r')\b'
+        if re.search(months_pattern, text_lower):
             return True
         
-        # Education words (structural)
+        # Education words (structural) — word-boundary to avoid false positives
         education = {'bachelor', 'master', 'phd', 'doctorate', 'degree', 'diploma',
                      'certificate', 'certification', 'course', 'college', 'university'}
-        if any(word in text_lower for word in education):
+        edu_pattern = r'\b(' + '|'.join(re.escape(w) for w in education) + r')\b'
+        if re.search(edu_pattern, text_lower):
             return True
         
         # Length checks (structural)
@@ -2407,23 +2501,54 @@ class NLPProcessor:
         
         text_lower = text.lower()
         
-        # Learned non-skill patterns (from feedback_log)
-        non_skill_patterns = {
-            'n/a', 'none', 'page', 'date', 'employee', 'id', 'photo', 
-            'confidential', 'internal use', 'company logo', 'photo here',
-            'insert', 'position', 'department', 'supervisor', 'manager',
-            'remarks', 'classification', 'category', 'functional area',
-            'degree', 'course', 'institution', 'university', 'college',
-            'license', 'certificate', 'year', 'completed', 'obtained',
-            # ============ NEW: structural/employment-status/geo fragments ============
-            'regular', 'part-time', 'full-time', 'contractual', 'probationary',
-            'form', 'the philippines', 'republic of', 'internal_cv',
-            # =============================================================================
-        }
+        # ============ FIX: word-boundary matching instead of substring ============
+        # Previously used `pattern in text_lower` (plain substring match), which
+        # caused catastrophic false rejections:
+        #   'id' matched 'Bidding', 'Bid' -> killed 5 skills
+        #   'form' matched 'Transformer' -> killed 2 skills
+        #   'date' would match 'Update', 'Candidate'
+        #   'year' would match 'Yearly'
+        #   'page' would match 'Homepage'
+        # 
+        # Now split into:
+        #   1. MULTI-WORD patterns: safe for substring matching (specific enough)
+        #   2. SINGLE-WORD patterns: require word-boundary regex matching (\b)
         
-        # Check against learned patterns
-        if any(pattern in text_lower for pattern in non_skill_patterns):
+        # Multi-word patterns — safe for substring matching
+        non_skill_phrases = {
+            'n/a', 'internal use', 'company logo', 'photo here',
+            'functional area', 'employee id', 'internal_cv',
+            'the philippines', 'republic of',
+            'years of professional experience',  # metadata sub-header
+        }
+        if any(phrase in text_lower for phrase in non_skill_phrases):
             return True
+        
+        # ============ Block underscore-separated metadata fields ============
+        # e.g. "PRIMARY_ROLE Proposal Engineer", "FUNCTIONAL_AREA Sales..."
+        # These are table row artifacts from COMPETENCY CLASSIFICATION section.
+        if re.match(r'^[A-Za-z]+_[A-Za-z]+', text):
+            return True
+        # ====================================================================
+        
+        # Single-word patterns — MUST use word-boundary matching to avoid
+        # false positives like 'id' in 'Bidding' or 'form' in 'Transformer'
+        non_skill_words = {
+            'none', 'page', 'date', 'employee', 'photo',
+            'confidential', 'insert', 'position', 'department',
+            'supervisor', 'manager', 'remarks', 'classification',
+            'category', 'degree', 'course', 'institution',
+            'university', 'college', 'license', 'certificate',
+            'year', 'completed', 'obtained',
+            'regular', 'probationary',
+            'form',  # blocks standalone "FORM" but NOT "Transformer" (word-boundary)
+        }
+        # Build a single regex: \b(word1|word2|...)\b for efficient matching
+        if non_skill_words:
+            words_pattern = r'\b(' + '|'.join(re.escape(w) for w in non_skill_words) + r')\b'
+            if re.search(words_pattern, text_lower):
+                return True
+        # ============================================================================
         
         # Check length (too short or too long)
         if len(text) < 3 or len(text) > 100:
@@ -3229,7 +3354,7 @@ class NLPProcessor:
         
         # Extract candidates — prefer structured (line-preserved) text so section
         # detection and noun-chunking don't span across unrelated fields.
-        candidates = self._extract_candidates(structured_text or text)
+        candidates, trusted_candidates = self._extract_candidates(structured_text or text)
 
         valid_skills = []
         auto_approved = []
@@ -3245,6 +3370,40 @@ class NLPProcessor:
         auto_approved_predictions = {}
         
         for candidate in candidates:
+            # ============ TRUSTED SECTION BYPASS ============
+            # Candidates from EXPLICIT_SKILL_HEADERS sections bypass ML
+            # rejection (ML won't drop hardware/product terms) BUT still
+            # check the Knowledge Base to decide auto-approve vs needs-review:
+            #   - KB-known (skills table/aliases/components) → auto-approved
+            #   - Unknown → needs_review (NOT rejected, NOT auto-approved)
+            # This ensures auto-approved list ONLY contains DB-known skills.
+            candidate_normalized = self._normalize_skill_text(candidate)
+            is_trusted = any(
+                self._normalize_skill_text(tc) == candidate_normalized
+                for tc in trusted_candidates
+            ) if trusted_candidates else False
+            
+            if is_trusted:
+                # Still check obvious non-skills (dates, education, etc.)
+                if self._is_obvious_non_skill(candidate):
+                    print(f"[TRUSTED-REJECT] '{candidate}' -> obvious non-skill despite trusted section")
+                    continue
+                
+                # Check Knowledge Base: only auto-approve if already known
+                normalized_kb = {self._normalize_skill_text(s) for s in self.learned_skills}
+                if candidate_normalized in normalized_kb:
+                    print(f"[TRUSTED-KB] '{candidate}' -> auto-approved (in knowledge base)")
+                    auto_approved.append(candidate)
+                    valid_skills.append(candidate)
+                else:
+                    # Not in KB yet — send to needs_review so HR can approve/reject.
+                    # This prevents unknown skills from silently entering auto-approved.
+                    print(f"[TRUSTED-NEW] '{candidate}' -> needs review (not yet in knowledge base)")
+                    needs_review.append(candidate)
+                    valid_skills.append(candidate)
+                continue
+            # ============ END TRUSTED BYPASS ============
+            
             result = self._is_likely_skill(candidate)
             
             if isinstance(result, tuple):
