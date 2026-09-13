@@ -254,7 +254,64 @@ router.get('/dashboard/activity', async (req, res) => {
 
     res.json({ success: true, data: activities });
   } catch (err) {
-    console.error('Error fetching super admin recent activity:', err);
+    console.error('❌ Error fetching dashboard activity:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/superadmin/dashboard/role-breakdown
+router.get('/dashboard/role-breakdown', async (req, res) => {
+  try {
+    const { data: allProfiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('role');
+
+    if (profilesError) {
+      console.error('❌ Error fetching roles for breakdown:', profilesError);
+      throw new Error(`Roles error: ${profilesError.message}`);
+    }
+
+    const roleCounts = {};
+    (allProfiles || []).forEach(profile => {
+      const role = profile.role || 'Unknown';
+      roleCounts[role] = (roleCounts[role] || 0) + 1;
+    });
+
+    const roleColors = {
+      'Super Admin': '#ef4444',
+      'Admin': '#f59e0b',
+      'Human Resources': '#8b5cf6',
+      'Project Manager': '#3b82f6',
+      'Resource Manager': '#22c55e',
+      'Employee': '#6b7280',
+      'Unknown': '#94a3b8',
+    };
+
+    const total = allProfiles?.length || 0;
+    const rolesList = ['Super Admin', 'Admin', 'Human Resources', 'Project Manager', 'Resource Manager', 'Employee'];
+    
+    Object.keys(roleCounts).forEach(r => {
+      if (!rolesList.includes(r)) rolesList.push(r);
+    });
+
+    const breakdown = rolesList.map(role => {
+      const count = roleCounts[role] || 0;
+      const percentage = total > 0 ? Math.round((count / total) * 100) : 0;
+      return {
+        role,
+        count,
+        percentage,
+        color: roleColors[role] || '#64748b',
+      };
+    });
+
+    res.json({
+      success: true,
+      data: breakdown,
+      total,
+    });
+  } catch (err) {
+    console.error('❌ Error fetching role breakdown:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
