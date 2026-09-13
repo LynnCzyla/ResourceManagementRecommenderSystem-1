@@ -554,18 +554,18 @@ router.delete('/:id', async (req, res) => {
 
     console.log(`📋 Deleting job posting: ${id}`);
 
-    // ✅ Check if user has access to delete this posting
+    // ✅ Check if job posting exists and user has access
+    const { data: existing } = await supabase
+      .from('job_postings')
+      .select('status, created_by, profiles:created_by (branch_id)')
+      .eq('id', id)
+      .single();
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Job posting not found.' });
+    }
+
     if (!isSuperAdmin) {
-      const { data: existing } = await supabase
-        .from('job_postings')
-        .select('created_by, profiles:created_by (branch_id)')
-        .eq('id', id)
-        .single();
-
-      if (!existing) {
-        return res.status(404).json({ success: false, error: 'Job posting not found.' });
-      }
-
       const creatorBranchId = existing.profiles?.branch_id;
       if (!creatorBranchId || creatorBranchId !== userBranchId) {
         return res.status(403).json({
@@ -575,19 +575,15 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
-    const { data: linkedApplications } = await supabase
+    // Unlink any linked applications so foreign key constraint does not block deletion
+    const { error: unlinkError } = await supabase
       .from('job_applications')
-      .select('id')
-      .eq('job_posting_id', id)
-      .limit(1);
+      .update({ job_posting_id: null })
+      .eq('job_posting_id', id);
 
-    if (linkedApplications && linkedApplications.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete this posting. It has applications on file — close it instead.',
-      });
-    }
+    if (unlinkError) throw unlinkError;
 
+    // Delete the job posting permanently
     const { error } = await supabase.from('job_postings').delete().eq('id', id);
     if (error) throw error;
 
