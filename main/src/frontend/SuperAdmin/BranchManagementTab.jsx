@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 const API_BASE = `${API_BASE_URL}/api/superadmin`;
 
@@ -93,6 +94,11 @@ export default function BranchManagementTab() {
     return errors;
   };
 
+  const getAuthHeaders = () => {
+    const token = getStoredToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const loadBranches = useCallback(async (page = pagination.page) => {
     setLoading(true);
     try {
@@ -103,7 +109,9 @@ export default function BranchManagementTab() {
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
       if (statusFilter && statusFilter !== 'All') params.set('status', statusFilter);
 
-      const res = await fetch(`${API_BASE}/branches?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/branches?${params.toString()}`, {
+        headers: getAuthHeaders(),
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load branches');
       setTableNotConfigured(!!json.table_not_found);
@@ -147,7 +155,7 @@ export default function BranchManagementTab() {
 
       const res = await fetch(`${API_BASE}/branches`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(submitData),
       });
       const json = await res.json();
@@ -190,7 +198,7 @@ export default function BranchManagementTab() {
 
       const res = await fetch(`${API_BASE}/branches/${selectedBranch.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(submitData),
       });
       const json = await res.json();
@@ -218,7 +226,10 @@ export default function BranchManagementTab() {
     if (!result.isConfirmed) return;
 
     try {
-      const res = await fetch(`${API_BASE}/branches/${branch.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/branches/${branch.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to delete branch');
       loadBranches();
