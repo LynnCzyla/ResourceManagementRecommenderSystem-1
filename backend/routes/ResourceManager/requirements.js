@@ -36,7 +36,7 @@ router.get('/', async (req, res) => {
                         )
                     )
                 `)
-                .not('status', 'in', '("Cancelled","Canceled","Completed","Done")')
+                .not('status', 'in', '("Cancelled","Canceled","Completed","Done","Rejected")')
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -121,7 +121,7 @@ router.get('/', async (req, res) => {
                 )
             `)
             .in('project_id', projectIds)
-            .not('status', 'in', '("Cancelled","Canceled","Completed","Done")')
+            .not('status', 'in', '("Cancelled","Canceled","Completed","Done","Rejected")')
             .order('created_at', { ascending: false });
 
         if (error) {
