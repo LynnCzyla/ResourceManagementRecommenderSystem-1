@@ -168,7 +168,7 @@ export default function PMSendFeedbackTab({ user }) {
   };
 
   const styles = {
-    container: { padding: '8px 0' },
+    container: { display: 'flex', flexDirection: 'column', gap: '24px' },
     card: { padding: '24px', marginBottom: '24px' },
     formGroup: { marginBottom: '16px' },
     label: { display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' },

@@ -328,10 +328,7 @@ export default function PMFeedbackFormTab({ user }) {
   );
 
   const styles = {
-    container: { padding: '24px' },
-    header: { marginBottom: '32px' },
-    title: { fontSize: '28px', fontWeight: '700', color: 'var(--color-text-primary)', marginBottom: '8px' },
-    subtitle: { fontSize: '15px', color: 'var(--color-text-secondary)' },
+    container: { display: 'flex', flexDirection: 'column', gap: '24px' },
     card: { padding: '24px', marginBottom: '24px' },
     form: { display: 'flex', flexDirection: 'column', gap: '20px' },
     formRow: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' },
@@ -398,11 +395,6 @@ export default function PMFeedbackFormTab({ user }) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Send Feedback Request</h1>
-        <p style={styles.subtitle}>Email clients a link so they can rate the team members who worked on their project</p>
-      </div>
-
       <div className="glass-card" style={styles.card}>
         {loadError && <div style={styles.loadError}>{loadError}</div>}
         {fieldErrors.general && <div style={styles.loadError}>{fieldErrors.general}</div>}

@@ -61,6 +61,7 @@ export default function HRApplicationsTab() {
 
   // Active / History tab
   const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
+  const [hoveredTab, setHoveredTab] = useState(null);
 
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
@@ -268,26 +269,34 @@ export default function HRApplicationsTab() {
       {/* Active / History Tabs */}
       <div style={styles.subTabsContainer}>
         <button
+          type="button"
           onClick={() => setActiveTab('Active')}
+          onMouseEnter={() => setHoveredTab('Active')}
+          onMouseLeave={() => setHoveredTab(null)}
           style={{
             ...styles.subTabButton,
-            borderBottomColor: activeTab === 'Active' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'Active' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: activeTab === 'Active' ? '700' : '500'
+            ...(activeTab === 'Active' ? styles.subTabButtonActive : hoveredTab === 'Active' ? styles.subTabButtonHovered : {})
           }}
         >
-          Active ({activeCount})
+          Active
+          <span style={{ ...styles.tabCount, ...(activeTab === 'Active' ? styles.tabCountActive : {}) }}>
+            {activeCount}
+          </span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('History')}
+          onMouseEnter={() => setHoveredTab('History')}
+          onMouseLeave={() => setHoveredTab(null)}
           style={{
             ...styles.subTabButton,
-            borderBottomColor: activeTab === 'History' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'History' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: activeTab === 'History' ? '700' : '500'
+            ...(activeTab === 'History' ? styles.subTabButtonActive : hoveredTab === 'History' ? styles.subTabButtonHovered : {})
           }}
         >
-          History ({historyCount})
+          History
+          <span style={{ ...styles.tabCount, ...(activeTab === 'History' ? styles.tabCountActive : {}) }}>
+            {historyCount}
+          </span>
         </button>
       </div>
 
@@ -856,21 +865,46 @@ const styles = {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
   },
-  // Active / History tabs
   subTabsContainer: {
     display: 'flex',
-    gap: '28px',
+    gap: '8px',
     borderBottom: '1px solid var(--color-border)',
-    marginBottom: '24px',
+    marginTop: '-4px',
+    marginBottom: '20px',
   },
   subTabButton: {
-    background: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'transparent',
     border: 'none',
-    borderBottom: '3px solid transparent',
-    padding: '12px 6px',
-    fontSize: '15px',
+    borderBottom: '2px solid transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
     cursor: 'pointer',
     transition: 'all 0.2s',
+  },
+  subTabButtonActive: {
+    color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  subTabButtonHovered: {
+    color: 'var(--color-text-primary)',
+  },
+  tabCount: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '30px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-muted)',
+  },
+  tabCountActive: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
   },
   card: {
     padding: '24px',

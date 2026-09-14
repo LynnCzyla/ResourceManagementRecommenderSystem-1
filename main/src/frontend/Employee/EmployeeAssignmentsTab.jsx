@@ -146,6 +146,7 @@ const IconHistory = () => (
 
 export default function EmployeeAssignmentsTab({ user }) {
   const [subTab, setSubTab] = useState('assignments'); // 'assignments' | 'history'
+  const [hoveredTab, setHoveredTab] = useState(null);
 
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -372,9 +373,11 @@ export default function EmployeeAssignmentsTab({ user }) {
         <button
           type="button"
           onClick={() => setSubTab('assignments')}
+          onMouseEnter={() => setHoveredTab('assignments')}
+          onMouseLeave={() => setHoveredTab(null)}
           style={{
             ...styles.subTabBtn,
-            ...(subTab === 'assignments' ? styles.subTabBtnActive : {})
+            ...(subTab === 'assignments' ? styles.subTabBtnActive : hoveredTab === 'assignments' ? styles.subTabBtnHovered : {})
           }}
         >
           <IconAssignments />
@@ -383,14 +386,18 @@ export default function EmployeeAssignmentsTab({ user }) {
         <button
           type="button"
           onClick={() => setSubTab('history')}
+          onMouseEnter={() => setHoveredTab('history')}
+          onMouseLeave={() => setHoveredTab(null)}
           style={{
             ...styles.subTabBtn,
-            ...(subTab === 'history' ? styles.subTabBtnActive : {})
+            ...(subTab === 'history' ? styles.subTabBtnActive : hoveredTab === 'history' ? styles.subTabBtnHovered : {})
           }}
         >
           <IconHistory />
           History
-          {completedCount > 0 && <span style={styles.subTabCount}>{completedCount}</span>}
+          <span style={{ ...styles.tabCount, ...(subTab === 'history' ? styles.tabCountActive : {}) }}>
+            {completedCount}
+          </span>
         </button>
       </div>
 
@@ -808,37 +815,44 @@ const styles = {
   },
   subTabBar: {
     display: 'flex',
-    gap: '6px',
+    gap: '8px',
     borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '0',
+    marginTop: '-4px',
+    marginBottom: '20px',
   },
   subTabBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '7px',
-    padding: '10px 20px',
-    fontSize: '13px',
-    fontWeight: '600',
+    gap: '8px',
+    background: 'transparent',
     border: 'none',
     borderBottom: '2px solid transparent',
-    marginBottom: '-1px',
-    background: 'transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
     color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    borderRadius: '6px 6px 0 0',
-    transition: 'color 0.15s',
+    transition: 'all 0.2s',
   },
   subTabBtnActive: {
     color: 'var(--color-primary)',
     borderBottom: '2px solid var(--color-primary)',
-    background: 'var(--color-primary-light)',
   },
-  subTabCount: {
-    fontSize: '10px',
+  subTabBtnHovered: {
+    color: 'var(--color-text-primary)',
+  },
+  tabCount: {
+    fontSize: '11px',
     fontWeight: '700',
-    padding: '1px 6px',
-    borderRadius: '20px',
-    background: 'rgba(255, 255, 255, 0.25)',
+    padding: '2px 8px',
+    borderRadius: '30px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-muted)',
+  },
+  tabCountActive: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
   },
   errorBanner: {
     padding: '12px 16px',
