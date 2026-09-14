@@ -866,7 +866,7 @@ export default function AdminManagementTab() {
                       backgroundColor: admin.locked ? 'rgba(234, 179, 8, 0.15)' : 'rgba(34, 197, 94, 0.15)',
                       color: admin.locked ? '#eab308' : '#22c55e',
                     }}>
-                      {admin.locked ? '🔒 Locked' : '🔓 Unlocked'}
+                      {admin.locked ? 'Locked' : 'Unlocked'}
                     </span>
                     {admin.failed_attempts > 0 && (
                       <span style={styles.failedAttempts}>
@@ -1086,8 +1086,9 @@ export default function AdminManagementTab() {
                     <label style={styles.formLabel}>Contact Number</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={formData.contact_number}
-                      onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, contact_number: e.target.value.replace(/[^0-9]/g, '') })}
                       style={styles.formInput}
                       placeholder="e.g., 09123456789"
                     />
@@ -1250,8 +1251,9 @@ export default function AdminManagementTab() {
                     <label style={styles.formLabel}>Contact Number</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={formData.contact_number}
-                      onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, contact_number: e.target.value.replace(/[^0-9]/g, '') })}
                       style={styles.formInput}
                       placeholder="e.g., 09123456789"
                     />

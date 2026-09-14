@@ -509,10 +509,12 @@ export default function BranchManagementTab() {
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     required
                     value={formData.contact_number}
                     onChange={(e) => {
-                      setFormData({ ...formData, contact_number: e.target.value });
+                      const numericVal = e.target.value.replace(/[^0-9]/g, '');
+                      setFormData({ ...formData, contact_number: numericVal });
                       if (validationErrors.contact_number) {
                         setValidationErrors({ ...validationErrors, contact_number: '' });
                       }
@@ -641,10 +643,12 @@ export default function BranchManagementTab() {
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     required
                     value={formData.contact_number}
                     onChange={(e) => {
-                      setFormData({ ...formData, contact_number: e.target.value });
+                      const numericVal = e.target.value.replace(/[^0-9]/g, '');
+                      setFormData({ ...formData, contact_number: numericVal });
                       if (validationErrors.contact_number) {
                         setValidationErrors({ ...validationErrors, contact_number: '' });
                       }

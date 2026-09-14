@@ -589,11 +589,11 @@ export default function AccountManagementTab() {
                     <td style={styles.tableCell}>
                       {account.locked ? (
                         <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
-                          🔒 Locked
+                          Locked
                         </span>
                       ) : (
                         <span style={{ ...styles.statusBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
-                          🔓 Unlocked
+                          Unlocked
                         </span>
                       )}
                       {account.failed_attempts > 0 && (
