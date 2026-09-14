@@ -1,4 +1,4 @@
-﻿//backend/controllers/feedbackController.js
+//backend/controllers/feedbackController.js
 const { spawn } = require('child_process');
 const pythonService = require('../services/pythonService');
 const supabase = require('../supabase');
@@ -12,7 +12,7 @@ const {
 } = require('../utils/skillNormalizer');
 
 // ============ ADD THIS HELPER FUNCTION ============
-async function updateLearningSystem(approved_skills, rejected_skills) {
+async function updateLearningSystem(approved_skills, rejected_skills, context = {}) {
     return new Promise((resolve, reject) => {
         const rootPath = path.join(__dirname, '../..');
         const pythonPath = process.platform === 'win32'
@@ -25,10 +25,11 @@ async function updateLearningSystem(approved_skills, rejected_skills) {
             path.join(scriptPath, 'runner.py'),
             'learn_feedback',
             JSON.stringify(approved_skills || []),
-            JSON.stringify(rejected_skills || [])
+            JSON.stringify(rejected_skills || []),
+            JSON.stringify(context || {})
         ];
 
-        console.log('ðŸ§  Updating learning system...');
+        console.log('🧠 Updating learning system...');
         console.log(`   Approved: ${approved_skills?.length || 0}`);
         console.log(`   Rejected: ${rejected_skills?.length || 0}`);
 
@@ -703,7 +704,12 @@ exports.saveSkillFeedback = async (req, res) => {
         // ============ UPDATE LEARNING SYSTEM ============
         let merged = 0;
         try {
-            const result = await updateLearningSystem(approved_skills || [], rejected_skills || []);
+            const learningContext = {
+                document_id: documentId,
+                employee_id: profileData?.employee_id,
+                reviewed_by: profileData?.id
+            };
+            const result = await updateLearningSystem(approved_skills || [], rejected_skills || [], learningContext);
             merged = result?.merged || 0;
             console.log(`âœ… Learning system updated!`);
         } catch (learningError) {
