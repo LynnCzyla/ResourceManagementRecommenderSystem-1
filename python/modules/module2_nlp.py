@@ -2524,6 +2524,10 @@ class NLPProcessor:
         if not text:
             return True
         
+        # Check learned rejections first (feedback_training & feedback_log)
+        if self._is_obvious_non_skill(text):
+            return True
+        
         text_lower = text.lower()
         
         # ============ FIX: word-boundary matching instead of substring ============
@@ -3273,6 +3277,7 @@ class NLPProcessor:
         # =================================================================
         
         self._save_ephemeral_json()
+        self._invalidate_facts_cache()
         return len(approved_skills)
     
     # ============ SIMILARITY CALCULATION ============
