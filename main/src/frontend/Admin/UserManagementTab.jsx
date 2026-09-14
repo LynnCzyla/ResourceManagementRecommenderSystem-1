@@ -54,6 +54,7 @@ const IconRefresh = () => (
 
 export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTabChange }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'accounts');
+  const [hoveredSubTab, setHoveredSubTab] = useState(null);
 
   const handleSubTabClick = (newSubTab) => {
     setSubTab(newSubTab);
@@ -1067,46 +1068,34 @@ export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTa
 
       <div style={styles.subTabsContainer}>
         <button 
+          type="button"
           onClick={() => {
             handleSubTabClick('accounts');
             fetchUsers();
           }} 
-          onMouseEnter={(e) => {
-            if (subTab !== 'accounts') {
-              e.currentTarget.style.background = 'var(--color-primary-light)';
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }
+          onMouseEnter={() => setHoveredSubTab('accounts')}
+          onMouseLeave={() => setHoveredSubTab(null)}
+          style={{
+            ...styles.subTabButton,
+            ...(subTab === 'accounts' ? styles.subTabButtonActive : hoveredSubTab === 'accounts' ? styles.subTabButtonHovered : {})
           }}
-          onMouseLeave={(e) => {
-            if (subTab !== 'accounts') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--color-text-secondary)';
-            }
-          }}
-          style={{ ...styles.subTabButton, borderBottomColor: subTab === 'accounts' ? 'var(--color-primary)' : 'transparent', color: subTab === 'accounts' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'accounts' ? '700' : '500', ...(subTab === 'accounts' ? styles.subTabButtonHover : {}) }}
         >
           <IconUsers />
           User Accounts {loading && '...'}
         </button>
         <button 
+          type="button"
           onClick={() => {
             handleSubTabClick('create');
             fetchHiredEmployees();
             fetchUsers();
           }} 
-          onMouseEnter={(e) => {
-            if (subTab !== 'create') {
-              e.currentTarget.style.background = 'var(--color-primary-light)';
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }
+          onMouseEnter={() => setHoveredSubTab('create')}
+          onMouseLeave={() => setHoveredSubTab(null)}
+          style={{
+            ...styles.subTabButton,
+            ...(subTab === 'create' ? styles.subTabButtonActive : hoveredSubTab === 'create' ? styles.subTabButtonHovered : {})
           }}
-          onMouseLeave={(e) => {
-            if (subTab !== 'create') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--color-text-secondary)';
-            }
-          }}
-          style={{ ...styles.subTabButton, borderBottomColor: subTab === 'create' ? 'var(--color-primary)' : 'transparent', color: subTab === 'create' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'create' ? '700' : '500', ...(subTab === 'create' ? styles.subTabButtonHover : {}) }}
         >
           <IconCreateAccount />
           Create Accounts
@@ -1118,20 +1107,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTa
           )}
         </button>
         <button 
+          type="button"
           onClick={() => handleSubTabClick('requests')} 
-          onMouseEnter={(e) => {
-            if (subTab !== 'requests') {
-              e.currentTarget.style.background = 'var(--color-primary-light)';
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }
+          onMouseEnter={() => setHoveredSubTab('requests')}
+          onMouseLeave={() => setHoveredSubTab(null)}
+          style={{
+            ...styles.subTabButton,
+            ...(subTab === 'requests' ? styles.subTabButtonActive : hoveredSubTab === 'requests' ? styles.subTabButtonHovered : {})
           }}
-          onMouseLeave={(e) => {
-            if (subTab !== 'requests') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--color-text-secondary)';
-            }
-          }}
-          style={{ ...styles.subTabButton, borderBottomColor: subTab === 'requests' ? 'var(--color-primary)' : 'transparent', color: subTab === 'requests' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'requests' ? '700' : '500', ...(subTab === 'requests' ? styles.subTabButtonHover : {}) }}
         >
           <IconRequests />
           Contact Requests
@@ -1142,20 +1125,14 @@ export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTa
           )}
         </button>
         <button 
+          type="button"
           onClick={() => handleSubTabClick('locked')} 
-          onMouseEnter={(e) => {
-            if (subTab !== 'locked') {
-              e.currentTarget.style.background = 'var(--color-primary-light)';
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }
+          onMouseEnter={() => setHoveredSubTab('locked')}
+          onMouseLeave={() => setHoveredSubTab(null)}
+          style={{
+            ...styles.subTabButton,
+            ...(subTab === 'locked' ? styles.subTabButtonActive : hoveredSubTab === 'locked' ? styles.subTabButtonHovered : {})
           }}
-          onMouseLeave={(e) => {
-            if (subTab !== 'locked') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--color-text-secondary)';
-            }
-          }}
-          style={{ ...styles.subTabButton, borderBottomColor: subTab === 'locked' ? 'var(--color-primary)' : 'transparent', color: subTab === 'locked' ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: subTab === 'locked' ? '700' : '500', ...(subTab === 'locked' ? styles.subTabButtonHover : {}) }}
         >
           <IconLocked />
           Locked Accounts
@@ -1992,29 +1969,32 @@ const styles = {
   },
   subTabsContainer: {
     display: 'flex',
-    gap: '24px',
+    gap: '8px',
     borderBottom: '1px solid var(--color-border)',
-    marginBottom: '28px',
+    marginTop: '-4px',
+    marginBottom: '20px',
   },
   subTabButton: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '7px',
-    padding: '10px 20px',
-    fontSize: '13px',
-    fontWeight: '600',
+    gap: '8px',
+    background: 'transparent',
     border: 'none',
     borderBottom: '2px solid transparent',
-    marginBottom: '-1px',
-    background: 'transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
     color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    borderRadius: '6px 6px 0 0',
-    transition: 'color 0.15s',
+    transition: 'all 0.2s',
   },
-  subTabButtonHover: {
-    background: 'var(--color-primary-light)',
+  subTabButtonActive: {
     color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  subTabButtonHovered: {
+    color: 'var(--color-text-primary)',
   },
   tableToolbar: {
     display: 'flex',

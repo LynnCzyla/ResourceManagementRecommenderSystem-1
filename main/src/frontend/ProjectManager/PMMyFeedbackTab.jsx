@@ -87,7 +87,7 @@ export default function PMMyFeedbackTab() {
   return (
     <div>
       <div style={styles.pageHeader}>
-        <h2 style={styles.pageTitle}>Client Feedback Received</h2>
+        <h1 style={styles.pageTitle}>Client Feedback Received</h1>
         <p style={styles.pageSubtitle}>
           See how clients have evaluated your project management performance.
         </p>
@@ -209,18 +209,19 @@ export default function PMMyFeedbackTab() {
 }
 
 const styles = {
-  pageHeader: { marginBottom: 24 },
+  pageHeader: { marginBottom: 28 },
   pageTitle: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: 24,
-    fontWeight: 700,
+    fontSize: '28px',
+    fontWeight: '800',
     color: 'var(--color-text-primary)',
+    letterSpacing: '-0.75px',
+    marginBottom: '4px',
     margin: 0,
   },
   pageSubtitle: {
-    fontSize: 13,
+    fontSize: '15px',
     color: 'var(--color-text-secondary)',
-    marginTop: 6,
+    marginTop: '4px',
   },
   centerMsg: {
     display: 'flex',
