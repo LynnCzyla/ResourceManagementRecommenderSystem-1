@@ -2023,8 +2023,9 @@ class NLPProcessor:
             if not line:
                 continue
             
-            # Check if this is a section header
-            if header_pattern.match(line):
+            # Check if this is a section header (must be short, <= 4 words)
+            words = line.split()
+            if 1 <= len(words) <= 4 and header_pattern.match(line):
                 # Save previous section
                 if current_section and current_content:
                     sections[current_section] = '\n'.join(current_content)
@@ -2109,11 +2110,11 @@ class NLPProcessor:
                     break
             
             # ============ FIX: hard-exclude known metadata/table sections ============
-            # Phase 3B: Expanded exclusion list to include education, references, and contact details
+            # Phase 3B: Expanded exclusion list to include education, references, contact details, and ECP form tables
             METADATA_SECTION_MARKERS = (
                 'classification', 'primary role', 'functional area',
                 'specialization category', 'experience category',
-                'relevant project experience', 'project name',
+                'relevant project experience', 'project name', 'project name / type',
                 'education', 'educational background', 'academic history',
                 'character reference', 'references', 'personal reference',
                 'personal details', 'personal information', 'contact information',
@@ -2121,19 +2122,21 @@ class NLPProcessor:
                 'professional summary', 'competency classification',
                 'manager remarks', 'employee identification',
                 'professional license', 'training & certifications',
-                'training and certifications',
+                'training and certifications', 'field value', 'field', 'value',
+                'projects', 'project experience', 'work experience', 'employment history'
                 # ===========================================================
             )
-            if any(marker in section_lower for marker in METADATA_SECTION_MARKERS):
-                score -= 10
+            is_metadata = any(marker in section_lower for marker in METADATA_SECTION_MARKERS)
+            if is_metadata:
+                score = -100
             # ============================================================================
 
             is_explicit = any(h in section_lower for h in EXPLICIT_SKILL_HEADERS)
             scored_sections[section_name] = {
                 'content': content,
                 'score': score,
-                'is_skill_section': score >= 3,  # Threshold learned from data
-                'is_trusted': is_explicit,  # True = bullets auto-approved, bypass ML
+                'is_skill_section': (score >= 3 and not is_metadata),
+                'is_trusted': is_explicit and not is_metadata,
             }
         
         # ============ STEP 3: Extract from skill sections ============
@@ -2309,23 +2312,27 @@ class NLPProcessor:
             # and the section-header exclusion logic above.
             final_candidates.add(c)
 
-        # ============ NEW: drop truncated-prefix duplicates ============
+        # ============ NEW: drop truncated-prefix and subphrase duplicates ============
         # If two candidates are the same skill at different lengths — e.g.
-        # "Uninterruptible Power Supply" vs "Uninterruptible Power Supply
-        # Systems" — keep only the longer, complete one. A candidate is
-        # considered a truncated duplicate only when it is an exact,
-        # word-for-word PREFIX of another (longer) candidate, so unrelated
-        # skills that merely share a first word are never affected.
+        # "Service Engineering" vs "Service Engineering And Field Support",
+        # or "Uninterruptible Power Supply" vs "Uninterruptible Power Supply Systems" —
+        # keep only the longer, complete one. A candidate is considered a duplicate
+        # when its word sequence appears contiguously inside an already-kept longer candidate.
+        def _is_contiguous_subphrase(sub_words, full_words):
+            if not sub_words or len(sub_words) >= len(full_words):
+                return False
+            n_sub = len(sub_words)
+            return any(full_words[i:i+n_sub] == sub_words for i in range(len(full_words) - n_sub + 1))
+
         sorted_by_len = sorted(final_candidates, key=lambda s: len(s.split()), reverse=True)
         deduped = []
         for cand in sorted_by_len:
             cand_words = cand.lower().split()
-            is_prefix_of_existing = any(
-                len(cand_words) < len(kept.lower().split())
-                and kept.lower().split()[:len(cand_words)] == cand_words
+            is_subphrase_of_existing = any(
+                _is_contiguous_subphrase(cand_words, kept.lower().split())
                 for kept in deduped
             )
-            if not is_prefix_of_existing:
+            if not is_subphrase_of_existing:
                 deduped.append(cand)
         final_candidates = set(deduped)
         # ======================================================================
@@ -2544,13 +2551,54 @@ class NLPProcessor:
         #   2. SINGLE-WORD patterns: require word-boundary regex matching (\b)
         
         # Multi-word patterns — safe for substring matching
+        # Substring blocks (phrases that should never appear anywhere in a skill)
         non_skill_phrases = {
             'n/a', 'internal use', 'company logo', 'photo here',
-            'functional area', 'employee id', 'internal_cv',
+            'employee id', 'internal_cv',
             'the philippines', 'republic of',
             'years of professional experience',  # metadata sub-header
         }
         if any(phrase in text_lower for phrase in non_skill_phrases):
+            return True
+
+        # Exact match blocks: WEA ECP Table headers, metadata labels, and department/role names
+        # We match these exactly so that genuine skills with similar words (e.g. "Application and Service Engineering Support")
+        # are NOT falsely rejected.
+        exact_non_skill_phrases = {
+            'application & service engineering',
+            'application and service engineering',
+            'sales, application & service engineering',
+            'sales, application and service engineering',
+            'service & maintenance',
+            'service and maintenance',
+            'electrical sales engineering',
+            'senior sales engineer',
+            'senior design engineer',
+            'sales engineer',
+            'general manager',
+            'immediate supervisor',
+            'employment status',
+            'date hired',
+            'primary role',
+            'primary_role',
+            'functional area',
+            'functional_area',
+            'experience category',
+            'experience_category',
+            'specialization category',
+            'specialization_category',
+            'project name',
+            'project type',
+            'project name / type',
+            'project name/type',
+            'field value',
+            'field_value',
+            'field',
+            'value',
+            'role',
+            'industry',
+        }
+        if text_lower in exact_non_skill_phrases:
             return True
         
         # ============ Block underscore-separated metadata fields ============
