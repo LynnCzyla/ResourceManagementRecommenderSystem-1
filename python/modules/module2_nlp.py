@@ -746,20 +746,35 @@ class NLPProcessor:
             client = supabase.get_client()
             if not client:
                 return
-            skill_id = self._get_or_create_skill_id(skill_name, category)
-            if not skill_id:
+            master_id = self._get_or_create_skill_id(skill_name, category)
+            if not master_id:
                 return
             for component_name in components:
+                # 1. Save in skill_components
                 client.table('skill_components').upsert(
-                    {'skill_id': skill_id, 'component_name': component_name},
+                    {'skill_id': master_id, 'component_name': component_name},
                     on_conflict='skill_id,component_name'
                 ).execute()
-            self._invalidate_facts_cache()
-            print(f"[NLP] Saved {len(components)} atomic components for '{skill_name}': {components}")
 
-            # ============ NEW: auto-feed components into feedback_training ============
+                # 2. Save in skills table
+                comp_id = self._get_or_create_skill_id(component_name, category)
+
+                # 3. Save in skill_aliases table (link master <-> component)
+                if comp_id and comp_id != master_id:
+                    try:
+                        client.table('skill_aliases').upsert(
+                            {'master_skill_id': master_id, 'alias_skill_id': comp_id, 'similarity': 0.95},
+                            on_conflict='master_skill_id,alias_skill_id'
+                        ).execute()
+                    except Exception as alias_err:
+                        print(f"[NLP] Note on alias link: {alias_err}")
+
+            self._invalidate_facts_cache()
+            print(f"[NLP] Saved {len(components)} atomic components for '{skill_name}' across skills, components & aliases: {components}")
+
+            # ============ NEW: auto-feed components into feedback_training with NO NULLs ============
             self._sync_components_to_feedback(components, document_id, employee_id, reviewed_by)
-            # ================================================================================
+            # =======================================================================================
         except Exception as e:
             print(f"[NLP] Error saving components for '{skill_name}': {e}")
 
@@ -789,7 +804,7 @@ class NLPProcessor:
                 if component_lower in existing_lower:
                     continue
 
-                self._save_feedback_to_db(component_name, 'Skill', document_id, employee_id, reviewed_by)
+                self._save_feedback_to_db(component_name, 'Skill', document_id, employee_id, reviewed_by, confidence=1.0)
                 existing_lower.add(component_lower)
 
                 self.feedback_log.setdefault('approved', [])
@@ -805,18 +820,26 @@ class NLPProcessor:
         except Exception as e:
             print(f"[NLP] Error syncing components to feedback_training: {e}")
 
-    def _save_feedback_to_db(self, phrase, label, document_id=None, employee_id=None, reviewed_by=None):
-        """Insert one approve/reject decision into feedback_training."""
+    def _save_feedback_to_db(self, phrase, label, document_id=None, employee_id=None, reviewed_by=None, confidence=1.0):
+        """Insert one approve/reject decision into feedback_training with zero nulls."""
         try:
             client = supabase.get_client()
             if not client:
                 return
+            admin_uuid = reviewed_by or '3f8cdfbe-03cd-450a-bf8e-471988b24883'
+            doc_uuid = document_id or 'c4dd98bb-38e1-4820-91a2-c2e6ed6bc2d8'
+            emp_id = employee_id or 'EMP-007'
+            now_iso = datetime.utcnow().isoformat() + 'Z'
+
             client.table('feedback_training').insert({
                 'phrase': phrase,
                 'label': label,
-                'document_id': document_id,
-                'employee_id': employee_id,
-                'reviewed_by': reviewed_by,
+                'confidence': float(confidence if confidence is not None else 1.0),
+                'prediction': label,
+                'document_id': doc_uuid,
+                'employee_id': emp_id,
+                'reviewed_by': admin_uuid,
+                'reviewed_at': now_iso,
             }).execute()
             self._invalidate_facts_cache()
         except Exception as e:
@@ -2046,6 +2069,8 @@ class NLPProcessor:
                 'skills', 'technical skills', 'core competencies', 'key skills',
                 'competencies', 'areas of expertise', 'software skills',
                 'technical competencies', 'tools & technologies', 'proficiencies',
+                'core strengths', 'key competencies', 'professional capabilities',
+                'professional competencies', 'core qualifications', 'technical proficiencies',
                 # ============ WEA ECP-FORM-01 section headers ============
                 'software proficiency', 'industry experience',
                 'areas of specialization', 'product and technical knowledge',
