@@ -222,32 +222,67 @@ export default function LogsTab() {
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
               id="btn-generate-pdf-audit"
-              style={{ ...styles.exportBtn, background: 'linear-gradient(135deg, #0b1220 0%, #1e3a5f 100%)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', opacity: exportingPdf ? 0.7 : 1, cursor: exportingPdf ? 'not-allowed' : 'pointer' }}
+              type="button"
               onClick={() => handleExport('pdf')}
-              disabled={exportingPdf || exportingExcel}
+              disabled={exportingPdf || loading}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                border: 'none',
+                background: 'linear-gradient(135deg, #0b1220 0%, #1e3a5f 100%)',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: exportingPdf || loading ? 'not-allowed' : 'pointer',
+                opacity: exportingPdf || loading ? 0.6 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                transition: 'all 0.2s ease',
+              }}
+              title="Generate PDF of Audit Trail"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
               </svg>
-              {exportingPdf ? 'Generating...' : 'Generate PDF'}
+              {exportingPdf ? 'Generating PDF...' : 'Generate PDF'}
             </button>
+
             <button
               id="btn-export-excel-audit"
-              style={{ ...styles.exportBtn, background: 'linear-gradient(135deg, #15803d 0%, #166534 100%)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', opacity: exportingExcel ? 0.7 : 1, cursor: exportingExcel ? 'not-allowed' : 'pointer' }}
+              type="button"
               onClick={() => handleExport('excel')}
-              disabled={exportingPdf || exportingExcel}
+              disabled={exportingExcel || loading}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid #10b981',
+                background: 'linear-gradient(135deg, #065f46 0%, #059669 100%)',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: exportingExcel || loading ? 'not-allowed' : 'pointer',
+                opacity: exportingExcel || loading ? 0.6 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 4px rgba(16,185,129,0.2)',
+                transition: 'all 0.2s ease',
+              }}
+              title="Export Audit Trail as Excel spreadsheet"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="8" y1="13" x2="16" y2="17" />
+                <line x1="8" y1="17" x2="16" y2="13" />
               </svg>
-              {exportingExcel ? 'Exporting...' : 'Export Excel'}
+              {exportingExcel ? 'Exporting Excel...' : 'Export Excel'}
             </button>
           </div>
         </div>
