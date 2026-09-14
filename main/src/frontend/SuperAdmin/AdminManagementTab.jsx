@@ -1295,9 +1295,6 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '24px',
-    padding: '24px',
-    maxWidth: '1400px',
-    margin: '0 auto',
   },
   header: {
     display: 'flex',

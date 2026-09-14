@@ -177,16 +177,19 @@ export default function RMResourceRequestFormTab() {
 
   const styles = {
     container: {
-      padding: '24px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '24px',
     },
     header: {
-      marginBottom: '32px',
+      marginBottom: '8px',
     },
     title: {
       fontSize: '28px',
-      fontWeight: '700',
+      fontWeight: '800',
+      letterSpacing: '-0.75px',
+      marginBottom: '4px',
       color: 'var(--color-text-primary)',
-      marginBottom: '8px',
     },
     subtitle: {
       fontSize: '15px',
