@@ -235,17 +235,26 @@ exports.processDocument = async (req, res) => {
         if (historyApprovedKeys.size > 0 || historyRejectedKeys.size > 0) {
             const beforeCount = finalNeedsReview.length;
 
+            const skillsToAutoApprove = [];
             finalNeedsReview = finalNeedsReview.filter(skill => {
                 if (hasComparisonKey(historyRejectedKeys, skill)) {
                     console.log(`   ⏭️  Skipping "${skill}" (already REJECTED by this employee before) ❌`);
                     return false;
                 }
                 if (hasComparisonKey(historyApprovedKeys, skill)) {
-                    console.log(`   ⏭️  Skipping "${skill}" (already approved by this employee before)`);
+                    console.log(`   ✅ Auto-approving "${skill}" (already approved by this employee before)`);
+                    skillsToAutoApprove.push(skill);
                     return false;
                 }
                 return true;
             });
+
+            for (const s of skillsToAutoApprove) {
+                if (!hasComparisonKey(autoApprovedComparisonSet, s)) {
+                    autoApprovedNormalized.push(s);
+                    addComparisonKeys(autoApprovedComparisonSet, s);
+                }
+            }
 
             // A knowledge-base skill that this employee specifically rejected before
             // should not silently auto-approve again either.
@@ -260,6 +269,7 @@ exports.processDocument = async (req, res) => {
         if (globalRejectedNoiseKeys.size > 0) {
             const beforeNoiseFilter = finalNeedsReview.length;
             finalNeedsReview = finalNeedsReview.filter(skill => !hasComparisonKey(globalRejectedNoiseKeys, skill));
+            autoApprovedNormalized = autoApprovedNormalized.filter(skill => !hasComparisonKey(globalRejectedNoiseKeys, skill));
             if (beforeNoiseFilter !== finalNeedsReview.length) {
                 console.log(`📊 Global noise filter: ${beforeNoiseFilter} → ${finalNeedsReview.length}`);
             }
@@ -658,4 +668,11 @@ exports.getDocumentOcrText = async (req, res) => {
         console.error('Error fetching OCR text:', error);
         res.status(500).json({ success: false, error: error.message });
     }
+};
+
+exports.invalidateDocumentCaches = () => {
+    cachedGlobalNoise = null;
+    cachedGlobalNoiseTime = 0;
+    cachedKBSkills = null;
+    cachedKBSkillsTime = 0;
 };

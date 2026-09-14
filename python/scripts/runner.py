@@ -147,7 +147,7 @@ class Runner:
             print(error_trace, file=sys.stderr)
             return {'success': False, 'error': str(e), 'traceback': error_trace}
     
-    def learn_feedback(self, approved_skills, rejected_skills):
+    def learn_feedback(self, approved_skills, rejected_skills, context=None):
         """Update learning from user feedback — delegates to NLPProcessor's
         own learn_from_feedback(), which is the method that actually populates
         rejected_phrases / rejected_fragments / learned_skill_keywords and
@@ -159,9 +159,21 @@ class Runner:
             approved = json.loads(approved_skills) if isinstance(approved_skills, str) else (approved_skills or [])
             rejected = json.loads(rejected_skills) if isinstance(rejected_skills, str) else (rejected_skills or [])
             
-            print(f"[LEARN] Processing {len(approved)} approved, {len(rejected)} rejected", file=sys.stderr)
+            doc_id = None
+            emp_id = None
+            rev_by = None
+            if context:
+                ctx = json.loads(context) if isinstance(context, str) else context
+                doc_id = ctx.get('document_id')
+                emp_id = ctx.get('employee_id')
+                rev_by = ctx.get('reviewed_by')
+
+            print(f"[LEARN] Processing {len(approved)} approved, {len(rejected)} rejected (reviewer={rev_by})", file=sys.stderr)
             
-            skills_learned = self.nlp.learn_from_feedback(approved, rejected)
+            skills_learned = self.nlp.learn_from_feedback(
+                approved, rejected,
+                document_id=doc_id, employee_id=emp_id, reviewed_by=rev_by
+            )
             
             return {"success": True, "skills_learned": skills_learned}
             
@@ -286,7 +298,8 @@ def main():
     elif cmd == "learn_feedback" and len(sys.argv) >= 4:
         approved_skills = sys.argv[2]
         rejected_skills = sys.argv[3]
-        result = runner.learn_feedback(approved_skills, rejected_skills)
+        context = sys.argv[4] if len(sys.argv) >= 5 else None
+        result = runner.learn_feedback(approved_skills, rejected_skills, context)
         _REAL_STDOUT.write(json.dumps(result))
         _REAL_STDOUT.flush()
     

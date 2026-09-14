@@ -3,8 +3,6 @@ import weaLogo from '../../assets/WEA_logo_bgremoved.png';
 import ApplicantJobPostingsTab from './ApplicantJobPostingsTab';
 
 export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme }) {
-  const [showMyApplications, setShowMyApplications] = useState(false);
-
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -17,16 +15,6 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
           </div>
         </div>
         <div className="applicant-header-right" style={styles.headerRight}>
-          <button
-            onClick={() => setShowMyApplications(!showMyApplications)}
-            style={{
-              ...styles.navButton,
-              backgroundColor: showMyApplications ? 'var(--color-primary)' : 'transparent',
-              color: showMyApplications ? 'white' : 'var(--color-text-primary)'
-            }}
-          >
-            {showMyApplications ? '← Back to Jobs' : 'My Applications'}
-          </button>
           <div style={styles.themeToggle}>
             <span style={{ display: 'flex', alignItems: 'center', color: 'var(--color-text-secondary)', marginRight: '6px' }}>
               {isDark ? (
@@ -57,7 +45,7 @@ export default function ApplicantLayout({ user, onLogout, isDark, toggleTheme })
 
       {/* Main Content */}
       <main className="applicant-main-container" style={styles.main}>
-        <ApplicantJobPostingsTab showMyApplications={showMyApplications} />
+        <ApplicantJobPostingsTab />
       </main>
     </div>
   );
@@ -115,18 +103,6 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     flexWrap: 'wrap',
-  },
-  navButton: {
-    padding: '8px 16px',
-    borderRadius: '8px',
-    border: '1px solid var(--color-border)',
-    backgroundColor: 'transparent',
-    color: 'var(--color-text-primary)',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    minHeight: '40px',
-    transition: 'all 0.2s',
   },
   logoutButton: {
     padding: '8px 16px',

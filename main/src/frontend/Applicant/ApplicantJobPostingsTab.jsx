@@ -6,9 +6,8 @@ import { API_BASE_URL } from '../../config/api';
 const API = `${API_BASE_URL}/api/applicant`;
 const SUPER_ADMIN_API = `${API_BASE_URL}/api/superadmin`;
 
-export default function ApplicantJobPostingsTab({ showMyApplications }) {
+export default function ApplicantJobPostingsTab() {
   const [jobPostings, setJobPostings] = useState([]);
-  const [myApplications, setMyApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -21,8 +20,6 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const [applicantEmail, setApplicantEmail] = useState('');
 
   // ✅ Add state for max file size
   const [maxFileSize, setMaxFileSize] = useState(5);
@@ -159,50 +156,16 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     benefits: row.benefits || '',
   });
 
-  const loadMyApplications = async () => {
-    if (!applicantEmail) {
-      setMyApplications([]);
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      const res = await fetch(`${API}/my-applications?email=${encodeURIComponent(applicantEmail)}`);
-      const data = await res.json();
-      if (data.success) {
-        setMyApplications(
-          data.data.map((app) => ({
-            id: app.id,
-            jobTitle: app.job_postings?.title || app.position_applied,
-            department: app.department || app.job_postings?.departments?.department_name || '—',
-            appliedDate: app.applied_date ? new Date(app.applied_date).toISOString().split('T')[0] : '',
-            status: app.status,
-          }))
-        );
-      }
-    } catch (err) {
-      console.error('Failed to load applications:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Re-fetch when branch filter changes
   useEffect(() => {
-    if (!showMyApplications) {
-      loadJobPostings();
-    }
+    loadJobPostings();
   }, [branchFilter]);
 
   useEffect(() => {
     fetchBranches();
     fetchSystemSettings(); // ✅ Fetch system settings on mount
-    if (showMyApplications) {
-      loadMyApplications();
-    } else {
-      loadJobPostings();
-    }
-  }, [showMyApplications]);
+    loadJobPostings();
+  }, []);
 
   const showSuccessAlert = (message, title = 'Success!') => {
     Swal.fire({
@@ -391,90 +354,7 @@ export default function ApplicantJobPostingsTab({ showMyApplications }) {
     return <div style={styles.loading}>Loading...</div>;
   }
 
-  // Show My Applications view
-  if (showMyApplications) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>My Applications</h1>
-          <p style={styles.subtitle}>Track your job application status</p>
-        </div>
 
-        <div className="glass-card" style={{ ...styles.card, marginBottom: 24 }}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Enter the email you applied with</label>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <input
-                type="email"
-                value={applicantEmail}
-                onChange={(e) => setApplicantEmail(e.target.value)}
-                placeholder="your@email.com"
-                style={{ ...styles.input, flex: 1 }}
-              />
-              <button onClick={loadMyApplications} style={styles.applyBtn}>Search</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-card" style={styles.card}>
-          {myApplications.length === 0 ? (
-            <div style={styles.emptyState}>
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-              </svg>
-              <p style={styles.emptyText}>
-                {applicantEmail
-                  ? "No applications found for this email."
-                  : "Enter your email above to view your applications."}
-              </p>
-            </div>
-          ) : (
-            <div style={styles.applicationsList}>
-              {myApplications.map(app => (
-                <div key={app.id} className="glass-card" style={styles.applicationCard}>
-                  <div style={styles.applicationHeader}>
-                    <h3 style={styles.applicationTitle}>{app.jobTitle}</h3>
-                    <span style={{
-                      ...styles.statusBadge,
-                      backgroundColor: app.status === 'Interview Scheduled' ? 'var(--color-accent-light)' :
-                        app.status === 'Hired' ? 'var(--color-primary-light)' :
-                          app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                      color: app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
-                        app.status === 'Hired' ? 'var(--color-primary)' :
-                          app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
-                    }}>
-                      {app.status}
-                    </span>
-                  </div>
-                  <div style={styles.applicationMeta}>
-                    <div style={styles.metaItem}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.metaIcon}>
-                        <rect x="2" y="7" width="20" height="14" rx="2"></rect>
-                        <path d="M16 7V5a2 2 0 0 0-4 0v2"></path>
-                      </svg>
-                      <span style={styles.metaText}>{app.department}</span>
-                    </div>
-                    <div style={styles.metaItem}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={styles.metaIcon}>
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                      </svg>
-                      <span style={styles.metaText}>Applied: {app.appliedDate}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   // Show Job Postings view with Branch filter
   return (
@@ -1003,39 +883,7 @@ const styles = {
     fontWeight: '600',
     cursor: 'pointer',
   },
-  applicationsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  applicationCard: {
-    padding: '20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  applicationHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  applicationTitle: {
-    fontSize: '18px',
-    fontWeight: '700',
-    color: 'var(--color-text-primary)',
-    margin: 0,
-  },
-  applicationMeta: {
-    display: 'flex',
-    gap: '16px',
-  },
-  statusBadge: {
-    padding: '6px 12px',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: '600',
-  },
+
   modalOverlay: {
     position: 'fixed',
     top: 0,
