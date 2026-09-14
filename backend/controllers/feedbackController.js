@@ -780,7 +780,7 @@ exports.saveSkillFeedback = async (req, res) => {
                         document_id: documentId,
                         employee_id: profileData.employee_id
                     });
-                existingApprovedKeys.add(key);
+                addComparisonKeys(existingApprovedKeys, skill);
                 feedbackRowsWritten++;
             }
 
@@ -802,11 +802,21 @@ exports.saveSkillFeedback = async (req, res) => {
                         document_id: documentId,
                         employee_id: profileData.employee_id
                     });
-                existingRejectedKeys.add(key);
+                addComparisonKeys(existingRejectedKeys, skill);
                 feedbackRowsWritten++;
             }
 
-            console.log(`âœ… Feedback saved to training table!`);
+            console.log(`✅ Feedback saved to training table! (${feedbackRowsWritten} new rows)`);
+
+            // Invalidate document caches so subsequent uploads see these immediately
+            try {
+                const docCtrl = require('./documentController');
+                if (docCtrl.invalidateDocumentCaches) {
+                    docCtrl.invalidateDocumentCaches();
+                }
+            } catch (cacheErr) {
+                console.warn('Could not invalidate document caches:', cacheErr.message);
+            }
 
             // ============ GATED ML RETRAINING ============
             // Only actually retrains when >= 20 NEW human-reviewed rows have
