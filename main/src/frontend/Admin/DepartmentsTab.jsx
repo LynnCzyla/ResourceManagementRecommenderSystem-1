@@ -746,6 +746,7 @@ function PositionsSubTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function DepartmentsTab() {
   const [activeSubTab, setActiveSubTab] = useState('departments');
+  const [hoveredSubTab, setHoveredSubTab] = useState(null);
 
   return (
     <div>
@@ -758,25 +759,13 @@ export default function DepartmentsTab() {
       {/* Sub-tabs */}
       <div style={styles.subTabsContainer}>
         <button
+          type="button"
           onClick={() => setActiveSubTab('departments')}
-          onMouseEnter={(e) => {
-            if (activeSubTab !== 'departments') {
-              e.currentTarget.style.background = 'var(--color-primary-light)';
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activeSubTab !== 'departments') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--color-text-secondary)';
-            }
-          }}
+          onMouseEnter={() => setHoveredSubTab('departments')}
+          onMouseLeave={() => setHoveredSubTab(null)}
           style={{
             ...styles.subTabBtn,
-            borderBottomColor: activeSubTab === 'departments' ? 'var(--color-primary)' : 'transparent',
-            color: activeSubTab === 'departments' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: activeSubTab === 'departments' ? '700' : '500',
-            ...(activeSubTab === 'departments' ? styles.subTabBtnHover : {})
+            ...(activeSubTab === 'departments' ? styles.subTabBtnActive : hoveredSubTab === 'departments' ? styles.subTabBtnHovered : {})
           }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
@@ -786,25 +775,13 @@ export default function DepartmentsTab() {
           Departments
         </button>
         <button
+          type="button"
           onClick={() => setActiveSubTab('positions')}
-          onMouseEnter={(e) => {
-            if (activeSubTab !== 'positions') {
-              e.currentTarget.style.background = 'var(--color-primary-light)';
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activeSubTab !== 'positions') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--color-text-secondary)';
-            }
-          }}
+          onMouseEnter={() => setHoveredSubTab('positions')}
+          onMouseLeave={() => setHoveredSubTab(null)}
           style={{
             ...styles.subTabBtn,
-            borderBottomColor: activeSubTab === 'positions' ? 'var(--color-primary)' : 'transparent',
-            color: activeSubTab === 'positions' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            fontWeight: activeSubTab === 'positions' ? '700' : '500',
-            ...(activeSubTab === 'positions' ? styles.subTabBtnHover : {})
+            ...(activeSubTab === 'positions' ? styles.subTabBtnActive : hoveredSubTab === 'positions' ? styles.subTabBtnHovered : {})
           }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
@@ -837,29 +814,32 @@ const styles = {
 
   subTabsContainer: {
     display: 'flex',
-    gap: '6px',
+    gap: '8px',
     borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '0',
+    marginTop: '-4px',
+    marginBottom: '20px',
   },
   subTabBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '7px',
-    padding: '10px 20px',
-    fontSize: '13px',
-    fontWeight: '600',
+    gap: '8px',
+    background: 'transparent',
     border: 'none',
     borderBottom: '2px solid transparent',
-    marginBottom: '-1px',
-    background: 'transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
     color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    borderRadius: '6px 6px 0 0',
-    transition: 'color 0.15s',
+    transition: 'all 0.2s',
   },
-  subTabBtnHover: {
-    background: 'var(--color-primary-light)',
+  subTabBtnActive: {
     color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  subTabBtnHovered: {
+    color: 'var(--color-text-primary)',
   },
 
   toolbar: {

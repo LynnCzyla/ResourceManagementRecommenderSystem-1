@@ -100,6 +100,7 @@ export default function EmployeeProfileTab() {
   // 'credentials' = Upload CV / Resume + Certifications
   // 'account'     = Profile Details + Change Password
   const [mainTab, setMainTab] = useState('credentials');
+  const [hoveredMainTab, setHoveredMainTab] = useState(null);
 
   const getAuthHeader = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -895,7 +896,12 @@ const handleCertUpload = async (e) => {
         <button
           type="button"
           onClick={() => setMainTab('credentials')}
-          style={{ ...styles.mainTabBtn, ...(mainTab === 'credentials' ? styles.mainTabBtnActive : {}) }}
+          onMouseEnter={() => setHoveredMainTab('credentials')}
+          onMouseLeave={() => setHoveredMainTab(null)}
+          style={{
+            ...styles.mainTabBtn,
+            ...(mainTab === 'credentials' ? styles.mainTabBtnActive : hoveredMainTab === 'credentials' ? styles.mainTabBtnHovered : {})
+          }}
         >
           <IconUpload />
           Credentials
@@ -903,7 +909,12 @@ const handleCertUpload = async (e) => {
         <button
           type="button"
           onClick={() => setMainTab('account')}
-          style={{ ...styles.mainTabBtn, ...(mainTab === 'account' ? styles.mainTabBtnActive : {}) }}
+          onMouseEnter={() => setHoveredMainTab('account')}
+          onMouseLeave={() => setHoveredMainTab(null)}
+          style={{
+            ...styles.mainTabBtn,
+            ...(mainTab === 'account' ? styles.mainTabBtnActive : hoveredMainTab === 'account' ? styles.mainTabBtnHovered : {})
+          }}
         >
           <IconUser />
           Account Settings
@@ -1125,30 +1136,32 @@ const styles = {
   // ── Main tab bar (top-level) ──────────────────────────────────────────────
   mainTabBar: {
     display: 'flex',
-    gap: '6px',
+    gap: '8px',
     borderBottom: '1px solid var(--color-border)',
-    paddingBottom: '0',
+    marginTop: '-4px',
+    marginBottom: '20px',
   },
   mainTabBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '7px',
-    padding: '10px 20px',
-    fontSize: '13px',
-    fontWeight: '600',
+    gap: '8px',
+    background: 'transparent',
     border: 'none',
     borderBottom: '2px solid transparent',
-    marginBottom: '-1px',
-    background: 'transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
     color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    borderRadius: '6px 6px 0 0',
-    transition: 'color 0.15s',
+    transition: 'all 0.2s',
   },
   mainTabBtnActive: {
     color: 'var(--color-primary)',
     borderBottom: '2px solid var(--color-primary)',
-    background: 'var(--color-primary-light)',
+  },
+  mainTabBtnHovered: {
+    color: 'var(--color-text-primary)',
   },
 
   // ── Inner tab bar (inside Account Settings card) ── matches screenshot ────

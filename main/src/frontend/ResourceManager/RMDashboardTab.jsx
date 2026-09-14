@@ -310,7 +310,11 @@ export default function RMDashboardTab() {
             <div style={styles.buttonGroup}>
               <button 
                 onClick={() => generateReport('pdf')} 
-                style={styles.reportBtn}
+                style={{
+                  ...styles.reportBtn,
+                  cursor: pdfLoading || excelLoading ? 'not-allowed' : 'pointer',
+                  opacity: pdfLoading || excelLoading ? 0.6 : 1,
+                }}
                 disabled={pdfLoading || excelLoading}
                 title="Generate PDF of Employee Utilization"
               >
@@ -325,7 +329,11 @@ export default function RMDashboardTab() {
               </button>
               <button 
                 onClick={() => generateReport('excel')} 
-                style={styles.excelBtn}
+                style={{
+                  ...styles.excelBtn,
+                  cursor: pdfLoading || excelLoading ? 'not-allowed' : 'pointer',
+                  opacity: pdfLoading || excelLoading ? 0.6 : 1,
+                }}
                 disabled={pdfLoading || excelLoading}
                 title="Export Employee Utilization as Excel spreadsheet"
               >
