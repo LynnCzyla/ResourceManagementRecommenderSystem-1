@@ -1166,7 +1166,7 @@ class NLPProcessor:
             is_short_enough_for_header = len(line.split()) <= 3
             
             # Check if this is a section header
-            if is_short_enough_for_header and header_pattern.match(line):
+            if is_short_enough_for_header and header_patterns.match(line):
                     # Clean the section name
                     section = line.rstrip(':.').strip()
                     if len(section) > 2 and len(section) < 50:
@@ -2583,8 +2583,23 @@ class NLPProcessor:
         if len(text) < 3 or len(text) > 100:
             return True
         
-        # Check if it's a date or number
-        if re.match(r'^\d', text) or re.search(r'\d{4}', text):
+        # Check if it's purely a date or number (e.g. "2018 - 2022", "12/05/2020", "2019", "100")
+        # Do NOT reject software versions like "AutoCAD 2017", "Office 2019", or skills like "2D Drafting", "3D Modeling", "5S"
+        text_stripped = text.strip()
+        # Pure digits or numbers
+        if re.match(r'^\d+$', text_stripped):
+            return True
+        # Date ranges like "2015 - 2019", "2018-present"
+        if re.match(r'^(?:19|20)\d{2}\s*[-–/to]+\s*(?:(?:19|20)\d{2}|present|current|now)$', text_stripped, re.IGNORECASE):
+            return True
+        # Date formats like 01/2020, 2020-05-12, 12-05-2020
+        if re.match(r'^\d{1,4}[/-]\d{1,2}[/-]\d{2,4}$', text_stripped):
+            return True
+        # Starts with a number but NOT a technical abbreviation like 2D, 3D, 4G, 5G, 5S, 6S, 8D
+        if re.match(r'^\d+(?![a-zA-Z])', text_stripped):
+            return True
+        # Standalone month + year like "January 2018", "June 2020"
+        if re.match(r'^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{4}$', text_stripped, re.IGNORECASE):
             return True
         
         # Check if it's all uppercase (often headers)
