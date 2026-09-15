@@ -378,6 +378,96 @@ const sendFeedbackRequestEmail = async ({
   return await sendEmail(mailOptions);
 };
 
+// ============================================
+// APPLICATION RECEIVED EMAIL (to the applicant)
+// Paste this into backend/utils/mailer.js, right before `module.exports`.
+// ============================================
+const sendApplicationReceivedEmail = async ({
+  to,
+  applicantName,
+  position,
+  department,
+  branchName,
+  appliedDate,
+  referenceId,
+}) => {
+  const currentYear = new Date().getFullYear();
+  const dateText = appliedDate
+    ? new Date(appliedDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    : new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const mailOptions = {
+    from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
+    to,
+    subject: `We received your application - ${position} at WEA`,
+    html: getEmailWrapper(`
+      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 20px; overflow: hidden;">
+        <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
+          <div style="margin-bottom: 16px;">
+            ${getLogoHtml()}
+          </div>
+          <h1 style="font-family: 'Outfit', sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
+            Application Received
+          </h1>
+          <p style="color: #94a3b8; font-size: 13px; font-weight: 500; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">
+            WEA Resource Management System
+          </p>
+        </div>
+
+        <div style="padding: 32px;">
+          <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">
+            Dear <strong style="color: #f8fafc;">${applicantName}</strong>,<br/><br/>
+            Thank you for applying to WEA. We have received your application for the
+            <strong>${position}</strong> position and our recruitment team will begin reviewing it shortly.
+          </p>
+
+          <div style="background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 14px; padding: 20px; margin-bottom: 24px;">
+            <h3 style="color: #f8fafc; font-size: 15px; font-weight: 700; margin: 0 0 16px 0; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 8px;">
+              📋 Application Summary
+            </h3>
+            <table style="width: 100%; border-collapse: collapse; color: #cbd5e1; font-size: 13px;">
+              <tr><td style="padding: 6px 0; font-weight: 600; width: 40%;">Position:</td><td>${position}</td></tr>
+              ${department ? `<tr><td style="padding: 6px 0; font-weight: 600;">Department:</td><td>${department}</td></tr>` : ''}
+              ${branchName ? `<tr><td style="padding: 6px 0; font-weight: 600;">Branch:</td><td>${branchName}</td></tr>` : ''}
+              <tr><td style="padding: 6px 0; font-weight: 600;">Date Applied:</td><td>${dateText}</td></tr>
+              ${referenceId ? `<tr><td style="padding: 6px 0; font-weight: 600;">Reference No.:</td><td><code style="background: #0f172a; padding: 2px 8px; border-radius: 4px; color: #e2e8f0;">${referenceId}</code></td></tr>` : ''}
+              <tr><td style="padding: 6px 0; font-weight: 600;">Status:</td><td><strong style="color: #f59e0b;">Pending Review</strong></td></tr>
+            </table>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+            <h4 style="color: #f8fafc; font-size: 14px; margin: 0 0 8px 0;">What happens next</h4>
+            <ul style="color: #cbd5e1; font-size: 13px; line-height: 1.6; margin: 0; padding-left: 20px;">
+              <li>Our HR team reviews your qualifications against the role.</li>
+              <li>If you move forward, we will email you an interview invitation.</li>
+              <li>Reviews usually take a few business days. No action is needed from you right now.</li>
+            </ul>
+          </div>
+
+          <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
+            Keep this email for your records. If you need to update any detail in your application,
+            reply to this message and include your reference number.<br/><br/>
+            Best regards,<br/>
+            <strong>WEA HR &amp; Recruitment Team</strong>
+          </p>
+        </div>
+
+        <div style="padding: 16px 32px; border-top: 1px solid #334155; text-align: center;">
+          <p style="color: #64748b; font-size: 11px; margin: 0;">
+            © ${currentYear} WEA Resource Management System. All rights reserved.
+          </p>
+        </div>
+      </div>
+    `),
+  };
+
+  return await sendEmail(mailOptions);
+};
+
+// ============================================
+// Then update the existing module.exports at the bottom of mailer.js
+// to include the new function:
+// ============================================
 module.exports = {
   sendEmail,
   getLogoHtml,
@@ -386,4 +476,5 @@ module.exports = {
   sendRejectionEmail,
   sendFeedbackRequestEmail,
   sendAdminWelcomeEmail,
+  sendApplicationReceivedEmail, // ✅ add this line
 };
