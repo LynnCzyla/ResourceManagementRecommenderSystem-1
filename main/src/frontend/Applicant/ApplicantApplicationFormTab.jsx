@@ -368,7 +368,7 @@ export default function ApplicantApplicationFormTab() {
                         e.preventDefault();
                       }
                     }}
-                    pattern="[0-9+\-()\s]{7,20}"
+                    pattern="[0-9+\\-\\(\\)\\s]{7,20}"
                     title="Please enter a valid phone number with numbers only"
                     style={styles.formInput}
                     placeholder="+63 XXX XXX XXXX"
