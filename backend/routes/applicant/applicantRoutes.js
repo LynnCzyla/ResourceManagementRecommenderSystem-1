@@ -6,6 +6,9 @@ const path = require('path');
 const fs = require('fs');
 const supabase = require('../../supabase');
 
+// ✅ Applicant confirmation email
+const { sendApplicationReceivedEmail } = require('../../utils/mailer');
+
 // ------------------------------------------------------------
 // Helper: Get system settings
 // ------------------------------------------------------------
@@ -128,7 +131,7 @@ router.get('/job-postings', async (req, res) => {
 
 // ------------------------------------------------------------
 // GET /api/applicant/branches
-// Public list of Active branches for job filtering
+// Public list of branches for job filtering
 // ------------------------------------------------------------
 router.get('/branches', async (req, res) => {
   try {
@@ -302,6 +305,41 @@ async function processApplication(req, res) {
       });
     }
 
+    // ------------------------------------------------------------
+    // ✅ Block duplicate applications: same email + same job posting
+    // ------------------------------------------------------------
+    if (job_posting_id) {
+      const normalizedEmail = email.trim().toLowerCase();
+      console.log(`🔎 Checking duplicate: job_posting_id=${job_posting_id}, email=${normalizedEmail}`);
+
+      // ✅ Use a plain select + limit instead of maybeSingle().
+      // maybeSingle() throws PGRST116 if more than one row matches
+      // (which can happen from earlier test submissions), and that
+      // error was silently letting duplicates through.
+      const { data: existingApplications, error: dupeCheckError } = await supabase
+        .from('job_applications')
+        .select('id, email, job_posting_id')
+        .eq('job_posting_id', job_posting_id)
+        .ilike('email', normalizedEmail)
+        .limit(1);
+
+      if (dupeCheckError) {
+        // ✅ Made this loud on purpose: a silent failure here means
+        // duplicates slip through without anyone noticing.
+        console.error('🚨 DUPLICATE CHECK QUERY FAILED (duplicates will NOT be blocked):', dupeCheckError);
+      } else if (existingApplications && existingApplications.length > 0) {
+        console.log(`⛔ Duplicate found, blocking submission:`, existingApplications[0]);
+        return res.status(409).json({
+          success: false,
+          error: 'This email has already applied for this position. You can only submit one application per job posting.',
+        });
+      } else {
+        console.log('✅ No duplicate found, proceeding with submission.');
+      }
+    } else {
+      console.warn('⚠️ No job_posting_id received — duplicate check was skipped entirely.');
+    }
+
     // ✅ FETCH BRANCH_ID FROM JOB POSTING
     let branch_id = null;
     let jobPostingTitle = null;
@@ -310,7 +348,7 @@ async function processApplication(req, res) {
 
     if (job_posting_id) {
       console.log(`🔍 Fetching job posting ${job_posting_id} for branch info...`);
-      
+
       const { data: jobPosting, error: jobError } = await supabase
         .from('job_postings')
         .select(`
@@ -344,7 +382,7 @@ async function processApplication(req, res) {
         created_by = jobPosting.created_by;
         jobPostingTitle = jobPosting.title;
         jobPostingDepartment = jobPosting.departments?.department_name || null;
-        
+
         if (created_by) {
           console.log(`🔍 Fetching profile for created_by: ${created_by}`);
           const { data: profile, error: profileError } = await supabase
@@ -352,7 +390,7 @@ async function processApplication(req, res) {
             .select('branch_id, first_name, last_name, role')
             .eq('id', created_by)
             .single();
-          
+
           if (profileError) {
             console.error('❌ Error fetching profile:', profileError);
           } else if (profile) {
@@ -370,7 +408,7 @@ async function processApplication(req, res) {
         .select('branch_id')
         .eq('department_name', department)
         .single();
-      
+
       if (!deptError && deptData) {
         branch_id = deptData.branch_id;
         console.log(`✅ Found branch_id ${branch_id} from department`);
@@ -389,7 +427,7 @@ async function processApplication(req, res) {
         `)
         .eq('id', job_posting_id)
         .single();
-      
+
       if (!jobError && jobPosting?.departments?.branch_id) {
         branch_id = jobPosting.departments.branch_id;
         console.log(`✅ Found branch_id ${branch_id} from job posting's department`);
@@ -482,6 +520,43 @@ async function processApplication(req, res) {
 
     console.log(`✅ Application submitted successfully with branch_id: ${branch_id}`);
 
+    const applicantFullName = `${first_name} ${last_name}`.trim();
+
+    // ------------------------------------------------------------
+    // ✅ Send confirmation email to the applicant (non-fatal)
+    // The application is already saved at this point, so a mail
+    // failure must never turn into a failed submission.
+    // ------------------------------------------------------------
+    try {
+      let branchName = null;
+      if (branch_id) {
+        const { data: branchRow } = await supabase
+          .from('branches')
+          .select('name')
+          .eq('id', branch_id)
+          .single();
+        branchName = branchRow?.name || null;
+      }
+
+      console.log(`📧 Attempting to send confirmation email to: ${email}`);
+
+      const emailResult = await sendApplicationReceivedEmail({
+        to: email,
+        applicantName: applicantFullName,
+        position: position_applied || jobPostingTitle,
+        department: applicationData.department,
+        branchName,
+        appliedDate: data.applied_date || new Date().toISOString(),
+        referenceId: data.id,
+      });
+
+      console.log(`✅ Confirmation email sent to applicant: ${email}`, emailResult);
+    } catch (mailErr) {
+      // ✅ Made this loud on purpose: this is the ONLY place a Brevo/API
+      // failure will show up, since the applicant still sees "success".
+      console.error('🚨 CONFIRMATION EMAIL FAILED (applicant will not know):', mailErr?.response?.data || mailErr?.message || mailErr);
+    }
+
     // Notify HR team members about new applicant
     try {
       let hrQuery = supabase.from('profiles').select('id').eq('role', 'Human Resources').eq('status', 'Active');
@@ -490,7 +565,6 @@ async function processApplication(req, res) {
       }
       const { data: hrUsers } = await hrQuery;
       if (hrUsers && hrUsers.length > 0) {
-        const applicantFullName = `${first_name} ${last_name}`.trim();
         const hrNotifs = hrUsers.map(u => ({
           recipient_id: u.id,
           type: 'alert',
@@ -558,11 +632,11 @@ router.get('/my-applications', async (req, res) => {
     const transformedData = (data || []).map(item => ({
       ...item,
       branch_id: item.branch_id || item.job_postings?.departments?.branch_id || item.job_postings?.profiles?.branch_id || null,
-      branch_name: item.job_postings?.departments?.branches?.name || 
-                   item.job_postings?.profiles?.branches?.name || 
+      branch_name: item.job_postings?.departments?.branches?.name ||
+                   item.job_postings?.profiles?.branches?.name ||
                    'N/A',
-      posted_by: item.job_postings?.profiles ? 
-        `${item.job_postings.profiles.first_name || ''} ${item.job_postings.profiles.last_name || ''}`.trim() : 
+      posted_by: item.job_postings?.profiles ?
+        `${item.job_postings.profiles.first_name || ''} ${item.job_postings.profiles.last_name || ''}`.trim() :
         'Unknown',
       department_name: item.job_postings?.departments?.department_name || 'N/A'
     }));
@@ -581,37 +655,18 @@ router.get('/my-applications', async (req, res) => {
 router.get('/system-settings', async (req, res) => {
   try {
     const settings = await getSystemSettings();
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       data: {
         max_file_upload_size: settings.max_file_upload_size
       }
     });
   } catch (err) {
     console.error('Error fetching system settings:', err);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to load system settings' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load system settings'
     });
-  }
-});
-
-// ------------------------------------------------------------
-// GET /api/applicant/branches
-// Public list of active branches for job filter
-// ------------------------------------------------------------
-router.get('/branches', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('branches')
-      .select('id, name, location')
-      .order('name', { ascending: true });
-
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) {
-    console.error('Error fetching public branches:', err);
-    res.status(500).json({ success: false, error: 'Failed to load branches' });
   }
 });
 
