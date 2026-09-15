@@ -6,6 +6,15 @@ import { API_BASE_URL } from '../../config/api';
 const API = `${API_BASE_URL}/api/applicant`;
 const SUPER_ADMIN_API = `${API_BASE_URL}/api/superadmin`;
 
+// ✅ Digits only. No letters, no symbols, no spaces.
+const sanitizePhone = (value = '') => value.replace(/\D/g, '').slice(0, 15);
+
+// Keys allowed even though they are not digits
+const PHONE_CONTROL_KEYS = [
+  'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  'Tab', 'Enter', 'Home', 'End',
+];
+
 export default function ApplicantJobPostingsTab() {
   const [jobPostings, setJobPostings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,6 +29,7 @@ export default function ApplicantJobPostingsTab() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [applicantEmail, setApplicantEmail] = useState('');
 
   // ✅ Add state for max file size
   const [maxFileSize, setMaxFileSize] = useState(5);
@@ -219,6 +229,25 @@ export default function ApplicantJobPostingsTab() {
     setShowApplicationModal(true);
   };
 
+  // ✅ Phone handlers: numbers only
+  const handlePhoneChange = (e) => {
+    setApplyForm(prev => ({ ...prev, phone: sanitizePhone(e.target.value) }));
+  };
+
+  const handlePhoneKeyDown = (e) => {
+    if (e.ctrlKey || e.metaKey) return;
+    if (PHONE_CONTROL_KEYS.includes(e.key)) return;
+    if (!/^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+    }
+  };
+
+  const handlePhonePaste = (e) => {
+    e.preventDefault();
+    const pasted = (e.clipboardData || window.clipboardData).getData('text');
+    setApplyForm(prev => ({ ...prev, phone: sanitizePhone(prev.phone + pasted) }));
+  };
+
   const handleApplyFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -231,7 +260,10 @@ export default function ApplicantJobPostingsTab() {
       // ✅ Use dynamic max file size
       const maxSize = maxFileSize * 1024 * 1024;
       if (file.size > maxSize) {
-        showErrorAlert(`File size exceeds the ${maxFileSize}MB limit.`, 'File Too Large');
+        showErrorAlert(
+          `Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB. The limit is ${maxFileSize}MB.`,
+          'File Too Large'
+        );
         e.target.value = null;
         setApplyForm({ ...applyForm, resume: null });
         return;
@@ -243,11 +275,10 @@ export default function ApplicantJobPostingsTab() {
   const handleApplicationSubmit = async (e) => {
     e.preventDefault();
 
-    // Validate phone number: must have at least 7 digits and no letters
-    const cleanedPhone = (applyForm.phone || '').trim();
-    const digitsOnly = cleanedPhone.replace(/\D/g, '');
-    if (digitsOnly.length < 7 || /[a-zA-Z]/.test(cleanedPhone)) {
-      showErrorAlert('Please enter a valid phone number with numbers only.', 'Invalid Phone');
+    // ✅ Validate phone number: digits only, 7 to 15 digits
+    const phoneDigits = sanitizePhone(applyForm.phone);
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      showErrorAlert('Enter a phone number with 7 to 15 digits. Numbers only.', 'Invalid Phone');
       return;
     }
 
@@ -259,7 +290,7 @@ export default function ApplicantJobPostingsTab() {
       fd.append('middle_name', applyForm.middleName);
       fd.append('last_name', applyForm.lastName);
       fd.append('email', applyForm.email);
-      fd.append('phone', applyForm.phone);
+      fd.append('phone', phoneDigits);
       fd.append('location', applyForm.location);
       fd.append('position_applied', selectedPosting.title);
       fd.append('department', selectedPosting.department);
@@ -273,18 +304,38 @@ export default function ApplicantJobPostingsTab() {
         method: 'POST',
         body: fd,
       });
-      const data = await res.json();
 
-      if (data.success) {
+      // ✅ Read as text first so an HTML error page does not crash res.json()
+      const raw = await res.text();
+      let data = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok) {
+        console.error('Submit failed:', res.status, raw.slice(0, 300));
+        if (res.status === 413) {
+          showErrorAlert(`Your resume is too large for the server. Keep it under ${maxFileSize}MB.`, 'File Too Large');
+        } else {
+          showErrorAlert(
+            (data && data.error) || `The server returned an error (${res.status}). Please try again.`
+          );
+        }
+        return;
+      }
+
+      if (data && data.success) {
         setApplicantEmail(applyForm.email);
         setShowApplicationModal(false);
         showSuccessAlert('Application submitted successfully!');
       } else {
-        showErrorAlert(data.error || 'Failed to submit application.');
+        showErrorAlert((data && data.error) || 'Failed to submit application.');
       }
     } catch (err) {
-      showErrorAlert('Could not connect to the server.');
-      console.error(err);
+      console.error('Network error while submitting application:', err);
+      showErrorAlert('Could not reach the server. Check your internet connection and try again.', 'Connection Failed');
     } finally {
       setSubmitting(false);
     }
@@ -316,7 +367,7 @@ export default function ApplicantJobPostingsTab() {
     // Split by commas, newlines, semicolons
     const skills = cleanText
       .split(/[\n\r,;]+/)
-      .map(s => s.replace(/^[\s•\-\*]+|[\s•\-\*]+$/g, '').trim())
+      .map(s => s.replace(/^[\s•\-*]+|[\s•\-*]+$/g, '').trim())
       .filter(Boolean);
 
     if (skills.length === 0) {
@@ -353,8 +404,6 @@ export default function ApplicantJobPostingsTab() {
   if (loading) {
     return <div style={styles.loading}>Loading...</div>;
   }
-
-
 
   // Show Job Postings view with Branch filter
   return (
@@ -518,7 +567,6 @@ export default function ApplicantJobPostingsTab() {
             </div>
             <div style={styles.modalBody}>
               <form onSubmit={handleApplicationSubmit} style={styles.form}>
-                {/* Form fields - same as before */}
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Personal Information</h4>
                   <div className="applicant-form-grid" style={styles.formGrid}>
@@ -564,29 +612,21 @@ export default function ApplicantJobPostingsTab() {
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Phone *</label>
+                      {/* ✅ Numbers only. Pattern has no escaped characters, so it is valid in Chrome's `v` mode. */}
                       <input
-                        type="tel"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="tel"
                         required
+                        maxLength={15}
                         value={applyForm.phone}
-                        onChange={(e) => {
-                          // Restrict to numbers, +, -, (), and spaces only
-                          const cleanVal = e.target.value.replace(/[^0-9+\-()\s]/g, '');
-                          setApplyForm({ ...applyForm, phone: cleanVal });
-                        }}
-                        onKeyDown={(e) => {
-                          if (
-                            !/[0-9+\-()\s]/.test(e.key) &&
-                            !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) &&
-                            !e.ctrlKey &&
-                            !e.metaKey
-                          ) {
-                            e.preventDefault();
-                          }
-                        }}
-                        pattern="[0-9+\-()\s]{7,20}"
-                        title="Please enter a valid phone number with numbers only"
+                        onChange={handlePhoneChange}
+                        onKeyDown={handlePhoneKeyDown}
+                        onPaste={handlePhonePaste}
+                        pattern="[0-9]{7,15}"
+                        title="Numbers only, 7 to 15 digits"
                         style={styles.input}
-                        placeholder="+63 XXX XXX XXXX"
+                        placeholder="09XXXXXXXXX"
                       />
                     </div>
                     <div style={styles.formGroup}>
@@ -656,7 +696,6 @@ export default function ApplicantJobPostingsTab() {
                   </div>
                 </div>
 
-                {/* ✅ UPDATED Resume Section with dynamic file size */}
                 <div style={styles.formSection}>
                   <h4 style={styles.formSectionTitle}>Resume</h4>
                   <div style={styles.formGroup}>
