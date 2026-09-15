@@ -6,6 +6,7 @@ import sys
 import time
 import re
 import hashlib
+import gc
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -132,14 +133,20 @@ class OCRProcessor:
     # METHOD 2: Fast OCR for Scanned PDFs (OPTIMIZED)
     # ============================================================
     def extract_with_ocr_fast(self, file_path):
-        """Parallel OCR — scanned PDFs and images.
-        Pages are processed concurrently (up to 3 workers) instead of serially.
+        """OCR — scanned PDFs and images.
+        Pages are converted from the PDF one at a time (not all at once) and
+        processed with a small worker pool (currently capped at 1 - serial)
+        to keep peak memory low on memory-constrained hosts (e.g. Render's
+        512MB instances). Each page's intermediate image arrays are
+        explicitly freed (del + gc.collect()) as soon as that page's OCR is
+        done, instead of waiting for Python's garbage collector to get to
+        them whenever it feels like it.
         """
         if not OCR_SUPPORT or not PDF2IMAGE_SUPPORT:
             debug_print("[OCR] OCR not available")
             return None
 
-        debug_print("[OCR] Starting parallel OCR...")
+        debug_print("[OCR] Starting OCR...")
 
         def _deskew(gray):
             """Estimate and correct page skew/tilt before OCR.
@@ -198,6 +205,9 @@ class OCRProcessor:
         def _ocr_page(args):
             """Process a single page image and return (page_num, text)."""
             page_num, image = args
+            gray = None
+            otsu_binary = None
+            adaptive_binary = None
             try:
                 if not OCR_SUPPORT or pytesseract is None:
                     return page_num, ''
@@ -227,7 +237,12 @@ class OCRProcessor:
                 if minimal_conf >= EARLY_EXIT_CONFIDENCE:
                     debug_print(f"[OCR] Page {page_num}: minimal conf {minimal_conf:.1f} already good — skipped enhanced pass")
                     debug_print(f"[OCR] Page {page_num}: {len(minimal_text)} chars")
-                    return page_num, minimal_text.strip() if minimal_text else ''
+                    result = page_num, minimal_text.strip() if minimal_text else ''
+                    # ============ MEMORY CLEANUP ============
+                    del img_arr, img_bgr, raw_gray, minimal_gray, minimal_binary
+                    gc.collect()
+                    # ==========================================
+                    return result
 
                 # ENHANCED candidate — CLAHE + deskew + denoise + conditional
                 # sharpen + upscale + Otsu/adaptive pick. Helps pages with
@@ -248,7 +263,7 @@ class OCRProcessor:
 
                 h, w = gray.shape[:2]
                 if max(h, w) < 1600:
-                    scale = min(1.6, 3000 / max(h, w))
+                    scale = min(1.6, 2000 / max(h, w))
                     gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
                                        interpolation=cv2.INTER_CUBIC)
 
@@ -299,9 +314,21 @@ class OCRProcessor:
                     text = minimal_text
 
                 debug_print(f"[OCR] Page {page_num}: {len(text)} chars")
-                return page_num, text.strip() if text else ''
+                result = page_num, text.strip() if text else ''
+                # ============ MEMORY CLEANUP ============
+                del img_arr, img_bgr, raw_gray, minimal_gray, minimal_binary
+                if gray is not None:
+                    del gray
+                if otsu_binary is not None:
+                    del otsu_binary
+                if adaptive_binary is not None:
+                    del adaptive_binary
+                gc.collect()
+                # ==========================================
+                return result
             except Exception as exc:
                 debug_print(f"[OCR] Page {page_num} error: {exc}")
+                gc.collect()
                 return page_num, ''
 
         try:
@@ -335,10 +362,14 @@ class OCRProcessor:
                 images = [img]
                 debug_print(f"[OCR] Loaded image: {img.size}")
 
-            debug_print(f"[OCR] Processing {len(images)} pages (parallel, max 3 workers)...")
+            # Run pages with a small worker pool; preserve document order via
+            # page_num key. Capped at 1 (serial) for now to minimize peak
+            # memory on constrained hosts — raise once memory headroom is
+            # confirmed safe (e.g. after moving OCR to its own worker
+            # service with more RAM).
+            max_workers = min(1, len(images))
+            debug_print(f"[OCR] Processing {len(images)} pages (max {max_workers} workers)...")
 
-            # Run pages concurrently; preserve document order via page_num key
-            max_workers = min(2, len(images))
             results = {}
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
@@ -356,8 +387,12 @@ class OCRProcessor:
             all_text = [results[k] for k in sorted(results) if results[k]]
             full_text = '\n\n'.join(all_text)
 
+            # Free the raw page images now that OCR is done with all of them
+            del images
+            gc.collect()
+
             if full_text.strip():
-                debug_print(f"[OCR] Total: {len(full_text)} chars from {len(images)} pages")
+                debug_print(f"[OCR] Total: {len(full_text)} chars from {len(results)} pages")
                 return full_text
 
         except Exception as e:
@@ -426,8 +461,8 @@ class OCRProcessor:
             if not text:
                 debug_print(f"[STEP 1] Fast extraction FAILED (PDF likely scanned)")
 
-                # ========== STEP 3: Use parallel OCR for scanned PDF ==========
-                debug_print("[STEP 2] Using parallel OCR for scanned PDF...")
+                # ========== STEP 3: Use OCR for scanned PDF ==========
+                debug_print("[STEP 2] Using OCR for scanned PDF...")
                 ocr_start = time.time()
                 text = self.extract_with_ocr_fast(file_path)
                 ocr_time = time.time() - ocr_start
