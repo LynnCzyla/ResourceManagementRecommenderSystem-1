@@ -121,14 +121,21 @@ class PythonService {
                 reject(err);
             });
             
-            // --- Timeout (5 minutes) ---
+            // --- Timeout (10 minutes) ---
+            // ============ FIX: was 5 minutes (300000ms) — too tight for
+            // scanned multi-page PDFs going through OCR one page at a time
+            // with max_workers=1 (serial), especially on a memory-constrained
+            // instance where "hard" pages fall through to the slower
+            // enhanced OCR pass. Raised to 10 minutes to give real documents
+            // enough headroom to finish instead of being killed mid-OCR. ============
             const timeout = setTimeout(() => {
                 if (!resolved) {
                     console.error('❌ Python process timed out');
                     pythonProcess.kill();
-                    reject(new Error('Python process timed out after 5 minutes'));
+                    reject(new Error('Python process timed out after 10 minutes'));
                 }
-            }, 300000);
+            }, 600000);
+            // ====================================================
             
             // Clear timeout on resolve/reject
             const originalResolve = resolve;

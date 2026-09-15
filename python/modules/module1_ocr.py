@@ -205,6 +205,7 @@ class OCRProcessor:
         def _ocr_page(args):
             """Process a single page image and return (page_num, text)."""
             page_num, image = args
+            page_start = time.time()   # ← DAGDAG DITO
             gray = None
             otsu_binary = None
             adaptive_binary = None
@@ -236,7 +237,7 @@ class OCRProcessor:
                 EARLY_EXIT_CONFIDENCE = 75
                 if minimal_conf >= EARLY_EXIT_CONFIDENCE:
                     debug_print(f"[OCR] Page {page_num}: minimal conf {minimal_conf:.1f} already good — skipped enhanced pass")
-                    debug_print(f"[OCR] Page {page_num}: {len(minimal_text)} chars")
+                    debug_print(f"[OCR] Page {page_num}: {len(minimal_text)} chars, took {time.time() - page_start:.1f}s")
                     result = page_num, minimal_text.strip() if minimal_text else ''
                     # ============ MEMORY CLEANUP ============
                     del img_arr, img_bgr, raw_gray, minimal_gray, minimal_binary
@@ -313,7 +314,7 @@ class OCRProcessor:
                     debug_print(f"[OCR] Page {page_num}: {len(text.split())} words looks like a hallucination — forcing minimal")
                     text = minimal_text
 
-                debug_print(f"[OCR] Page {page_num}: {len(text)} chars")
+                debug_print(f"[OCR] Page {page_num}: {len(text)} chars, took {time.time() - page_start:.1f}s")
                 result = page_num, text.strip() if text else ''
                 # ============ MEMORY CLEANUP ============
                 del img_arr, img_bgr, raw_gray, minimal_gray, minimal_binary
@@ -327,7 +328,7 @@ class OCRProcessor:
                 # ==========================================
                 return result
             except Exception as exc:
-                debug_print(f"[OCR] Page {page_num} error: {exc}")
+                debug_print(f"[OCR] Page {page_num} error: {exc} (after {time.time() - page_start:.1f}s)")
                 gc.collect()
                 return page_num, ''
 
