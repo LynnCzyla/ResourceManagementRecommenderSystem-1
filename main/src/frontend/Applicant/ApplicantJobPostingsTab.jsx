@@ -207,7 +207,7 @@ export default function ApplicantJobPostingsTab() {
       firstName: '',
       middleName: '',
       lastName: '',
-      email: applicantEmail || '',
+      email: '',
       phone: '',
       location: '',
       experience: '',
