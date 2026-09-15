@@ -23,6 +23,54 @@ from modules.supabase_client import supabase
 # ============ FIX: connectors that should never lead a skill phrase ============
 LEADING_CONNECTORS = ('and', 'of', 'for', 'with', 'to', 'in', 'on', 'at')
 
+# ============ KNOWN ACRONYMS (preserved in uppercase) ============
+KNOWN_ACRONYMS = {
+    'ERP', 'CRM', 'REE', 'CAD', 'CAM', 'CAE', 'BOSH', 'TESDA', 'PRC',
+    'HVAC', 'ISO', 'PLC', 'SCADA', 'VFD', 'HMI', 'DMS', 'CNC', 'IT',
+    'SQL', 'API', 'AWS', 'GCP', 'BIM', 'MEP', 'QA', 'QC', 'KPI',
+    'CCTV', 'UPS', 'LAN', 'WAN', 'IOT', 'AI', 'ML', 'NLP', 'OS',
+    '2D', '3D', '4G', '5G', 'NC'
+}
+
+def smart_title_case(phrase, raw_source_phrase=None):
+    """Normalize phrase to Title Case while strictly preserving acronym casing (ERP, CRM, REE)."""
+    if not phrase:
+        return ""
+    
+    raw_words_map = {}
+    if raw_source_phrase:
+        for w in re.findall(r'\b[A-Za-z0-9]+\b', raw_source_phrase):
+            if w.isupper() and 2 <= len(w) <= 5:
+                raw_words_map[w.lower()] = w
+                
+    tokens = phrase.split()
+    title_tokens = []
+    LOWERCASE_WORDS = {'and', 'or', 'for', 'of', 'in', 'on', 'at', 'to', 'with', 'by', '&'}
+    
+    for i, token in enumerate(tokens):
+        subparts = re.split(r'([/\-])', token)
+        processed_subparts = []
+        for part in subparts:
+            if not part or part in '/-':
+                processed_subparts.append(part)
+                continue
+            clean_part = re.sub(r'^[^\w]+|[^\w]+$', '', part)
+            clean_upper = clean_part.upper()
+            clean_lower = clean_part.lower()
+            
+            if clean_upper in KNOWN_ACRONYMS:
+                processed_subparts.append(part.replace(clean_part, clean_upper))
+            elif clean_lower in raw_words_map:
+                processed_subparts.append(part.replace(clean_part, raw_words_map[clean_lower]))
+            elif i > 0 and clean_lower in LOWERCASE_WORDS:
+                processed_subparts.append(part.replace(clean_part, clean_lower))
+            else:
+                processed_subparts.append(part.replace(clean_part, clean_part.capitalize()))
+        
+        title_tokens.append(''.join(processed_subparts))
+        
+    return ' '.join(title_tokens)
+
 # ============ FALLBACK (Layer 3) SAFETY CONSTANTS ============
 # Used only when the ML classifier is unavailable/untrained/errors - see
 # _is_likely_skill()'s Layer 3. Not used at all when ML is active, so these
@@ -1977,36 +2025,75 @@ class NLPProcessor:
         # ==================================================================================
         
         # ============ STEP 1: Learn section names from this document ============
-        # First, extract all section headers
         header_pattern = re.compile(r'^([A-Z][A-Z\s&]+|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:.]?\s*$', re.MULTILINE)
         
+        # Canonical blacklist headers (table / metadata sections to strictly exclude)
+        BLACKLIST_TABLE_HEADERS = (
+            'training & certifications', 'training and certifications', 'certifications',
+            'educational background', 'education', 'academic history', 'academic background',
+            'professional license', 'professional licenses', 'license', 'licenses',
+            'competency classification', 'classification',
+            'employee identification', 'personal information', 'personal details', 'contact information',
+            'professional summary', 'summary', 'executive summary', 'career objective', 'objective',
+            'relevant project experience', 'project experience', 'projects', 'employment history', 'work experience',
+            'manager remarks', 'remarks', 'character references', 'references',
+            'document type', 'confidential', 'field value'
+        )
+        
+        # Canonical whitelist skill section headers
+        WHITELIST_SKILL_HEADERS = (
+            'technical competencies', 'software proficiency', 'industry experience',
+            'areas of specialization', 'product and technical knowledge',
+            'product knowledge', 'technical knowledge',
+            'skills', 'technical skills', 'core competencies', 'key skills',
+            'competencies', 'areas of expertise', 'software skills',
+            'tools & technologies', 'tools and technologies', 'proficiencies',
+            'core strengths', 'key competencies', 'professional capabilities',
+            'professional competencies', 'core qualifications', 'technical proficiencies',
+        )
+
         sections = {}
         lines = text.split('\n')
         current_section = None
         current_content = []
         
         for line in lines:
-            line = line.strip()
-            if not line:
+            line_str = line.strip()
+            if not line_str:
                 continue
             
-            # Check if this is a section header (must be short, <= 4 words)
-            words = line.split()
-            if 1 <= len(words) <= 4 and header_pattern.match(line):
+            # Normalize candidate header line: strip bullets, numbering, arrows, punctuation
+            header_clean = re.sub(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~0-9.\s]+', '', line_str).strip().lower()
+            header_clean = re.sub(r'\s*[:.]\s*$', '', header_clean)
+            
+            matched_header = None
+            for bh in BLACKLIST_TABLE_HEADERS:
+                if header_clean.startswith(bh) or (len(bh) > 8 and bh in header_clean):
+                    matched_header = bh
+                    break
+            if not matched_header:
+                for sh in WHITELIST_SKILL_HEADERS:
+                    if header_clean.startswith(sh) or (len(sh) > 8 and sh in header_clean):
+                        matched_header = sh
+                        break
+            
+            words = line_str.split()
+            is_generic_header = (1 <= len(words) <= 5 and bool(header_pattern.match(line_str)))
+            
+            if matched_header or is_generic_header:
                 # Save previous section
                 if current_section and current_content:
                     sections[current_section] = '\n'.join(current_content)
-                current_section = line.rstrip(':.').strip().lower()
+                current_section = matched_header if matched_header else header_clean
                 current_content = []
             elif current_section:
-                current_content.append(line)
+                current_content.append(line_str)
         
         # Save last section
         if current_section and current_content:
             sections[current_section] = '\n'.join(current_content)
         
         # ============ STEP 2: Score sections for skill relevance ============
-        # Skill indicators (learned patterns, not hardcoded)
         skill_indicators = [
             'skill', 'competenc', 'proficien', 'specializ', 
             'knowledge', 'expertise', 'qualif', 'ability',
@@ -2015,16 +2102,6 @@ class NLPProcessor:
             'control', 'tracking', 'document', 'filing', 'version'
         ]
         
-        # Non-skill indicators (things that are NOT skills)
-        non_skill_indicators = [
-            'photo', 'picture', 'logo', 'confidential', 'internal',
-            'employee id', 'full name', 'position', 'department',
-            'date hired', 'employment status', 'supervisor', 'manager remarks',
-            'educational background', 'degree', 'course', 'institution', 
-            'year completed', 'professional license', 'license number'
-        ]
-        
-        # Score each section
         scored_sections = {}
         for section_name, content in sections.items():
             section_lower = section_name.lower()
@@ -2032,73 +2109,32 @@ class NLPProcessor:
             
             score = 0
             
-            # Phase 3B: Explicit high-confidence skill section header boost (+5)
-            EXPLICIT_SKILL_HEADERS = (
-                'skills', 'technical skills', 'core competencies', 'key skills',
-                'competencies', 'areas of expertise', 'software skills',
-                'technical competencies', 'tools & technologies', 'proficiencies',
-                'core strengths', 'key competencies', 'professional capabilities',
-                'professional competencies', 'core qualifications', 'technical proficiencies',
-                # ============ WEA ECP-FORM-01 section headers ============
-                'software proficiency', 'industry experience',
-                'areas of specialization', 'product and technical knowledge',
-                'product knowledge', 'technical knowledge',
-                # ==========================================================
-            )
-            if any(h in section_lower for h in EXPLICIT_SKILL_HEADERS):
+            # Check for whitelist skill section headers (+5)
+            if any(h in section_lower or section_lower in h for h in WHITELIST_SKILL_HEADERS):
                 score += 5
 
-            # Check section name for skill indicators
             for indicator in skill_indicators:
                 if indicator in section_lower:
                     score += 3
                     break
             
-            # Check content for skill indicators
             for indicator in skill_indicators:
                 if indicator in content_lower:
                     score += 1
             
-            # Check for bullet points (often skills)
-            bullet_count = len(re.findall(r'[•\-\*]\s*[A-Za-z]', content))
+            # Check for bullet points
+            bullet_count = len(re.findall(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~]\s*[A-Za-z]', content, re.MULTILINE))
             if bullet_count > 2:
                 score += 2
             elif bullet_count > 0:
                 score += 1
             
-            # Check for common skill patterns
-            if re.search(r'\b(?:proficient|experienced|skilled|expert)\b', content_lower):
-                score += 2
-            
-            # Penalize non-skill sections
-            for indicator in non_skill_indicators:
-                if indicator in section_lower or indicator in content_lower:
-                    score -= 2
-                    break
-            
-            # ============ FIX: hard-exclude known metadata/table sections ============
-            # Phase 3B: Expanded exclusion list to include education, references, contact details, and ECP form tables
-            METADATA_SECTION_MARKERS = (
-                'classification', 'primary role', 'functional area',
-                'specialization category', 'experience category',
-                'relevant project experience', 'project name', 'project name / type',
-                'education', 'educational background', 'academic history',
-                'character reference', 'references', 'personal reference',
-                'personal details', 'personal information', 'contact information',
-                # ============ WEA ECP prose & metadata sections ============
-                'professional summary', 'competency classification',
-                'manager remarks', 'employee identification',
-                'professional license', 'training & certifications',
-                'training and certifications', 'field value', 'field', 'value',
-                'projects', 'project experience', 'work experience', 'employment history'
-                # ===========================================================
-            )
-            is_metadata = any(marker in section_lower for marker in METADATA_SECTION_MARKERS)
+            # HARD-EXCLUDE table & metadata sections
+            is_metadata = any(marker in section_lower for marker in BLACKLIST_TABLE_HEADERS)
             if is_metadata:
                 score = -100
-            # ============================================================================
-
-            is_explicit = any(h in section_lower for h in EXPLICIT_SKILL_HEADERS)
+            
+            is_explicit = any(h in section_lower for h in WHITELIST_SKILL_HEADERS)
             scored_sections[section_name] = {
                 'content': content,
                 'score': score,
@@ -2107,9 +2143,8 @@ class NLPProcessor:
             }
         
         # ============ STEP 3: Extract from skill sections ============
-        # Track which candidates came from trusted (EXPLICIT_SKILL_HEADERS) sections
-        # so they can bypass ML rejection later.
         trusted_candidates = set()
+        seen_section_skills = set()
 
         for section_name, section_data in scored_sections.items():
             if not section_data['is_skill_section']:
@@ -2118,21 +2153,14 @@ class NLPProcessor:
             content = section_data['content']
             is_trusted = section_data.get('is_trusted', False)
             
-            # Extract bullet points — LINE-START anchored to prevent
-            # splitting compound-hyphenated words like "Entry-Level" into
-            # fragments ("Level Engineering Documentation") and prevent
-            # page-header artifacts like "WEA-ECP-FORM-01" → "FORM".
+            # Extract bullet points — supporting standard bullets AND OCR bullet artifacts (+, *, -, •, ¢, «, », °, §, ·, >)
             bullet_items = []
             for _ln in content.split('\n'):
                 _ln = _ln.strip()
-                if _ln and _ln[0] in '•-*' and len(_ln) > 2:
-                    bullet_items.append(_ln[1:].strip())
+                _clean_ln = re.sub(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~]+\s*', '', _ln)
+                if _clean_ln != _ln and len(_clean_ln) > 2:
+                    bullet_items.append(_clean_ln.strip())
 
-            # ============ FIX: only fall back to plain lines for list-style sections ============
-            # A section is "list-style" if it's short, punchy lines (skills/tools),
-            # not flowing prose (Professional Summary). Guard on: no sentence-ending
-            # periods mid-content, and average line length typical of a skill label
-            # rather than a full sentence.
             content_lines = [ln.strip() for ln in content.split('\n') if ln.strip()]
             is_list_style = (
                 bool(content_lines)
@@ -2140,94 +2168,75 @@ class NLPProcessor:
                 and sum(len(ln.split()) for ln in content_lines) / len(content_lines) <= 8
             )
 
-            if is_list_style:
+            raw_extracted_items = []
+            if bullet_items:
+                raw_extracted_items.extend(bullet_items)
+            elif is_list_style:
                 plain_lines = [
                     ln for ln in content_lines
-                    if ln not in bullet_items and ln.lower() != section_name.lower()
+                    if ln.lower() != section_name.lower()
                 ]
-                for clean in plain_lines:
-                    if 3 < len(clean) < 100 and not self._is_non_skill(clean):
-                        whole_phrase_candidates.add(clean)
-                        if is_trusted:
-                            trusted_candidates.add(clean)
-            # ==============================================================================================
-            
-            if bullet_items:
-                for item in bullet_items:
-                    clean = item.strip()
-                    if 3 < len(clean) < 100 and clean:
-                        # Filter out non-skills
-                        if not self._is_non_skill(clean):
-                            whole_phrase_candidates.add(clean)
-                            if is_trusted:
-                                trusted_candidates.add(clean)
+                raw_extracted_items.extend(plain_lines)
             else:
-                # If no bullet points, split by newlines or commas
                 items = re.split(r'\n|,', content)
-                for item in items:
-                    clean = item.strip()
-                    if 3 < len(clean) < 100 and clean:
-                        if not self._is_non_skill(clean):
-                            whole_phrase_candidates.add(clean)
-                            if is_trusted:
-                                trusted_candidates.add(clean)
-        
-        # ============ STEP 4: Extract from bullet points anywhere ============
-        # ============ FIX: bullet marker must be at LINE START only ============
-        # The old pattern `[•\-\*][ \t]*(...)` treated ANY hyphen as a bullet
-        # marker, including hyphens inside compound words like "After-Sales"
-        # or "Why-Why". That mid-word hyphen would end one match early and
-        # immediately start a new "bullet" match right after it, shredding a
-        # single skill into two fragments (e.g. "Customer Service and After"
-        # + "Sales Support Systems"). Anchoring to line start (optional
-        # leading whitespace) via MULTILINE fixes this.
-        # The capture class also now includes ()- so a phrase isn't truncated
-        # right before a parenthetical, e.g. "Uninterruptible Power Supply
-        # (UPS) Systems" no longer gets cut to "Uninterruptible Power Supply".
+                raw_extracted_items.extend(items)
+            
+            # Add to whole_phrase_candidates with section-level deduplication
+            for item in raw_extracted_items:
+                clean = item.strip()
+                if 3 < len(clean) < 100 and not self._is_non_skill(clean):
+                    clean_norm = clean.lower()
+                    whole_phrase_candidates.add(clean)
+                    if is_trusted:
+                        trusted_candidates.add(clean)
+                    seen_section_skills.add(clean_norm)
+
+        # ============ STEP 4: Extract from bullet points in non-metadata text only ============
+        # Blacklisted table/metadata sections are NEVER scanned for bullets.
+        non_metadata_lines = []
+        for sec_name, sec_data in scored_sections.items():
+            if not any(marker in sec_name.lower() for marker in BLACKLIST_TABLE_HEADERS) and sec_data['score'] > -50:
+                non_metadata_lines.append(sec_data['content'])
+        non_metadata_text = '\n'.join(non_metadata_lines)
+
         bullet_matches = re.findall(
-            r'^[ \t]*[•\-\*][ \t]+([A-Za-z0-9 \t,&()\-/#+.]+)',
-            text,
+            r'^[ \t]*[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~][ \t]+([A-Za-z0-9 \t,&()\-/#+.]+)',
+            non_metadata_text,
             re.MULTILINE
         )
-        # ========================================================================
         for match in bullet_matches:
             clean = match.strip()
-            if 3 < len(clean) < 100 and clean:
-                if not self._is_non_skill(clean):
-                    whole_phrase_candidates.add(clean)  # ← was candidates.add(clean)
+            if 3 < len(clean) < 100 and clean and not self._is_non_skill(clean):
+                whole_phrase_candidates.add(clean)
         
-        # ============ STEP 5: Extract noun phrases (spaCy) ============
-        # Exclude EVERY detected section (skill or not) from the remainder —
-        # not just skill sections. Table sections like "Relevant Project
-        # Experience" were leaking through because they were only excluded via
-        # a substring .replace() that silently fails when the row text doesn't
-        # match byte-for-byte. Rebuilding remainder_text from only the truly
-        # unclassified lines is more reliable than subtracting known content.
-        classified_content = set()
-        for section_data in scored_sections.values():
-            for line in section_data['content'].split('\n'):
-                classified_content.add(line.strip())
+        # ============ STEP 5: Extract noun phrases (spaCy) from remainder (Fallback only) ============
+        # Only extract noun chunks if document does NOT have structured skill sections.
+        # When explicit skill sections exist, running noun chunks on unclassified lines
+        # only captures noise (e.g. table rows, headers, company names).
+        has_skill_sections = any(sec.get('is_skill_section', False) for sec in scored_sections.values())
+        if not has_skill_sections:
+            classified_content = set()
+            for section_data in scored_sections.values():
+                for line in section_data['content'].split('\n'):
+                    classified_content.add(line.strip())
 
-        remainder_lines = [
-            ln for ln in text.split('\n')
-            if ln.strip() and ln.strip() not in classified_content
-        ]
-        remainder_text = '\n'.join(remainder_lines)
-        # ================================================================================
+            remainder_lines = [
+                ln for ln in text.split('\n')
+                if ln.strip() and ln.strip() not in classified_content
+                and not any(marker in ln.strip().lower() for marker in BLACKLIST_TABLE_HEADERS)
+            ]
+            remainder_text = '\n'.join(remainder_lines)
 
-        doc = self.nlp(remainder_text)
-        for chunk in doc.noun_chunks:
-            chunk_text = chunk.text.strip()
-            if 3 < len(chunk_text) < 50:
-                if not self._is_non_skill(chunk_text): 
-                    candidates.add(chunk_text)
+            doc = self.nlp(remainder_text)
+            for chunk in doc.noun_chunks:
+                chunk_text = chunk.text.strip()
+                if 3 < len(chunk_text) < 50 and '\n' not in chunk_text:
+                    clean_c = self._clean_candidate_text(chunk_text)
+                    if clean_c and not self._is_non_skill(clean_c): 
+                        candidates.add(clean_c)
         
         # ============ STEP 6: Extract from colon-separated lists ============
         colon_pattern = re.compile(r'([A-Z][a-z]+[ \t]+[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+)*)[ \t]*[:][ \t]*([A-Za-z0-9 \t,&]+)')
-
-        # ============ FIX: structural PII guard ============
-        # These are field labels, not skills — reject regardless of learned
-        # feedback, since PII shouldn't require the model to be corrected first.
         PII_LABELS = {
             'full name', 'first name', 'last name', 'employee id',
             'employee number', 'date hired', 'contact number',
@@ -2236,18 +2245,15 @@ class NLPProcessor:
             'primary role', 'functional area', 'experience category',
             'specialization category', 'employment date'
         }
-        for match in colon_pattern.finditer(text):
+        for match in colon_pattern.finditer(non_metadata_text):
             label = match.group(1).strip().lower()
             if label in PII_LABELS:
                 continue
             value = match.group(2).strip()
-            if 3 < len(value) < 100 and value:
-                if not self._is_non_skill(value):
-                    candidates.add(value)
+            if 3 < len(value) < 100 and value and not self._is_non_skill(value):
+                candidates.add(value)
 
-        # ============ NEW: whole_phrase_candidates get light cleaning only, NO splitting ============
-        # These came from actual bullet/line items in the document, so the full
-        # phrase — however many words — is the real skill. Do not shred it.
+        # ============ CLEAN WHOLE PHRASE CANDIDATES ============
         for candidate in whole_phrase_candidates:
             cleaned = self._clean_candidate_text(candidate)
             if not cleaned or len(cleaned) < 3:
@@ -2256,35 +2262,20 @@ class NLPProcessor:
             words = cleaned.split()
             if words and words[0].lower() in LEADING_CONNECTORS:
                 continue
-            # NOTE: Removed the blanket '/' in cleaned rejection here.
-            # Forward slashes are valid in skill names like "ERP / Bid Management Tools".
 
-            candidates.add(cleaned)  # kept whole, regardless of word count
-            # Carry over trust status from source section to the cleaned version
+            candidates.add(cleaned)
             if candidate in trusted_candidates:
                 trusted_candidates.add(cleaned)
-        # ================================================================================================
 
-        # ============ FIX: final pass - drop anything still starting with a connector ============
+        # ============ DROP LEADING CONNECTORS ============
         final_candidates = set()
         for c in candidates:
             words = c.split()
-            if not words:
+            if not words or words[0].lower() in LEADING_CONNECTORS:
                 continue
-            if words[0].lower() in LEADING_CONNECTORS:
-                continue
-            # NOTE: Removed the blanket '/' rejection. Forward slashes are
-            # valid in real skill names ("ERP / Bid Management Tools").
-            # Table-separator artifacts are already filtered by _is_non_skill
-            # and the section-header exclusion logic above.
             final_candidates.add(c)
 
-        # ============ NEW: drop truncated-prefix and subphrase duplicates ============
-        # If two candidates are the same skill at different lengths — e.g.
-        # "Service Engineering" vs "Service Engineering And Field Support",
-        # or "Uninterruptible Power Supply" vs "Uninterruptible Power Supply Systems" —
-        # keep only the longer, complete one. A candidate is considered a duplicate
-        # when its word sequence appears contiguously inside an already-kept longer candidate.
+        # ============ DROP SUBPHRASE DUPLICATES ============
         def _is_contiguous_subphrase(sub_words, full_words):
             if not sub_words or len(sub_words) >= len(full_words):
                 return False
@@ -2302,110 +2293,102 @@ class NLPProcessor:
             if not is_subphrase_of_existing:
                 deduped.append(cand)
         final_candidates = set(deduped)
-        # ======================================================================
 
-        # ============ DIAGNOSTIC: trace 5 persistently missing skills ============
-        _TRACE_SKILLS = [
-            'electrical engineering services',
-            'power systems and transformer supply projects',
-            'industrial proposal and tender engineering',
-            'proposal engineering and bid preparation',
-            'power and distribution transformers',
-        ]
-        import sys
-        print(f"\n[DIAG] ======= EXTRACTION PIPELINE TRACE =======", file=sys.stderr)
-        print(f"[DIAG] Sections detected: {list(scored_sections.keys())}", file=sys.stderr)
-        for sname, sdata in scored_sections.items():
-            if sdata['is_skill_section']:
-                print(f"[DIAG] SKILL SECTION '{sname}': score={sdata['score']}, trusted={sdata.get('is_trusted')}", file=sys.stderr)
-                # Show first 200 chars of content
-                print(f"[DIAG]   content preview: {sdata['content'][:200]}", file=sys.stderr)
-        
-        for trace_skill in _TRACE_SKILLS:
-            # Check whole_phrase_candidates
-            in_wpc = any(trace_skill in c.lower() for c in whole_phrase_candidates)
-            # Check candidates
-            in_cand = any(trace_skill in c.lower() for c in candidates)
-            # Check final_candidates
-            in_final = any(trace_skill in c.lower() for c in final_candidates)
-            # Check trusted
-            in_trusted = any(trace_skill in c.lower() for c in trusted_candidates)
-            
-            if not in_final:
-                print(f"[DIAG] MISSING '{trace_skill}':", file=sys.stderr)
-                print(f"[DIAG]   whole_phrase_candidates: {in_wpc}", file=sys.stderr)
-                print(f"[DIAG]   candidates (after clean): {in_cand}", file=sys.stderr)
-                print(f"[DIAG]   final_candidates: {in_final}", file=sys.stderr)
-                print(f"[DIAG]   trusted_candidates: {in_trusted}", file=sys.stderr)
-            else:
-                print(f"[DIAG] FOUND '{trace_skill}' in final_candidates (trusted={in_trusted})", file=sys.stderr)
-        
-        # Also dump the raw text lines around "Industry Experience" for inspection
-        for i, line in enumerate(text.split('\n')):
-            line_stripped = line.strip().lower()
-            if 'industry experience' in line_stripped or 'electrical engineering services' in line_stripped:
-                context_start = max(0, i-1)
-                context_end = min(len(text.split('\n')), i+6)
-                print(f"[DIAG] Text around line {i} ('{line.strip()[:50]}'):", file=sys.stderr)
-                for j in range(context_start, context_end):
-                    print(f"[DIAG]   L{j}: '{text.split(chr(10))[j].strip()}'", file=sys.stderr)
-                break
-        print(f"[DIAG] =======================================\n", file=sys.stderr)
-        # ============ END DIAGNOSTIC ============
+        # ============ EXACT + FUZZY OCR-TYPO DEDUPLICATION ============
+        # Catches OCR character misreads (e.g. "Chient And Supplier Communication" vs
+        # "Client And Supplier Communication") and exact duplicates.
+        final_candidates = self._fuzzy_dedupe_candidates(final_candidates)
 
-        # Also return trusted candidates (from EXPLICIT_SKILL_HEADERS sections)
-        # so the caller can bypass ML rejection for them.
         trusted_final = trusted_candidates & final_candidates
         return final_candidates, trusted_final
     
+    def _fuzzy_dedupe_candidates(self, candidates):
+        """Deduplicate candidates handling exact duplicates and single-token OCR misreads."""
+        if not candidates:
+            return set()
+        
+        candidates_list = list(candidates)
+        kept = []
+
+        for cand in candidates_list:
+            cand_lower = cand.lower().strip()
+            cand_tokens = cand_lower.split()
+            
+            is_dup = False
+            for i, existing in enumerate(kept):
+                exist_lower = existing.lower().strip()
+                exist_tokens = exist_lower.split()
+
+                # Exact normalized match
+                if cand_lower == exist_lower:
+                    is_dup = True
+                    break
+
+                # OCR Typo check: same word count, exactly 1 differing token with high character similarity
+                if len(cand_tokens) == len(exist_tokens) and len(cand_tokens) >= 2:
+                    diffs = [(w1, w2) for w1, w2 in zip(cand_tokens, exist_tokens) if w1 != w2]
+                    if len(diffs) == 1:
+                        w_cand, w_exist = diffs[0]
+                        char_sim = SequenceMatcher(None, w_cand, w_exist).ratio()
+                        if char_sim >= 0.75 and abs(len(w_cand) - len(w_exist)) <= 1:
+                            # Single-character OCR typo! Determine which one is the legitimate word:
+                            cand_oov = self.nlp.vocab[w_cand].is_oov
+                            exist_oov = self.nlp.vocab[w_exist].is_oov
+
+                            if cand_oov and not exist_oov:
+                                # existing is legitimate (e.g. "client"), cand is typo ("chient") -> drop cand
+                                is_dup = True
+                                break
+                            elif exist_oov and not cand_oov:
+                                # cand is legitimate, existing is typo -> replace existing with cand
+                                kept[i] = cand
+                                is_dup = True
+                                break
+                            else:
+                                # Neither or both OOV -> keep the existing one
+                                is_dup = True
+                                break
+
+            if not is_dup:
+                kept.append(cand)
+
+        return set(kept)
+
     def _clean_candidate_text(self, text):
-        """Clean extracted candidate text"""
+        """Clean extracted candidate text with smart casing and comprehensive bullet stripping"""
         if not text:
             return ""
 
-        # ============ NEW: remove parenthetical asides entirely, FIRST ============
-        # "(DMS)", "(Tracking Logs and Registers)" etc. are clarifying asides, not
-        # part of the skill name. Doing this before other cleanup prevents the
-        # old bug where a trailing ")" got stripped separately from its leading
-        # "(", leaving orphaned junk like "(Dms" after title-casing.
+        # Remove parenthetical asides
         text = re.sub(r'\([^)]*\)', '', text)
         text = re.sub(r'[()]', '', text)
-        # ============================================================================
 
-        # ============ FIX: strip ANY leading/trailing junk characters ============
-        # Old version only stripped '•', '-', '*' from the start, which is why
-        # things like "(Tracking Logs" and "- Engineering Drawings" got through.
-        # Also strips '/' now — table-separator artifacts like "/ Type Role".
-        text = re.sub(r'^[\s•\-\*\(\)\[\]/]+', '', text) 
-        text = re.sub(r'[\s•\-\*\(\)\[\]/]+$', '', text)
-        # ===========================================================================
+        # Strip ALL leading/trailing OCR bullet symbols and decorations
+        text = re.sub(r'^[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\[\]\(\)\/]+', '', text)
+        text = re.sub(r'[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\[\]\(\)\/]+$', '', text)
 
         # Remove brackets
         if text.startswith('[') and text.endswith(']'):
             text = text[1:-1]
 
-        # ============ FIX: strip a leading connector word ============
-        # This is what turns "And Archiving Systems" into "Archiving Systems".
+        # Strip leading connector words
         text = re.sub(
             r'^(?:' + '|'.join(LEADING_CONNECTORS) + r')\s+',
             '',
             text,
             flags=re.IGNORECASE
         )
-        # ================================================================
 
-        # Strip again in case removing the connector exposed more junk
-        text = re.sub(r'^[\s•\-\*\(\)\[\]]+', '', text)
-        
-        # Remove trailing punctuation
+        # Strip again in case removing connector exposed more symbols
+        text = re.sub(r'^[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\[\]\(\)\/]+', '', text)
         text = re.sub(r'[,;:]$', '', text)
         
         # Normalize whitespace
         text = ' '.join(text.split())
         
-        # Normalize case (title case for display)
+        # Smart Title Case (preserves acronyms like ERP, CRM, REE)
         if len(text.split()) > 1:
-            text = text.title()
+            text = smart_title_case(text, raw_source_phrase=text)
         
         return text
     
@@ -2495,7 +2478,7 @@ class NLPProcessor:
 
     def _is_non_skill(self, text):
         """Dynamically determine if text is likely NOT a skill"""
-        if not text:
+        if not text or '\n' in text or '\r' in text:
             return True
         
         # Check learned rejections first (feedback_training & feedback_log)
