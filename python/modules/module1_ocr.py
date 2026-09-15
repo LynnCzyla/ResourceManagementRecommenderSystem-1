@@ -357,6 +357,8 @@ class OCRProcessor:
                         )
                     images.extend(page_imgs)
                 debug_print(f"[OCR] Converted {len(images)} pages")
+                for idx, img in enumerate(images):
+                    debug_print(f"[OCR] Page {idx+1} dimensions: {img.size[0]}x{img.size[1]} pixels")
             else:
                 img = Image.open(file_path)
                 images = [img]
