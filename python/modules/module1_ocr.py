@@ -309,15 +309,26 @@ class OCRProcessor:
             images = []
 
             if is_pdf:
-                debug_print("[OCR] Converting PDF to images...")
-                try:
-                    images = convert_from_path(file_path, dpi=150, thread_count=2)
-                except Exception as dpi_exc:
-                    # Very large page canvases at 200 DPI can trip Pillow's
-                    # decompression-bomb safety check. Fall back to the old
-                    # default rather than failing the whole document.
-                    debug_print(f"[OCR] 200 DPI conversion failed ({dpi_exc}), retrying at 150 DPI...")
-                    images = convert_from_path(file_path, dpi=150, thread_count=4)
+                debug_print("[OCR] Converting PDF to images (one page at a time)...")
+                from pdf2image import pdfinfo_from_path
+                info = pdfinfo_from_path(file_path)
+                num_pages = info["Pages"]
+                debug_print(f"[OCR] PDF has {num_pages} pages")
+
+                images = []
+                for page_num in range(1, num_pages + 1):
+                    try:
+                        page_imgs = convert_from_path(
+                            file_path, dpi=150, thread_count=1,
+                            first_page=page_num, last_page=page_num
+                        )
+                    except Exception as dpi_exc:
+                        debug_print(f"[OCR] Page {page_num} at 150 DPI failed ({dpi_exc}), retrying at 100 DPI...")
+                        page_imgs = convert_from_path(
+                            file_path, dpi=100, thread_count=1,
+                            first_page=page_num, last_page=page_num
+                        )
+                    images.extend(page_imgs)
                 debug_print(f"[OCR] Converted {len(images)} pages")
             else:
                 img = Image.open(file_path)
