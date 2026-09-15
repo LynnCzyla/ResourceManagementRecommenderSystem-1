@@ -36,7 +36,7 @@ const notificationsRouter = require('./routes/notifications');
 const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
-const applicantRoutes = require('./routes/applicant/applicantRoutes');
+const applicantRoutes = require('./routes/applicant/applicantRoutes'); 
 
 // ============ SUPER ADMIN ROUTES ============
 const superAdminDashboardRoutes = require('./routes/SuperAdmin/dashboard');
