@@ -25,11 +25,22 @@ class DocumentProcessor:
         # instance via the new `nlp` param; only construct one here if the
         # caller didn't supply one, so DocumentProcessor still works
         # standalone for any other caller that doesn't pass nlp.
-        self.nlp = nlp if nlp is not None else NLPProcessor(
-            model_name=self.config.get('spacy_model', 'en_core_web_md')
-        )
-        # ====================================================
+        self._nlp = nlp
+    # ==============================================
         self.process_log = []
+        
+    @property
+    def nlp(self):
+        if self._nlp is None:
+            print("[INTEGRATION] Lazily initializing NLP Processor (post-OCR)...")
+            self._nlp = NLPProcessor(
+                model_name=self.config.get('spacy_model', 'en_core_web_md')
+            )
+        return self._nlp
+
+    @nlp.setter
+    def nlp(self, value):
+        self._nlp = value
     
     def process_document_complete(self, image_path, employee_id, document_type):
         """Complete document processing pipeline"""

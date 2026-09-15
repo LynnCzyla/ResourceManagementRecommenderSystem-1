@@ -46,34 +46,23 @@ except ImportError as e:
 
 class Runner:
     def __init__(self):
-        # ============ FIX: Create shared NLP instance ============
-        print("[RUNNER] Initializing NLP Processor...", file=sys.stderr)
-        self.nlp = NLPProcessor()
-        print(f"[RUNNER] NLP initialized. ML Active: {self.nlp.use_ml}", file=sys.stderr)
-        
+
+        #============ FIX: DEFER NLP — let DocumentProcessor build it lazily,
+        # AFTER OCR runs, instead of eagerly here before OCR even starts ============
+        self.nlp = None
         print("[RUNNER] Initializing OCR Processor...", file=sys.stderr)
         self.ocr = OCRProcessor()
-        
         print("[RUNNER] Initializing Document Processor...", file=sys.stderr)
-        # ============ FIX (duplicate-init bug) ============
-        # DocumentProcessor used to always build its own NLPProcessor
-        # internally (full Supabase fetch + ML classifier load), which was
-        # then immediately discarded by the old `self.processor.nlp = self.nlp`
-        # override below. Pass the already-built instance in directly so it's
-        # only ever constructed once per process.
-        self.processor = DocumentProcessor(nlp=self.nlp)
-        # The line below is now a harmless no-op (processor.nlp already IS
-        # self.nlp) - left in place as a defensive no-op rather than removed,
-        # to keep this change minimal and behavior-neutral either way.
-        self.processor.nlp = self.nlp
-        # ====================================================
+        self.processor = DocumentProcessor(nlp=None)
         print("[RUNNER] Document Processor initialized.", file=sys.stderr)
+        
     
     def process_document(self, image_path, employee_id, doc_type):
         try:
             start = time.time()
             
             result = self.processor.process_document_complete(image_path, employee_id, doc_type)
+            self.nlp = self.processor.nlp  
             
             if result and result.get('success') and result.get('ocr'):
                 result['ocr']['processing_time'] = time.time() - start
