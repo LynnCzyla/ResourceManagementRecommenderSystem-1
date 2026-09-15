@@ -1,4 +1,3 @@
-//backend/controllers/feedbackController.js
 const { spawn } = require('child_process');
 const pythonService = require('../services/pythonService');
 const supabase = require('../supabase');
