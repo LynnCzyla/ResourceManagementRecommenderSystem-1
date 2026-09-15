@@ -311,7 +311,7 @@ class OCRProcessor:
             if is_pdf:
                 debug_print("[OCR] Converting PDF to images...")
                 try:
-                    images = convert_from_path(file_path, dpi=200, thread_count=4)
+                    images = convert_from_path(file_path, dpi=150, thread_count=2)
                 except Exception as dpi_exc:
                     # Very large page canvases at 200 DPI can trip Pillow's
                     # decompression-bomb safety check. Fall back to the old
@@ -327,7 +327,7 @@ class OCRProcessor:
             debug_print(f"[OCR] Processing {len(images)} pages (parallel, max 3 workers)...")
 
             # Run pages concurrently; preserve document order via page_num key
-            max_workers = min(3, len(images))
+            max_workers = min(2, len(images))
             results = {}
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
