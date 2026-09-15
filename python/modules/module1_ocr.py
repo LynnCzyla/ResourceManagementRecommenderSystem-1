@@ -169,32 +169,31 @@ class OCRProcessor:
             except Exception:
                 return gray
 
-        def _ocr_with_confidence(pil_img, page_num):
-            """Run OCR and return (text, mean_word_confidence).
-            Uses image_to_data instead of image_to_string so we get a
-            per-word confidence score, AND so we can drop very-low-confidence
-            tokens (Tesseract's way of saying "I'm basically guessing here"),
-            which is what silently produced the 9000+-word garbage output on
-            a noisy page before this fix — image_to_string just joins
-            whatever Tesseract outputs, hallucinated tokens included.
+        def _mean_confidence(pil_img):
+            """Mean Tesseract word confidence for a page — DIAGNOSTIC ONLY,
+            used solely to compare Otsu vs adaptive thresholding and pick
+            the better one. Does NOT filter or alter the returned text.
+            (Earlier version of this function also dropped any word below
+            conf 40 from the text itself — meant to kill hallucinated
+            garbage, but on genuinely noisy "hard" pages it was just as
+            likely to drop real, correctly-read words that happened to score
+            low confidence because of the noise, which is what caused the
+            cv_08/cv_10/cv_11 deletion spike. Text filtering is no longer
+            done here; the word-count sanity guard below handles hallucination.)
             """
             data = pytesseract.image_to_data(
                 pil_img, config='--oem 3 --psm 6',
                 output_type=pytesseract.Output.DICT
             )
-            words, confs = [], []
-            for word, conf in zip(data['text'], data['conf']):
-                word = word.strip()
+            confs = []
+            for conf in data['conf']:
                 try:
                     conf = float(conf)
                 except (ValueError, TypeError):
-                    conf = -1
+                    continue
                 if conf >= 0:
                     confs.append(conf)
-                if word and conf >= 40:  # discard low-confidence hallucinated tokens
-                    words.append(word)
-            mean_conf = sum(confs) / len(confs) if confs else 0.0
-            return ' '.join(words), mean_conf
+            return sum(confs) / len(confs) if confs else 0.0
 
         def _ocr_page(args):
             """Process a single page image and return (page_num, text)."""
@@ -204,104 +203,100 @@ class OCRProcessor:
                     return page_num, ''
                 img_arr = np.array(image)
                 img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
-                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                raw_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-                # NEW: Normalize contrast/lighting BEFORE anything else. CLAHE
-                # (adaptive histogram equalization) evens out brightness variance
-                # across the page — uneven scanner lighting, phone-camera exposure
-                # jitter — so deskew and thresholding downstream get a cleaner
-                # signal to work with instead of fighting a washed-out or muddy scan.
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                gray = clahe.apply(gray)
+                # MINIMAL candidate — deskew + Otsu only, no CLAHE/sharpen/
+                # upscale. This is the safest baseline: it can't be hurt by
+                # over-processing, but it also won't help pages that
+                # genuinely need contrast correction or sharpening.
+                minimal_gray = _deskew(raw_gray.copy())
+                _, minimal_binary = cv2.threshold(minimal_gray, 0, 255,
+                                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                minimal_text = pytesseract.image_to_string(
+                    Image.fromarray(minimal_binary), config='--oem 3 --psm 6'
+                )
 
-                # Straighten the page (corrects the skew/rotation typical of
-                # scans and camera photos) before any other processing.
+                # NEW: Early exit — if the minimal pass already reads
+                # cleanly, don't bother computing the enhanced pipeline at
+                # all. Most "easy" pages don't need CLAHE/sharpening, and
+                # skipping the second OCR pass on them keeps runtime close
+                # to the single-pass baseline; only genuinely hard pages
+                # pay the cost of running both candidates.
+                minimal_conf = _mean_confidence(Image.fromarray(minimal_binary))
+                EARLY_EXIT_CONFIDENCE = 75
+                if minimal_conf >= EARLY_EXIT_CONFIDENCE:
+                    debug_print(f"[OCR] Page {page_num}: minimal conf {minimal_conf:.1f} already good — skipped enhanced pass")
+                    debug_print(f"[OCR] Page {page_num}: {len(minimal_text)} chars")
+                    return page_num, minimal_text.strip() if minimal_text else ''
+
+                # ENHANCED candidate — CLAHE + deskew + denoise + conditional
+                # sharpen + upscale + Otsu/adaptive pick. Helps pages with
+                # poor contrast/lighting or genuine blur, but can hurt pages
+                # that are already noisy (CLAHE/sharpen amplify noise instead
+                # of text) — that's exactly what happened to cv_08/cv_10/cv_11
+                # when we trusted this pipeline unconditionally. Now it's
+                # just a candidate, not the default.
+                gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(raw_gray)
                 gray = _deskew(gray)
-
-                # Light denoise — smooths JPEG/scanner-sensor noise without
-                # eroding thin character strokes the way a stronger filter would.
                 gray = cv2.medianBlur(gray, 3)
 
-                # NEW: Counter-sharpen — but ONLY if the page is actually blurry.
-                # Sharpening a page that ISN'T blurry just amplifies whatever
-                # noise/texture is already there (this is what blew up cv_09:
-                # a noisy-but-not-blurry page got sharpened anyway, and the
-                # amplified noise got read as thousands of fake "words").
-                # Variance of the Laplacian is a standard blur metric — low
-                # variance means few sharp edges, i.e. the page IS blurry.
                 laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-                BLUR_THRESHOLD = 150  # empirical: below this, page reads as blurry
+                BLUR_THRESHOLD = 150
                 if laplacian_var < BLUR_THRESHOLD:
                     blurred = cv2.GaussianBlur(gray, (0, 0), sigmaX=3)
                     gray = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
-                    debug_print(f"[OCR] Page {page_num}: laplacian_var={laplacian_var:.1f}, sharpened (page looked blurry)")
-                else:
-                    debug_print(f"[OCR] Page {page_num}: laplacian_var={laplacian_var:.1f}, skipped sharpening (page already sharp/noisy)")
 
-                # Upscale small/blurry pages — Tesseract reads noticeably
-                # better on higher-resolution input, especially for pages
-                # rendered at low DPI or shot at a distance.
                 h, w = gray.shape[:2]
                 if max(h, w) < 1600:
                     scale = min(1.6, 3000 / max(h, w))
                     gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
                                        interpolation=cv2.INTER_CUBIC)
 
-                # Binarize. Otsu works well for evenly-lit pages, but on scans
-                # with lighting gradients CLAHE only partially corrected, it can
-                # collapse into a near-all-black or near-all-white result.
                 _, otsu_binary = cv2.threshold(gray, 0, 255,
                                                cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                otsu_text, otsu_conf = _ocr_with_confidence(Image.fromarray(otsu_binary), page_num)
+                enhanced_text = pytesseract.image_to_string(
+                    Image.fromarray(otsu_binary), config='--oem 3 --psm 6'
+                )
+                enhanced_binary_for_conf = otsu_binary
 
                 fg_ratio = np.mean(otsu_binary < 128)
                 if fg_ratio < 0.02 or fg_ratio > 0.6:
-                    # FIXED: previously this branch switched to adaptive
-                    # thresholding unconditionally whenever Otsu's foreground
-                    # ratio looked off. On a noisy/hard page, adaptive
-                    # thresholding turned background speckle into fake
-                    # "text" blobs, and Tesseract hallucinated ~9000 garbage
-                    # words from it (the cv_09 regression). Now we: (1) apply
-                    # a morphological open to strip speckle noise before OCR,
-                    # and (2) only USE the adaptive result if its mean
-                    # confidence actually beats Otsu's — otherwise we keep
-                    # the Otsu output, which is a safe fallback even if
-                    # imperfect.
                     adaptive_binary = cv2.adaptiveThreshold(
                         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                         cv2.THRESH_BINARY, blockSize=31, C=15
                     )
                     kernel = np.ones((2, 2), np.uint8)
                     adaptive_binary = cv2.morphologyEx(adaptive_binary, cv2.MORPH_OPEN, kernel)
-                    adaptive_text, adaptive_conf = _ocr_with_confidence(Image.fromarray(adaptive_binary), page_num)
-
+                    adaptive_text = pytesseract.image_to_string(
+                        Image.fromarray(adaptive_binary), config='--oem 3 --psm 6'
+                    )
+                    otsu_conf = _mean_confidence(Image.fromarray(otsu_binary))
+                    adaptive_conf = _mean_confidence(Image.fromarray(adaptive_binary))
                     if adaptive_conf > otsu_conf:
-                        text = adaptive_text
-                        debug_print(f"[OCR] Page {page_num}: fg_ratio={fg_ratio:.3f}, used adaptive threshold (conf {adaptive_conf:.1f} > otsu {otsu_conf:.1f})")
-                    else:
-                        text = otsu_text
-                        debug_print(f"[OCR] Page {page_num}: fg_ratio={fg_ratio:.3f}, adaptive conf ({adaptive_conf:.1f}) didn't beat otsu ({otsu_conf:.1f}) — kept otsu")
-                else:
-                    text = otsu_text
+                        enhanced_text = adaptive_text
+                        enhanced_binary_for_conf = adaptive_binary
 
-                # NEW: Sanity guard — a resume page realistically has maybe
-                # 100-400 words. If the pipeline above produced something
-                # absurd (this is what happened on cv_09: 10,000+ words from
-                # one page), the CLAHE/threshold combo malfunctioned on this
-                # specific page's noise pattern. Rather than trust it, redo
-                # OCR with the simplest possible pipeline (no CLAHE, no
-                # sharpening — just deskew + Otsu) as a safe fallback.
+                # DECIDE — pick whichever of minimal vs enhanced has higher
+                # mean OCR confidence for THIS specific page, instead of
+                # always trusting the enhanced pipeline. This is what lets
+                # "easy" pages benefit from CLAHE/sharpening while "hard"/
+                # very noisy pages fall back to the safer minimal version.
+                # (minimal_conf was already computed above for the early-exit
+                # check — reused here rather than recomputed.)
+                enhanced_conf = _mean_confidence(Image.fromarray(enhanced_binary_for_conf))
+                if enhanced_conf >= minimal_conf:
+                    text = enhanced_text
+                    debug_print(f"[OCR] Page {page_num}: laplacian_var={laplacian_var:.1f}, used ENHANCED (conf {enhanced_conf:.1f} >= minimal {minimal_conf:.1f})")
+                else:
+                    text = minimal_text
+                    debug_print(f"[OCR] Page {page_num}: laplacian_var={laplacian_var:.1f}, used MINIMAL (conf {minimal_conf:.1f} > enhanced {enhanced_conf:.1f})")
+
+                # Sanity guard — belt-and-suspenders in case BOTH candidates
+                # somehow blow up (shouldn't happen now, but cheap to keep).
                 MAX_SANE_WORDS_PER_PAGE = 1000
                 if len(text.split()) > MAX_SANE_WORDS_PER_PAGE:
-                    debug_print(f"[OCR] Page {page_num}: {len(text.split())} words looks like a hallucination — retrying with minimal preprocessing")
-                    safe_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-                    safe_gray = _deskew(safe_gray)
-                    _, safe_binary = cv2.threshold(safe_gray, 0, 255,
-                                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                    text = pytesseract.image_to_string(
-                        Image.fromarray(safe_binary), config='--oem 3 --psm 6'
-                    )
-                    debug_print(f"[OCR] Page {page_num}: fallback produced {len(text.split())} words")
+                    debug_print(f"[OCR] Page {page_num}: {len(text.split())} words looks like a hallucination — forcing minimal")
+                    text = minimal_text
 
                 debug_print(f"[OCR] Page {page_num}: {len(text)} chars")
                 return page_num, text.strip() if text else ''
