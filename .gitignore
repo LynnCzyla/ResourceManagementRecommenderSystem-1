@@ -55,7 +55,6 @@ frontend/build/
 *.tgz
 
 # ============ Shared Data ============
-shared-data/models/*.pkl
 shared-data/models/*.h5
 shared-data/models/*.joblib
 shared-data/datasets/*.csv

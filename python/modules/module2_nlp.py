@@ -1,6 +1,6 @@
 """
-🤖 Module 2: Natural Language Processing (100% Dynamic)
-NO hardcoded lists - learns everything from documents
+🤖 Module 2: Natural Language Processing 
+
 """
 import spacy
 import re
@@ -63,19 +63,10 @@ GENERIC_TERM_DOC_FREQ_RATIO = 0.12  # a token appearing in >=12% of learned skil
 GENERIC_TERM_MIN_COUNT = 4          # ...provided it also appears in at least this many distinct skills (avoids noise at small corpus sizes)
 
 # ============ SUPABASE FACTS CACHE ============
-# Each PDF upload spawns a brand-new Python process (see pythonService.js's
-# spawn() call), so an in-memory cache alone is useless — the process, and
-# everything in it, is gone before the next upload starts. To avoid
-# re-downloading the full skills + skill_aliases + feedback_training tables
-# on every single upload, we snapshot them to a small local JSON file and
-# reuse that snapshot for FACTS_CACHE_TTL_SECONDS before hitting Supabase
-# again. Any new skill/alias/feedback write invalidates the cache immediately
-# so freshly-approved data is never stale for longer than one write.
 FACTS_CACHE_TTL_SECONDS = 600  # 10 minutes
 
 
 class NLPProcessor:
-    """100% Dynamic NLP - Learns everything from documents"""
 
     # ============ DUPLICATE-WORK DIAGNOSTICS (process-lifetime counters) ============
     # Pure instrumentation, added to answer "how many times was NLPProcessor
@@ -146,19 +137,6 @@ class NLPProcessor:
         self.feedback_log = {}               # User feedback log
 
         # ============ MERGE-RUN PERFORMANCE CACHES ============
-        # merge_synonyms_dynamically() naively compares every skill pair
-        # (O(n^2)): at ~233 learned skills that's ~27k pairs. The dominant
-        # cost was never the O(n^2) Python loop itself — it was calling the
-        # spaCy pipeline (self.nlp(...)) TWICE per pair with no caching, so
-        # the same skill text got re-parsed by spaCy up to n-1 times. These
-        # caches make every per-skill computation (normalization, tokens,
-        # spaCy doc/vector, learned type, learned importance) happen at most
-        # ONCE per skill for the lifetime of this process, no matter how
-        # many pairs that skill is compared against. They are pure functions
-        # of (skill text, self.doc_texts/self.skill_dictionary), so it's
-        # safe to keep them warm across multiple merge runs; call
-        # _clear_merge_run_caches() if doc_texts/skill_dictionary changed
-        # and you need a guaranteed-fresh recompute.
         self._skill_cache = {}               # skill -> {norm, nospace, tokens, token_set}
         self._nlp_doc_cache = {}             # skill -> spaCy Doc (or None on failure)
         self._skill_type_cache = {}          # skill -> learned type string
@@ -168,17 +146,6 @@ class NLPProcessor:
         
         self.classifier = SkillClassifier()
         # ============ SMART ML ACTIVATION ============
-        # FIX: self.use_ml was previously only ever assigned when
-        # self.classifier.is_trained was True - with no else branch, so on
-        # a fresh deployment (no skill_classifier.pkl yet, nothing to train
-        # on), self.use_ml was never set at all and the first read of it
-        # anywhere (e.g. `if self.use_ml:` in _is_likely_skill, or
-        # runner.py logging self.nlp.use_ml right after construction)
-        # raised AttributeError. Defaulting to False here is behavior-
-        # neutral for every case that worked before (is_trained True still
-        # sets True) and only changes the previously-broken untrained case
-        # from a crash into the same "no ML available" state _is_likely_skill
-        # already handles via its self.use_ml check.
         self.use_ml = bool(self.classifier.is_trained)
         # Try to get accuracy from model file
         try:
