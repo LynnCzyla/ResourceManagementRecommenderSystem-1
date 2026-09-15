@@ -342,17 +342,52 @@ class OCRProcessor:
                 num_pages = info["Pages"]
                 debug_print(f"[OCR] PDF has {num_pages} pages")
 
+                # ============ FIX: Adaptive DPI based on actual page size ============
+                # Some scanned PDFs report an oversized MediaBox (page dimensions in
+                # points), so a fixed dpi=150 balloons into a huge pixel canvas
+                # (e.g. 3580x4613 instead of the expected ~1275x1650 for a normal
+                # letter page). Rather than rendering huge and downscaling after
+                # (wasteful and no quality gain), compute the DPI that targets a
+                # sane max pixel dimension directly, so text renders at a
+                # consistent, OCR-appropriate resolution regardless of how the
+                # source PDF reports its page size.
+                TARGET_MAX_DIM = 2000   # good OCR resolution for a normal document page
+                DEFAULT_DPI = 150
+                MIN_DPI = 100
+                MAX_DPI = 150
+
+                page_w_pts, page_h_pts = None, None
+                size_str = info.get("Page size", "")
+                try:
+                    # pdfinfo format e.g. "3580 x 4613 pts" or "612 x 792 pts (letter)"
+                    parts = size_str.replace("pts", "").split("x")
+                    page_w_pts = float(parts[0].strip())
+                    page_h_pts = float(parts[1].split("(")[0].strip())
+                except Exception:
+                    pass
+
+                if page_w_pts and page_h_pts:
+                    page_w_in = page_w_pts / 72.0
+                    page_h_in = page_h_pts / 72.0
+                    computed_dpi = TARGET_MAX_DIM / max(page_w_in, page_h_in)
+                    target_dpi = max(MIN_DPI, min(MAX_DPI, computed_dpi))
+                    debug_print(f"[OCR] Page size: {page_w_in:.1f}x{page_h_in:.1f}in — using {target_dpi:.0f} DPI (targeting ~{TARGET_MAX_DIM}px)")
+                else:
+                    target_dpi = DEFAULT_DPI
+                    debug_print(f"[OCR] Could not parse page size ('{size_str}') — using default {target_dpi} DPI")
+                # =========================================================================
+
                 images = []
                 for page_num in range(1, num_pages + 1):
                     try:
                         page_imgs = convert_from_path(
-                            file_path, dpi=150, thread_count=1,
+                            file_path, dpi=target_dpi, thread_count=1,
                             first_page=page_num, last_page=page_num
                         )
                     except Exception as dpi_exc:
-                        debug_print(f"[OCR] Page {page_num} at 150 DPI failed ({dpi_exc}), retrying at 100 DPI...")
+                        debug_print(f"[OCR] Page {page_num} at {target_dpi:.0f} DPI failed ({dpi_exc}), retrying at {MIN_DPI} DPI...")
                         page_imgs = convert_from_path(
-                            file_path, dpi=100, thread_count=1,
+                            file_path, dpi=MIN_DPI, thread_count=1,
                             first_page=page_num, last_page=page_num
                         )
                     images.extend(page_imgs)
