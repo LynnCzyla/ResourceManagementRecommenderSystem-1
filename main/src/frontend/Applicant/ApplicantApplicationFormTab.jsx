@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
 
+// ✅ Digits only. No letters, no symbols, no spaces.
+const sanitizePhone = (value = '') => value.replace(/\D/g, '').slice(0, 15);
+
+// Keys allowed even though they are not digits
+const PHONE_CONTROL_KEYS = [
+  'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  'Tab', 'Enter', 'Home', 'End',
+];
+
 export default function ApplicantApplicationFormTab() {
   const [selectedPosition, setSelectedPosition] = useState('');
   const [myApplications, setMyApplications] = useState([]);
@@ -46,19 +55,17 @@ export default function ApplicantApplicationFormTab() {
     try {
       const API_URL = `${API_BASE_URL}/api/applicant/system-settings`;
       console.log('📡 Fetching system settings from:', API_URL);
-      
+
       const res = await fetch(API_URL);
       console.log('📡 Response status:', res.status);
-      
+
       if (res.ok) {
         const data = await res.json();
         console.log('📡 System settings data:', data);
-        
+
         if (data.success && data.data) {
           const size = data.data.max_file_upload_size || 5;
           console.log('✅ Setting max file size to:', size);
-          
-          // ✅ Update the state with the new value
           setMaxFileSize(size);
         } else {
           console.warn('⚠️ API returned success:false or no data');
@@ -125,14 +132,32 @@ export default function ApplicantApplicationFormTab() {
     });
   };
 
+  // ✅ Phone handlers: numbers only
+  const handlePhoneChange = (e) => {
+    setFormData(prev => ({ ...prev, phone: sanitizePhone(e.target.value) }));
+  };
+
+  const handlePhoneKeyDown = (e) => {
+    if (e.ctrlKey || e.metaKey) return;
+    if (PHONE_CONTROL_KEYS.includes(e.key)) return;
+    if (!/^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+    }
+  };
+
+  const handlePhonePaste = (e) => {
+    e.preventDefault();
+    const pasted = (e.clipboardData || window.clipboardData).getData('text');
+    setFormData(prev => ({ ...prev, phone: sanitizePhone(prev.phone + pasted) }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validate phone number: must have at least 7 digits and no letters
-    const cleanedPhone = (formData.phone || '').trim();
-    const digitsOnly = cleanedPhone.replace(/\D/g, '');
-    if (digitsOnly.length < 7 || /[a-zA-Z]/.test(cleanedPhone)) {
-      showErrorAlert('Please enter a valid phone number with numbers only.', 'Invalid Phone');
+    // ✅ Validate phone number: digits only, 7 to 15 digits
+    const phoneDigits = sanitizePhone(formData.phone);
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      showErrorAlert('Enter a phone number with 7 to 15 digits. Numbers only.', 'Invalid Phone');
       return;
     }
 
@@ -163,7 +188,7 @@ export default function ApplicantApplicationFormTab() {
     if (file) {
       // ✅ Use dynamic max file size
       const maxSizeBytes = maxFileSize * 1024 * 1024;
-      
+
       console.log(`📄 File size: ${(file.size / (1024 * 1024)).toFixed(2)}MB, Limit: ${maxFileSize}MB`);
 
       if (file.type !== 'application/pdf') {
@@ -175,7 +200,7 @@ export default function ApplicantApplicationFormTab() {
 
       if (file.size > maxSizeBytes) {
         showErrorAlert(
-          `File size exceeds the ${maxFileSize}MB limit.`,
+          `Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB. The limit is ${maxFileSize}MB.`,
           'File Too Large'
         );
         e.target.value = null;
@@ -212,9 +237,6 @@ export default function ApplicantApplicationFormTab() {
   if (loading) {
     return <div style={styles.loading}>Loading applications...</div>;
   }
-
-  // ✅ Log current value for debugging
-  console.log('🔍 Current maxFileSize state:', maxFileSize);
 
   return (
     <div style={styles.container}>
@@ -268,11 +290,11 @@ export default function ApplicantApplicationFormTab() {
                         <td style={styles.td}>
                           <span style={{
                             ...styles.statusBadge,
-                            backgroundColor: app.status === 'Pending' ? 'var(--color-warning-light)' : 
-                                           app.status === 'Under Review' ? 'var(--color-accent-light)' : 
+                            backgroundColor: app.status === 'Pending' ? 'var(--color-warning-light)' :
+                                           app.status === 'Under Review' ? 'var(--color-accent-light)' :
                                            app.status === 'Recommended' ? 'var(--color-primary-light)' : 'var(--color-danger-light)',
-                            color: app.status === 'Pending' ? 'var(--color-warning)' : 
-                                   app.status === 'Under Review' ? 'var(--color-accent)' : 
+                            color: app.status === 'Pending' ? 'var(--color-warning)' :
+                                   app.status === 'Under Review' ? 'var(--color-accent)' :
                                    app.status === 'Recommended' ? 'var(--color-primary)' : 'var(--color-danger)'
                           }}>
                             {app.status}
@@ -350,28 +372,21 @@ export default function ApplicantApplicationFormTab() {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Phone Number *</label>
+                  {/* ✅ Numbers only. Pattern has no escaped characters, so it is valid in Chrome's `v` mode. */}
                   <input
-                    type="tel"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="tel"
                     required
+                    maxLength={15}
                     value={formData.phone}
-                    onChange={(e) => {
-                      const cleanVal = e.target.value.replace(/[^0-9+\-()\s]/g, '');
-                      setFormData({ ...formData, phone: cleanVal });
-                    }}
-                    onKeyDown={(e) => {
-                      if (
-                        !/[0-9+\-()\s]/.test(e.key) &&
-                        !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) &&
-                        !e.ctrlKey &&
-                        !e.metaKey
-                      ) {
-                        e.preventDefault();
-                      }
-                    }}
-                    pattern="[0-9+\-()\s]{7,20}"
-                    title="Please enter a valid phone number with numbers only"
+                    onChange={handlePhoneChange}
+                    onKeyDown={handlePhoneKeyDown}
+                    onPaste={handlePhonePaste}
+                    pattern="[0-9]{7,15}"
+                    title="Numbers only, 7 to 15 digits"
                     style={styles.formInput}
-                    placeholder="+63 XXX XXX XXXX"
+                    placeholder="09XXXXXXXXX"
                   />
                 </div>
               </div>
@@ -457,9 +472,9 @@ export default function ApplicantApplicationFormTab() {
               </div>
               <div style={styles.formGroup}>
                 <label style={styles.formLabel}>
-                  Resume (PDF) * 
+                  Resume (PDF) *
                   <span style={styles.fileSizeHint}>
-                    (Max {maxFileSize}MB) {/* ✅ Shows dynamic value */}
+                    (Max {maxFileSize}MB)
                   </span>
                 </label>
                 <div style={styles.fileUpload}>
@@ -481,7 +496,7 @@ export default function ApplicantApplicationFormTab() {
                       {formData.resume ? formData.resume.name : 'Click to upload your resume'}
                     </span>
                     <span style={styles.fileHint}>
-                      Accepted formats: PDF only (Max {maxFileSize}MB) {/* ✅ Shows dynamic value */}
+                      Accepted formats: PDF only (Max {maxFileSize}MB)
                     </span>
                   </label>
                 </div>
