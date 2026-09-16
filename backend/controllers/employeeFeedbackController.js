@@ -346,13 +346,14 @@ const submitPmEvaluation = async (req, res) => {
     }
 
     // Confirm the employee is actually assigned to this project
-    const { data: assignment, error: assignError } = await supabase
+    const { data: assignmentRows, error: assignError } = await supabase
       .from('project_assignments')
       .select('id')
       .eq('project_id', projectId)
       .eq('profile_id', profileId)
-      .maybeSingle();
+      .limit(1);
     if (assignError) throw assignError;
+    const assignment = assignmentRows?.[0];
     if (!assignment) {
       return res.status(400).json({ success: false, message: 'This employee is not assigned to the selected project' });
     }
@@ -380,59 +381,54 @@ const submitPmEvaluation = async (req, res) => {
     };
 
     // 1. Save or update the project manager's own evaluation record
-    const { data: existing, error: existingErr } = await supabase
+    const { data: existingRows, error: existingErr } = await supabase
       .from('performance_records')
       .select('id')
       .eq('profile_id', profileId)
       .eq('project_id', projectId)
       .eq('created_by', pmProfileId)
       .eq('feedback_source', 'project_manager')
-      .maybeSingle();
+      .order('created_at', { ascending: false })
+      .limit(1);
     if (existingErr) throw existingErr;
+    const existing = existingRows?.[0];
 
-    // ── FIX: .single() -> .maybeSingle() + fallback ──────────────────
-    // .single() throws PGRST116 ("JSON object requested, multiple (or no)
-    // rows returned") if the RLS SELECT policy hides the row from the PM
-    // right after the write. .maybeSingle() returns null instead of
-    // throwing, and we fall back to the in-memory record (with the row id
-    // when we have it) so the request still succeeds and reports
-    // meaningful data even if a SELECT policy is misconfigured.
     let saved;
     if (existing) {
       const { data, error } = await supabase
         .from('performance_records')
         .update(record)
         .eq('id', existing.id)
-        .select()
-        .maybeSingle();
+        .select();
       if (error) throw error;
-      saved = data || { id: existing.id, ...record };
+      saved = data?.[0] || { id: existing.id, ...record };
     } else {
       const { data, error } = await supabase
         .from('performance_records')
         .insert(record)
-        .select()
-        .maybeSingle();
+        .select();
       if (error) throw error;
-      saved = data || record;
+      saved = data?.[0] || record;
     }
 
     // 2. If client feedback response exists, copy/upsert it directly into performance_records as feedback_source = 'client'
     if (feedbackResponseId) {
-      const { data: resp, error: respErr } = await supabase
+      const { data: respRows, error: respErr } = await supabase
         .from('feedback_responses')
         .select('*')
         .eq('id', feedbackResponseId)
-        .maybeSingle();
+        .limit(1);
       if (respErr) throw respErr;
+      const resp = respRows?.[0];
 
       if (resp) {
-        const { data: reqRow, error: reqErr } = await supabase
+        const { data: reqRows, error: reqErr } = await supabase
           .from('feedback_requests')
           .select('*')
           .eq('id', resp.feedback_request_id)
-          .maybeSingle();
+          .limit(1);
         if (reqErr) throw reqErr;
+        const reqRow = reqRows?.[0];
 
         const clientRecord = {
           profile_id: profileId,
@@ -449,7 +445,7 @@ const submitPmEvaluation = async (req, res) => {
           timeliness_rating: resp.timeliness_rating != null ? Number(resp.timeliness_rating) : null,
           quality_of_work_rating: resp.quality_of_work_rating != null ? Number(resp.quality_of_work_rating) : null,
           teamwork_rating: resp.teamwork_rating != null ? Number(resp.teamwork_rating) : null,
-          problem_solving_rating: resp.problem_solving_rating != null ? Number(resp.problem_solving_rating) : null,
+          problem_solving_rating: resp.problem_solving_rating != null ? Number(problem_solving_rating) : null,
           deliverables_feedback: resp.deliverables_feedback || null,
           client_feedback: resp.additional_comments || null,
           strengths: resp.strengths || null,
@@ -461,15 +457,16 @@ const submitPmEvaluation = async (req, res) => {
           updated_at: new Date().toISOString(),
         };
 
-        const { data: existingClientRec, error: clientRecErr } = await supabase
+        const { data: existingClientRows, error: clientRecErr } = await supabase
           .from('performance_records')
           .select('id')
           .eq('profile_id', profileId)
           .eq('project_id', projectId)
           .eq('feedback_response_id', feedbackResponseId)
           .eq('feedback_source', 'client')
-          .maybeSingle();
+          .limit(1);
         if (clientRecErr) throw clientRecErr;
+        const existingClientRec = existingClientRows?.[0];
 
         if (existingClientRec) {
           const { error: updErr } = await supabase
@@ -489,25 +486,26 @@ const submitPmEvaluation = async (req, res) => {
     // 3. Store the PM's evaluation in the feedback_responses table
     let targetRequestId = null;
     if (feedbackResponseId) {
-      const { data: clientResp, error: clientRespErr } = await supabase
+      const { data: clientRespRows, error: clientRespErr } = await supabase
         .from('feedback_responses')
         .select('feedback_request_id')
         .eq('id', feedbackResponseId)
-        .maybeSingle();
-      if (!clientRespErr && clientResp) {
-        targetRequestId = clientResp.feedback_request_id;
+        .limit(1);
+      if (!clientRespErr && clientRespRows?.[0]) {
+        targetRequestId = clientRespRows[0].feedback_request_id;
       }
     }
 
     if (!targetRequestId) {
       // Find a feedback request for this project and employee
-      const { data: freq, error: freqErr } = await supabase
+      const { data: freqRows, error: freqErr } = await supabase
         .from('feedback_requests')
         .select('id')
         .eq('project_id', projectId)
-        .maybeSingle();
-      if (!freqErr && freq) {
-        targetRequestId = freq.id;
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (!freqErr && freqRows?.[0]) {
+        targetRequestId = freqRows[0].id;
       }
     }
 
@@ -524,22 +522,23 @@ const submitPmEvaluation = async (req, res) => {
         problem_solving_rating: problem_solving_rating != null ? Number(problem_solving_rating) : null,
         deliverables_feedback: pmAssessment || null,
         strengths: strengths || null,
-        areas_for_improvement: areas_for_improvement || null,
+        areas_for_improvement: areasForImprovement || null,
         project_feedback: projectFeedback || null,
         reviewed_by: pmProfileId,
         reviewed_at: new Date().toISOString(),
         review_status: 'approved'
       };
 
-      const { data: existingPmResp, error: pmRespErr } = await supabase
+      const { data: existingPmRespRows, error: pmRespErr } = await supabase
         .from('feedback_responses')
         .select('id')
         .eq('feedback_request_id', targetRequestId)
         .eq('profile_id', profileId)
         .eq('reviewed_by', pmProfileId)
-        .maybeSingle();
+        .limit(1);
 
       if (!pmRespErr) {
+        const existingPmResp = existingPmRespRows?.[0];
         if (existingPmResp) {
           await supabase
             .from('feedback_responses')
