@@ -8,6 +8,30 @@
 //   the EMP. Never touches feedback_source = 'client' rows (those are only
 //   ever written by clientFeedbackController.js) — that's what keeps the
 //   client-sourced PM record un-editable by the PM.
+//
+// ── FIX (this file) ───────────────────────────────────────────────────
+// submitPmEvaluation was calling `.select().single()` immediately after
+// every insert/update into performance_records. PostgREST's `.single()`
+// requires the INSERT/UPDATE's RETURNING clause to see exactly one row —
+// which depends on the table's RLS SELECT policy, not just the write
+// succeeding. Previously, `performance_records` only had a SELECT policy
+// scoped to `profile_id = auth.uid()`, so when a PM (auth.uid() =
+// created_by, not profile_id) inserted an evaluation for an employee,
+// Postgres let the INSERT happen but then hid the row from the PM on
+// read-back, and PostgREST threw:
+//   "JSON object requested, multiple (or no) rows returned" (PGRST116)
+// even though the row was actually written.
+//
+// Real fix is a DB policy change:
+//   CREATE POLICY "Allow select for creator or subject"
+//   ON public.performance_records
+//   FOR SELECT TO authenticated
+//   USING (auth.uid() = created_by OR auth.uid() = profile_id);
+//
+// As defense-in-depth (so a missing/overridden policy degrades gracefully
+// instead of 500ing), every insert/update in this file now uses
+// `.maybeSingle()` instead of `.single()`, and falls back to the record
+// we already have in memory if the read-back comes back empty.
 
 const supabase = require('../supabase');
 
@@ -95,7 +119,7 @@ const getMyFeedback = async (req, res) => {
         : (r.evaluator ? ([r.evaluator.first_name, r.evaluator.last_name].filter(Boolean).join(' ') || 'Unnamed') : 'Unknown');
 
       const isClient = r.feedback_source === 'client';
-      const detailFeedback = isClient 
+      const detailFeedback = isClient
         ? (r.client_feedback || r.deliverables_feedback || '')
         : (r.pm_assessment || r.project_feedback || '');
 
@@ -366,6 +390,13 @@ const submitPmEvaluation = async (req, res) => {
       .maybeSingle();
     if (existingErr) throw existingErr;
 
+    // ── FIX: .single() -> .maybeSingle() + fallback ──────────────────
+    // .single() throws PGRST116 ("JSON object requested, multiple (or no)
+    // rows returned") if the RLS SELECT policy hides the row from the PM
+    // right after the write. .maybeSingle() returns null instead of
+    // throwing, and we fall back to the in-memory record (with the row id
+    // when we have it) so the request still succeeds and reports
+    // meaningful data even if a SELECT policy is misconfigured.
     let saved;
     if (existing) {
       const { data, error } = await supabase
@@ -373,17 +404,17 @@ const submitPmEvaluation = async (req, res) => {
         .update(record)
         .eq('id', existing.id)
         .select()
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      saved = data;
+      saved = data || { id: existing.id, ...record };
     } else {
       const { data, error } = await supabase
         .from('performance_records')
         .insert(record)
         .select()
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      saved = data;
+      saved = data || record;
     }
 
     // 2. If client feedback response exists, copy/upsert it directly into performance_records as feedback_source = 'client'
