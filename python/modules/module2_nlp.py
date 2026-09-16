@@ -29,7 +29,7 @@ KNOWN_ACRONYMS = {
     'HVAC', 'ISO', 'PLC', 'SCADA', 'VFD', 'HMI', 'DMS', 'CNC', 'IT',
     'SQL', 'API', 'AWS', 'GCP', 'BIM', 'MEP', 'QA', 'QC', 'KPI',
     'CCTV', 'UPS', 'LAN', 'WAN', 'IOT', 'AI', 'ML', 'NLP', 'OS',
-    '2D', '3D', '4G', '5G', 'NC'
+    '2D', '3D', '4G', '5G', 'NC', 'CMMS'
 }
 
 def smart_title_case(phrase, raw_source_phrase=None):
@@ -2030,12 +2030,16 @@ class NLPProcessor:
         # Canonical blacklist headers (table / metadata sections to strictly exclude)
         BLACKLIST_TABLE_HEADERS = (
             'training & certifications', 'training and certifications', 'certifications',
+            'training / certification', 'training/certification',
             'educational background', 'education', 'academic history', 'academic background',
             'professional license', 'professional licenses', 'license', 'licenses',
             'competency classification', 'classification',
             'employee identification', 'personal information', 'personal details', 'contact information',
             'professional summary', 'summary', 'executive summary', 'career objective', 'objective',
             'relevant project experience', 'project experience', 'projects', 'employment history', 'work experience',
+            'project name / type', 'project n ame / type', 'project name/type', 'project name', 'project type',
+            'industry', 'primary role', 'primary_role', 'primary r ile', 'functional area', 'functional_area',
+            'experience category', 'experience_category', 'specialization category', 'specialization_category',
             'manager remarks', 'remarks', 'character references', 'references',
             'document type', 'confidential', 'field value'
         )
@@ -2062,23 +2066,61 @@ class NLPProcessor:
             if not line_str:
                 continue
             
+            # Bullet lines are ALWAYS content/skills, NEVER section headers!
+            is_bullet = bool(re.match(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.]\s+', line_str))
+            
             # Normalize candidate header line: strip bullets, numbering, arrows, punctuation
-            header_clean = re.sub(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~0-9.\s]+', '', line_str).strip().lower()
+            header_clean = re.sub(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.0-9.\s]+', '', line_str).strip().lower()
             header_clean = re.sub(r'\s*[:.]\s*$', '', header_clean)
             
-            matched_header = None
-            for bh in BLACKLIST_TABLE_HEADERS:
-                if header_clean.startswith(bh) or (len(bh) > 8 and bh in header_clean):
-                    matched_header = bh
-                    break
-            if not matched_header:
-                for sh in WHITELIST_SKILL_HEADERS:
-                    if header_clean.startswith(sh) or (len(sh) > 8 and sh in header_clean):
-                        matched_header = sh
-                        break
+            # Alpha-only normalized line for fuzzy matching
+            alpha_header = re.sub(r'[^a-zA-Z\s]', ' ', line_str).strip().lower()
+            alpha_header = ' '.join(alpha_header.split())
             
+            matched_header = None
+            if not is_bullet and len(line_str.split()) <= 6:
+                # 1. Multi-word blacklist checks first: prevent "competency classification" from matching whitelist "competencies"
+                is_blacklist_phrase = False
+                for bh in BLACKLIST_TABLE_HEADERS:
+                    bh_alpha = ' '.join(re.sub(r'[^a-zA-Z\s]', ' ', bh).split())
+                    if len(bh.split()) >= 2:
+                        if bh_alpha == alpha_header or bh_alpha in alpha_header or header_clean.startswith(bh):
+                            matched_header = bh
+                            is_blacklist_phrase = True
+                            break
+                    elif alpha_header == bh_alpha:
+                        matched_header = bh
+                        is_blacklist_phrase = True
+                        break
+
+                # 2. Check whitelist skill headers (exact, prefix, or fuzzy token similarity)
+                if not is_blacklist_phrase:
+                    for sh in WHITELIST_SKILL_HEADERS:
+                        if alpha_header == sh or alpha_header.startswith(sh) or header_clean == sh:
+                            matched_header = sh
+                            break
+                        # Fuzzy match for OCR noise like "TECHNICAL COMPETENC] Ss" or "SOFTWARE PROFIC] ENCY"
+                        tokens = alpha_header.split()
+                        target_tokens = sh.split()
+                        if len(tokens) == len(target_tokens) or (len(tokens) == len(target_tokens) + 1 and len(tokens) <= 4):
+                            sub = ' '.join(tokens[:len(target_tokens)])
+                            if SequenceMatcher(None, sub, sh).ratio() >= 0.75:
+                                matched_header = sh
+                                break
+
+                # 3. Check any remaining blacklist headers by token similarity
+                if not matched_header:
+                    for bh in BLACKLIST_TABLE_HEADERS:
+                        bh_alpha = ' '.join(re.sub(r'[^a-zA-Z\s]', ' ', bh).split())
+                        bh_tokens = bh_alpha.split()
+                        alpha_tokens = alpha_header.split()
+                        if len(alpha_tokens) == len(bh_tokens) and len(bh_tokens) >= 2:
+                            if SequenceMatcher(None, alpha_header, bh_alpha).ratio() >= 0.78:
+                                matched_header = bh
+                                break
+
             words = line_str.split()
-            is_generic_header = (1 <= len(words) <= 5 and bool(header_pattern.match(line_str)))
+            is_generic_header = (not is_bullet and 1 <= len(words) <= 5 and bool(header_pattern.match(line_str)))
             
             if matched_header or is_generic_header:
                 # Save previous section
@@ -2110,7 +2152,8 @@ class NLPProcessor:
             score = 0
             
             # Check for whitelist skill section headers (+5)
-            if any(h in section_lower or section_lower in h for h in WHITELIST_SKILL_HEADERS):
+            is_explicit = any(h == section_lower or section_lower.startswith(h) for h in WHITELIST_SKILL_HEADERS)
+            if is_explicit:
                 score += 5
 
             for indicator in skill_indicators:
@@ -2123,18 +2166,26 @@ class NLPProcessor:
                     score += 1
             
             # Check for bullet points
-            bullet_count = len(re.findall(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~]\s*[A-Za-z]', content, re.MULTILINE))
+            bullet_count = len(re.findall(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.]\s*[A-Za-z]', content, re.MULTILINE))
             if bullet_count > 2:
                 score += 2
             elif bullet_count > 0:
                 score += 1
             
-            # HARD-EXCLUDE table & metadata sections
-            is_metadata = any(marker in section_lower for marker in BLACKLIST_TABLE_HEADERS)
+            # HARD-EXCLUDE table & metadata sections (unless it is an explicit whitelist skill section)
+            is_metadata = False
+            if not is_explicit:
+                for marker in BLACKLIST_TABLE_HEADERS:
+                    if len(marker.split()) >= 2:
+                        if marker in section_lower:
+                            is_metadata = True
+                            break
+                    elif section_lower == marker:
+                        is_metadata = True
+                        break
             if is_metadata:
                 score = -100
             
-            is_explicit = any(h in section_lower for h in WHITELIST_SKILL_HEADERS)
             scored_sections[section_name] = {
                 'content': content,
                 'score': score,
@@ -2153,11 +2204,11 @@ class NLPProcessor:
             content = section_data['content']
             is_trusted = section_data.get('is_trusted', False)
             
-            # Extract bullet points — supporting standard bullets AND OCR bullet artifacts (+, *, -, •, ¢, «, », °, §, ·, >)
+            # Extract bullet points — supporting standard bullets AND OCR bullet artifacts (+, *, -, •, ¢, «, », °, §, ·, >, \ufffd, .)
             bullet_items = []
             for _ln in content.split('\n'):
                 _ln = _ln.strip()
-                _clean_ln = re.sub(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~]+\s*', '', _ln)
+                _clean_ln = re.sub(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.]+\s*', '', _ln)
                 if _clean_ln != _ln and len(_clean_ln) > 2:
                     bullet_items.append(_clean_ln.strip())
 
@@ -2200,7 +2251,7 @@ class NLPProcessor:
         non_metadata_text = '\n'.join(non_metadata_lines)
 
         bullet_matches = re.findall(
-            r'^[ \t]*[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~][ \t]+([A-Za-z0-9 \t,&()\-/#+.]+)',
+            r'^[ \t]*[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.][ \t]+([A-Za-z0-9 \t,&():;\-/#+.]+)',
             non_metadata_text,
             re.MULTILINE
         )
@@ -2245,13 +2296,18 @@ class NLPProcessor:
             'primary role', 'functional area', 'experience category',
             'specialization category', 'employment date'
         }
-        for match in colon_pattern.finditer(non_metadata_text):
-            label = match.group(1).strip().lower()
-            if label in PII_LABELS:
+        for line in non_metadata_text.split('\n'):
+            line_str = line.strip()
+            # Bullet lines must NOT be treated as colon metadata key-value headers
+            if not line_str or re.match(r'^[•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.\,\;]', line_str):
                 continue
-            value = match.group(2).strip()
-            if 3 < len(value) < 100 and value and not self._is_non_skill(value):
-                candidates.add(value)
+            for match in colon_pattern.finditer(line_str):
+                label = match.group(1).strip().lower()
+                if label in PII_LABELS:
+                    continue
+                value = match.group(2).strip()
+                if 3 < len(value) < 100 and value and not self._is_non_skill(value):
+                    candidates.add(value)
 
         # ============ CLEAN WHOLE PHRASE CANDIDATES ============
         for candidate in whole_phrase_candidates:
@@ -2355,17 +2411,20 @@ class NLPProcessor:
         return set(kept)
 
     def _clean_candidate_text(self, text):
-        """Clean extracted candidate text with smart casing and comprehensive bullet stripping"""
+        """Clean extracted candidate text with smart casing, comprehensive bullet stripping, and OCR typo healing"""
         if not text:
             return ""
+
+        # Normalize curly braces to parentheses so parenthetical cleaner can strip them
+        text = text.replace('{', '(').replace('}', ')')
 
         # Remove parenthetical asides
         text = re.sub(r'\([^)]*\)', '', text)
         text = re.sub(r'[()]', '', text)
 
         # Strip ALL leading/trailing OCR bullet symbols and decorations
-        text = re.sub(r'^[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\[\]\(\)\/]+', '', text)
-        text = re.sub(r'[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\[\]\(\)\/]+$', '', text)
+        text = re.sub(r'^[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.\[\]\(\)\/]+', '', text)
+        text = re.sub(r'[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\ufffd\.\[\]\(\)\/]+$', '', text)
 
         # Remove brackets
         if text.startswith('[') and text.endswith(']'):
@@ -2383,10 +2442,30 @@ class NLPProcessor:
         text = re.sub(r'^[\s•\-\*\+\¢\«\»\°\§\©\®\>\<\·\|\~\[\]\(\)\/]+', '', text)
         text = re.sub(r'[,;:]$', '', text)
         
+        # ============ OCR COMMON TYPO AUTO-HEALING ============
+        # Correct high-confidence OCR character misreads from blurry/degraded scans
+        text = re.sub(r'\bEngin(?:ee|ec|ce|ie)ring\b', 'Engineering', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bL[oa]dustrial\b', 'Industrial', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bWoed\b', 'Word', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bLifecyci[el]\b', 'Lifecycle', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSates\b', 'Sales', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bAdv\s*isory\b', 'Advisory', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bAdy\s*tsory\b', 'Advisory', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b(?:¢\s*)?[‘\'`]?[Oo]ordination\b', 'Coordination', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bChen\b', 'Client', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bClient\s+Reaw(?::\s*|\s+)Analysis\b', 'Client Requirements Analysis', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSolution\s+Des\s*[Aa]\b', 'Solution Design', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bApph[ce]a[nt]on\b', 'Application', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bM[ua]rntenance\b', 'Maintenance', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*[|/]?\s*Senior\s*Sales\b.*$', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*[|/]?\s*Senior\s*Ss\b.*$', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*[|/]?\s*Senior\s*Design\b.*$', '', text, flags=re.IGNORECASE)
+        # =====================================================
+
         # Normalize whitespace
         text = ' '.join(text.split())
         
-        # Smart Title Case (preserves acronyms like ERP, CRM, REE)
+        # Smart Title Case (preserves acronyms like ERP, CRM, REE, CMMS)
         if len(text.split()) > 1:
             text = smart_title_case(text, raw_source_phrase=text)
         
@@ -2481,6 +2560,13 @@ class NLPProcessor:
         if not text or '\n' in text or '\r' in text:
             return True
         
+        # Reject OCR horizontal line artifacts, separators, or text dominated by non-alpha noise
+        if re.search(r'[-_=~*#]{3,}', text):
+            return True
+        letters_count = len(re.findall(r'[a-zA-Z]', text))
+        if letters_count < 3 or (letters_count / max(1, len(text.strip())) < 0.5):
+            return True
+
         # Check learned rejections first (feedback_training & feedback_log)
         if self._is_obvious_non_skill(text):
             return True
