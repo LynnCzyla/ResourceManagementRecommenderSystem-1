@@ -11,39 +11,39 @@
   --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Light Theme Variables */
-  --color-bg-root: #f8fafc;
-  --color-bg-sidebar: #ffffff;
-  --color-bg-topbar: rgba(255, 255, 255, 0.85);
+  /* Light Theme Variables - Soft Slate/Warm Eye-Friendly Tints */
+  --color-bg-root: #f1f5f9;
+  --color-bg-sidebar: #f8fafc;
+  --color-bg-topbar: rgba(248, 250, 252, 0.9);
   --color-bg-card: #ffffff;
-  --color-bg-card-hover: #f1f5f9;
-  --color-border: #e2e8f0;
+  --color-bg-card-hover: #e2e8f0;
+  --color-border: #cbd5e1;
   
   --color-text-primary: #0f172a;
-  --color-text-secondary: #475569;
-  --color-text-muted: #94a3b8;
+  --color-text-secondary: #334155;
+  --color-text-muted: #64748b;
   
   --color-primary: #059669; /* Emerald Primary matching WEA */
-  --color-primary-light: rgba(16, 185, 129, 0.1);
+  --color-primary-light: rgba(16, 185, 129, 0.12);
   --color-primary-hover: #047857;
   
   --color-secondary: #0a192f;
   --color-accent: #0284c7; /* Blue Accent */
-  --color-accent-light: rgba(2, 132, 199, 0.1);
+  --color-accent-light: rgba(2, 132, 199, 0.12);
   
   --color-danger: #ef4444;
-  --color-danger-light: rgba(239, 68, 68, 0.1);
+  --color-danger-light: rgba(239, 68, 68, 0.12);
   --color-success: #10b981;
   --color-warning: #f59e0b;
-  --color-warning-light: rgba(245, 158, 11, 0.1);
+  --color-warning-light: rgba(245, 158, 11, 0.12);
   
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
-  --shadow-neon: 0 0 15px rgba(16, 185, 129, 0.15);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 12px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.06);
+  --shadow-neon: 0 0 15px rgba(16, 185, 129, 0.2);
 
-  --glass-bg: rgba(255, 255, 255, 0.75);
-  --glass-border: rgba(226, 232, 240, 0.8);
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(203, 213, 225, 0.9);
   --glass-blur: 12px;
 }
 
@@ -237,6 +237,25 @@ div.hover-profile:hover {
   background-color: var(--color-bg-card-hover) !important;
   transform: scale(1.02) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Card and Surface Shadows & Depth Enhancements */
+.card, [class*="-card"], table, select, input, textarea {
+  box-shadow: var(--shadow-sm);
+}
+
+/* Eye-Friendly Form Control & Surface Styling in Light Mode */
+body:not(.dark-theme) input,
+body:not(.dark-theme) select,
+body:not(.dark-theme) textarea {
+  border-color: #cbd5e1;
+}
+
+body:not(.dark-theme) input:focus,
+body:not(.dark-theme) select:focus,
+body:not(.dark-theme) textarea:focus {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15) !important;
 }
 
 /* Generic button hovers */
