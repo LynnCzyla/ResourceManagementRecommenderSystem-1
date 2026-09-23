@@ -51,7 +51,12 @@ COPY main/src/assets/WEA_logo_bgremoved.png ./main/src/assets/WEA_logo_bgremoved
 # Ensure the uploads directory exists (multer writes here)
 RUN mkdir -p backend/uploads
 
+# ---- Startup script: launches the warm Python daemon + Node together ----
+COPY start.sh ./start.sh
+RUN chmod +x start.sh
+
 ENV NODE_ENV=production
+ENV PYTHON_DAEMON_URL=http://127.0.0.1:5001
 EXPOSE 5000
 
-CMD ["node", "backend/server.js"]
+CMD ["./start.sh"]
