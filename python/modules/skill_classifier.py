@@ -52,6 +52,14 @@ class SkillClassifier:
     Ground truth data comes exclusively from Supabase feedback_training table.
     """
     
+    # Render's free-tier filesystem is ephemeral - anything _save_model()
+    # writes to disk is gone the next time the instance restarts or wakes
+    # from sleep. Mirroring the trained model into Supabase Storage means a
+    # fresh process can pull the last-trained model instead of retraining
+    # from scratch on every cold start.
+    SUPABASE_MODEL_BUCKET = 'ml-models'
+    SUPABASE_MODEL_KEY = 'skill_classifier.pkl'
+
     def __init__(self, model_path=None, auto_train=True):
         self.model_path = model_path or self._get_default_model_path()
         
@@ -90,16 +98,22 @@ class SkillClassifier:
             'trained_on_reviewed_count': 0,
         }
         
-        # Try to load existing model
+        # Try to load existing model - local disk first (fast path within a
+        # single warm daemon process), then Supabase Storage (survives a
+        # fresh/restarted Render instance with no local file yet), and only
+        # retrain from scratch if neither has a usable model.
         if not self._load_model():
-            print("[ML] No trained model found.")
-            # Auto-train if data available in Supabase. `auto_train=False`
-            # is used when constructing a throwaway CANDIDATE model for
-            # gated retraining (train_and_replace_if_needed), so it doesn't
-            # redundantly self-train here before being trained again there.
-            if auto_train and self._has_training_data():
-                print("[ML] Found training data in Supabase. Auto-training...")
-                self.train_from_supabase()
+            if self._download_model_from_supabase() and self._load_model():
+                pass
+            else:
+                print("[ML] No trained model found.")
+                # Auto-train if data available in Supabase. `auto_train=False`
+                # is used when constructing a throwaway CANDIDATE model for
+                # gated retraining (train_and_replace_if_needed), so it doesn't
+                # redundantly self-train here before being trained again there.
+                if auto_train and self._has_training_data():
+                    print("[ML] Found training data in Supabase. Auto-training...")
+                    self.train_from_supabase()
     
     def _get_default_model_path(self):
         """Get default path for model storage"""
@@ -199,6 +213,13 @@ class SkillClassifier:
             # it in for the active model.
             os.replace(str(tmp_path), str(model_path))
             print(f"[ML]  Model saved to {model_path}")
+
+            # Best-effort mirror to Supabase Storage. Local disk is already
+            # the source of truth for THIS process; a failure here just
+            # means the next cold-start (new Render instance) retrains once
+            # more instead of pulling this version - not fatal.
+            self._upload_model_to_supabase()
+
             return True
         except Exception as e:
             print(f"[ML] Error saving model: {e}")
@@ -214,6 +235,71 @@ class SkillClassifier:
                 print(f"[ML] Could not remove temp model file {tmp_path}: {cleanup_error}")
             return False
     
+    def _download_model_from_supabase(self):
+        """
+        Pull the last-trained model from Supabase Storage down into
+        self.model_path, so a fresh instance on Render's ephemeral
+        filesystem (new container after a redeploy or a spin-down/wake
+        cycle) can find a usable model locally instead of retraining from
+        scratch. Non-fatal on any failure - callers just fall back to
+        retraining, same as before this existed.
+        """
+        if not HAS_SUPABASE:
+            return False
+        try:
+            client = supabase.get_client()
+            if not client:
+                return False
+            data = client.storage.from_(self.SUPABASE_MODEL_BUCKET).download(self.SUPABASE_MODEL_KEY)
+            if not data:
+                return False
+
+            model_path = Path(self.model_path)
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = model_path.with_name(model_path.name + f'.tmp-dl-{os.getpid()}')
+            with open(tmp_path, 'wb') as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(str(tmp_path), str(model_path))
+
+            print(f"[ML] ⬇️  Pulled model from Supabase Storage "
+                  f"({self.SUPABASE_MODEL_BUCKET}/{self.SUPABASE_MODEL_KEY})")
+            return True
+        except Exception as e:
+            # Most common case: nothing uploaded there yet (first deploy) -
+            # this is expected, not an error worth alarming over.
+            print(f"[ML] No model available in Supabase Storage yet ({e})")
+            return False
+
+    def _upload_model_to_supabase(self):
+        """
+        Push the just-saved .pkl to Supabase Storage (bucket must already
+        exist - create a private 'ml-models' bucket once in the Supabase
+        dashboard). Best-effort: local disk already has the model for THIS
+        process, so a failure here only costs one extra retrain on the next
+        cold start, not correctness now.
+        """
+        if not HAS_SUPABASE:
+            return False
+        try:
+            client = supabase.get_client()
+            if not client:
+                return False
+            with open(self.model_path, 'rb') as f:
+                data = f.read()
+            client.storage.from_(self.SUPABASE_MODEL_BUCKET).upload(
+                self.SUPABASE_MODEL_KEY,
+                data,
+                file_options={"upsert": "true", "content-type": "application/octet-stream"}
+            )
+            print(f"[ML] ⬆️  Pushed model to Supabase Storage "
+                  f"({self.SUPABASE_MODEL_BUCKET}/{self.SUPABASE_MODEL_KEY})")
+            return True
+        except Exception as e:
+            print(f"[ML] Could not push model to Supabase Storage: {e}")
+            return False
+
     def _fetch_human_reviewed_rows(self):
         """
         Single source of truth for the "human-reviewed" query used by

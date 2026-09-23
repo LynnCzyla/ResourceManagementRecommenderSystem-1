@@ -19,8 +19,47 @@ class PythonService {
     }
 
     async processDocument(imagePath, employeeId, docType) {
-        console.log('🐍 Starting Python document processing runner...');
-        
+        console.log('🐍 Starting Python document processing...');
+
+        // ⚡ Try warm Python daemon first — avoids reloading spaCy/sklearn
+        // and re-triggering an ML retrain on every single upload, which is
+        // what happens when this always falls through to a cold spawn().
+        // Daemon must be running (see python/scripts/daemon.py) and reachable
+        // at PYTHON_DAEMON_URL for this path to be used at all.
+        try {
+            const controller = new AbortController();
+            // OCR can legitimately take minutes on a CPU-constrained instance,
+            // so give this the same generous ceiling as the spawn fallback,
+            // not the 2-minute one used for retrain-if-needed.
+            const timeoutId = setTimeout(() => controller.abort(), 600000);
+            const res = await fetch(`${this.daemonUrl}/process-document`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_path: imagePath,
+                    employee_id: employeeId,
+                    doc_type: docType
+                }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            if (res.ok) {
+                const data = await res.json();
+                console.log('⚡ Processed via warm Python daemon!');
+                console.log(`📊 Skills found: ${data?.nlp?.skills?.length || 0}`);
+                return data;
+            }
+            console.log(`⚠️ Daemon responded with ${res.status}, falling back to spawn`);
+        } catch (daemonErr) {
+            console.log(`⚠️ Daemon unavailable (${daemonErr.message}), falling back to spawn`);
+        }
+
+        return this._spawnProcessDocument(imagePath, employeeId, docType);
+    }
+
+    // Original cold-start path — kept as the fallback for local dev (no
+    // daemon running) and for the rare case the daemon itself is down.
+    async _spawnProcessDocument(imagePath, employeeId, docType) {
         return new Promise((resolve, reject) => {
             const args = [
                 '-u',
@@ -121,14 +160,21 @@ class PythonService {
                 reject(err);
             });
             
-            // --- Timeout (5 minutes) ---
+            // --- Timeout (10 minutes) ---
+            // ============ FIX: was 5 minutes (300000ms) — too tight for
+            // scanned multi-page PDFs going through OCR one page at a time
+            // with max_workers=1 (serial), especially on a memory-constrained
+            // instance where "hard" pages fall through to the slower
+            // enhanced OCR pass. Raised to 10 minutes to give real documents
+            // enough headroom to finish instead of being killed mid-OCR. ============
             const timeout = setTimeout(() => {
                 if (!resolved) {
                     console.error('❌ Python process timed out');
                     pythonProcess.kill();
-                    reject(new Error('Python process timed out after 5 minutes'));
+                    reject(new Error('Python process timed out after 10 minutes'));
                 }
-            }, 300000);
+            }, 600000);
+            // ====================================================
             
             // Clear timeout on resolve/reject
             const originalResolve = resolve;

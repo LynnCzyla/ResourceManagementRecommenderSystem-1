@@ -65,8 +65,10 @@ def retrain_if_needed():
 
 @app.route('/get-stats', methods=['GET'])
 def get_stats():
+    # Runner only defines get_ml_status() - it never had a get_stats()
+    # method, so this route 500'd on every call before this fix.
     runner = get_runner()
-    result = runner.get_stats()
+    result = runner.get_ml_status()
     return jsonify(result)
 
 if __name__ == '__main__':

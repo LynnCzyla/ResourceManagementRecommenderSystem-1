@@ -527,6 +527,11 @@ const handleCertUpload = async (e) => {
 };
 
   const handleFeedbackSubmitted = async (approvedSkills) => {
+    // Keep the upload button disabled through this finishing step too —
+    // closing the modal below doesn't mean fetchEmployeeData() has
+    // resolved yet, and a second upload started in that gap was racing
+    // the still-running save from the first one.
+    setOcrLoading(true);
     if (approvedSkills?.length > 0) {
       const merged = Array.from(new Set([...employeeSkills, ...approvedSkills]));
       setEmployeeSkills(merged);
@@ -542,6 +547,7 @@ const handleCertUpload = async (e) => {
     await fetchEmployeeData();
     setProcessingStatus('Done!');
     setProcessingStep('complete');
+    setOcrLoading(false);
     setTimeout(() => setShowProgressDetails(false), 3000);
   };
 
@@ -571,7 +577,11 @@ const handleCertUpload = async (e) => {
     }
   };
 
-  const handleSkipFeedback = () => {
+  const handleSkipFeedback = async () => {
+    // Same as handleFeedbackSubmitted: hold the upload button disabled
+    // until fetchEmployeeData() actually finishes, not just until the
+    // modal closes.
+    setOcrLoading(true);
     // Skipping just closes the modal but doesn't clear the needs review list
     // This allows the user to review again later
     setShowFeedbackModal(false);
@@ -581,9 +591,10 @@ const handleCertUpload = async (e) => {
     setPendingSkills([]);
     setAutoApprovedSkills([]);
     setPreviouslyRejectedSkills([]);
-    fetchEmployeeData();
+    await fetchEmployeeData();
     setProcessingStatus('Done!');
     setProcessingStep('complete');
+    setOcrLoading(false);
     setTimeout(() => setShowProgressDetails(false), 3000);
   };
 
@@ -933,11 +944,26 @@ const handleCertUpload = async (e) => {
                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
                 </svg>
-                <label style={styles.uploadBtnLabel}>
+                <label
+                  style={{
+                    ...styles.uploadBtnLabel,
+                    ...((ocrLoading || showFeedbackModal) ? styles.uploadBtnLabelDisabled : {})
+                  }}
+                >
                   Browse Files
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleFileUpload} style={{ display: 'none' }} disabled={ocrLoading} />
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                    disabled={ocrLoading || showFeedbackModal}
+                  />
                 </label>
-                <span style={styles.uploadHelper}>Supported formats: PDF, PNG, JPG (Max 5MB)</span>
+                <span style={styles.uploadHelper}>
+                  {(ocrLoading || showFeedbackModal)
+                    ? 'Please finish reviewing the current resume first...'
+                    : 'Supported formats: PDF, PNG, JPG (Max 5MB)'}
+                </span>
               </div>
 
               {ocrLoading && (
@@ -1199,6 +1225,10 @@ const styles = {
     cursor: 'pointer',
     marginBottom: '8px',
     display: 'inline-block',
+  },
+  uploadBtnLabelDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
   },
   uploadHelper: { fontSize: '11px', color: 'var(--color-text-muted)' },
 

@@ -1,0 +1,905 @@
+{
+  "classifier_is_trained": true,
+  "per_phrase": [
+    {
+      "phrase": "bid preparation for tenders",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6638,
+      "prob_skill": 0.6638,
+      "correct": true
+    },
+    {
+      "phrase": "proposal engineering and bid preparation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5968,
+      "prob_skill": 0.5968,
+      "correct": true
+    },
+    {
+      "phrase": "power and distribution transformers",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5592,
+      "prob_skill": 0.4408,
+      "correct": false
+    },
+    {
+      "phrase": "electrical engineering services",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5649,
+      "prob_skill": 0.5649,
+      "correct": true
+    },
+    {
+      "phrase": "power systems and transformer supply projects",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5598,
+      "prob_skill": 0.5598,
+      "correct": true
+    },
+    {
+      "phrase": "industrial proposal and tender engineering",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5322,
+      "prob_skill": 0.4678,
+      "correct": false
+    },
+    {
+      "phrase": "cross-functional collaboration",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5357,
+      "prob_skill": 0.5357,
+      "correct": true
+    },
+    {
+      "phrase": "client requirements gathering",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6845,
+      "prob_skill": 0.6845,
+      "correct": true
+    },
+    {
+      "phrase": "electrical cost estimation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.701,
+      "prob_skill": 0.701,
+      "correct": true
+    },
+    {
+      "phrase": "technical documentation review",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6692,
+      "prob_skill": 0.6692,
+      "correct": true
+    },
+    {
+      "phrase": "ups service support and coordination",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6299,
+      "prob_skill": 0.6299,
+      "correct": true
+    },
+    {
+      "phrase": "sales engineering support",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5674,
+      "prob_skill": 0.5674,
+      "correct": true
+    },
+    {
+      "phrase": "explosion-proof lighting systems",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5563,
+      "prob_skill": 0.5563,
+      "correct": true
+    },
+    {
+      "phrase": "hazardous area equipment handling",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5098,
+      "prob_skill": 0.4902,
+      "correct": false
+    },
+    {
+      "phrase": "lighting calculation and analysis",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5908,
+      "prob_skill": 0.5908,
+      "correct": true
+    },
+    {
+      "phrase": "industrial control systems maintenance",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6169,
+      "prob_skill": 0.6169,
+      "correct": true
+    },
+    {
+      "phrase": "architectural drafting standards",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6388,
+      "prob_skill": 0.6388,
+      "correct": true
+    },
+    {
+      "phrase": "dialux lighting simulation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6088,
+      "prob_skill": 0.6088,
+      "correct": true
+    },
+    {
+      "phrase": "autocad 2d drafting",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6595,
+      "prob_skill": 0.6595,
+      "correct": true
+    },
+    {
+      "phrase": "autocad 3d modeling",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5641,
+      "prob_skill": 0.5641,
+      "correct": true
+    },
+    {
+      "phrase": "project scheduling and coordination",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6119,
+      "prob_skill": 0.6119,
+      "correct": true
+    },
+    {
+      "phrase": "vendor negotiation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5087,
+      "prob_skill": 0.5087,
+      "correct": true
+    },
+    {
+      "phrase": "quality assurance inspection",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6663,
+      "prob_skill": 0.6663,
+      "correct": true
+    },
+    {
+      "phrase": "technical specification writing",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6109,
+      "prob_skill": 0.6109,
+      "correct": true
+    },
+    {
+      "phrase": "customer relationship management",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.628,
+      "prob_skill": 0.628,
+      "correct": true
+    },
+    {
+      "phrase": "budget forecasting",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": true
+    },
+    {
+      "phrase": "risk assessment for construction projects",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6841,
+      "prob_skill": 0.3159,
+      "correct": false
+    },
+    {
+      "phrase": "supply chain coordination",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5907,
+      "prob_skill": 0.5907,
+      "correct": true
+    },
+    {
+      "phrase": "cable sizing and load calculation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.582,
+      "prob_skill": 0.582,
+      "correct": true
+    },
+    {
+      "phrase": "single line diagram preparation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6285,
+      "prob_skill": 0.6285,
+      "correct": true
+    },
+    {
+      "phrase": "panel board layout design",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5087,
+      "prob_skill": 0.4913,
+      "correct": false
+    },
+    {
+      "phrase": "switchgear specification",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5452,
+      "prob_skill": 0.5452,
+      "correct": true
+    },
+    {
+      "phrase": "preventive maintenance scheduling",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6163,
+      "prob_skill": 0.6163,
+      "correct": true
+    },
+    {
+      "phrase": "occupational safety compliance",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5466,
+      "prob_skill": 0.5466,
+      "correct": true
+    },
+    {
+      "phrase": "electrical code compliance",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6892,
+      "prob_skill": 0.6892,
+      "correct": true
+    },
+    {
+      "phrase": "energy audit and analysis",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5255,
+      "prob_skill": 0.5255,
+      "correct": true
+    },
+    {
+      "phrase": "generator sizing and selection",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": true
+    },
+    {
+      "phrase": "voltage drop calculation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5488,
+      "prob_skill": 0.5488,
+      "correct": true
+    },
+    {
+      "phrase": "photometric report preparation",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6285,
+      "prob_skill": 0.6285,
+      "correct": true
+    },
+    {
+      "phrase": "LED retrofit design",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5204,
+      "prob_skill": 0.4796,
+      "correct": false
+    },
+    {
+      "phrase": "solar PV system design",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5204,
+      "prob_skill": 0.4796,
+      "correct": false
+    },
+    {
+      "phrase": "control panel wiring",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5552,
+      "prob_skill": 0.5552,
+      "correct": true
+    },
+    {
+      "phrase": "root cause analysis",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5615,
+      "prob_skill": 0.5615,
+      "correct": true
+    },
+    {
+      "phrase": "inventory and materials management",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6844,
+      "prob_skill": 0.6844,
+      "correct": true
+    },
+    {
+      "phrase": "contract review and compliance",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5102,
+      "prob_skill": 0.5102,
+      "correct": true
+    },
+    {
+      "phrase": "after-sales technical support",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5732,
+      "prob_skill": 0.5732,
+      "correct": true
+    },
+    {
+      "phrase": "warranty claims processing",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": true
+    },
+    {
+      "phrase": "site survey and inspection",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": true
+    },
+    {
+      "phrase": "transformer testing and commissioning",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5297,
+      "prob_skill": 0.5297,
+      "correct": true
+    },
+    {
+      "phrase": "earthing and grounding system design",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5204,
+      "prob_skill": 0.4796,
+      "correct": false
+    },
+    {
+      "phrase": "power factor correction",
+      "true_label": "Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5014,
+      "prob_skill": 0.4986,
+      "correct": false
+    },
+    {
+      "phrase": "technical proposal costing",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5909,
+      "prob_skill": 0.5909,
+      "correct": true
+    },
+    {
+      "phrase": "client presentation and pitching",
+      "true_label": "Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.673,
+      "prob_skill": 0.673,
+      "correct": true
+    },
+    {
+      "phrase": "Senior CAD Drafter",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6945,
+      "prob_skill": 0.3055,
+      "correct": true
+    },
+    {
+      "phrase": "Lighting Designer",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5745,
+      "prob_skill": 0.5745,
+      "correct": false
+    },
+    {
+      "phrase": "Proposal Engineer",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.7962,
+      "prob_skill": 0.2038,
+      "correct": true
+    },
+    {
+      "phrase": "Full Name",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Employee ID",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5293,
+      "prob_skill": 0.4707,
+      "correct": true
+    },
+    {
+      "phrase": "Date Hired",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "License Number",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "10 years",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6852,
+      "prob_skill": 0.3148,
+      "correct": true
+    },
+    {
+      "phrase": "June 15, 2016",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.603,
+      "prob_skill": 0.397,
+      "correct": true
+    },
+    {
+      "phrase": "Philippines",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Mapua University",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Company Logo",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Internal Use Only",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5362,
+      "prob_skill": 0.4638,
+      "correct": true
+    },
+    {
+      "phrase": "Confidential",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5293,
+      "prob_skill": 0.4707,
+      "correct": true
+    },
+    {
+      "phrase": "EMP-006",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6108,
+      "prob_skill": 0.3892,
+      "correct": true
+    },
+    {
+      "phrase": "Engineering Services",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5722,
+      "prob_skill": 0.4278,
+      "correct": true
+    },
+    {
+      "phrase": "Industrial Facilities",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5384,
+      "prob_skill": 0.5384,
+      "correct": false
+    },
+    {
+      "phrase": "Construction Projects",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6841,
+      "prob_skill": 0.3159,
+      "correct": true
+    },
+    {
+      "phrase": "Years of Professional Experience",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.7649,
+      "prob_skill": 0.2351,
+      "correct": true
+    },
+    {
+      "phrase": "Manager Remarks",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5915,
+      "prob_skill": 0.4085,
+      "correct": true
+    },
+    {
+      "phrase": "Educational Background",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6243,
+      "prob_skill": 0.3757,
+      "correct": true
+    },
+    {
+      "phrase": "Training and Certifications",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Relevant Project Experience",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.67,
+      "prob_skill": 0.33,
+      "correct": true
+    },
+    {
+      "phrase": "Areas of Specialization",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6798,
+      "prob_skill": 0.3202,
+      "correct": true
+    },
+    {
+      "phrase": "Senior-Level",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6955,
+      "prob_skill": 0.3045,
+      "correct": true
+    },
+    {
+      "phrase": "Functional Area",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6426,
+      "prob_skill": 0.3574,
+      "correct": true
+    },
+    {
+      "phrase": "Experience Category",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6887,
+      "prob_skill": 0.3113,
+      "correct": true
+    },
+    {
+      "phrase": "Primary Role",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5404,
+      "prob_skill": 0.4596,
+      "correct": true
+    },
+    {
+      "phrase": "Project Engineer",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.7917,
+      "prob_skill": 0.2083,
+      "correct": true
+    },
+    {
+      "phrase": "Field Technician",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.6004,
+      "prob_skill": 0.6004,
+      "correct": false
+    },
+    {
+      "phrase": "Account Manager",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5188,
+      "prob_skill": 0.4812,
+      "correct": true
+    },
+    {
+      "phrase": "Marketing Coordinator",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Civil Status",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5949,
+      "prob_skill": 0.4051,
+      "correct": true
+    },
+    {
+      "phrase": "Contact Number",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Email Address",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Home Address",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Nationality",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Religion",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Signature",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Approved By",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Date Prepared",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Reference Number",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Page 1 of 3",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Attachment",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Department",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5651,
+      "prob_skill": 0.4349,
+      "correct": true
+    },
+    {
+      "phrase": "Job Level",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.674,
+      "prob_skill": 0.326,
+      "correct": true
+    },
+    {
+      "phrase": "Immediate Supervisor",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.5859,
+      "prob_skill": 0.4141,
+      "correct": true
+    },
+    {
+      "phrase": "Remarks",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "N/A",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "TIN Number",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "SSS Number",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5103,
+      "prob_skill": 0.5103,
+      "correct": false
+    },
+    {
+      "phrase": "Emergency Contact",
+      "true_label": "Not Skill",
+      "predicted_label": "Skill",
+      "confidence": 0.5416,
+      "prob_skill": 0.5416,
+      "correct": false
+    },
+    {
+      "phrase": "Years of Service",
+      "true_label": "Not Skill",
+      "predicted_label": "Not Skill",
+      "confidence": 0.6213,
+      "prob_skill": 0.3787,
+      "correct": true
+    }
+  ],
+  "overall": {
+    "n": 106,
+    "tp": 44,
+    "tn": 26,
+    "fp": 27,
+    "fn": 9,
+    "accuracy": 0.6604,
+    "precision": 0.6197,
+    "recall": 0.8302,
+    "f1_score": 0.7097
+  },
+  "threshold_sensitivity": [
+    {
+      "n": 106,
+      "tp": 9,
+      "tn": 53,
+      "fp": 0,
+      "fn": 44,
+      "accuracy": 0.5849,
+      "precision": 1.0,
+      "recall": 0.1698,
+      "f1_score": 0.2903,
+      "threshold": 0.65,
+      "num_auto_approved": 9
+    },
+    {
+      "n": 106,
+      "tp": 0,
+      "tn": 53,
+      "fp": 0,
+      "fn": 53,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "threshold": 0.75,
+      "num_auto_approved": 0
+    },
+    {
+      "n": 106,
+      "tp": 0,
+      "tn": 53,
+      "fp": 0,
+      "fn": 53,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "threshold": 0.85,
+      "num_auto_approved": 0
+    }
+  ]
+}
