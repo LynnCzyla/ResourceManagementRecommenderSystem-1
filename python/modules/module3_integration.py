@@ -7,16 +7,22 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-# Fix imports - use relative imports
-from modules.module1_ocr import OCRProcessor
-from modules.module2_nlp import NLPProcessor
+# ============ MEMORY: lazy/local imports ============
+# module1_ocr pulls in opencv/pdf2image/pytesseract; module2_nlp pulls in
+# spacy/sklearn. Neither is imported at module level anymore - each is only
+# imported inside its own property, the first time that property is
+# actually touched. This lets runner.py's NLP-only subprocess construct a
+# DocumentProcessor (to reuse process_nlp_only below) WITHOUT ever pulling
+# opencv/pdf2image/pytesseract into that process's memory, since it never
+# touches .ocr. See runner.py's _run_nlp_stage / _run_ocr_stage.
+# ======================================================
 
 class DocumentProcessor:
     """Complete document processing workflow"""
     
     def __init__(self, config=None, nlp=None):
         self.config = config or {}
-        self.ocr = OCRProcessor(config)
+        self._ocr = None
         # ============ FIX (duplicate-init bug) ============
         # runner.py already builds one NLPProcessor (full Supabase fetch +
         # ML classifier load) and was overriding self.processor.nlp with it
@@ -28,10 +34,22 @@ class DocumentProcessor:
         self._nlp = nlp
     # ==============================================
         self.process_log = []
-        
+
+    @property
+    def ocr(self):
+        if self._ocr is None:
+            from modules.module1_ocr import OCRProcessor  # deferred - see note above
+            self._ocr = OCRProcessor(self.config)
+        return self._ocr
+
+    @ocr.setter
+    def ocr(self, value):
+        self._ocr = value
+
     @property
     def nlp(self):
         if self._nlp is None:
+            from modules.module2_nlp import NLPProcessor  # deferred - see note above
             print("[INTEGRATION] Lazily initializing NLP Processor (post-OCR)...")
             self._nlp = NLPProcessor(
                 model_name=self.config.get('spacy_model', 'en_core_web_md')
@@ -43,7 +61,12 @@ class DocumentProcessor:
         self._nlp = value
     
     def process_document_complete(self, image_path, employee_id, document_type):
-        """Complete document processing pipeline"""
+        """Complete document processing pipeline (single process, OCR+NLP
+        back to back). Used by any caller that isn't going through runner.py's
+        split-process path (e.g. the warm daemon, which stays warm precisely
+        because it does NOT restart between documents, so the two-process
+        split doesn't apply/help there). See _do_ocr_stage / _do_nlp_stage
+        below for the pieces used by runner.py's OOM-avoiding split path."""
         doc_id = f"DOC-{datetime.now().strftime('%Y%m%d')}-{employee_id}"
         
         log_entry = {
@@ -54,113 +77,14 @@ class DocumentProcessor:
         }
         
         try:
-            # Step 1: Module 1 - OCR Processing
-            print(f" Module 1: Processing document {doc_id}")
-            ocr_result = self.ocr.process_document(
-                image_path, doc_id, employee_id, document_type
-            )
-            
-            if not ocr_result['success']:
-                raise Exception("OCR processing failed")
-            
-            log_entry['ocr_complete'] = datetime.now().isoformat()
-            log_entry['ocr_confidence'] = ocr_result['ocr_data']['ocr_confidence']
-            log_entry['ocr_word_count'] = ocr_result['ocr_data']['word_count']
-            
-            # Step 2: Module 2 - NLP Processing
-            print(f" Module 2: NLP processing for {doc_id}")
-            
-            # ============ FIX: Get full NLP result with auto_approved/needs_review ============
-            structured_text = ocr_result['ocr_data'].get('structured_ocr_text',
-                                                           ocr_result['ocr_data']['cleaned_ocr_text'])
-            nlp_full_result = self.nlp.extract_skills_with_categories(
-                ocr_result['ocr_data']['cleaned_ocr_text'],
-                structured_text  # ← NEW: line-preserved text for section/candidate detection
-            )
-            
-            # Prepare database records — reuse the result above instead of re-running
-            # extraction a second time (was calling NLP twice on the same document).
-            # ============ FIX (duplicate-pipeline bug) ============
-            # This comment already claimed extraction wasn't re-run, but
-            # prepare_db_records() was calling extract_skills_with_categories()
-            # internally regardless, which re-ran the full candidate
-            # extraction + _learn_from_document() + merge_synonyms_dynamically()
-            # a second time per document (visible as documents_analyzed
-            # incrementing twice and two identical [MERGE STATS] lines per
-            # upload). Passing the already-computed result through actually
-            # makes this comment true.
-            nlp_result = self.nlp.prepare_db_records(
-                employee_id,
-                ocr_result['ocr_data']['cleaned_ocr_text'],
-                structured_text,
-                extracted=nlp_full_result
-            )
-            # ========================================================
-            
-            log_entry['nlp_complete'] = datetime.now().isoformat()
-            log_entry['skills_found'] = nlp_result['summary']['total_skills_found']
-            log_entry['licenses_found'] = nlp_result['summary']['licenses_found']
-            
-            # ============ FIX: Log the separation ============
-            print(f"[INTEGRATION] Auto-approved: {len(nlp_full_result.get('auto_approved', []))}")
-            print(f"[INTEGRATION] Needs review: {len(nlp_full_result.get('needs_review', []))}")
-            if nlp_full_result.get('auto_approved'):
-                print(f"[INTEGRATION] Auto-approved samples: {nlp_full_result.get('auto_approved', [])[:5]}")
-            
-            # Combine results with CORRECT data
-            result = {
-                'success': True,
-                'document_id': doc_id,
-                'employee_id': employee_id,
-                'document_type': document_type,
-                'processing_timestamp': datetime.now().isoformat(),
-                'ocr': {
-                    'raw_text': ocr_result['ocr_data']['raw_ocr_text'],
-                    'cleaned_text': ocr_result['ocr_data']['cleaned_ocr_text'],
-                    'confidence': ocr_result['ocr_data']['ocr_confidence'],
-                    'word_count': ocr_result['ocr_data']['word_count'],
-                    'char_count': ocr_result['ocr_data']['char_count'],
-                    'processing_time': ocr_result['ocr_data']['processing_time_seconds']
-                },
-                'nlp': {
-                    # ============ FIX: Use actual skill names, not objects ============
-                    'skills': nlp_full_result.get('skills', []),
-                    'categorized_skills': nlp_full_result.get('categorized', {}),
-                    'auto_approved': nlp_full_result.get('auto_approved', []),
-                    'needs_review': nlp_full_result.get('needs_review', []),
-                    # Original ML prediction + confidence per needs-review skill,
-                    # e.g. {"Electrical Design": {"prediction": "Skill", "confidence": 0.82}}.
-                    # Carried unchanged through runner.py/pythonService.js so the
-                    # backend/frontend never has to re-run the model.
-                    'needs_review_predictions': nlp_full_result.get('needs_review_predictions', {}),
-                    # Original ML prediction + confidence per ML-auto-approved
-                    # skill (>= 0.85 confidence). Previously discarded; now
-                    # preserved the same way needs_review_predictions is.
-                    'auto_approved_predictions': nlp_full_result.get('auto_approved_predictions', {}),
-                    'prc_license': nlp_full_result.get('licenses', [None])[0] if nlp_full_result.get('licenses') else None,
-                    'prc_verified': bool(nlp_full_result.get('licenses'))
-                },
-                'db_records': {
-                    'documents_table': ocr_result['ocr_data'],
-                    'employees_update': nlp_result['employee_update'],
-                    'skills_master': nlp_result['skills_master'],
-                    'employee_skills': nlp_result['employee_skills']
-                },
-                'summary': {
-                    'total_skills_extracted': nlp_result['summary']['total_skills_found'],
-                    'licenses_found': nlp_result['summary']['licenses_found'],
-                    'processing_success': True
-                }
-            }
-            
+            ocr_result = self._do_ocr_stage(image_path, doc_id, employee_id, document_type, log_entry)
+            result = self._do_nlp_stage(ocr_result, doc_id, employee_id, document_type, log_entry)
             log_entry['status'] = 'success'
             log_entry['end_time'] = datetime.now().isoformat()
-            
         except Exception as e:
             log_entry['status'] = 'failed'
             log_entry['error'] = str(e)
             log_entry['end_time'] = datetime.now().isoformat()
-            
             result = {
                 'success': False,
                 'document_id': doc_id,
@@ -168,12 +92,119 @@ class DocumentProcessor:
                 'error': str(e),
                 'log_entry': log_entry
             }
-        
+
         self.process_log.append(log_entry)
         self._save_log(log_entry)
-        
         return result
-    
+
+    def _do_ocr_stage(self, image_path, doc_id, employee_id, document_type, log_entry):
+        """Step 1 only: OCR. Raises on failure (caller decides how to report it).
+        Returns the raw ocr_result dict (JSON-serializable - this is exactly
+        what runner.py's OCR-stage subprocess dumps to a temp file)."""
+        print(f" Module 1: Processing document {doc_id}")
+        ocr_result = self.ocr.process_document(
+            image_path, doc_id, employee_id, document_type
+        )
+
+        if not ocr_result['success']:
+            raise Exception("OCR processing failed")
+
+        log_entry['ocr_complete'] = datetime.now().isoformat()
+        log_entry['ocr_confidence'] = ocr_result['ocr_data']['ocr_confidence']
+        log_entry['ocr_word_count'] = ocr_result['ocr_data']['word_count']
+        return ocr_result
+
+    def _do_nlp_stage(self, ocr_result, doc_id, employee_id, document_type, log_entry):
+        """Step 2 only: NLP + result assembly, given an already-computed
+        ocr_result (from _do_ocr_stage, possibly in a different process -
+        this method never touches self.ocr, only self.nlp, so it's safe to
+        call from a process that only imported module2_nlp)."""
+        # ============ FIX: Get full NLP result with auto_approved/needs_review ============
+        structured_text = ocr_result['ocr_data'].get('structured_ocr_text',
+                                                       ocr_result['ocr_data']['cleaned_ocr_text'])
+        nlp_full_result = self.nlp.extract_skills_with_categories(
+            ocr_result['ocr_data']['cleaned_ocr_text'],
+            structured_text  # ← NEW: line-preserved text for section/candidate detection
+        )
+
+        # Prepare database records — reuse the result above instead of re-running
+        # extraction a second time (was calling NLP twice on the same document).
+        # ============ FIX (duplicate-pipeline bug) ============
+        # This comment already claimed extraction wasn't re-run, but
+        # prepare_db_records() was calling extract_skills_with_categories()
+        # internally regardless, which re-ran the full candidate
+        # extraction + _learn_from_document() + merge_synonyms_dynamically()
+        # a second time per document (visible as documents_analyzed
+        # incrementing twice and two identical [MERGE STATS] lines per
+        # upload). Passing the already-computed result through actually
+        # makes this comment true.
+        nlp_result = self.nlp.prepare_db_records(
+            employee_id,
+            ocr_result['ocr_data']['cleaned_ocr_text'],
+            structured_text,
+            extracted=nlp_full_result
+        )
+        # ========================================================
+
+        log_entry['nlp_complete'] = datetime.now().isoformat()
+        log_entry['skills_found'] = nlp_result['summary']['total_skills_found']
+        log_entry['licenses_found'] = nlp_result['summary']['licenses_found']
+
+        # ============ FIX: Log the separation ============
+        print(f"[INTEGRATION] Auto-approved: {len(nlp_full_result.get('auto_approved', []))}")
+        print(f"[INTEGRATION] Needs review: {len(nlp_full_result.get('needs_review', []))}")
+        if nlp_full_result.get('auto_approved'):
+            print(f"[INTEGRATION] Auto-approved samples: {nlp_full_result.get('auto_approved', [])[:5]}")
+
+        # Combine results with CORRECT data
+        result = {
+            'success': True,
+            'document_id': doc_id,
+            'employee_id': employee_id,
+            'document_type': document_type,
+            'processing_timestamp': datetime.now().isoformat(),
+            'ocr': {
+                'raw_text': ocr_result['ocr_data']['raw_ocr_text'],
+                'cleaned_text': ocr_result['ocr_data']['cleaned_ocr_text'],
+                'confidence': ocr_result['ocr_data']['ocr_confidence'],
+                'word_count': ocr_result['ocr_data']['word_count'],
+                'char_count': ocr_result['ocr_data']['char_count'],
+                'processing_time': ocr_result['ocr_data']['processing_time_seconds']
+            },
+            'nlp': {
+                # ============ FIX: Use actual skill names, not objects ============
+                'skills': nlp_full_result.get('skills', []),
+                'categorized_skills': nlp_full_result.get('categorized', {}),
+                'auto_approved': nlp_full_result.get('auto_approved', []),
+                'needs_review': nlp_full_result.get('needs_review', []),
+                # Original ML prediction + confidence per needs-review skill,
+                # e.g. {"Electrical Design": {"prediction": "Skill", "confidence": 0.82}}.
+                # Carried unchanged through runner.py/pythonService.js so the
+                # backend/frontend never has to re-run the model.
+                'needs_review_predictions': nlp_full_result.get('needs_review_predictions', {}),
+                # Original ML prediction + confidence per ML-auto-approved
+                # skill (>= 0.85 confidence). Previously discarded; now
+                # preserved the same way needs_review_predictions is.
+                'auto_approved_predictions': nlp_full_result.get('auto_approved_predictions', {}),
+                'prc_license': nlp_full_result.get('licenses', [None])[0] if nlp_full_result.get('licenses') else None,
+                'prc_verified': bool(nlp_full_result.get('licenses'))
+            },
+            'db_records': {
+                'documents_table': ocr_result['ocr_data'],
+                'employees_update': nlp_result['employee_update'],
+                'skills_master': nlp_result['skills_master'],
+                'employee_skills': nlp_result['employee_skills']
+            },
+            'summary': {
+                'total_skills_extracted': nlp_result['summary']['total_skills_found'],
+                'licenses_found': nlp_result['summary']['licenses_found'],
+                'processing_success': True
+            }
+        }
+
+        log_entry['nlp_stage_status'] = 'success'
+        return result
+
     def _save_log(self, log_entry):
         """Save processing log to file"""
         log_dir = Path(__file__).parent.parent.parent / 'shared-data' / 'logs'
