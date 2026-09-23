@@ -123,7 +123,11 @@ export default function EmployeeProfileTab() {
 
     return axios.post(`${API_URL}/employee/process-document`, formData, {
       headers: authHeader,
-      timeout: 300000,
+      // OCR + NLP on a large/scanned CV can take several minutes on its own
+      // (observed ~6.4 min for OCR alone on some files). 5 min was too tight
+      // and caused the client to abort while the backend was still working
+      // fine, producing a false "failed" message. 15 min gives real headroom.
+      timeout: 900000,
       ...(onUploadProgress ? { onUploadProgress } : {})
     });
   };
@@ -416,7 +420,7 @@ export default function EmployeeProfileTab() {
     } catch (error) {
         let msg = 'Failed to process document';
         if (error.isMismatchCancelled) msg = error.message;
-        else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = '⏱️ Processing is taking longer than expected. Please try with a smaller file.';
+        else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = "⏱️ This is taking a while, but it's still processing in the background — it hasn't failed. Feel free to check back in a few minutes; you don't need to re-upload.";
         else if (error.response?.data?.error) msg = error.response.data.error;
         else if (error.response?.status === 500) msg = 'Server error. Please check the backend logs.';
         else if (error.message) msg = error.message;
@@ -517,7 +521,7 @@ const handleCertUpload = async (e) => {
   } catch (error) {
       let msg = 'Failed to process certificate';
       if (error.isMismatchCancelled) msg = error.message;
-      else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = '⏱️ Processing is taking longer than expected. Please try with a smaller file.';
+      else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) msg = "⏱️ This is taking a while, but it's still processing in the background — it hasn't failed. Feel free to check back in a few minutes; you don't need to re-upload.";
       else if (error.response?.data?.error) msg = error.response.data.error;
       else if (error.message) msg = error.message;
       setUploadError(msg);
