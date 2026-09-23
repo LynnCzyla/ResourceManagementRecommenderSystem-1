@@ -51,12 +51,19 @@ COPY main/src/assets/WEA_logo_bgremoved.png ./main/src/assets/WEA_logo_bgremoved
 # Ensure the uploads directory exists (multer writes here)
 RUN mkdir -p backend/uploads
 
-# ---- Startup script: launches the warm Python daemon + Node together ----
-COPY start.sh ./start.sh
-RUN chmod +x start.sh
+# ---- Startup ----
+# Reverted from a daemon+Node dual-process setup: keeping spaCy resident in
+# memory 24/7 (via python/scripts/daemon.py) caused an OOM kill under
+# concurrent traffic on Render's free 512MB instance. The original problem
+# the daemon solved - retraining the ML classifier on every upload - is now
+# fixed independently in skill_classifier.py (which pulls the last-trained
+# model from Supabase Storage instead of retraining from scratch), so a
+# plain per-request spawn (a few seconds of reload cost, memory fully freed
+# after each request) is the safer trade-off on this instance size.
+# See start.sh - kept in the repo, unused - if this ever gets revisited on a
+# bigger instance.
 
 ENV NODE_ENV=production
-ENV PYTHON_DAEMON_URL=http://127.0.0.1:5001
 EXPOSE 5000
 
-CMD ["./start.sh"]
+CMD ["node", "backend/server.js"]
