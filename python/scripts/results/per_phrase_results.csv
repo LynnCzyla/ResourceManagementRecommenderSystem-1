@@ -1,0 +1,107 @@
+phrase,true_label,predicted_label,confidence,prob_skill,correct
+bid preparation for tenders,Skill,Skill,0.6638,0.6638,True
+proposal engineering and bid preparation,Skill,Skill,0.5968,0.5968,True
+power and distribution transformers,Skill,Not Skill,0.5592,0.4408,False
+electrical engineering services,Skill,Skill,0.5649,0.5649,True
+power systems and transformer supply projects,Skill,Skill,0.5598,0.5598,True
+industrial proposal and tender engineering,Skill,Not Skill,0.5322,0.4678,False
+cross-functional collaboration,Skill,Skill,0.5357,0.5357,True
+client requirements gathering,Skill,Skill,0.6845,0.6845,True
+electrical cost estimation,Skill,Skill,0.701,0.701,True
+technical documentation review,Skill,Skill,0.6692,0.6692,True
+ups service support and coordination,Skill,Skill,0.6299,0.6299,True
+sales engineering support,Skill,Skill,0.5674,0.5674,True
+explosion-proof lighting systems,Skill,Skill,0.5563,0.5563,True
+hazardous area equipment handling,Skill,Not Skill,0.5098,0.4902,False
+lighting calculation and analysis,Skill,Skill,0.5908,0.5908,True
+industrial control systems maintenance,Skill,Skill,0.6169,0.6169,True
+architectural drafting standards,Skill,Skill,0.6388,0.6388,True
+dialux lighting simulation,Skill,Skill,0.6088,0.6088,True
+autocad 2d drafting,Skill,Skill,0.6595,0.6595,True
+autocad 3d modeling,Skill,Skill,0.5641,0.5641,True
+project scheduling and coordination,Skill,Skill,0.6119,0.6119,True
+vendor negotiation,Skill,Skill,0.5087,0.5087,True
+quality assurance inspection,Skill,Skill,0.6663,0.6663,True
+technical specification writing,Skill,Skill,0.6109,0.6109,True
+customer relationship management,Skill,Skill,0.628,0.628,True
+budget forecasting,Skill,Skill,0.5103,0.5103,True
+risk assessment for construction projects,Skill,Not Skill,0.6841,0.3159,False
+supply chain coordination,Skill,Skill,0.5907,0.5907,True
+cable sizing and load calculation,Skill,Skill,0.582,0.582,True
+single line diagram preparation,Skill,Skill,0.6285,0.6285,True
+panel board layout design,Skill,Not Skill,0.5087,0.4913,False
+switchgear specification,Skill,Skill,0.5452,0.5452,True
+preventive maintenance scheduling,Skill,Skill,0.6163,0.6163,True
+occupational safety compliance,Skill,Skill,0.5466,0.5466,True
+electrical code compliance,Skill,Skill,0.6892,0.6892,True
+energy audit and analysis,Skill,Skill,0.5255,0.5255,True
+generator sizing and selection,Skill,Skill,0.5103,0.5103,True
+voltage drop calculation,Skill,Skill,0.5488,0.5488,True
+photometric report preparation,Skill,Skill,0.6285,0.6285,True
+LED retrofit design,Skill,Not Skill,0.5204,0.4796,False
+solar PV system design,Skill,Not Skill,0.5204,0.4796,False
+control panel wiring,Skill,Skill,0.5552,0.5552,True
+root cause analysis,Skill,Skill,0.5615,0.5615,True
+inventory and materials management,Skill,Skill,0.6844,0.6844,True
+contract review and compliance,Skill,Skill,0.5102,0.5102,True
+after-sales technical support,Skill,Skill,0.5732,0.5732,True
+warranty claims processing,Skill,Skill,0.5103,0.5103,True
+site survey and inspection,Skill,Skill,0.5103,0.5103,True
+transformer testing and commissioning,Skill,Skill,0.5297,0.5297,True
+earthing and grounding system design,Skill,Not Skill,0.5204,0.4796,False
+power factor correction,Skill,Not Skill,0.5014,0.4986,False
+technical proposal costing,Skill,Skill,0.5909,0.5909,True
+client presentation and pitching,Skill,Skill,0.673,0.673,True
+Senior CAD Drafter,Not Skill,Not Skill,0.6945,0.3055,True
+Lighting Designer,Not Skill,Skill,0.5745,0.5745,False
+Proposal Engineer,Not Skill,Not Skill,0.7962,0.2038,True
+Full Name,Not Skill,Skill,0.5103,0.5103,False
+Employee ID,Not Skill,Not Skill,0.5293,0.4707,True
+Date Hired,Not Skill,Skill,0.5103,0.5103,False
+License Number,Not Skill,Skill,0.5103,0.5103,False
+10 years,Not Skill,Not Skill,0.6852,0.3148,True
+"June 15, 2016",Not Skill,Not Skill,0.603,0.397,True
+Philippines,Not Skill,Skill,0.5103,0.5103,False
+Mapua University,Not Skill,Skill,0.5103,0.5103,False
+Company Logo,Not Skill,Skill,0.5103,0.5103,False
+Internal Use Only,Not Skill,Not Skill,0.5362,0.4638,True
+Confidential,Not Skill,Not Skill,0.5293,0.4707,True
+EMP-006,Not Skill,Not Skill,0.6108,0.3892,True
+Engineering Services,Not Skill,Not Skill,0.5722,0.4278,True
+Industrial Facilities,Not Skill,Skill,0.5384,0.5384,False
+Construction Projects,Not Skill,Not Skill,0.6841,0.3159,True
+Years of Professional Experience,Not Skill,Not Skill,0.7649,0.2351,True
+Manager Remarks,Not Skill,Not Skill,0.5915,0.4085,True
+Educational Background,Not Skill,Not Skill,0.6243,0.3757,True
+Training and Certifications,Not Skill,Skill,0.5103,0.5103,False
+Relevant Project Experience,Not Skill,Not Skill,0.67,0.33,True
+Areas of Specialization,Not Skill,Not Skill,0.6798,0.3202,True
+Senior-Level,Not Skill,Not Skill,0.6955,0.3045,True
+Functional Area,Not Skill,Not Skill,0.6426,0.3574,True
+Experience Category,Not Skill,Not Skill,0.6887,0.3113,True
+Primary Role,Not Skill,Not Skill,0.5404,0.4596,True
+Project Engineer,Not Skill,Not Skill,0.7917,0.2083,True
+Field Technician,Not Skill,Skill,0.6004,0.6004,False
+Account Manager,Not Skill,Not Skill,0.5188,0.4812,True
+Marketing Coordinator,Not Skill,Skill,0.5103,0.5103,False
+Civil Status,Not Skill,Not Skill,0.5949,0.4051,True
+Contact Number,Not Skill,Skill,0.5103,0.5103,False
+Email Address,Not Skill,Skill,0.5103,0.5103,False
+Home Address,Not Skill,Skill,0.5103,0.5103,False
+Nationality,Not Skill,Skill,0.5103,0.5103,False
+Religion,Not Skill,Skill,0.5103,0.5103,False
+Signature,Not Skill,Skill,0.5103,0.5103,False
+Approved By,Not Skill,Skill,0.5103,0.5103,False
+Date Prepared,Not Skill,Skill,0.5103,0.5103,False
+Reference Number,Not Skill,Skill,0.5103,0.5103,False
+Page 1 of 3,Not Skill,Skill,0.5103,0.5103,False
+Attachment,Not Skill,Skill,0.5103,0.5103,False
+Department,Not Skill,Not Skill,0.5651,0.4349,True
+Job Level,Not Skill,Not Skill,0.674,0.326,True
+Immediate Supervisor,Not Skill,Not Skill,0.5859,0.4141,True
+Remarks,Not Skill,Skill,0.5103,0.5103,False
+N/A,Not Skill,Skill,0.5103,0.5103,False
+TIN Number,Not Skill,Skill,0.5103,0.5103,False
+SSS Number,Not Skill,Skill,0.5103,0.5103,False
+Emergency Contact,Not Skill,Skill,0.5416,0.5416,False
+Years of Service,Not Skill,Not Skill,0.6213,0.3787,True

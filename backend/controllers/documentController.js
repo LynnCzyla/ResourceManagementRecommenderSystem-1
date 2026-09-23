@@ -401,6 +401,15 @@ exports.processDocument = async (req, res) => {
 
             console.log(`📊 Before: ${originalCount} skills, After: ${finalNeedsReview.length} skills kept`);
 
+            // Deduplicate finalNeedsReview so identical skills never appear twice in pending_skills
+            const seenNeedsReviewKeys = new Set();
+            finalNeedsReview = finalNeedsReview.filter(skill => {
+                const key = skillKey(skill);
+                if (seenNeedsReviewKeys.has(key)) return false;
+                seenNeedsReviewKeys.add(key);
+                return true;
+            });
+
             // Upload to storage and insert a fresh row
             const uploadResult = await storageService.uploadFile(file, employeeId, documentType);
 

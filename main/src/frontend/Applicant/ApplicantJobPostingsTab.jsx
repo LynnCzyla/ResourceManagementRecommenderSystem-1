@@ -318,6 +318,12 @@ export default function ApplicantJobPostingsTab() {
         console.error('Submit failed:', res.status, raw.slice(0, 300));
         if (res.status === 413) {
           showErrorAlert(`Your resume is too large for the server. Keep it under ${maxFileSize}MB.`, 'File Too Large');
+        } else if (res.status === 409) {
+          // ✅ Duplicate application: same email already applied to this posting
+          showErrorAlert(
+            (data && data.error) || 'This email has already applied for this position.',
+            'Already Applied'
+          );
         } else {
           showErrorAlert(
             (data && data.error) || `The server returned an error (${res.status}). Please try again.`
@@ -329,7 +335,10 @@ export default function ApplicantJobPostingsTab() {
       if (data && data.success) {
         setApplicantEmail(applyForm.email);
         setShowApplicationModal(false);
-        showSuccessAlert('Application submitted successfully!');
+        // ✅ Let the applicant know a confirmation email is on its way
+        showSuccessAlert(
+          `Your application has been submitted. A confirmation email has been sent to ${applyForm.email}.`
+        );
       } else {
         showErrorAlert((data && data.error) || 'Failed to submit application.');
       }

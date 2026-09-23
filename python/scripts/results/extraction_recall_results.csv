@@ -1,0 +1,12 @@
+resume,expected_count,found_count,recall_pct,missing_skills
+cv_01.pdf,22,21,95.5,Microsoft PowerPoint
+cv_02.pdf,22,20,90.9,Electrical Drawings using AutoCAD 2D; Multi-Cable Transit (MCT) Design
+cv_03.pdf,19,16,84.2,Microsoft PowerPoint; AutoCAD 2017; Uninterruptible Power Supply (UPS) Systems
+cv_04.pdf,17,14,82.4,AutoCAD (Electrical and 2D Drafting); MicroStation; SmartPlant3D
+cv_05.pdf,18,17,94.4,Microsoft PowerPoint
+cv_06.pdf,10,9,90.0,AutoCAD 2D and 3D Drawing Support
+cv_07.pdf,16,14,87.5,Client Technical Communication and Support; Microsoft PowerPoint
+cv_08.pdf,16,11,68.8,Engineering Document Classification and Filing; Project Documentation Expediting and Coordination; Compliance with Document Standards and Procedures; Basic Project Coordination Support; Basic Project Collaboration Platforms
+cv_09.pdf,18,10,55.6,AutoCAD 2D; AutoCAD 3D; Dialux Lighting Calculation; Architectural Drafting; Technical Documentation; AGI32; Industrial Lighting Fixtures; Industrial Control Systems
+cv_10.pdf,14,6,42.9,Electrical System Configuration and Evaluation; Cost Reduction and Value Engineering Strategies; Technical Documentation for Bidding and Tendering; Sales Engineering Technical Support; Client Requirement Analysis and Interpretation; Microsoft PowerPoint; AutoCAD Electrical; Electrical Engineering Services
+cv_11.pdf,19,10,52.6,Application Engineering for Electrical Systems; Service Engineering and Field Support; System Troubleshooting and Technical Advisory; Project Lifecycle and After-Sales Support; Engineering Coordination Across Sales and Service Teams; Microsoft Word; Microsoft PowerPoint; Basic Engineering Calculation Tools; Industrial Electrical System Troubleshooting
