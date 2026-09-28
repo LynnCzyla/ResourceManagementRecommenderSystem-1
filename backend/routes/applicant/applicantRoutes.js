@@ -75,7 +75,8 @@ router.get('/job-postings', async (req, res) => {
           branches:branch_id (
             id,
             name,
-            location
+            location,
+            currency_code
           )
         )
       `)
@@ -114,6 +115,7 @@ router.get('/job-postings', async (req, res) => {
         branch_id: item.profiles?.branch_id || null,
         branch_name: item.profiles?.branches?.name || 'N/A',
         branch_location: item.profiles?.branches?.location || 'N/A',
+        currency_code: item.profiles?.branches?.currency_code || 'PHP',
         department_name: item.departments?.department_name || 'N/A',
         position_name: item.positions?.position_name || 'N/A'
       };
@@ -179,7 +181,8 @@ router.get('/job-postings/:id', async (req, res) => {
           branches:branch_id (
             id,
             name,
-            location
+            location,
+            currency_code
           )
         )
       `)
@@ -208,6 +211,7 @@ router.get('/job-postings/:id', async (req, res) => {
       branch_id: data.profiles?.branch_id || null,
       branch_name: data.profiles?.branches?.name || 'N/A',
       branch_location: data.profiles?.branches?.location || 'N/A',
+      currency_code: data.profiles?.branches?.currency_code || 'PHP',
       department_name: data.departments?.department_name || 'N/A',
       position_name: data.positions?.position_name || 'N/A'
     };

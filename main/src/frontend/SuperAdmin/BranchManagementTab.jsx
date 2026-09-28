@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
 import { getStoredToken } from '../../lib/supabaseClient';
+import { CURRENCIES } from '../../config/currency';
 
 const API_BASE = `${API_BASE_URL}/api/superadmin`;
 
@@ -10,6 +11,7 @@ const emptyForm = {
   location: '',
   address: '',
   contact_number: '',
+  currency_code: 'PHP',
   status: 'Active',
 };
 
@@ -150,6 +152,7 @@ export default function BranchManagementTab() {
         location: formData.location.trim(),
         address: formData.address.trim(),
         contact_number: formData.contact_number.trim(),
+        currency_code: formData.currency_code,
         status: formData.status,
       };
 
@@ -193,6 +196,7 @@ export default function BranchManagementTab() {
         location: formData.location.trim(),
         address: formData.address.trim(),
         contact_number: formData.contact_number.trim(),
+        currency_code: formData.currency_code,
         status: formData.status,
       };
 
@@ -246,6 +250,7 @@ export default function BranchManagementTab() {
       location: branch.location || '',
       address: branch.address || '',
       contact_number: branch.contact_number || '',
+      currency_code: branch.currency_code || 'PHP',
       status: branch.status || 'Active',
     });
     setValidationErrors({});
@@ -333,6 +338,7 @@ export default function BranchManagementTab() {
               <th style={styles.tableHeaderCell}>Location</th>
               <th style={styles.tableHeaderCell}>Address</th>
               <th style={styles.tableHeaderCell}>Contact</th>
+              <th style={styles.tableHeaderCell}>Currency</th>
               <th style={styles.tableHeaderCell}>Manager</th>
               <th style={styles.tableHeaderCell}>Status</th>
               <th style={styles.tableHeaderCell}>Actions</th>
@@ -340,9 +346,9 @@ export default function BranchManagementTab() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="7" style={styles.emptyCell}>Loading...</td></tr>
+              <tr><td colSpan="8" style={styles.emptyCell}>Loading...</td></tr>
             ) : branches.length === 0 ? (
-              <tr><td colSpan="7" style={styles.emptyCell}>No branches found</td></tr>
+              <tr><td colSpan="8" style={styles.emptyCell}>No branches found</td></tr>
             ) : (
               branches.map(branch => (
                 <tr key={branch.id} style={styles.tableRow}>
@@ -354,6 +360,7 @@ export default function BranchManagementTab() {
                     <span style={styles.addressText}>{branch.address}</span>
                   </td>
                   <td style={styles.tableCell}>{branch.contact_number}</td>
+                  <td style={styles.tableCell}>{branch.currency_code || 'PHP'}</td>
                   <td style={styles.tableCell}>
                     {branch.admin_info ? (
                       <span style={styles.managerBadge}>
@@ -529,6 +536,19 @@ export default function BranchManagementTab() {
                     <span style={styles.errorText}>{getError('contact_number')}</span>
                   )}
                 </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Currency</label>
+                  <select
+                    value={formData.currency_code}
+                    onChange={(e) => setFormData({ ...formData, currency_code: e.target.value })}
+                    style={styles.formInput}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.code} - {c.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div style={styles.infoBox}>
@@ -662,6 +682,19 @@ export default function BranchManagementTab() {
                   {hasError('contact_number') && (
                     <span style={styles.errorText}>{getError('contact_number')}</span>
                   )}
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Currency</label>
+                  <select
+                    value={formData.currency_code}
+                    onChange={(e) => setFormData({ ...formData, currency_code: e.target.value })}
+                    style={styles.formInput}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.code} - {c.name}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div style={styles.formGroup}>

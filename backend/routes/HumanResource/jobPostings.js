@@ -1,6 +1,15 @@
 // backend/routes/HumanResource/jobPostings.js
 const express = require('express');
 const router = express.Router();
+
+// True when a YYYY-MM-DD date is in the past. Allows 1 day of grace because the
+// server clock (UTC) can be a day behind the HR user's local date.
+function isPastDate(dateStr) {
+  const d = String(dateStr || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  const yesterdayUtc = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return d < yesterdayUtc;
+}
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 
@@ -153,7 +162,7 @@ router.get('/', async (req, res) => {
           *,
           departments ( id, department_name ),
           positions ( id, position_name ),
-          profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+          profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
           hr_resource_requests:source_request_id ( 
             id, 
             quantity_needed,
@@ -230,7 +239,7 @@ router.get('/', async (req, res) => {
         *,
         departments ( id, department_name ),
         positions ( id, position_name ),
-        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
         hr_resource_requests:source_request_id ( 
           id, 
           quantity_needed,
@@ -299,7 +308,7 @@ router.get('/:id', async (req, res) => {
         *,
         departments ( id, department_name ),
         positions ( id, position_name ),
-        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
         hr_resource_requests:source_request_id ( id, quantity_needed ),
         job_applications ( id, status )
       `)
@@ -355,6 +364,13 @@ router.post('/', async (req, res) => {
 
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
+    }
+
+    if (closing_date && isPastDate(closing_date)) {
+      return res.status(400).json({
+        success: false,
+        error: 'The posting end date cannot be in the past.'
+      });
     }
 
     // ✅ Check if user belongs to a branch
@@ -492,6 +508,23 @@ router.put('/:id', async (req, res) => {
 
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
+    }
+
+    // Only reject a past end date when it was changed (old postings can keep theirs)
+    if (closing_date) {
+      const { data: current } = await supabase
+        .from('job_postings')
+        .select('closing_date')
+        .eq('id', id)
+        .maybeSingle();
+      const unchanged = current?.closing_date &&
+        String(current.closing_date).slice(0, 10) === String(closing_date).slice(0, 10);
+      if (!unchanged && isPastDate(closing_date)) {
+        return res.status(400).json({
+          success: false,
+          error: 'The posting end date cannot be in the past.'
+        });
+      }
     }
 
     let rawDescription = (description || '').replace(/\[VACANCY:\s*\d+\]/gi, '').trim();

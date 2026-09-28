@@ -201,8 +201,13 @@ const sendOnboardingOfferEmail = async ({
   instructions,
   subject,
   customMessage,
+  currency,
 }) => {
-  const formattedSalary = salary ? (typeof salary === 'number' ? `₱${salary.toLocaleString()}/month` : salary) : 'As agreed upon';
+  const { formatMoney } = require('./currency');
+  const salaryNum = Number(String(salary ?? '').replace(/,/g, ''));
+  const formattedSalary = salary
+    ? (Number.isFinite(salaryNum) ? `${formatMoney(salaryNum, currency)}/month` : salary)
+    : 'As agreed upon';
   const mailSubject = subject || `Job Offer: ${position} - WEA Resource Management System`;
 
   const mailOptions = {

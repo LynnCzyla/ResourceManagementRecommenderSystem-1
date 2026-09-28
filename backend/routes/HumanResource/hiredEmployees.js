@@ -762,12 +762,37 @@ router.post('/:id/send-offer', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Employee record not found.' });
     }
 
+    // Currency comes from the branch of this applicant (fallback: HR user's branch)
+    let currency = 'PHP';
+    try {
+      let branchId = userBranchId;
+      if (emp.application_id) {
+        const { data: appRow } = await supabase
+          .from('job_applications')
+          .select('branch_id')
+          .eq('id', emp.application_id)
+          .maybeSingle();
+        if (appRow?.branch_id) branchId = appRow.branch_id;
+      }
+      if (branchId) {
+        const { data: br } = await supabase
+          .from('branches')
+          .select('currency_code')
+          .eq('id', branchId)
+          .maybeSingle();
+        if (br?.currency_code) currency = br.currency_code;
+      }
+    } catch (e) {
+      console.warn('Could not resolve branch currency, using PHP:', e.message);
+    }
+
     const { sendOnboardingOfferEmail } = require('../../utils/mailer');
     await sendOnboardingOfferEmail({
       to: emp.email,
       applicantName: emp.name,
       position: jobTitle || 'Position Offered',
       salary: salary || emp.salary,
+      currency,
       benefits,
       employmentType,
       startDate: startDate || emp.hire_date,
