@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../../config/api';
+import BackupRestoreCard from './BackupRestoreCard';
 
 export default function SystemSettingsTab() {
   const [ocrThreshold, setOcrThreshold] = useState(75);
@@ -522,6 +523,8 @@ export default function SystemSettingsTab() {
           </button>
         </div>
       </form>
+
+      <BackupRestoreCard />
     </div>
   );
 }
