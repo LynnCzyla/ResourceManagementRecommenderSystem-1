@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { parsePositiveInt } = require('../../utils/validators');
 
 console.log('✅ RM resourceRequests route loaded');
 
@@ -173,6 +174,11 @@ router.post('/', async (req, res) => {
       });
     }
 
+    const qtyCheck = parsePositiveInt(quantity, 'Quantity', { defaultValue: 1 });
+    if (qtyCheck.error) {
+      return res.status(400).json({ success: false, error: qtyCheck.error });
+    }
+
     // Check if user belongs to a branch
     if (!userBranchId) {
       return res.status(403).json({
@@ -224,7 +230,7 @@ router.post('/', async (req, res) => {
         request_title: requestTitle,
         department_name: departmentName,
         position_title: positionName,
-        quantity_needed: Number(quantity) || 1,
+        quantity_needed: qtyCheck.value,
         required_skills: requiredSkills || null,
         experience_level: experienceLevel || 'Junior',
         start_date: startDate,

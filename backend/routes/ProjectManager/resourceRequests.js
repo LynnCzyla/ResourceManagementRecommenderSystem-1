@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { parsePositiveInt } = require('../../utils/validators');
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -283,6 +284,13 @@ router.post('/', async (req, res) => {
       }
     }
 
+    for (const resource of resources) {
+      const qtyCheck = parsePositiveInt(resource.quantity, 'Quantity needed', { defaultValue: 1 });
+      if (qtyCheck.error) {
+        return res.status(400).json({ success: false, message: qtyCheck.error });
+      }
+    }
+
     const createdIds = [];
 
     for (const resource of resources) {
@@ -294,7 +302,7 @@ router.post('/', async (req, res) => {
           project_id: projectId,
           position_id: positionId,
           role_title: positionId ? null : (resource.role || null),
-          quantity_needed: parseInt(resource.quantity, 10) || 1,
+          quantity_needed: parsePositiveInt(resource.quantity, 'Quantity needed', { defaultValue: 1 }).value,
           assignment_type: resource.assignment || 'Full-Time (40 hours/week)',
           justification: resource.justification || null,
           start_date: resource.startDate || project.start_date || null,

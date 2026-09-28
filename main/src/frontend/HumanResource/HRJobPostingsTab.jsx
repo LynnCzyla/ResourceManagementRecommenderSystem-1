@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
 import { formatMoney, currencySymbol } from '../../config/currency';
+import { blockInvalidNumberKeys } from '../../utils/numberInput';
 import { API_BASE_URL } from '../../config/api';
 
 // Today's date as YYYY-MM-DD in the user's local timezone (what <input type="date"> uses)
@@ -284,8 +285,22 @@ export default function HRJobPostingsTab() {
     quantity: formData.quantity || 1,
   });
 
+  const salaryError = () => {
+    const min = formData.salaryMin === '' || formData.salaryMin == null ? null : Number(formData.salaryMin);
+    const max = formData.salaryMax === '' || formData.salaryMax == null ? null : Number(formData.salaryMax);
+    if (min !== null && (!Number.isFinite(min) || min <= 0)) return 'Minimum salary must be greater than 0.';
+    if (max !== null && (!Number.isFinite(max) || max <= 0)) return 'Maximum salary must be greater than 0.';
+    if (min !== null && max !== null && min > max) return 'Minimum salary cannot be greater than maximum salary.';
+    return null;
+  };
+
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
+    const salaryErr = salaryError();
+    if (salaryErr) {
+      showErrorAlert(salaryErr, 'Invalid Salary');
+      return;
+    }
     const dateError = closingDateError();
     if (dateError) {
       showErrorAlert(dateError, 'Invalid End Date');
@@ -307,6 +322,11 @@ export default function HRJobPostingsTab() {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    const salaryErr = salaryError();
+    if (salaryErr) {
+      showErrorAlert(salaryErr, 'Invalid Salary');
+      return;
+    }
     const dateError = closingDateError();
     if (dateError) {
       showErrorAlert(dateError, 'Invalid End Date');
@@ -547,8 +567,14 @@ export default function HRJobPostingsTab() {
           <label style={styles.formLabel}>Min Salary ({currencySymbol(userBranch?.currency_code)})</label>
           <input
             type="number"
+            min="1"
+            step="any"
             value={formData.salaryMin}
-            onChange={(e) => setFormData({ ...formData, salaryMin: e.target.value })}
+            onKeyDown={blockInvalidNumberKeys}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '' || Number(v) > 0) setFormData({ ...formData, salaryMin: v });
+            }}
             style={styles.formInput}
           />
         </div>
@@ -556,8 +582,14 @@ export default function HRJobPostingsTab() {
           <label style={styles.formLabel}>Max Salary ({currencySymbol(userBranch?.currency_code)})</label>
           <input
             type="number"
+            min="1"
+            step="any"
             value={formData.salaryMax}
-            onChange={(e) => setFormData({ ...formData, salaryMax: e.target.value })}
+            onKeyDown={blockInvalidNumberKeys}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '' || Number(v) > 0) setFormData({ ...formData, salaryMax: v });
+            }}
             style={styles.formInput}
           />
         </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { fetchResourceRequests, createResourceRequest } from './Rmapi';
 import { API_BASE_URL } from '../../config/api';
+import { blockInvalidNumberKeys } from '../../utils/numberInput';
 
 const emptyForm = {
   requestTitle: '',
@@ -435,7 +436,7 @@ export default function RMResourceRequestFormTab() {
               <label style={styles.label}>Quantity *</label>
               <input
                 type="number"
-                name="quantity"
+                onKeyDown={blockInvalidNumberKeys} name="quantity"
                 required
                 min="1"
                 style={styles.input}

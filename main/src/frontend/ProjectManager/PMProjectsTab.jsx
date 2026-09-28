@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getProjects, createProject, updateProject, getSkills, updateProjectStatus, getProjectHistoryDetails } from './pmApi';
+import { blockInvalidNumberKeys } from '../../utils/numberInput';
 
 // Statuses that count as "done" and belong in the Project History tab.
 const COMPLETED_STATUSES = ['Completed', 'Archived', 'Cancelled'];
@@ -1103,7 +1104,7 @@ export default function PMProjectsTab({ user, onNavigate }) {
                   <div style={{ ...styles.formGroup, flex: 1 }}>
                     <label style={styles.formLabel}>Team Size <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                     <input 
-                      type="number" 
+                      type="number" onKeyDown={blockInvalidNumberKeys} 
                       min="1"
                       value={formData.teamSize} 
                       onChange={(e) => setFormData({ ...formData, teamSize: e.target.value })} 
@@ -1222,7 +1223,7 @@ export default function PMProjectsTab({ user, onNavigate }) {
                         <div style={{ ...styles.formGroup, flex: 1 }}>
                           <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                           <input 
-                            type="number" 
+                            type="number" onKeyDown={blockInvalidNumberKeys} 
                             min="1"
                             value={res.quantity} 
                             onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)} 
@@ -1497,7 +1498,7 @@ export default function PMProjectsTab({ user, onNavigate }) {
                   <div style={{ ...styles.formGroup, flex: 1 }}>
                     <label style={styles.formLabel}>Team Size <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                     <input 
-                      type="number" 
+                      type="number" onKeyDown={blockInvalidNumberKeys} 
                       min="1"
                       value={editFormData.teamSize} 
                       onChange={(e) => setEditFormData({ ...editFormData, teamSize: e.target.value })} 

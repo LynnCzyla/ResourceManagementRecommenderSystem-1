@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { parsePositiveNumber } = require('../../utils/validators');
 
 // ✅ Helper to check if user has HR or Admin role
 const hasHrOrAdminRole = (user) => {
@@ -347,6 +348,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Name and email are required.' });
     }
 
+    const salaryCheck = parsePositiveNumber(salary, 'Salary');
+    if (salaryCheck.error) {
+      return res.status(400).json({ success: false, error: salaryCheck.error });
+    }
+
     // ✅ Verify branch access through application
     if (application_id && !isSuperAdmin) {
       const { data: application } = await supabase
@@ -378,7 +384,7 @@ router.post('/', async (req, res) => {
     if (existingEmp) {
       console.log(`📋 Employee already exists: ${existingEmp.id}`);
       const updatePayload = {
-        salary: salary !== undefined ? salary : existingEmp.salary,
+        salary: salary !== undefined ? salaryCheck.value : existingEmp.salary,
         hire_date: hire_date || existingEmp.hire_date,
         name: name.trim(),
         email: email.trim(),
@@ -407,7 +413,7 @@ router.post('/', async (req, res) => {
           position_id: position_id || null,
           department_id: department_id || null,
           hire_date: hire_date || new Date().toISOString().slice(0, 10),
-          salary: salary || null,
+          salary: salaryCheck.value,
           status: 'Onboarding',
         })
         .select()
@@ -557,8 +563,13 @@ router.put('/:id', async (req, res) => {
       }
     }
 
+    const salaryCheck = parsePositiveNumber(salary, 'Salary');
+    if (salaryCheck.error) {
+      return res.status(400).json({ success: false, error: salaryCheck.error });
+    }
+
     const updateData = {};
-    if (salary !== undefined) updateData.salary = salary;
+    if (salary !== undefined) updateData.salary = salaryCheck.value;
     if (hire_date) updateData.hire_date = hire_date;
     if (status) {
       if (status === 'Archived' || status === 'Inactive') updateData.status = 'Inactive';
@@ -717,6 +728,11 @@ router.post('/:id/send-offer', async (req, res) => {
       subject, customMessage
     } = req.body;
 
+    const salaryCheck = parsePositiveNumber(salary, 'Salary');
+    if (salaryCheck.error) {
+      return res.status(400).json({ success: false, error: salaryCheck.error });
+    }
+
     const userBranchId = req.user?.branch_id;
     const isSuperAdmin = req.user?.is_super_admin || false;
     const userRole = req.user?.role;
@@ -791,7 +807,7 @@ router.post('/:id/send-offer', async (req, res) => {
       to: emp.email,
       applicantName: emp.name,
       position: jobTitle || 'Position Offered',
-      salary: salary || emp.salary,
+      salary: salaryCheck.value ?? emp.salary,
       currency,
       benefits,
       employmentType,
@@ -808,7 +824,7 @@ router.post('/:id/send-offer', async (req, res) => {
     const { data: updatedEmp, error: updateErr } = await supabase
       .from('hired_employees')
       .update({
-        salary: salary ? parseFloat(salary) : emp.salary,
+        salary: salaryCheck.value ?? emp.salary,
         hire_date: startDate || emp.hire_date,
         status: 'Active',
       })

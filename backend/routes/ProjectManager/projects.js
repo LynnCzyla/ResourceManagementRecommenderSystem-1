@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { parsePositiveInt } = require('../../utils/validators');
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -715,12 +716,23 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const teamSizeCheck = parsePositiveInt(teamSize, 'Team size');
+    if (teamSizeCheck.error) {
+      return res.status(400).json({ success: false, message: teamSizeCheck.error });
+    }
+    for (const resource of resources) {
+      const qtyCheck = parsePositiveInt(resource.quantity, 'Quantity needed', { defaultValue: 1 });
+      if (qtyCheck.error) {
+        return res.status(400).json({ success: false, message: qtyCheck.error });
+      }
+    }
+
     const { data: project, error: projectError } = await supabase
       .from('projects')
       .insert({
         project_name: name,
         project_description: description,
-        team_size: teamSize ? parseInt(teamSize, 10) : null,
+        team_size: teamSizeCheck.value,
         duration_days: duration ? parseInt(duration, 10) : null,
         start_date: startDate,
         end_date: endDate,
@@ -742,7 +754,7 @@ router.post('/', async (req, res) => {
           project_id: project.id,
           position_id: positionId,
           role_title: positionId ? null : (resource.role || null),
-          quantity_needed: parseInt(resource.quantity, 10) || 1,
+          quantity_needed: parsePositiveInt(resource.quantity, 'Quantity needed', { defaultValue: 1 }).value,
           assignment_type: resource.assignment || 'Full-time',
           justification: resource.justification || null,
           start_date: resource.startDate || startDate || null,
@@ -799,6 +811,11 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const { name, description, startDate, endDate, priority, status, teamSize, duration } = req.body;
 
+    const teamSizeCheck = parsePositiveInt(teamSize, 'Team size');
+    if (teamSizeCheck.error) {
+      return res.status(400).json({ success: false, message: teamSizeCheck.error });
+    }
+
     const updateData = { updated_at: new Date().toISOString() };
     if (name !== undefined) updateData.project_name = name;
     if (description !== undefined) updateData.project_description = description;
@@ -806,7 +823,7 @@ router.put('/:id', async (req, res) => {
     if (endDate !== undefined) updateData.end_date = endDate;
     if (priority !== undefined) updateData.priority = priority;
     if (status !== undefined) updateData.status = status;
-    if (teamSize !== undefined) updateData.team_size = parseInt(teamSize, 10) || null;
+    if (teamSize !== undefined) updateData.team_size = teamSizeCheck.value;
     if (duration !== undefined) updateData.duration_days = parseInt(duration, 10) || null;
 
     const { data, error } = await supabase

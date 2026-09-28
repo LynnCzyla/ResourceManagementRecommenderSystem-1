@@ -192,7 +192,7 @@ export default function SystemSettingsTab() {
     <div>
       <div style={styles.header}>
         <h1 style={styles.title}>System Settings</h1>
-        <p style={styles.subtitle}>Modify OCR, NLP, database sync, and portal security parameters.</p>
+        <p style={styles.subtitle}>Modify portal security parameters.</p>
       </div>
 
       <form onSubmit={handleSubmit} style={styles.form}>

@@ -12,6 +12,7 @@ function isPastDate(dateStr) {
 }
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { parseSalaryRange } = require('../../utils/validators');
 
 // Helper to parse quantity and clean description
 function parsePostingQuantityAndDescription(row) {
@@ -366,6 +367,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
     }
 
+    const salary = parseSalaryRange(salary_min, salary_max);
+    if (salary.error) {
+      return res.status(400).json({ success: false, error: salary.error });
+    }
+
     if (closing_date && isPastDate(closing_date)) {
       return res.status(400).json({
         success: false,
@@ -433,8 +439,8 @@ router.post('/', async (req, res) => {
         position_id: position_id || null,
         location: locationValue,
         employment_type: employment_type || 'Full-time',
-        salary_min: salary_min || null,
-        salary_max: salary_max || null,
+        salary_min: salary.min,
+        salary_max: salary.max,
         requirements: requirements?.trim() || null,
         responsibilities: responsibilities?.trim() || null,
         benefits: benefits?.trim() || null,
@@ -510,6 +516,11 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
     }
 
+    const salary = parseSalaryRange(salary_min, salary_max);
+    if (salary.error) {
+      return res.status(400).json({ success: false, error: salary.error });
+    }
+
     // Only reject a past end date when it was changed (old postings can keep theirs)
     if (closing_date) {
       const { data: current } = await supabase
@@ -542,8 +553,8 @@ router.put('/:id', async (req, res) => {
         position_id: position_id || null,
         location: location || null,
         employment_type,
-        salary_min: salary_min || null,
-        salary_max: salary_max || null,
+        salary_min: salary.min,
+        salary_max: salary.max,
         requirements: requirements?.trim() || null,
         responsibilities: responsibilities?.trim() || null,
         benefits: benefits?.trim() || null,

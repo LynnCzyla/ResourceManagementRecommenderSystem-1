@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { parsePositiveInt } = require('../../utils/validators');
 
 console.log('✅ requirements route loaded');
 
@@ -396,6 +397,11 @@ router.post('/', async (req, res) => {
             });
         }
 
+        const qtyCheck = parsePositiveInt(quantity, 'Quantity');
+        if (qtyCheck.error) {
+            return res.status(400).json({ success: false, error: qtyCheck.error });
+        }
+
         // Check if project exists and user has access
         const { data: project, error: projectError } = await supabase
             .from('projects')
@@ -432,7 +438,7 @@ router.post('/', async (req, res) => {
             .insert({
                 project_id,
                 role_title,
-                quantity_needed: quantity,
+                quantity_needed: qtyCheck.value,
                 justification: justification || null,
                 priority: priority || 'Medium',
                 status: 'Open',

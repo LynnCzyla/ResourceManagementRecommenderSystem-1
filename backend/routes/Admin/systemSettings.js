@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { requireIntInRange } = require('../../utils/validators');
 
 // GET current system settings
 router.get('/system-settings', async (req, res) => {
@@ -81,33 +82,20 @@ router.put('/system-settings', async (req, res) => {
       minSpecial,
     } = req.body;
 
-    // Validate inputs
-    if (sessionTimeout < 5 || sessionTimeout > 120) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Session timeout must be between 5 and 120 minutes' 
-      });
-    }
-
-    if (maxLoginAttempts < 3 || maxLoginAttempts > 10) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Max login attempts must be between 3 and 10' 
-      });
-    }
-
-    if (maxFileSize < 1 || maxFileSize > 50) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Max file size must be between 1 and 50 MB' 
-      });
-    }
-
-    if (minPasswordLength < 8 || minPasswordLength > 32) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Min password length must be between 8 and 32 characters' 
-      });
+    // Validate inputs (all required, whole numbers, inside range)
+    const checks = [
+      requireIntInRange(sessionTimeout, 'Session timeout (minutes)', 5, 120),
+      requireIntInRange(maxLoginAttempts, 'Max login attempts', 3, 10),
+      requireIntInRange(maxFileSize, 'Max file size (MB)', 1, 50),
+      requireIntInRange(minPasswordLength, 'Min password length', 8, 32),
+      requireIntInRange(minUppercase, 'Min uppercase letters', 1, 5),
+      requireIntInRange(minLowercase, 'Min lowercase letters', 1, 5),
+      requireIntInRange(minNumber, 'Min numbers', 1, 5),
+      requireIntInRange(minSpecial, 'Min special characters', 1, 5),
+    ];
+    const failed = checks.find((c) => c.error);
+    if (failed) {
+      return res.status(400).json({ success: false, message: failed.error });
     }
 
     // Check if settings already exist
