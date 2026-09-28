@@ -1,44 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import weaLogo from '../assets/WEA_logo_bgremoved.png';
 import ApplicantLayout from './Applicant/ApplicantLayout';
 
 export default function ApplicantPortal({ isDark, toggleTheme }) {
-  // ✅ Check if we should show the landing page or the portal
-  const [showPortal, setShowPortal] = useState(() => {
-    // Only auto-skip to the full portal when we're actually on the
-    // dedicated /applicant-portal route (i.e. the tab opened via
-    // "Enter Applicant Portal"). The landing page rendered from the
-    // Login screen should always show the intro + button, even if a
-    // previous visit in this tab already set the "entered" flag.
-    const onPortalRoute = window.location.pathname === '/applicant-portal';
-    const hasEntered = sessionStorage.getItem('applicant_portal_entered') === 'true';
-    const params = new URLSearchParams(window.location.search);
-    const hasEnterParam = params.get('enter') === 'true';
+  const navigate = useNavigate();
+  const location = useLocation();
 
-    return !(onPortalRoute && (hasEntered || hasEnterParam));
-  });
+  // The URL decides which screen to show:
+  //   /applicant-portal              -> landing page
+  //   /applicant-portal/jobs         -> job postings list
+  //   /applicant-portal/jobs/:jobId  -> job postings list + that posting's details
+  // So copying the URL while browsing jobs always brings you back to the jobs.
+  const onLanding = /^\/applicant-portal\/?$/.test(location.pathname);
+  const showPortal = onLanding;
 
-  const handleEnterPortal = () => {
-    sessionStorage.setItem('applicant_portal_entered', 'true');
-    setShowPortal(false);
-  };
+  const handleEnterPortal = () => navigate('/applicant-portal/jobs');
+  const handleBackToLanding = () => navigate('/applicant-portal');
 
-  const handleBackToLanding = () => {
-    sessionStorage.removeItem('applicant_portal_entered');
-    setShowPortal(true);
-  };
-
-  // Check URL params on mount
+  // Backwards compatibility: old links like /applicant-portal?enter=true
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     if (params.get('enter') === 'true') {
-      // Store in sessionStorage so it persists after refresh
-      sessionStorage.setItem('applicant_portal_entered', 'true');
-      setShowPortal(false);
-      // Clean up the URL but keep the flag in sessionStorage
-      window.history.replaceState(null, '', '/applicant-portal');
+      navigate('/applicant-portal/jobs', { replace: true });
     }
-  }, []);
+  }, [location.search, navigate]);
 
   // If in the portal view, show the ApplicantLayout
   if (!showPortal) {
