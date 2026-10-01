@@ -187,8 +187,11 @@ router.get('/', async (req, res) => {
         workloadStatus = 'Available';
         utilizationRate = 0;
       } else {
-        workloadStatus = p.availability_status || 'Available';
-        utilizationRate = workloadService.getUtilizationRate(p.id, workloadStatus, score);
+        // Use cached workload details (from recalculateForEmployee) for accurate W & utilization.
+        // Falls back to local task-count score if no cache entry exists yet.
+        const cached = workloadService.getWorkloadDetails(p.id, p.availability_status || 'Available', score);
+        workloadStatus = cached.workloadStatus || p.availability_status || 'Available';
+        utilizationRate = cached.utilizationRate ?? workloadService.getUtilizationRate(p.id, workloadStatus, score);
       }
 
       const isAssignable = !isPM;
