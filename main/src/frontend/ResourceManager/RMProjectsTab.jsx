@@ -10,7 +10,7 @@ import {
 } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
-const COMPLETED_STATUSES = ['Completed', 'Archived'];
+const COMPLETED_STATUSES = ['Completed', 'Archived', 'Cancelled'];
 
 export default function RMProjectsTab() {
   const [projects, setProjects] = useState([]);
@@ -221,6 +221,7 @@ export default function RMProjectsTab() {
               <>
                 <option value="Completed">Completed</option>
                 <option value="Archived">Archived</option>
+                <option value="Cancelled">Cancelled</option>
               </>
             ) : (
               <>
