@@ -1,105 +1,75 @@
 """
 extraction_recall_test.py
 
-Measures EXTRACTION RECALL: out of all the skills a human reader can find
-in a resume, how many did the pipeline's extraction step actually surface
-(as a candidate, whether it ended up auto_approved OR needs_review)?
+Measures EXTRACTION RECALL: of the skills a human finds in a resume, how many
+did the pipeline surface as candidates (auto_approved OR needs_review)?
 
-This is DIFFERENT from the ML classifier accuracy test
-(test_skill_classification_accuracy.py). That one asks "given a phrase,
-did the classifier label it correctly?" This one asks "did the phrase
-ever make it into the candidate list in the first place?" A skill that
-never gets extracted can never be classified correctly, no matter how
-good the ML model is - so this measures a different, earlier failure
-point in the pipeline.
+Reports two matching modes so you can show sensitivity:
+  - strict : exact match, or containment where the shorter phrase covers
+             >= 50% of the words of the longer one
+  - loose  : any containment either way (original, permissive behavior)
 
-===========================================================================
-FOLDER SETUP (do this before running)
-===========================================================================
-Put your test resumes and their matching "expected skills" files in the
-SAME folder, using this naming convention:
+Also groups results by tier (baseline/easy/medium/hard) from the filename
+suffix, e.g. cv_01_hard.pdf -> tier "hard".
 
-    ocr_test_samples/
-        cv_01.pdf
-        cv_01_expected.txt      <- one skill per line, YOU write this
-                                    by reading cv_01.pdf yourself
-        cv_02.pdf
-        cv_02_expected.txt
-        ...
+Folder layout:
+    cv_01_easy.pdf
+    cv_01_easy_expected.txt     <- one skill per line
 
-Each *_expected.txt should contain the skills a human reading that resume
-would list - one per line, plain text, no numbering/bullets needed:
-
-    Microsoft Excel
-    Technical Quotation and Proposal Preparation
-    Project Coordination and Monitoring
-    Inside Sales Engineering
-    ...
-
-===========================================================================
-USAGE
-===========================================================================
-    cd D:\\ResourceManagementRecommenderSystem\\python\\scripts
-    python extraction_recall_test.py --folder ocr_test_samples
-
-Writes results\\extraction_recall_results.csv and prints a summary table.
+Usage (run from the folder that contains runner.py):
+    python extraction_recall_test.py --folder ocr_test_samples_v2
+    python extraction_recall_test.py --folder ocr_test_samples_v2 --out-name recall_v2
 """
-
 import argparse
 import csv
 import json
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
+
+TIER_ORDER = ["baseline", "easy", "medium", "hard"]
 
 
 def normalize(text):
-    """Lowercase, strip leading bullet/garbage chars and punctuation,
-    collapse whitespace. Mirrors the kind of cleanup the pipeline itself
-    should eventually do, so matching isn't unfairly punished by known
-    OCR bullet artifacts like '¢ ' or stray 'E '."""
     text = text.strip()
-    # strip common OCR bullet artifacts at the start of the line
-    text = re.sub(r'^[¢•\-\*eE]+\s+', '', text)
+    text = re.sub(r'^[¢•\-\*eE]+\s+', '', text)   # OCR bullet artifacts
     text = text.lower()
     text = re.sub(r'[^a-z0-9\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    return re.sub(r'\s+', ' ', text).strip()
 
 
-def is_match(expected_norm, extracted_norm):
-    """Permissive containment match in either direction - same spirit as
-    the existing [DIAG] trace_skill check in module2_nlp.py
-    ('trace_skill in c.lower()'). A hit either way counts as found,
-    since resume skill phrasing rarely matches ground truth word-for-word."""
-    if not expected_norm or not extracted_norm:
+def match_loose(exp, ext):
+    if not exp or not ext:
         return False
-    return expected_norm in extracted_norm or extracted_norm in expected_norm
+    return exp in ext or ext in exp
+
+
+def match_strict(exp, ext):
+    if not exp or not ext:
+        return False
+    if exp == ext:
+        return True
+    short, long_ = sorted([exp, ext], key=len)
+    if short not in long_:
+        return False
+    return len(short.split()) / len(long_.split()) >= 0.5
 
 
 def run_pipeline(resume_path, employee_id="RECALL-TEST"):
-    """Calls runner.py process_document and returns the parsed JSON result.
-    stdout is reserved for the final JSON payload only (see runner.py's
-    stdout/stderr contract) - all diagnostic prints go to stderr, so this
-    capture is clean."""
     cmd = [sys.executable, "runner.py", "process_document",
            str(resume_path), employee_id, "resume"]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
-        raise RuntimeError(f"runner.py exited {proc.returncode}. stderr tail:\n"
-                            f"{proc.stderr[-1000:]}")
+        raise RuntimeError(f"runner.py exited {proc.returncode}. stderr tail:\n{proc.stderr[-1000:]}")
     try:
         return json.loads(proc.stdout.strip())
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Could not parse JSON from stdout: {e}\n"
-                            f"stdout was: {proc.stdout[:500]}")
+        raise RuntimeError(f"Could not parse JSON: {e}\nstdout: {proc.stdout[:500]}")
 
 
 def get_all_extracted_skills(result):
-    """Pull every candidate skill the pipeline surfaced, regardless of
-    whether the classifier auto-approved it or sent it for review - we
-    want to know if it was EXTRACTED at all, not whether it was approved."""
     nlp = result.get("nlp", {}) or {}
     skills = set(nlp.get("skills", []) or [])
     skills.update(nlp.get("auto_approved", []) or [])
@@ -107,105 +77,115 @@ def get_all_extracted_skills(result):
     return skills
 
 
+def tier_of(stem):
+    suffix = stem.rsplit("_", 1)[-1]
+    return suffix if suffix in TIER_ORDER else "untiered"
+
+
+def score(expected_skills, extracted_norm, matcher):
+    found, missing = 0, []
+    for exp in expected_skills:
+        e = normalize(exp)
+        if any(matcher(e, x) for x in extracted_norm):
+            found += 1
+        else:
+            missing.append(exp)
+    return found, missing
+
+
 def main():
     ap = argparse.ArgumentParser(description="Extraction recall batch test")
-    ap.add_argument("--folder", default="ocr_test_samples",
-                     help="Folder containing resumes + *_expected.txt files")
-    ap.add_argument("--pattern", default="*.pdf",
-                     help="Glob pattern for resume files (default: *.pdf)")
+    ap.add_argument("--folder", default="ocr_test_samples_v2")
+    ap.add_argument("--pattern", default="*.pdf")
+    ap.add_argument("--out-name", default="extraction_recall_results",
+                    help="Output CSV base name (avoids overwriting old runs)")
     args = ap.parse_args()
 
     folder = Path(args.folder)
     resumes = sorted(folder.glob(args.pattern))
     if not resumes:
-        print(f"[ERROR] No files matching '{args.pattern}' found in {folder}")
+        print(f"[ERROR] No files matching '{args.pattern}' in {folder}")
         return
 
     out_dir = Path("results")
     out_dir.mkdir(exist_ok=True)
-    csv_path = out_dir / "extraction_recall_results.csv"
+    csv_path = out_dir / f"{args.out_name}.csv"
 
     rows = []
-    total_expected = 0
-    total_found = 0
+    tiers = defaultdict(lambda: dict(docs=0, exp=0, strict=0, loose=0))
 
     for resume_path in resumes:
         expected_path = resume_path.with_name(resume_path.stem + "_expected.txt")
         if not expected_path.exists():
-            print(f"[SKIP] {resume_path.name} - no matching {expected_path.name} found")
+            print(f"[SKIP] {resume_path.name} - no {expected_path.name}")
             continue
-
-        expected_skills = [
-            line.strip() for line in expected_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        if not expected_skills:
+        expected = [l.strip() for l in expected_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if not expected:
             print(f"[SKIP] {resume_path.name} - {expected_path.name} is empty")
             continue
 
-        print(f"[RUN] {resume_path.name} ({len(expected_skills)} expected skills)...")
+        print(f"[RUN] {resume_path.name} ({len(expected)} expected skills)...")
         try:
             result = run_pipeline(resume_path)
         except RuntimeError as e:
             print(f"[ERROR] {resume_path.name}: {e}")
             continue
 
-        extracted_raw = get_all_extracted_skills(result)
-        extracted_norm = [normalize(s) for s in extracted_raw]
+        extracted_norm = [normalize(s) for s in get_all_extracted_skills(result)]
+        f_strict, miss_strict = score(expected, extracted_norm, match_strict)
+        f_loose, _ = score(expected, extracted_norm, match_loose)
 
-        missing = []
-        found_count = 0
-        for exp in expected_skills:
-            exp_norm = normalize(exp)
-            hit = any(is_match(exp_norm, ext_norm) for ext_norm in extracted_norm)
-            if hit:
-                found_count += 1
-            else:
-                missing.append(exp)
-
-        recall = found_count / len(expected_skills) if expected_skills else 0.0
-        total_expected += len(expected_skills)
-        total_found += found_count
+        tier = tier_of(resume_path.stem)
+        t = tiers[tier]
+        t["docs"] += 1
+        t["exp"] += len(expected)
+        t["strict"] += f_strict
+        t["loose"] += f_loose
 
         rows.append({
             "resume": resume_path.name,
-            "expected_count": len(expected_skills),
-            "found_count": found_count,
-            "recall_pct": round(recall * 100, 1),
-            "missing_skills": "; ".join(missing),
+            "tier": tier,
+            "expected_count": len(expected),
+            "found_strict": f_strict,
+            "recall_strict_pct": round(f_strict / len(expected) * 100, 1),
+            "found_loose": f_loose,
+            "recall_loose_pct": round(f_loose / len(expected) * 100, 1),
+            "missing_skills_strict": "; ".join(miss_strict),
         })
-
-        print(f"       recall = {found_count}/{len(expected_skills)} "
-              f"({recall*100:.1f}%)")
-        if missing:
-            print(f"       missing: {missing}")
+        print(f"       strict={f_strict}/{len(expected)} ({f_strict/len(expected)*100:.1f}%)  "
+              f"loose={f_loose}/{len(expected)} ({f_loose/len(expected)*100:.1f}%)")
+        if miss_strict:
+            print(f"       missing (strict): {miss_strict}")
 
     if not rows:
-        print("\n[ERROR] No resumes were successfully tested. "
-              "Check that *_expected.txt files exist and match resume filenames.")
+        print("\n[ERROR] No resumes were tested. Check *_expected.txt names.")
         return
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "resume", "expected_count", "found_count", "recall_pct", "missing_skills"
-        ])
-        writer.writeheader()
-        writer.writerows(rows)
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
 
-    overall_recall = (total_found / total_expected * 100) if total_expected else 0.0
-
-    print("\n" + "=" * 60)
-    print(" EXTRACTION RECALL SUMMARY")
-    print("=" * 60)
-    print(f"{'Resume':<20} {'Expected':<10} {'Found':<10} {'Recall'}")
-    print("-" * 60)
-    for r in rows:
-        print(f"{r['resume']:<20} {r['expected_count']:<10} "
-              f"{r['found_count']:<10} {r['recall_pct']}%")
-    print("-" * 60)
-    print(f"{'OVERALL':<20} {total_expected:<10} {total_found:<10} "
-          f"{overall_recall:.1f}%")
-    print("=" * 60)
+    print("\n" + "=" * 72)
+    print(" EXTRACTION RECALL BY TIER")
+    print("=" * 72)
+    print(f"{'Tier':<10}{'Docs':<7}{'Expected':<10}{'Strict':<16}{'Loose'}")
+    print("-" * 72)
+    tot = dict(docs=0, exp=0, strict=0, loose=0)
+    for tier in TIER_ORDER + ["untiered"]:
+        t = tiers.get(tier)
+        if not t or not t["exp"]:
+            continue
+        print(f"{tier:<10}{t['docs']:<7}{t['exp']:<10}"
+              f"{t['strict']:>3} ({t['strict']/t['exp']*100:5.1f}%)   "
+              f"{t['loose']:>3} ({t['loose']/t['exp']*100:5.1f}%)")
+        for k in tot:
+            tot[k] += t[k]
+    print("-" * 72)
+    print(f"{'OVERALL':<10}{tot['docs']:<7}{tot['exp']:<10}"
+          f"{tot['strict']:>3} ({tot['strict']/tot['exp']*100:5.1f}%)   "
+          f"{tot['loose']:>3} ({tot['loose']/tot['exp']*100:5.1f}%)")
+    print("=" * 72)
     print(f"\nWrote: {csv_path}")
 
 

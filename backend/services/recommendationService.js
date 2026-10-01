@@ -217,7 +217,7 @@ class RecommendationEngine {
                 .from('project_tasks')
                 .select('profile_id, priority')
                 .in('profile_id', profileIds)
-                .in('status', ['Active', 'In Progress']),
+                .in('status', ['Pending', 'Active', 'In Progress']),
             supabase
                 .from('performance_records')
                 .select('profile_id, rating')
@@ -1296,7 +1296,7 @@ class RecommendationEngine {
             .from('project_tasks')
             .select('priority')
             .eq('profile_id', profileId)
-            .in('status', ['Active', 'In Progress']);
+            .in('status', ['Pending', 'Active', 'In Progress']);
 
         if (error) throw error;
 

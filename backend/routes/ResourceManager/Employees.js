@@ -163,15 +163,15 @@ router.get('/', async (req, res) => {
 
       let workloadStatus;
       let utilizationRate;
-      if (score === 0 && assignCount === 0) {
+      if (score === 0) {
         workloadStatus = 'Available';
         utilizationRate = 0;
-      } else if (score <= 3 && assignCount <= 1) {
+      } else if (score <= 3) {
         workloadStatus = 'Limited Availability';
-        utilizationRate = Math.min(Math.round(((score + assignCount * 2) / 6) * 100), 80) || 50;
+        utilizationRate = Math.min(Math.round((score / 6) * 100), 100);
       } else {
         workloadStatus = 'Fully Utilized';
-        utilizationRate = 100;
+        utilizationRate = Math.min(Math.round((score / 6) * 100), 100);
       }
 
       const isAssignable = true;
