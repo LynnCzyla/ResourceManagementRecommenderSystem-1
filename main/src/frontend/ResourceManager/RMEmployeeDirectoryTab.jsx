@@ -367,7 +367,7 @@ const handleViewEmployee = async (emp) => {
                   }}
                 >
                   {emp.workloadStatus || 'Available'}
-                  {emp.rawRole !== 'Project Manager' && emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.workloadStatus !== 'Available'
+                  {emp.rawRole !== 'Project Manager' && emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.utilizationRate > 0
                     ? ` (${emp.utilizationRate}%)`
                     : ''}
                 </span>
