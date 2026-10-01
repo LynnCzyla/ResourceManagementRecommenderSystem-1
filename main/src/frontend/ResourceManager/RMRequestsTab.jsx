@@ -771,8 +771,8 @@ export default function RMRequestsTab() {
                                 const rawFactor = rec.availabilityFactor ?? (1 / (1 + Math.exp(0.4 * (wScore - 7))));
                                 const availPct = wScore === 0 ? 100 : Math.min(100, Math.max(1, Math.round((rawFactor / 0.94263) * 100)));
                                 const statusLabel = rec.availabilityStatus || rec.breakdown?.availability?.status || (availPct >= 80 ? 'Available' : availPct >= 50 ? 'Limited Availability' : 'Fully Utilized');
-                                const isHeavy = availPct < 50;
-                                const isLimited = availPct < 80;
+                                const isHeavy = statusLabel === 'Fully Utilized' || availPct < 50;
+                                const isLimited = !isHeavy && (statusLabel === 'Limited Availability' || availPct < 80);
 
                                 return (
                                   <span style={{
