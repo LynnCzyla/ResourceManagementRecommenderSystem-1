@@ -4,22 +4,87 @@ const multer = require('multer');
 const documentController = require('../../controllers/documentController');
 const { verifyToken } = require('../Middleware/auth');
 
-// Configure multer for file uploads
+const supabase = require('../../supabase');
+
+// Configure multer memory storage
 const storage = multer.memoryStorage();
-const upload = multer({
-    storage: storage,
-    limits: {
-        fileSize: 10 * 1024 * 1024
-    },
-    fileFilter: (req, file, cb) => {
+
+// Cache system settings briefly (60 seconds) to avoid DB roundtrip on every file upload
+let cachedSettings = null;
+let lastSettingsFetch = 0;
+
+async function getSystemSettings() {
+  const now = Date.now();
+  if (cachedSettings && (now - lastSettingsFetch < 60000)) {
+    return cachedSettings;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('max_file_upload_size')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) {
+      console.warn('⚠️ Could not fetch system settings, using default 10MB:', error?.message);
+      cachedSettings = { max_file_upload_size: 10 };
+    } else {
+      cachedSettings = { max_file_upload_size: data.max_file_upload_size || 10 };
+    }
+  } catch (err) {
+    console.warn('⚠️ Error fetching system settings, using default 10MB:', err.message);
+    cachedSettings = { max_file_upload_size: 10 };
+  }
+  lastSettingsFetch = now;
+  return cachedSettings;
+}
+
+// Dynamic multer upload middleware reading max_file_upload_size from system settings
+const dynamicUpload = async (req, res, next) => {
+  try {
+    const settings = await getSystemSettings();
+    const maxFileSizeMB = settings.max_file_upload_size || 10;
+    const maxFileSizeBytes = maxFileSizeMB * 1024 * 1024;
+
+    const uploader = multer({
+      storage: storage,
+      limits: {
+        fileSize: maxFileSizeBytes
+      },
+      fileFilter: (req, file, cb) => {
         const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
         if (allowedTypes.includes(file.mimetype)) {
-            cb(null, true);
+          cb(null, true);
         } else {
-            cb(new Error('Invalid file type. Only PNG, JPG, JPEG, and PDF are allowed'));
+          cb(new Error('Invalid file type. Only PNG, JPG, JPEG, and PDF are allowed'));
         }
-    }
-});
+      }
+    }).single('document');
+
+    uploader(req, res, (err) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({
+            success: false,
+            error: `File size exceeds the ${maxFileSizeMB}MB limit configured by the administrator. Please upload a smaller file.`
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          error: err.message || 'File upload failed'
+        });
+      }
+      next();
+    });
+  } catch (err) {
+    console.error('Error in dynamicUpload middleware:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Server error processing file upload'
+    });
+  }
+};
 
 // ============ LOAD FEEDBACK CONTROLLER ============
 let feedbackController;
@@ -31,10 +96,28 @@ try {
     feedbackController = null;
 }
 
-const supabase = require('../../supabase');
+// ============ SETTINGS ROUTE FOR EMPLOYEES ============
+// GET /api/employee/system-settings (fetches max file upload size configured by Super Admin)
+router.get('/system-settings', verifyToken, async (req, res) => {
+  try {
+    const settings = await getSystemSettings();
+    res.json({
+      success: true,
+      data: {
+        max_file_upload_size: settings.max_file_upload_size || 10
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching employee system settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch upload settings'
+    });
+  }
+});
 
 // ============ DOCUMENT ROUTES (ALL PROTECTED) ============
-router.post('/process-document', verifyToken, upload.single('document'), documentController.processDocument);
+router.post('/process-document', verifyToken, dynamicUpload, documentController.processDocument);
 router.get('/documents', verifyToken, documentController.getDocuments);
 
 // ============================================================

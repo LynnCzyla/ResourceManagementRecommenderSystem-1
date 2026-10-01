@@ -163,19 +163,20 @@ export default function RMDashboardTab() {
     }
   };
 
-  // Calculations for Resource Analytics Statistics
-  const employeesOnly = employees.filter(
-    (e) => (e.rawRole || '').trim().toLowerCase() === 'employee' || (e.role || '').trim().toLowerCase() === 'employee'
-  );
-  const hasEmployeesData = employeesOnly.length > 0;
-  const activeEmployeesCount = employeesOnly.filter((e) => e.workloadStatus !== 'Available').length;
+  // Calculations for Resource Analytics Statistics across the workforce (employees only, excluding PMs)
+  const workforce = employees.filter((e) => {
+    const r = (e.rawRole || e.role || '').toLowerCase();
+    return !r.includes('project manager') && !r.includes('project_manager');
+  });
+  const hasEmployeesData = workforce.length > 0;
+  const activeEmployeesCount = workforce.filter((e) => e.workloadStatus !== 'Available').length;
   
   const avgUtilization = hasEmployeesData
-    ? Math.round(employeesOnly.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / employeesOnly.length)
+    ? Math.round(workforce.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / workforce.length)
     : 0;
 
-  const availablePoolCount = employeesOnly.filter((e) => e.workloadStatus === 'Available').length;
-  const fullyUtilizedCount = employeesOnly.filter((e) => e.workloadStatus === 'Fully Utilized').length;
+  const availablePoolCount = workforce.filter((e) => e.workloadStatus === 'Available').length;
+  const fullyUtilizedCount = workforce.filter((e) => e.workloadStatus === 'Fully Utilized').length;
 
   const getUtilizationStatus = (val) => {
     if (val < 60) return { label: 'Underutilized', color: 'var(--color-warning)', bg: 'rgba(245, 158, 11, 0.1)' };

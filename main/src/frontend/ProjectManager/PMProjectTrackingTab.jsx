@@ -68,6 +68,7 @@ export default function PMProjectTrackingTab({ user }) {
   // the header filter is set to "All Projects" (where `employees` is scoped
   // differently, or empty).
   const [taskModalEmployees, setTaskModalEmployees] = useState([]);
+  const [createModalEmployees, setCreateModalEmployees] = useState([]);
   const [newTaskData, setNewTaskData] = useState({
     title: '',
     description: '',
@@ -145,6 +146,45 @@ export default function PMProjectTrackingTab({ user }) {
     loadTasks(selectedProjectId);
   }, [selectedProjectId]);
 
+  const handleOpenCreateTask = () => {
+    setFormError('');
+    if (selectedProjectId !== 'all' && selectedProjectId) {
+      setNewTaskData({
+        title: '',
+        description: '',
+        employeeId: '',
+        priority: 'Medium',
+        dueDate: '',
+        projectId: selectedProjectId
+      });
+      setCreateModalEmployees(employees);
+    } else {
+      setNewTaskData({
+        title: '',
+        description: '',
+        employeeId: '',
+        priority: 'Medium',
+        dueDate: '',
+        projectId: ''
+      });
+      setCreateModalEmployees([]);
+    }
+    setShowCreateTaskModal(true);
+  };
+
+  const handleCloseCreateModal = () => {
+    setShowCreateTaskModal(false);
+    setCreateModalEmployees([]);
+    setNewTaskData({
+      title: '',
+      description: '',
+      employeeId: '',
+      priority: 'Medium',
+      dueDate: '',
+      projectId: ''
+    });
+  };
+
   const handleCreateTask = async (e) => {
     e.preventDefault();
     const targetProjectId = selectedProjectId !== 'all' ? selectedProjectId : newTaskData.projectId;
@@ -167,15 +207,7 @@ export default function PMProjectTrackingTab({ user }) {
       });
 
       await loadTasks(selectedProjectId);
-      setShowCreateTaskModal(false);
-      setNewTaskData({
-        title: '',
-        description: '',
-        employeeId: '',
-        priority: 'Medium',
-        dueDate: '',
-        projectId: ''
-      });
+      handleCloseCreateModal();
     } catch (err) {
       console.error('Failed to create task:', err);
       setFormError(err.message || 'Failed to create task');
@@ -240,12 +272,12 @@ export default function PMProjectTrackingTab({ user }) {
     if (!taskToEdit) return;
 
     const result = await Swal.fire({
-      title: 'Remove Task?',
-      text: `Are you sure you want to permanently delete "${taskToEdit.title}"? This action cannot be undone.`,
+      title: 'Cancel Task?',
+      text: `Are you sure you want to cancel "${taskToEdit.title}"? The task will be marked as Cancelled to preserve employee progress history.`,
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonText: 'Yes, delete task',
-      cancelButtonText: 'Cancel',
+      confirmButtonText: 'Yes, cancel task',
+      cancelButtonText: 'Keep Task',
       reverseButtons: true,
       confirmButtonColor: '#ef4444',
       cancelButtonColor: '#64748b',
@@ -269,8 +301,8 @@ export default function PMProjectTrackingTab({ user }) {
 
       Swal.fire({
         icon: 'success',
-        title: 'Task Removed',
-        text: `Task "${taskToEdit.title}" was completely deleted.`,
+        title: 'Task Cancelled',
+        text: `Task "${taskToEdit.title}" was marked as Cancelled.`,
         timer: 2000,
         showConfirmButton: false,
         customClass: {
@@ -280,11 +312,11 @@ export default function PMProjectTrackingTab({ user }) {
         }
       });
     } catch (err) {
-      console.error('Failed to delete task:', err);
+      console.error('Failed to cancel task:', err);
       Swal.fire({
         icon: 'error',
-        title: 'Failed to Remove Task',
-        text: err.message || 'An error occurred while deleting the task.',
+        title: 'Failed to Cancel Task',
+        text: err.message || 'An error occurred while cancelling the task.',
         customClass: {
           popup: 'swal-custom-popup',
           title: 'swal-custom-title',
@@ -664,10 +696,7 @@ export default function PMProjectTrackingTab({ user }) {
           {/* 3. + Assign Task Button */}
           {!isViewingCompletedProject && (
             <button 
-              onClick={() => {
-                setFormError('');
-                setShowCreateTaskModal(true);
-              }} 
+              onClick={handleOpenCreateTask} 
               style={styles.createBtn}
             >
               + Assign Task
@@ -867,11 +896,19 @@ export default function PMProjectTrackingTab({ user }) {
                   <label style={styles.formLabel}>Project</label>
                   <select 
                     value={newTaskData.projectId || ''} 
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const pId = e.target.value;
                       setNewTaskData(prev => ({ ...prev, projectId: pId, employeeId: '' }));
                       if (pId) {
-                        loadEmployees(pId);
+                        try {
+                          const data = await getEmployees(user?.id, undefined, pId);
+                          setCreateModalEmployees(data || []);
+                        } catch (err) {
+                          console.error('Failed to load project employees:', err);
+                          setCreateModalEmployees([]);
+                        }
+                      } else {
+                        setCreateModalEmployees([]);
                       }
                     }} 
                     style={styles.modalSelect}
@@ -916,7 +953,7 @@ export default function PMProjectTrackingTab({ user }) {
                   required
                 >
                   <option value="">-- Choose Resource --</option>
-                  {employees.map(emp => (
+                  {(selectedProjectId !== 'all' ? employees : createModalEmployees).map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
                   ))}
                 </select>
@@ -950,7 +987,7 @@ export default function PMProjectTrackingTab({ user }) {
               </div>
 
               <div style={styles.modalActions}>
-                <button type="button" onClick={() => setShowCreateTaskModal(false)} style={styles.cancelBtn}>Cancel</button>
+                <button type="button" onClick={handleCloseCreateModal} style={styles.cancelBtn}>Cancel</button>
                 <button type="submit" style={styles.saveBtn}>Assign Task</button>
               </div>
             </form>
@@ -1112,7 +1149,7 @@ export default function PMProjectTrackingTab({ user }) {
                     <polyline points="3 6 5 6 21 6"></polyline>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                   </svg>
-                  {deletingTask ? 'Removing...' : 'Remove'}
+                  {deletingTask ? 'Cancelling...' : 'Cancel Task'}
                 </button>
                 <div style={styles.modalRightActions}>
                   <button type="button" onClick={handleCloseEditModal} style={styles.cancelBtn}>Cancel</button>

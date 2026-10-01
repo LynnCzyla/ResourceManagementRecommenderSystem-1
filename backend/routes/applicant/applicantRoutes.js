@@ -22,14 +22,14 @@ async function getSystemSettings() {
       .single();
 
     if (error) {
-      console.warn('⚠️ Could not fetch system settings, using default 5MB:', error.message);
-      return { max_file_upload_size: 5 };
+      console.warn('⚠️ Could not fetch system settings, using default 10MB:', error.message);
+      return { max_file_upload_size: 10 };
     }
 
-    return data || { max_file_upload_size: 5 };
+    return data || { max_file_upload_size: 10 };
   } catch (err) {
-    console.warn('⚠️ Error fetching system settings, using default 5MB:', err.message);
-    return { max_file_upload_size: 5 };
+    console.warn('⚠️ Error fetching system settings, using default 10MB:', err.message);
+    return { max_file_upload_size: 10 };
   }
 }
 
@@ -231,7 +231,7 @@ router.post('/applications', async (req, res, next) => {
   try {
     // ✅ Get system settings for file size limit
     const settings = await getSystemSettings();
-    const maxFileSizeMB = settings.max_file_upload_size || 5;
+    const maxFileSizeMB = settings.max_file_upload_size || 10;
     const maxFileSizeBytes = maxFileSizeMB * 1024 * 1024;
 
     console.log(`📋 File upload limit: ${maxFileSizeMB}MB`);

@@ -168,7 +168,10 @@ export default function EmployeeFeedbackTab({ user }) {
 
       {!hasFeedback ? (
         <div style={styles.emptyState}>
-          <p>No client feedback yet. Once a client completes a feedback form for a project you worked on, it will show up here.</p>
+          <p>No feedback has been shared with you yet.</p>
+          <span style={{ fontSize: 13, color: 'var(--color-text-muted)', display: 'block', marginTop: 6 }}>
+            Feedback will appear here once reviewed and granted visibility by the Resource Manager.
+          </span>
         </div>
       ) : (
         <>

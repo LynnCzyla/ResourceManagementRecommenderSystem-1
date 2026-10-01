@@ -1,6 +1,6 @@
-// backend/routes/ProjectManager/projects.js
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 const { parsePositiveInt } = require('../../utils/validators');
@@ -137,6 +137,22 @@ function transformProject(row, clientFeedback = null) {
     requiredSkills: [...new Set([...allPrimarySkills, ...allSecondarySkills])],
     requiredPrimarySkills: [...new Set(allPrimarySkills)],
     requiredSecondarySkills: [...new Set(allSecondarySkills)],
+    allocatedEmployees: (row.project_assignments || [])
+      .filter(a => ['Assigned', 'Active'].includes(a.status))
+      .map(a => {
+        const p = a.profiles || {};
+        const name = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unnamed Employee';
+        return {
+          id: a.id,
+          profileId: a.profile_id,
+          employeeId: p.employee_id || 'N/A',
+          name,
+          role: a.assigned_role || p.positions?.position_name || 'Team Member',
+          department: p.departments?.department_name || '',
+          avatar: p.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
+          status: a.status,
+        };
+      }),
     resources: requirements.map(r => {
       const skillRows = r.requirement_skills || [];
       const primarySkills = skillRows
@@ -191,6 +207,21 @@ const PROJECT_SELECT = `
       skills,
       skill_type
     )
+  ),
+  project_assignments (
+    id,
+    profile_id,
+    assigned_role,
+    status,
+    profiles!project_assignments_profile_id_fkey (
+      id,
+      employee_id,
+      first_name,
+      last_name,
+      avatar_url,
+      positions ( position_name ),
+      departments ( department_name )
+    )
   )
 `;
 
@@ -226,7 +257,11 @@ function invalidateProjectsCache() {
 router.get('/', async (req, res) => {
   try {
     const { createdBy } = req.query;
-    const cacheKey = `list:${createdBy || 'all'}`;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const effectiveCreatedBy = userRole === 'Project Manager' ? userId : createdBy;
+    const cacheKey = `list:${effectiveCreatedBy || 'all'}:${userId || 'anonymous'}`;
 
     const cached = getCached(cacheKey);
     if (cached) {
@@ -236,9 +271,10 @@ router.get('/', async (req, res) => {
     let query = supabase
       .from('projects')
       .select(PROJECT_SELECT)
+      .neq('status', 'Deleted')
       .order('created_at', { ascending: false });
 
-    if (createdBy) query = query.eq('created_by', createdBy);
+    if (effectiveCreatedBy) query = query.eq('created_by', effectiveCreatedBy);
 
     const { data, error } = await query;
     if (error) throw error;
@@ -331,6 +367,7 @@ router.get('/:id/history-details', async (req, res) => {
         updated_at
       `)
       .eq('id', id)
+      .eq('created_by', req.user.id)
       .single();
 
     if (projectError || !project) {
@@ -622,6 +659,7 @@ router.get('/:id', async (req, res) => {
       .from('projects')
       .select(PROJECT_SELECT)
       .eq('id', id)
+      .eq('created_by', req.user.id)
       .single();
 
     if (error) throw error;
@@ -695,8 +733,8 @@ router.post('/', async (req, res) => {
       endDate,
       priority = 'Medium',
       resources = [],
-      createdBy, // profile id of the PM creating this project
     } = req.body;
+    const createdBy = req.user.id;
 
     if (!name || !description) {
       return res.status(400).json({ success: false, message: 'Project name and description are required' });
@@ -705,9 +743,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Start date and end date are required' });
     }
 
-    // ✅ Validate every resource has at least one primary skill
+    // ✅ Validate every resource has at least one primary skill (handles string or array)
     for (const resource of resources) {
-      const hasPrimary = resource.primarySkills && resource.primarySkills.trim().length > 0;
+      const primaryText = Array.isArray(resource.primarySkills)
+        ? resource.primarySkills.join(',')
+        : (resource.primarySkills || '');
+      const hasPrimary = primaryText.trim().length > 0;
       if (!hasPrimary) {
         return res.status(400).json({
           success: false,
@@ -738,7 +779,7 @@ router.post('/', async (req, res) => {
         end_date: endDate,
         priority,
         status: 'Pending Approval',
-        created_by: createdBy || null,
+        created_by: createdBy,
       })
       .select()
       .single();
@@ -759,18 +800,23 @@ router.post('/', async (req, res) => {
           justification: resource.justification || null,
           start_date: resource.startDate || startDate || null,
           end_date: resource.endDate || endDate || null,
+          status: 'Pending',
         })
         .select()
         .single();
 
       if (reqError) throw reqError;
 
-      const primarySkillNames = resource.primarySkills
-        ? resource.primarySkills.split(',').map(s => s.trim()).filter(Boolean)
-        : [];
-      const secondarySkillNames = resource.secondarySkills
-        ? resource.secondarySkills.split(',').map(s => s.trim()).filter(Boolean)
-        : [];
+      const primarySkillNames = Array.isArray(resource.primarySkills)
+        ? resource.primarySkills.map(s => String(s).trim()).filter(Boolean)
+        : (resource.primarySkills
+          ? resource.primarySkills.split(',').map(s => s.trim()).filter(Boolean)
+          : []);
+      const secondarySkillNames = Array.isArray(resource.secondarySkills)
+        ? resource.secondarySkills.map(s => String(s).trim()).filter(Boolean)
+        : (resource.secondarySkills
+          ? resource.secondarySkills.split(',').map(s => s.trim()).filter(Boolean)
+          : []);
 
       await attachSkillsToRequirement(requirement.id, primarySkillNames, 'Primary');
       await attachSkillsToRequirement(requirement.id, secondarySkillNames, 'Secondary');
@@ -786,7 +832,7 @@ router.post('/', async (req, res) => {
 
     await logAuditEvent({
       req,
-      userId: createdBy || null,
+      userId: req.user?.id || createdBy || null,
       action: 'Created',
       systemCategory: 'Resource Management',
       logDescription: `Created project ${name}`,
@@ -816,13 +862,30 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: teamSizeCheck.error });
     }
 
+    const VALID_PROJECT_STATUSES = ['Pending Approval', 'Pending', 'Active', 'On Hold', 'Completed', 'Cancelled'];
+    if (status !== undefined) {
+      if (!VALID_PROJECT_STATUSES.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status: "${status}". Valid statuses are: ${VALID_PROJECT_STATUSES.join(', ')}`
+        });
+      }
+    }
+
     const updateData = { updated_at: new Date().toISOString() };
     if (name !== undefined) updateData.project_name = name;
     if (description !== undefined) updateData.project_description = description;
     if (startDate !== undefined) updateData.start_date = startDate;
     if (endDate !== undefined) updateData.end_date = endDate;
     if (priority !== undefined) updateData.priority = priority;
-    if (status !== undefined) updateData.status = status;
+    if (status !== undefined) {
+      updateData.status = status;
+      if (status === 'Cancelled') {
+        updateData.cancelled_at = new Date().toISOString();
+        updateData.cancelled_by = req.user.id;
+        updateData.cancellation_reason = 'Cancelled by Project Manager';
+      }
+    }
     if (teamSize !== undefined) updateData.team_size = teamSizeCheck.value;
     if (duration !== undefined) updateData.duration_days = parseInt(duration, 10) || null;
 
@@ -830,6 +893,7 @@ router.put('/:id', async (req, res) => {
       .from('projects')
       .update(updateData)
       .eq('id', id)
+      .eq('created_by', req.user.id)
       .select()
       .single();
 
@@ -959,16 +1023,25 @@ router.patch('/:id/status', async (req, res) => {
     const { id } = req.params;
     const { status, restoreMode = 'with_previous', reason } = req.body;
 
-    if (!status) {
-      return res.status(400).json({ success: false, message: 'Status is required' });
+    const VALID_PATCH_STATUSES = ['Active', 'On Hold', 'Completed', 'Cancelled'];
+    if (!status || !VALID_PATCH_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Status is required and must be one of: ${VALID_PATCH_STATUSES.join(', ')}`
+      });
     }
 
     // Fetch existing project to capture name, description, and creator
-    const { data: project, error: projErr } = await supabase
+    let projectQuery = supabase
       .from('projects')
       .select('id, project_name, status, created_by, project_description')
-      .eq('id', id)
-      .single();
+      .eq('id', id);
+
+    if (!req.user.is_admin && !req.user.is_super_admin) {
+      projectQuery = projectQuery.eq('created_by', req.user.id);
+    }
+
+    const { data: project, error: projErr } = await projectQuery.single();
 
     if (projErr || !project) {
       return res.status(404).json({ success: false, message: 'Project not found' });
@@ -981,26 +1054,19 @@ router.patch('/:id/status', async (req, res) => {
       .filter(Boolean)
       .join(' ')
       .trim() || 'Project Manager';
-    const wasCompleted = project.status === 'Completed' || project.status === 'Cancelled';
+    const wasCompleted = project.status === 'Completed' || project.status === 'Cancelled' || project.status === 'Canceled';
     const isRestoring = status === 'Active' && wasCompleted;
     const isCancelling = status === 'Cancelled';
 
     const updatePayload = { status, updated_at: nowIso };
     if (isRestoring) {
-      const existingDesc = (project.project_description || '')
-        .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
-        .trim();
-      if (!existingDesc.includes('<!-- RESTORED -->') && !existingDesc.includes('[RESTORED]')) {
-        updatePayload.project_description = `${existingDesc} <!-- RESTORED -->`.trim();
-      } else {
-        updatePayload.project_description = existingDesc;
-      }
+      updatePayload.restored_at = nowIso;
+      updatePayload.restored_by = req.user.id;
     } else if (isCancelling) {
-      const existingDesc = (project.project_description || '')
-        .replace(/<!-- CANCELLED_REASON:\s*[\s\S]*?\s*-->/g, '')
-        .trim();
       const reasonText = (reason || '').trim() || 'No reason provided';
-      updatePayload.project_description = `${existingDesc} <!-- CANCELLED_REASON: ${reasonText} -->`.trim();
+      updatePayload.cancelled_at = nowIso;
+      updatePayload.cancelled_by = req.user.id;
+      updatePayload.cancellation_reason = reasonText;
     }
 
     const { data, error } = await supabase
@@ -1012,15 +1078,17 @@ router.patch('/:id/status', async (req, res) => {
 
     if (error) throw error;
 
+    let skippedEmployees = [];
+
     // Handle project completion
     if (status === 'Completed') {
-      // 1. Unassign all employees from this project:
-      // Set status = 'Completed' and record end_date on project_assignments so active queries treat them as unassigned
+      // 1. Unassign all active employees from this project:
       const { error: assignErr } = await supabase
         .from('project_assignments')
         .update({
           status: 'Completed',
           end_date: todayDate,
+          updated_at: nowIso,
         })
         .eq('project_id', id)
         .eq('status', 'Assigned');
@@ -1037,7 +1105,7 @@ router.patch('/:id/status', async (req, res) => {
 
       if (!tasksFetchErr && projectTasks) {
         if (projectTasks.length === 0) {
-          // If no tasks exist, insert a milestone completion task so Weekly Progress Report has the entry
+          // If no tasks exist, insert a milestone completion task
           const { data: insertedTask } = await supabase
             .from('project_tasks')
             .insert({
@@ -1049,6 +1117,7 @@ router.patch('/:id/status', async (req, res) => {
               status: 'Completed',
               due_date: todayDate,
               progress_logs: [{
+                id: crypto.randomUUID(),
                 date: nowIso,
                 percentage: 100,
                 note: 'Project concluded and marked as completed.',
@@ -1061,7 +1130,7 @@ router.patch('/:id/status', async (req, res) => {
 
           if (insertedTask) {
             try {
-              const { error: reportError } = await supabase.from('project_report').insert({
+              await supabase.from('project_report').insert({
                 task_id: insertedTask.id,
                 project_id: id,
                 employee_id: reportEmployeeId,
@@ -1072,10 +1141,6 @@ router.patch('/:id/status', async (req, res) => {
                 percentage: 100,
                 log_date: todayDate,
               });
-
-              if (reportError) {
-                console.error('Non-fatal error inserting milestone into project_report:', reportError);
-              }
             } catch (rErr) {
               console.error('Non-fatal error inserting milestone into project_report:', rErr);
             }
@@ -1086,27 +1151,30 @@ router.patch('/:id/status', async (req, res) => {
             const currentTotal = existingLogs.reduce((sum, log) => sum + (parseInt(log.percentage, 10) || 0), 0);
             const remaining = Math.max(0, 100 - currentTotal);
 
-            const completionLog = {
-              date: nowIso,
-              percentage: remaining > 0 ? remaining : 100,
-              note: 'Project concluded and marked as completed.',
-              loggedBy: req.user?.id || project.created_by || null,
+            const taskUpdatePayload = {
+              status: 'Completed',
+              updated_at: nowIso,
             };
 
-            const updatedLogs = [...existingLogs, completionLog];
+            // D11 FIX: Only append log if there was remaining work to 100%
+            if (remaining > 0) {
+              const completionLog = {
+                id: crypto.randomUUID(),
+                date: nowIso,
+                percentage: remaining,
+                note: 'Project concluded and marked as completed.',
+                loggedBy: req.user?.id || project.created_by || null,
+              };
+              taskUpdatePayload.progress_logs = [...existingLogs, completionLog];
+            }
 
             await supabase
               .from('project_tasks')
-              .update({
-                status: 'Completed',
-                progress_logs: updatedLogs,
-                updated_at: nowIso,
-              })
+              .update(taskUpdatePayload)
               .eq('id', task.id);
 
-            // Record the PM who completed the project in the weekly report.
             try {
-              const { error: reportError } = await supabase.from('project_report').insert({
+              await supabase.from('project_report').insert({
                 task_id: task.id,
                 project_id: id,
                 employee_id: reportEmployeeId,
@@ -1117,10 +1185,6 @@ router.patch('/:id/status', async (req, res) => {
                 percentage: 100,
                 log_date: todayDate,
               });
-
-              if (reportError) {
-                console.error('Non-fatal error inserting task completion into project_report:', reportError);
-              }
             } catch (rErr) {
               console.error('Non-fatal error inserting task completion into project_report:', rErr);
             }
@@ -1129,63 +1193,55 @@ router.patch('/:id/status', async (req, res) => {
       }
 
       // 3. Mark all resource requirements as Completed so RM Pending Requests queue is clean
-      const { error: reqErr } = await supabase
+      await supabase
         .from('project_resource_requirements')
-        .update({
-          status: 'Completed',
-        })
+        .update({ status: 'Completed' })
         .eq('project_id', id)
         .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
-
-      if (reqErr) {
-        console.error('Non-fatal error updating project resource requirements on completion:', reqErr);
-      }
     } else if (status === 'Cancelled') {
+      const cancelReasonText = (reason || '').trim() || 'Project cancelled by Project Manager';
+
       // 1. Unassign all active employees from this project
-      const { error: assignErr } = await supabase
+      await supabase
         .from('project_assignments')
         .update({
           status: 'Cancelled',
           end_date: todayDate,
+          cancelled_at: nowIso,
+          cancelled_by: req.user.id,
+          cancellation_reason: cancelReasonText,
+          updated_at: nowIso,
         })
         .eq('project_id', id)
         .eq('status', 'Assigned');
 
-      if (assignErr) {
-        console.error('Non-fatal error updating project assignments on cancellation:', assignErr);
-      }
-
       // 2. Mark pending/open/approved/filled resource requirements as Cancelled
-      const { error: reqErr } = await supabase
+      await supabase
         .from('project_resource_requirements')
         .update({
           status: 'Cancelled',
+          cancelled_at: nowIso,
+          cancelled_by: req.user.id,
+          cancellation_reason: cancelReasonText,
         })
         .eq('project_id', id)
         .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
 
-      if (reqErr) {
-        console.error('Non-fatal error updating project resource requirements on cancellation:', reqErr);
-      }
-
       // 3. Mark non-completed tasks as Cancelled
-      const { error: taskErr } = await supabase
+      await supabase
         .from('project_tasks')
         .update({
           status: 'Cancelled',
+          cancelled_at: nowIso,
+          cancelled_by: req.user.id,
+          cancellation_reason: cancelReasonText,
           updated_at: nowIso,
         })
         .eq('project_id', id)
         .neq('status', 'Completed');
-
-      if (taskErr) {
-        console.error('Non-fatal error updating project tasks on cancellation:', taskErr);
-      }
     } else if (isRestoring) {
       if (restoreMode === 'as_new') {
-        // Option B: Restore as New Project
-        // Non-destructive: mark previous assignments and previous tasks as 'Archived'
-        // Resource requirements are restored to 'Pending' so new staff can be requested/assigned
+        // Mode 1: Restore as NEW: core project details only
         await supabase
           .from('project_assignments')
           .update({ status: 'Archived', updated_at: nowIso })
@@ -1196,27 +1252,97 @@ router.patch('/:id/status', async (req, res) => {
           .update({ status: 'Archived', updated_at: nowIso })
           .eq('project_id', id);
 
+        // Reset all previous requirements to 'Pending' so RM can assign fresh team
         await supabase
           .from('project_resource_requirements')
           .update({ status: 'Pending' })
           .eq('project_id', id)
-          .in('status', ['Completed', 'Archived']);
+          .in('status', ['Completed', 'Archived', 'Cancelled', 'Canceled']);
       } else {
-        // Option A: Restore with Previous Employees & Tasks (Default)
-        // Reactivate snapshot assignments and tasks linked to this project at completion
-        await supabase
+        // Mode 2: Restore including employees and resource requests
+        // 1. Fetch previous assignments (Completed or Cancelled)
+        const { data: prevAssignments } = await supabase
           .from('project_assignments')
-          .update({ status: 'Assigned', updated_at: nowIso })
+          .select(`
+            id,
+            profile_id,
+            requirement_id,
+            assigned_role,
+            profiles (
+              id,
+              status,
+              branch_id,
+              first_name,
+              last_name
+            )
+          `)
           .eq('project_id', id)
-          .eq('status', 'Completed');
+          .in('status', ['Completed', 'Cancelled', 'Canceled']);
 
-        await supabase
+        const activeAssignedProfileIds = new Set();
+        const skippedProfileIds = new Set();
+
+        if (prevAssignments && prevAssignments.length > 0) {
+          for (const assign of prevAssignments) {
+            const empProfile = assign.profiles;
+            const empName = [empProfile?.first_name, empProfile?.last_name].filter(Boolean).join(' ') || `Employee ${assign.profile_id}`;
+            const isActive = empProfile?.status === 'Active';
+
+            if (isActive) {
+              await supabase
+                .from('project_assignments')
+                .update({
+                  status: 'Assigned',
+                  end_date: null,
+                  restored_at: nowIso,
+                  restored_by: req.user.id,
+                  updated_at: nowIso,
+                })
+                .eq('id', assign.id);
+              activeAssignedProfileIds.add(assign.profile_id);
+            } else {
+              skippedProfileIds.add(assign.profile_id);
+              skippedEmployees.push({
+                employeeId: assign.profile_id,
+                name: empName,
+                role: assign.assigned_role,
+                reason: `Account status is '${empProfile?.status || 'Inactive'}' (terminated or deactivated)`,
+              });
+              await supabase
+                .from('project_assignments')
+                .update({
+                  status: 'Unassigned',
+                  updated_at: nowIso,
+                })
+                .eq('id', assign.id);
+            }
+          }
+        }
+
+        // 2. Reactivate tasks (restore from Completed or Cancelled)
+        const { data: prevTasks } = await supabase
           .from('project_tasks')
-          .update({ status: 'In Progress', updated_at: nowIso })
+          .select('id, profile_id, status')
           .eq('project_id', id)
-          .in('status', ['Completed', 'Completed-Hidden']);
+          .in('status', ['Completed', 'Completed-Hidden', 'Cancelled', 'Canceled']);
 
-        // Check active assignments for this project to accurately set each requirement's status
+        if (prevTasks && prevTasks.length > 0) {
+          for (const task of prevTasks) {
+            const taskAssigneeSkipped = task.profile_id && skippedProfileIds.has(task.profile_id);
+            await supabase
+              .from('project_tasks')
+              .update({
+                status: 'In Progress',
+                profile_id: taskAssigneeSkipped ? null : task.profile_id,
+                restored_at: nowIso,
+                restored_by: req.user.id,
+                updated_at: nowIso,
+              })
+              .eq('id', task.id);
+          }
+        }
+
+        // 3. Reactivate requirements and calculate filled status
         const { data: activeAssignments } = await supabase
           .from('project_assignments')
           .select('id, requirement_id')
@@ -1227,17 +1353,25 @@ router.patch('/:id/status', async (req, res) => {
           .from('project_resource_requirements')
           .select('id, quantity_needed')
           .eq('project_id', id)
-          .in('status', ['Completed', 'Archived']);
+          .in('status', ['Completed', 'Archived', 'Cancelled', 'Canceled']);
 
         if (projectRequirements && projectRequirements.length > 0) {
           for (const reqItem of projectRequirements) {
             const qtyNeeded = reqItem.quantity_needed || 1;
             const assignedCount = (activeAssignments || []).filter(a => a.requirement_id === reqItem.id).length;
-            const newReqStatus = assignedCount >= qtyNeeded ? 'Filled' : 'Pending';
+            const newReqStatus = assignedCount >= qtyNeeded
+              ? 'Filled'
+              : assignedCount > 0
+                ? 'Partially Allocated'
+                : 'Pending';
 
             await supabase
               .from('project_resource_requirements')
-              .update({ status: newReqStatus })
+              .update({
+                status: newReqStatus,
+                restored_at: nowIso,
+                restored_by: req.user.id,
+              })
               .eq('id', reqItem.id);
           }
         }
@@ -1323,63 +1457,19 @@ router.patch('/:id/status', async (req, res) => {
       if (typeof invalidateEmployeesCache === 'function') invalidateEmployeesCache();
     } catch (e) {}
 
-    res.status(200).json({ success: true, message: 'Project status updated', data });
+    res.status(200).json({ success: true, message: 'Project status updated', data, skippedEmployees });
   } catch (error) {
     console.error('Error updating project status:', error);
     res.status(500).json({ success: false, message: 'Failed to update project status', error: error.message });
   }
 });
 
-// ✅ DELETE /api/pm/projects/:id
+// ❌ DELETE /api/pm/projects/:id — Hard DELETE permanently disabled per lifecycle policy (D02 fix)
 router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Fetch project and assigned employees before deleting
-    const { data: project } = await supabase
-      .from('projects')
-      .select('project_name, created_by')
-      .eq('id', id)
-      .maybeSingle();
-
-    const { data: assignments } = await supabase
-      .from('project_assignments')
-      .select('profile_id')
-      .eq('project_id', id);
-
-    const { error } = await supabase.from('projects').delete().eq('id', id);
-    if (error) throw error;
-
-    // Notify assigned employees about project deletion
-    if (project && assignments && assignments.length > 0) {
-      try {
-        const employeeIds = [...new Set(assignments.map(a => a.profile_id).filter(Boolean))];
-        const notifs = employeeIds.map(empId => ({
-          recipient_id: empId,
-          type: 'alert',
-          text: `Project "${project.project_name}" has been deleted by Project Manager.`,
-          read: false,
-        }));
-        if (notifs.length > 0) {
-          await supabase.from('notifications').insert(notifs);
-        }
-      } catch (nErr) {
-        console.error('Non-fatal error sending deletion notification:', nErr);
-      }
-    }
-
-    await logAuditEvent({
-      req,
-      action: 'Deleted',
-      systemCategory: 'Resource Management',
-      logDescription: `Deleted project ${id}`,
-    });
-    invalidateProjectsCache();
-    res.status(200).json({ success: true, message: 'Project deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting project:', error);
-    res.status(500).json({ success: false, message: 'Failed to delete project', error: error.message });
-  }
+  return res.status(405).json({
+    success: false,
+    message: 'Hard deletion of projects is permanently disabled to preserve audit history and prevent data loss. Please use Cancel Project (PATCH /api/pm/projects/:id/status with status: "Cancelled") which moves the project to Project History and supports future restoration.'
+  });
 });
 
 module.exports = router;

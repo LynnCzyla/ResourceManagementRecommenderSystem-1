@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
+const workloadService = require('../../services/workloadService');
 
 router.get('/assignments', verifyToken, async (req, res) => {
   try {
@@ -112,14 +114,28 @@ router.put('/tasks/:id', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Status is required' });
     }
 
+    const { data: task, error: taskError } = await supabase
+      .from('project_tasks')
+      .select('profile_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (taskError) throw taskError;
+    if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+    if (task.profile_id !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'You are not assigned to this task' });
+    }
+
     const { data, error } = await supabase
       .from('project_tasks')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('profile_id', req.user.id)
       .select()
       .single();
 
     if (error) throw error;
+
+    workloadService.recalculateForEmployee(req.user.id).catch(e => console.warn('Workload recalc error:', e.message));
 
     res.json({ success: true, message: 'Task status updated successfully', data });
   } catch (error) {
@@ -139,12 +155,15 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
 
     const { data: existing, error: fetchError } = await supabase
       .from('project_tasks')
-      .select('progress_logs')
+      .select('profile_id, progress_logs')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (fetchError) throw fetchError;
     if (!existing) return res.status(404).json({ success: false, error: 'Task not found' });
+    if (existing.profile_id !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'You are not assigned to this task' });
+    }
 
     const newPercentageVal = Math.min(100, Math.max(0, parseInt(percentage, 10) || 0));
     const logs = existing.progress_logs || [];
@@ -183,7 +202,7 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
     const logWeek = week || (startDate && endDate ? `Week ${weekNumber} (${startDate} to ${endDate})` : `Week ${weekNumber}`);
 
     const newLog = {
-      id: Date.now(),
+      id: crypto.randomUUID(),
       week: logWeek,
       startDate: startDate || null,
       endDate: endDate || null,
@@ -275,6 +294,11 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
       }
     } catch (notifErr) {
       console.error('Non-fatal error creating progress notification:', notifErr.message);
+    }
+
+    const employeeProfileId = data?.profile_id || req.user?.id;
+    if (employeeProfileId) {
+      workloadService.recalculateForEmployee(employeeProfileId).catch(e => console.warn('Workload recalc error:', e.message));
     }
 
     res.json({ success: true, message: 'Progress logged successfully', data });

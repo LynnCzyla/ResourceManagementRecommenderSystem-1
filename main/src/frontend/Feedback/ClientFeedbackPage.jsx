@@ -95,9 +95,10 @@ export default function ClientFeedbackPage() {
       }
 
       setRequestData(body.data);
+      const pmTarget = body.data.pm || (body.data.employees || []).find(e => e.isPm) || (body.data.employees || [])[0];
       const initial = {};
-      for (const emp of body.data.employees) {
-        initial[emp.id] = emptyEmployeeResponse();
+      if (pmTarget) {
+        initial[pmTarget.id] = emptyEmployeeResponse();
       }
       setEmployeeResponses(initial);
       setPhase('form');
@@ -127,15 +128,16 @@ export default function ClientFeedbackPage() {
 
   const validate = () => {
     const errors = {};
-    for (const emp of requestData.employees) {
-      const r = employeeResponses[emp.id];
+    const pmTarget = requestData?.pm || (requestData?.employees || []).find(e => e.isPm) || (requestData?.employees || [])[0];
+    if (pmTarget) {
+      const r = employeeResponses[pmTarget.id] || emptyEmployeeResponse();
       for (const cat of RATING_CATEGORIES) {
         if (!r[cat.key] || r[cat.key] < 1) {
-          errors[`${emp.id}.${cat.key}`] = `${cat.label} is required`;
+          errors[`${pmTarget.id}.${cat.key}`] = `${cat.label} is required`;
         }
       }
       if (r.wouldRecommend === null) {
-        errors[`${emp.id}.wouldRecommend`] = 'Please select Yes or No';
+        errors[`${pmTarget.id}.wouldRecommend`] = 'Please select Yes or No';
       }
     }
     if (!sharedFields.projectRating || sharedFields.projectRating < 1) {
@@ -168,17 +170,18 @@ export default function ClientFeedbackPage() {
 
     setSubmitting(true);
     try {
-      const responses = requestData.employees.map(emp => {
-        const r = employeeResponses[emp.id];
-        const payload = {
-          employeeId: emp.id,
-          strengths: r.strengths.trim(),
-          areasForImprovement: r.areasForImprovement.trim(),
-          wouldRecommend: r.wouldRecommend,
-        };
-        for (const cat of RATING_CATEGORIES) payload[cat.key] = r[cat.key];
-        return payload;
-      });
+      const pmTarget = requestData?.pm || (requestData?.employees || []).find(e => e.isPm) || (requestData?.employees || [])[0];
+      const responses = pmTarget ? [{
+        employeeId: pmTarget.id,
+        strengths: (employeeResponses[pmTarget.id]?.strengths || '').trim(),
+        areasForImprovement: (employeeResponses[pmTarget.id]?.areasForImprovement || '').trim(),
+        wouldRecommend: employeeResponses[pmTarget.id]?.wouldRecommend,
+        ...(() => {
+          const cats = {};
+          for (const cat of RATING_CATEGORIES) cats[cat.key] = employeeResponses[pmTarget.id]?.[cat.key] || 0;
+          return cats;
+        })()
+      }] : [];
 
       const res = await fetch(`${PUBLIC_BASE}/feedback/${encodeURIComponent(token)}`, {
         method: 'POST',
@@ -341,7 +344,8 @@ export default function ClientFeedbackPage() {
     );
   }
 
-  // phase === 'form'
+  const pmTarget = requestData?.pm || (requestData?.employees || []).find(e => e.isPm) || (requestData?.employees || [])[0];
+
   return (
     <div style={styles.page}>
       <div style={styles.shell}>
@@ -350,85 +354,18 @@ export default function ClientFeedbackPage() {
         </div>
 
         <div style={styles.header}>
-          <h1 style={styles.title}>Project Feedback</h1>
+          <h1 style={styles.title}>Project & PM Feedback</h1>
           <p style={styles.subtitle}>
-            Hi {requestData.clientName}, please rate each team member who worked on{' '}
-            <strong>{requestData.projectName}</strong>. Your feedback helps WEA improve and helps the team grow.
+            Hi {requestData.clientName}, please provide your evaluation for{' '}
+            <strong>{requestData.projectName}</strong> and the Project Manager{pmTarget ? ` (${pmTarget.name})` : ''}.
           </p>
         </div>
 
         <form onSubmit={handleSubmit}>
-          {requestData.employees.map(emp => {
-            const r = employeeResponses[emp.id];
-            return (
-              <div key={emp.id} className="glass-card" style={styles.card}>
-                <div style={styles.employeeName}>{emp.name}</div>
-                {emp.role && <div style={styles.employeeRole}>{emp.role}</div>}
-
-                <div style={styles.ratingGrid}>
-                  {RATING_CATEGORIES.map(cat => (
-                    <div key={cat.key} style={styles.ratingGroup}>
-                      <label style={styles.label}>{cat.label} *</label>
-                      <StarRating
-                        value={r[cat.key]}
-                        onChange={(val) => updateEmployeeField(emp.id, cat.key, val)}
-                      />
-                      {fieldErrors[`${emp.id}.${cat.key}`] && (
-                        <span style={styles.fieldError}>{fieldErrors[`${emp.id}.${cat.key}`]}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Strengths</label>
-                  <textarea
-                    style={styles.textarea}
-                    placeholder="What did this person do particularly well?"
-                    value={r.strengths}
-                    onChange={(e) => updateEmployeeField(emp.id, 'strengths', e.target.value)}
-                  />
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Areas for Improvement</label>
-                  <textarea
-                    style={styles.textarea}
-                    placeholder="Any areas where this person could improve?"
-                    value={r.areasForImprovement}
-                    onChange={(e) => updateEmployeeField(emp.id, 'areasForImprovement', e.target.value)}
-                  />
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Would you recommend this person for future projects? *</label>
-                  <div style={styles.recommendRow}>
-                    <button
-                      type="button"
-                      style={styles.recommendBtn(r.wouldRecommend === true)}
-                      onClick={() => updateEmployeeField(emp.id, 'wouldRecommend', true)}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      style={styles.recommendBtn(r.wouldRecommend === false)}
-                      onClick={() => updateEmployeeField(emp.id, 'wouldRecommend', false)}
-                    >
-                      No
-                    </button>
-                  </div>
-                  {fieldErrors[`${emp.id}.wouldRecommend`] && (
-                    <span style={styles.fieldError}>{fieldErrors[`${emp.id}.wouldRecommend`]}</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
+          {/* Overall Project Feedback Card */}
           <div className="glass-card" style={styles.card}>
-            <div style={styles.sectionTitle}>Overall Project Feedback</div>
-            <div style={styles.sectionNote}>These questions apply to the project as a whole, not any one person.</div>
+            <div style={styles.sectionTitle}>Project Evaluation</div>
+            <div style={styles.sectionNote}>Please evaluate the project deliverables and execution as a whole.</div>
 
             <div style={{ ...styles.formGroup, marginBottom: '22px' }}>
               <label style={styles.label}>Overall Project Rating *</label>
@@ -453,7 +390,7 @@ export default function ClientFeedbackPage() {
               <label style={styles.label}>Deliverables Feedback *</label>
               <textarea
                 style={styles.textarea}
-                placeholder="How did the final deliverables meet your expectations?"
+                placeholder="How did the final deliverables meet your requirements, quality standards, and timelines?"
                 value={sharedFields.deliverablesFeedback}
                 onChange={(e) => updateSharedField('deliverablesFeedback', e.target.value)}
               />
@@ -464,7 +401,7 @@ export default function ClientFeedbackPage() {
               <label style={styles.label}>Overall Project Feedback *</label>
               <textarea
                 style={styles.textarea}
-                placeholder="How was your overall experience with this project?"
+                placeholder="How was your overall experience working on this project?"
                 value={sharedFields.projectFeedback}
                 onChange={(e) => updateSharedField('projectFeedback', e.target.value)}
               />
@@ -475,19 +412,103 @@ export default function ClientFeedbackPage() {
               <label style={styles.label}>Additional Comments</label>
               <textarea
                 style={styles.textarea}
-                placeholder="Anything else you'd like to share?"
+                placeholder="Any additional comments or recommendations for WEA?"
                 value={sharedFields.additionalComments}
                 onChange={(e) => updateSharedField('additionalComments', e.target.value)}
               />
             </div>
           </div>
 
+          {/* Project Manager Evaluation Card */}
+          {pmTarget && (() => {
+            const r = employeeResponses[pmTarget.id] || emptyEmployeeResponse();
+            return (
+              <div key={pmTarget.id} className="glass-card" style={styles.card}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '14px' }}>
+                  <div>
+                    <div style={styles.sectionTitle}>Project Manager Evaluation</div>
+                    <div style={{ ...styles.employeeName, marginTop: '4px' }}>{pmTarget.name}</div>
+                  </div>
+                  <span style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    color: 'var(--color-primary)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                  }}>
+                    Project Manager
+                  </span>
+                </div>
+
+                <div style={styles.ratingGrid}>
+                  {RATING_CATEGORIES.map(cat => (
+                    <div key={cat.key} style={styles.ratingGroup}>
+                      <label style={styles.label}>{cat.label} *</label>
+                      <StarRating
+                        value={r[cat.key]}
+                        onChange={(val) => updateEmployeeField(pmTarget.id, cat.key, val)}
+                      />
+                      {fieldErrors[`${pmTarget.id}.${cat.key}`] && (
+                        <span style={styles.fieldError}>{fieldErrors[`${pmTarget.id}.${cat.key}`]}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Strengths</label>
+                  <textarea
+                    style={styles.textarea}
+                    placeholder="What did the Project Manager do particularly well (leadership, communication, problem solving)?"
+                    value={r.strengths}
+                    onChange={(e) => updateEmployeeField(pmTarget.id, 'strengths', e.target.value)}
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Areas for Improvement</label>
+                  <textarea
+                    style={styles.textarea}
+                    placeholder="Any areas where the Project Manager could improve?"
+                    value={r.areasForImprovement}
+                    onChange={(e) => updateEmployeeField(pmTarget.id, 'areasForImprovement', e.target.value)}
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Would you recommend this Project Manager for future projects? *</label>
+                  <div style={styles.recommendRow}>
+                    <button
+                      type="button"
+                      style={styles.recommendBtn(r.wouldRecommend === true)}
+                      onClick={() => updateEmployeeField(pmTarget.id, 'wouldRecommend', true)}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.recommendBtn(r.wouldRecommend === false)}
+                      onClick={() => updateEmployeeField(pmTarget.id, 'wouldRecommend', false)}
+                    >
+                      No
+                    </button>
+                  </div>
+                  {fieldErrors[`${pmTarget.id}.wouldRecommend`] && (
+                    <span style={styles.fieldError}>{fieldErrors[`${pmTarget.id}.wouldRecommend`]}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           <button
             type="submit"
             style={{ ...styles.submitBtn, ...(submitting ? styles.submitBtnDisabled : {}) }}
             disabled={submitting}
           >
-            {submitting ? 'Submitting…' : 'Submit Feedback'}
+            {submitting ? 'Submitting Feedback…' : 'Submit Feedback'}
           </button>
         </form>
       </div>

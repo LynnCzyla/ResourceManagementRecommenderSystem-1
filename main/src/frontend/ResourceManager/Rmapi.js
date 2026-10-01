@@ -460,6 +460,23 @@ export async function fetchGlobalFeedbackReport(filters = {}) {
   }
 }
 
+// ---- Update Feedback Visibility (Grant / Revoke Permission) ----
+export async function updateFeedbackVisibility(recordId, visible) {
+  console.log(`🔐 Updating feedback visibility for ${recordId}: visible=${visible}`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/feedback-report/${recordId}/visibility`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ visible })
+    });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Update feedback visibility error:', error);
+    throw error;
+  }
+}
+
 // Default export for easy importing
 export default {
   fetchDashboard,
@@ -480,4 +497,5 @@ export default {
   fetchResourceRequests,
   createResourceRequest,
   fetchGlobalFeedbackReport,
+  updateFeedbackVisibility,
 };

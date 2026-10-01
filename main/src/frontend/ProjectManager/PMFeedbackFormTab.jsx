@@ -24,7 +24,7 @@ const DROPDOWN_STATUS_LABELS = {
 };
 
 function defaultIntro(projectName) {
-  return `We hope you've been satisfied with the progress of ${projectName || 'your project'}. We'd love to hear your feedback on the team members who worked on it.`;
+  return `We hope you've been satisfied with the progress of ${projectName || 'your project'}. We would appreciate your feedback on the project and the Project Manager.`;
 }
 
 function resolveUserId(user) {
@@ -69,7 +69,6 @@ export default function PMFeedbackFormTab({ user }) {
 
   const [projects, setProjects] = useState([]);
   const [employees, setEmployees] = useState([]);
-  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState([]);
   const [introTouched, setIntroTouched] = useState(false);
 
   const [loadError, setLoadError] = useState('');
@@ -124,7 +123,6 @@ export default function PMFeedbackFormTab({ user }) {
   useEffect(() => {
     if (!formData.projectId) {
       setEmployees([]);
-      setSelectedEmployeeIds([]);
       return;
     }
     let cancelled = false;
@@ -138,7 +136,6 @@ export default function PMFeedbackFormTab({ user }) {
             ? [{ id: effectiveUserId, name: pmDisplayName, isPm: true }]
             : [];
           setEmployees([...pmEntry, ...withoutPm]);
-          setSelectedEmployeeIds([]);
         }
       } catch (err) {
         console.error('Failed to load project employees:', err);
@@ -179,13 +176,17 @@ export default function PMFeedbackFormTab({ user }) {
   const sortedProjects = useMemo(() => {
     const withStatus = projects.map(p => {
       const feedbackStatus = projectFeedbackStatusMap[p.id] || null;
+      const isProjectCompleted = String(p.status || '').toLowerCase() === 'completed';
+      const isFeedbackCompleted = feedbackStatus === 'completed';
       return {
         ...p,
+        isProjectCompleted,
         feedbackStatus,
-        isDone: feedbackStatus === 'completed',
+        isDone: isFeedbackCompleted,
       };
     });
     return [...withStatus].sort((a, b) => {
+      if (a.isProjectCompleted !== b.isProjectCompleted) return a.isProjectCompleted ? -1 : 1;
       if (a.isDone !== b.isDone) return a.isDone ? 1 : -1;
       return (a.name || '').localeCompare(b.name || '');
     });
@@ -209,20 +210,12 @@ export default function PMFeedbackFormTab({ user }) {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const toggleEmployee = (id) => {
-    setFieldErrors(prev => ({ ...prev, employees: undefined }));
-    setSelectedEmployeeIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
-
   const validate = () => {
     const errors = {};
     if (!formData.clientName.trim()) errors.clientName = 'Client name is required';
     if (!formData.clientEmail.trim()) errors.clientEmail = 'Client email is required';
     else if (!EMAIL_RE.test(formData.clientEmail.trim())) errors.clientEmail = 'Enter a valid email address';
     if (!formData.projectId) errors.projectId = 'Select a project';
-    if (selectedEmployeeIds.length === 0) errors.employees = 'Select at least one team member to rate';
     if (!effectiveUserId) errors.general = 'Could not determine your account — please log out and back in.';
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
@@ -230,7 +223,6 @@ export default function PMFeedbackFormTab({ user }) {
 
   const resetForm = () => {
     setFormData({ clientName: '', clientEmail: '', projectId: '', projectName: '', introMessage: '' });
-    setSelectedEmployeeIds([]);
     setIntroTouched(false);
   };
 
@@ -246,7 +238,7 @@ export default function PMFeedbackFormTab({ user }) {
         clientName: formData.clientName.trim(),
         clientEmail: formData.clientEmail.trim(),
         projectId: formData.projectId,
-        employeeIds: selectedEmployeeIds,
+        employeeIds: effectiveUserId ? [effectiveUserId] : [],
         introMessage: formData.introMessage.trim(),
         redirectOrigin: window.location.origin,
       });
@@ -424,8 +416,18 @@ export default function PMFeedbackFormTab({ user }) {
               <option value="" style={{ color: '#1f2937', backgroundColor: '#ffffff' }}>-- Select a project --</option>
               {sortedProjects.map(p => (
                 <option key={p.id} value={p.id} style={{ color: '#1f2937', backgroundColor: '#ffffff' }}>
-                  {p.name}
-                  {p.feedbackStatus ? ` (${DROPDOWN_STATUS_LABELS[p.feedbackStatus] || p.feedbackStatus})` : ''}
+                  {p.isProjectCompleted
+                    ? p.feedbackStatus === 'completed'
+                      ? `[Project Complete - Feedback Received] ${p.name}`
+                      : p.feedbackStatus
+                        ? `[Project Complete - Feedback Sent] ${p.name}`
+                        : `[Project Complete - Ready for Feedback] ${p.name}`
+                    : p.feedbackStatus === 'completed'
+                      ? `[In Progress - Feedback Received] ${p.name}`
+                      : p.feedbackStatus
+                        ? `[In Progress - Feedback Sent] ${p.name}`
+                        : `[In Progress] ${p.name}`
+                  }
                 </option>
               ))}
             </select>
@@ -433,38 +435,38 @@ export default function PMFeedbackFormTab({ user }) {
             {projects.length === 0 && !loadError && (
               <span style={styles.emptyNote}>No projects found for your account yet.</span>
             )}
-          </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Team Members to Rate *</label>
-            {!formData.projectId ? (
-              <span style={styles.emptyNote}>Select a project first to see its assigned team.</span>
-            ) : employeesLoading ? (
-              <span style={styles.emptyNote}>Loading team members…</span>
-            ) : employees.length === 0 ? (
-              <span style={styles.emptyNote}>No employees are assigned to this project yet.</span>
-            ) : (
-              <div style={styles.employeeGrid}>
-                {employees.map(emp => {
-                  const selected = selectedEmployeeIds.includes(emp.id);
-                  return (
-                    <label
-                      key={emp.id}
-                      style={{ ...styles.employeeChip, ...(selected ? styles.employeeChipSelected : {}) }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={() => toggleEmployee(emp.id)}
-                      />
-                      {emp.name}
-                      {emp.isPm && <span style={styles.pmBadge}>PM</span>}
-                    </label>
-                  );
-                })}
+            {selectedProject && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: selectedProject.isProjectCompleted ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.08)',
+                border: `1px solid ${selectedProject.isProjectCompleted ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.2)'}`,
+                fontSize: '13px',
+                color: 'var(--color-text-primary)',
+                marginTop: '4px'
+              }}>
+                <div>
+                  <strong>{selectedProject.name}</strong> — {selectedProject.isProjectCompleted ? 'Project Status: Complete (Ready for client feedback)' : `Project Status: ${selectedProject.status || 'Active'}`}
+                  {selectedProject.feedbackStatus && (
+                    <span style={{
+                      marginLeft: 8,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      background: STATUS_STYLES[selectedProject.feedbackStatus]?.bg || 'rgba(148,163,184,0.15)',
+                      color: STATUS_STYLES[selectedProject.feedbackStatus]?.color || '#94a3b8'
+                    }}>
+                      Feedback: {DROPDOWN_STATUS_LABELS[selectedProject.feedbackStatus] || selectedProject.feedbackStatus}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
-            {fieldErrors.employees && <span style={styles.fieldError}>{fieldErrors.employees}</span>}
           </div>
 
           <div style={styles.formGroup}>

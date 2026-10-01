@@ -92,7 +92,8 @@ function transformFeedbackRequest(row, projectName, nameMap, origin) {
 // ── POST /api/pm/feedback-requests ───────────────────────────────────────
 const createFeedbackRequest = async (req, res) => {
   try {
-    const { projectId, createdBy, clientName, clientEmail, employeeIds, introMessage, redirectOrigin } = req.body;
+    const { projectId, clientName, clientEmail, employeeIds, introMessage, redirectOrigin } = req.body;
+    const createdBy = req.user.id;
 
     if (!projectId) {
       return res.status(400).json({ success: false, message: 'projectId is required' });
@@ -103,18 +104,6 @@ const createFeedbackRequest = async (req, res) => {
     if (!clientEmail || !clientEmail.trim()) {
       return res.status(400).json({ success: false, message: 'Client email is required' });
     }
-    if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
-      return res.status(400).json({ success: false, message: 'Select at least one employee' });
-    }
-    if (!createdBy) {
-      // feedback_requests.created_by is NOT NULL — catch this here with a
-      // clear message instead of letting it surface as a raw 23502 from
-      // the insert. If you're hitting this, the logged-in PM's id isn't
-      // making it into the request body — check what `user` prop the
-      // Feedback Request tab actually receives.
-      return res.status(400).json({ success: false, message: 'Missing logged-in user id (createdBy)' });
-    }
-
     // Validate the project exists. Pull created_by too — that's the
     // project's assigned PM, who is rateable even though they never show
     // up in project_assignments.
@@ -134,43 +123,22 @@ const createFeedbackRequest = async (req, res) => {
     if (!project) {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
-
-    // Validate the selected employees are actually assigned to this project
-    // (same project_assignments table employees.js uses to scope
-    // ?projectId=), OR are the project's assigned PM.
-    let assignments;
-    try {
-      const { data, error } = await supabase
-        .from('project_assignments')
-        .select('profile_id')
-        .eq('project_id', projectId)
-        .in('profile_id', employeeIds);
-      if (error) throw error;
-      assignments = data;
-    } catch (err) {
-      console.error('Error checking project assignments:', err);
-      return res.status(500).json({ success: false, message: 'Failed to validate assigned employees', error: err.message });
+    if (project.created_by !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'You can only create feedback requests for your own projects' });
     }
 
-    const assignedIds = new Set((assignments || []).map(a => a.profile_id));
-    if (project.created_by) assignedIds.add(project.created_by);
-
-    const invalidIds = employeeIds.filter(id => !assignedIds.has(id));
-    if (invalidIds.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'One or more selected employees are not assigned to this project',
-      });
-    }
+    // Client evaluates ONLY the Project and the Project Manager (not team employees)
+    const pmId = project.created_by || req.user.id;
+    const effectiveEmployeeIds = [pmId];
 
     let nameMap;
     try {
-      nameMap = await getEmployeeNameMap(employeeIds);
+      nameMap = await getEmployeeNameMap(effectiveEmployeeIds);
     } catch (err) {
       console.error('Error resolving employee names:', err);
       return res.status(500).json({ success: false, message: 'Failed to resolve employee names', error: err.message });
     }
-    const employeeNames = employeeIds.map(id => nameMap[id] || 'Unknown');
+    const employeeNames = effectiveEmployeeIds.map(id => nameMap[id] || 'Unknown');
 
     // Create the row first (status stays 'pending' until the email actually
     // sends). access_token/expires_at are generated here explicitly rather
@@ -185,7 +153,7 @@ const createFeedbackRequest = async (req, res) => {
           created_by: createdBy || null,
           client_name: clientName.trim(),
           client_email: clientEmail.trim(),
-          employee_ids: employeeIds,
+          employee_ids: effectiveEmployeeIds,
           status: 'pending',
           access_token: generateAccessToken(),
           expires_at: computeExpiresAt(),
@@ -206,6 +174,8 @@ const createFeedbackRequest = async (req, res) => {
 
     const feedbackLink = buildFeedbackLink(created.access_token, redirectOrigin);
 
+    const pmDisplayName = nameMap[pmId] || 'Project Manager';
+
     // Send the email. If this fails, the row stays 'pending' and we do
     // NOT report success — the PM can retry via the Resend button.
     try {
@@ -213,7 +183,8 @@ const createFeedbackRequest = async (req, res) => {
         to: created.client_email,
         clientName: created.client_name,
         projectName: project.project_name,
-        employeeNames,
+        pmName: pmDisplayName,
+        employeeNames: [pmDisplayName],
         introMessage: introMessage || '',
         feedbackLink,
         expiresAt: created.expires_at,
@@ -269,14 +240,14 @@ const createFeedbackRequest = async (req, res) => {
 // ── GET /api/pm/feedback-requests?createdBy=<profileId> ─────────────────
 const getFeedbackRequests = async (req, res) => {
   try {
-    const { createdBy } = req.query;
+    const createdBy = req.user.id;
 
     let query = supabase
       .from('feedback_requests')
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (createdBy) query = query.eq('created_by', createdBy);
+    query = query.eq('created_by', createdBy);
 
     const { data: rows, error } = await query;
     if (error) throw error;
@@ -339,11 +310,16 @@ const resendFeedbackRequest = async (req, res) => {
       .from('projects')
       .select('id, project_name')
       .eq('id', row.project_id)
+      .eq('created_by', req.user.id)
       .maybeSingle();
     if (projectError) throw projectError;
+    if (!project) {
+      return res.status(403).json({ success: false, message: 'You can only resend feedback requests for your own projects' });
+    }
 
     const nameMap = await getEmployeeNameMap(row.employee_ids || []);
     const employeeNames = (row.employee_ids || []).map(eid => nameMap[eid] || 'Unknown');
+    const pmDisplayName = nameMap[project.created_by] || employeeNames[0] || 'Project Manager';
     const feedbackLink = buildFeedbackLink(row.access_token, redirectOrigin);
 
     try {
@@ -351,7 +327,8 @@ const resendFeedbackRequest = async (req, res) => {
         to: row.client_email,
         clientName: row.client_name,
         projectName: project ? project.project_name : 'your project',
-        employeeNames,
+        pmName: pmDisplayName,
+        employeeNames: [pmDisplayName],
         introMessage: '',
         feedbackLink,
         expiresAt: row.expires_at,

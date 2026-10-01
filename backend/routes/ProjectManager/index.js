@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../Middleware/auth');
+const { requireRole } = require('../Middleware/roleGuard');
 
 console.log('✅ PM Router initializing...');
 
@@ -14,7 +15,7 @@ router.get('/test', (req, res) => {
   });
 });
 
-router.use(verifyToken);
+router.use(verifyToken, requireRole('Project Manager'));
 console.log('✅ Auth middleware applied');
 
 console.log('📦 Loading Dashboard route...');

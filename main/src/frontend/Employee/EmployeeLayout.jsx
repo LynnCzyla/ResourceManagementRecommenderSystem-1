@@ -73,10 +73,17 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const fetchNotifications = async () => {
     if (!user?.id) return;
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/notifications?userId=${user.id}`);
+      const response = await axios.get(`${API_BASE_URL}/api/notifications?userId=${user.id}`, {
+        headers: getAuthHeaders(),
+      });
       if (response.data.success) {
         setNotifications(response.data.data || []);
       }
@@ -129,7 +136,11 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
   const markAllRead = async () => {
     if (!user?.id) return;
     try {
-      const response = await axios.patch(`${API_BASE_URL}/api/notifications/mark-all-read`, { userId: user.id });
+      const response = await axios.patch(
+        `${API_BASE_URL}/api/notifications/mark-all-read`,
+        { userId: user.id },
+        { headers: getAuthHeaders() }
+      );
       if (response.data.success) {
         setNotifications(notifications.map(n => ({ ...n, read: true })));
       }
@@ -141,7 +152,9 @@ export default function EmployeeLayout({ user, onLogout, isDark, toggleTheme }) 
   const deleteNotification = async (id, e) => {
     e.stopPropagation();
     try {
-      const response = await axios.delete(`${API_BASE_URL}/api/notifications/${id}`);
+      const response = await axios.delete(`${API_BASE_URL}/api/notifications/${id}`, {
+        headers: getAuthHeaders(),
+      });
       if (response.data.success) {
         setNotifications(notifications.filter(n => n.id !== id));
       }

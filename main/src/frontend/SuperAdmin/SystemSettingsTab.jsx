@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../../config/api';
 import BackupRestoreCard from './BackupRestoreCard';
+import { getStoredToken } from '../../lib/supabaseClient';
 
 export default function SystemSettingsTab() {
   const [ocrThreshold, setOcrThreshold] = useState(75);
@@ -37,10 +38,17 @@ export default function SystemSettingsTab() {
     fetchSettings();
   }, []);
 
+  const authHeaders = () => {
+    const token = getStoredToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const fetchSettings = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/settings/system-settings`);
+      const response = await fetch(`${API_BASE_URL}/api/settings/system-settings`, {
+        headers: authHeaders(),
+      });
       const result = await response.json();
       
       if (result.success) {
@@ -144,6 +152,7 @@ export default function SystemSettingsTab() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders(),
         },
         body: JSON.stringify({
           sessionTimeout: settings.sessionTimeout,

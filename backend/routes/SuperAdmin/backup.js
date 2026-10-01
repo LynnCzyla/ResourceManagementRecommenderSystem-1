@@ -87,20 +87,53 @@ async function listAllAuthUsers() {
   return out;
 }
 
-async function fetchPage(table, from, useOrder) {
+async function fetchPage(table, from, useOrder, branchId) {
   let q = supabase.from(table).select('*');
   if (useOrder) q = q.order('id', { ascending: true });
+  // Apply branch filter when provided and the table supports it.
+  // Tables that always travel as global reference data are excluded from filtering.
+  const BRANCH_SCOPED_TABLES = [
+    'departments', 'positions', 'profiles', 'admins',
+    'job_postings', 'job_applications', 'interviews',
+    'hired_employees', 'hr_resource_requests',
+    'projects', 'project_resource_requirements', 'requirement_skills',
+    'project_resource_requirements_history',
+    'project_assignments', 'project_tasks', 'project_report',
+    'documents', 'employee_skills',
+    'feedback_requests', 'feedback_responses', 'feedback_training',
+    'performance_records', 'notifications', 'audit_logs',
+  ];
+  if (branchId && branchId !== 'all' && BRANCH_SCOPED_TABLES.includes(table)) {
+    q = q.eq('branch_id', branchId);
+  }
   return q.range(from, from + PAGE_SIZE - 1);
 }
 
-// ---------- EXPORT ----------
+// ---------- BRANCHES LIST (for dropdown) ----------
+
+router.get('/backup/branches', requireSuperAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name')
+      .order('name', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('❌ Failed to list branches:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 router.get('/backup/export', requireSuperAdmin, async (req, res) => {
   const includeAuth = req.query.includeAuth !== 'false';
+  const branchId = req.query.branchId || 'all'; // 'all' or a specific UUID
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const fileTag = branchId !== 'all' ? `-branch-${branchId.slice(0, 8)}` : '';
 
   res.setHeader('Content-Type', 'application/gzip');
-  res.setHeader('Content-Disposition', `attachment; filename="rmrs-backup-${stamp}.json.gz"`);
+  res.setHeader('Content-Disposition', `attachment; filename="rmrs-backup${fileTag}-${stamp}.json.gz"`);
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
 
   const gz = zlib.createGzip();
@@ -116,17 +149,18 @@ router.get('/backup/export', requireSuperAdmin, async (req, res) => {
       `{"version":${BACKUP_VERSION},` +
       `"created_at":${JSON.stringify(new Date().toISOString())},` +
       `"created_by":${JSON.stringify(req.user.email || req.user.id)},` +
+      `"branch_filter":${JSON.stringify(branchId)},` +
       `"tables":{`
     );
 
     let firstTable = true;
     for (const table of BACKUP_TABLES) {
       let useOrder = true;
-      let { data, error } = await fetchPage(table, 0, useOrder);
+      let { data, error } = await fetchPage(table, 0, useOrder, branchId);
       if (error && !isMissingTableError(error)) {
         // table may not have an "id" column -> retry unordered
         useOrder = false;
-        ({ data, error } = await fetchPage(table, 0, useOrder));
+        ({ data, error } = await fetchPage(table, 0, useOrder, branchId));
       }
       if (error) {
         skipped[table] = error.message;
@@ -145,7 +179,7 @@ router.get('/backup/export', requireSuperAdmin, async (req, res) => {
         }
         if (data.length < PAGE_SIZE) break;
         from += PAGE_SIZE;
-        const next = await fetchPage(table, from, useOrder);
+        const next = await fetchPage(table, from, useOrder, branchId);
         if (next.error) throw new Error(`${table}: ${next.error.message}`);
         data = next.data;
       }
@@ -167,7 +201,8 @@ router.get('/backup/export', requireSuperAdmin, async (req, res) => {
       req,
       action: 'Backup',
       systemCategory: 'System Settings',
-      logDescription: `Data backup downloaded (${Object.values(summary).reduce((a, b) => a + b, 0)} records)`,
+      logDescription: `Data backup downloaded (${Object.values(summary).reduce((a, b) => a + b, 0)} records)` +
+        (branchId !== 'all' ? ` [branch: ${branchId}]` : ' [all branches]'),
     });
   } catch (err) {
     console.error('❌ Backup export failed:', err);

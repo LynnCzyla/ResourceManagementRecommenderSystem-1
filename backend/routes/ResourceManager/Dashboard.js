@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
+const workloadService = require('../../services/workloadService');
 
 // ✅ Apply auth middleware
 router.use(verifyToken);
@@ -82,6 +83,7 @@ router.get('/', async (req, res) => {
         last_name,
         status,
         role,
+        availability_status,
         created_at,
         avatar_url,
         branch_id,
@@ -98,7 +100,7 @@ router.get('/', async (req, res) => {
     // ✅ Get all projects
     const projectsQuery = supabase
       .from('projects')
-      .select('id, status, project_code, project_name');
+      .select('id, status, project_code, project_name, created_by');
 
     // ✅ Run queries in PARALLEL
     const [employeesResult, assignmentsResult, projectsResult, tasksResult] = await Promise.all([
@@ -118,11 +120,11 @@ router.get('/', async (req, res) => {
     if (projectsResult.error) throw projectsResult.error;
     if (tasksResult.error) throw tasksResult.error;
 
-    // ✅ ONLY show users with role = 'Employee'
+    // ✅ Include both staff Employees and Project Managers in the workforce pool
     const employees = (employeesResult.data || []).filter(
       (emp) => {
         const role = (emp.role || '').trim().toLowerCase();
-        return role === 'employee';
+        return role === 'employee' || role === 'project manager' || role === 'project_manager';
       }
     );
 
@@ -150,7 +152,7 @@ router.get('/', async (req, res) => {
       a.status === 'Assigned'
     );
 
-    // ✅ Map employee to their active project name(s)
+    // ✅ Map employee to their active project name(s) (regular assignments + PM created projects)
     const employeeProjectMap = new Map();
     for (const a of assignments) {
       const proj = activeProjectMap.get(a.project_id);
@@ -164,9 +166,24 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // ✅ Filter projects to active projects with assignments from this branch
-    const projectIdsFromAssignments = [...new Set(assignments.map(a => a.project_id))];
-    let projects = allProjects.filter(p => projectIdsFromAssignments.includes(p.id) && p.status === 'Active');
+    // Also map projects led/managed by Project Managers
+    for (const p of allProjects) {
+      if (p.status === 'Active' && p.created_by && employeeIdSet.has(p.created_by)) {
+        if (!employeeProjectMap.has(p.created_by)) {
+          employeeProjectMap.set(p.created_by, []);
+        }
+        if (!employeeProjectMap.get(p.created_by).includes(p.project_name)) {
+          employeeProjectMap.get(p.created_by).push(p.project_name);
+        }
+      }
+    }
+
+    // ✅ Branch project IDs: projects with assignments from this branch OR created by branch users
+    const branchProjectIds = [...new Set([
+      ...assignments.map(a => a.project_id),
+      ...allProjects.filter(p => employeeIdSet.has(p.created_by)).map(p => p.id)
+    ])];
+    let projects = allProjects.filter(p => branchProjectIds.includes(p.id) && p.status === 'Active');
 
     // ✅ Set of active (profile_id + project_id) pairs from active assignments
     const activeAssignmentKeys = new Set(
@@ -221,23 +238,6 @@ router.get('/', async (req, res) => {
       const taskCount = taskCounts[emp.id] || 0;
       const workloadScore = workloadScores[emp.id] || 0;
 
-      let workloadStatus;
-      let utilizationRate;
-
-      if (workloadScore === 0) {
-        workloadStatus = 'Available';
-        utilizationRate = 0;
-        availableCount++;
-      } else if (workloadScore <= 3) {
-        workloadStatus = 'Limited Availability';
-        utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
-        limitedCount++;
-      } else {
-        workloadStatus = 'Fully Utilized';
-        utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
-        fullyLoadedCount++;
-      }
-
       const positionName = emp.positions?.position_name || null;
       const rawPosition = positionName?.trim();
       const rawRole = (emp.role || '').trim();
@@ -246,7 +246,7 @@ router.get('/', async (req, res) => {
       let displayRole;
       if (rawPosition && rawPosition.toLowerCase() !== 'employee') {
         displayRole = toTitleCase(rawPosition);
-      } else if (roleLower === 'project manager') {
+      } else if (roleLower === 'project manager' || roleLower === 'project_manager') {
         displayRole = 'Project Manager';
       } else if (roleLower === 'resource manager') {
         displayRole = 'Resource Manager';
@@ -261,6 +261,29 @@ router.get('/', async (req, res) => {
       const projectName = hasProject ? assignedProjects.join(', ') : 'Unassigned';
 
       if (hasProject) assignedToProjectCount++;
+
+      // Compute utilization and status:
+      // For Project Managers: always Available (they manage, not execute tasks)
+      // For Employees: load is based on Eq. (2) active task workload score W
+      const isPM = roleLower === 'project manager' || roleLower === 'project_manager';
+      let workloadStatus = emp.availability_status || 'Available';
+      let utilizationRate = 0;
+
+      if (isPM) {
+        // PMs are always Available in analytics — they don't consume capacity slots
+        workloadStatus = 'Available';
+        utilizationRate = 0;
+      } else {
+        utilizationRate = workloadService.getUtilizationRate(emp.id, workloadStatus, workloadScore);
+      }
+
+      if (workloadStatus === 'Available') {
+        availableCount++;
+      } else if (workloadStatus === 'Limited Availability') {
+        limitedCount++;
+      } else {
+        fullyLoadedCount++;
+      }
 
       employeeRows.push({
         id: emp.id,
@@ -287,9 +310,11 @@ router.get('/', async (req, res) => {
     console.log(`📊 Workload Distribution: Available: ${availableCount}, Limited: ${limitedCount}, Fully Loaded: ${fullyLoadedCount}`);
     console.log(`📊 Actually assigned to a project: ${assignedToProjectCount}`);
 
-    // ✅ Resource Utilization by Department
+    // ✅ Resource Utilization by Department — employees only (not PMs)
     const deptStats = {};
     for (const row of employeeRows) {
+      if ((row.rawRole || '').toLowerCase().includes('project manager') ||
+          (row.rawRole || '').toLowerCase().includes('project_manager')) continue; // exclude PMs
       const dept = row.department;
       if (!deptStats[dept]) deptStats[dept] = { total: 0, count: 0 };
       deptStats[dept].total += row.utilizationRate;
@@ -303,12 +328,19 @@ router.get('/', async (req, res) => {
       }))
       .sort((a, b) => b.utilization - a.utilization);
 
-    // ✅ Workload Distribution based on Workload Score
-    const totalForPct = employeeRows.length || 1;
+    // ✅ Workload Distribution — employees only (not PMs)
+    const employeeOnlyRows = employeeRows.filter(r =>
+      !(r.rawRole || '').toLowerCase().includes('project manager') &&
+      !(r.rawRole || '').toLowerCase().includes('project_manager')
+    );
+    const totalForPct = employeeOnlyRows.length || 1;
+    const empAvailable = employeeOnlyRows.filter(r => r.workloadStatus === 'Available').length;
+    const empLimited   = employeeOnlyRows.filter(r => r.workloadStatus === 'Limited Availability').length;
+    const empFull      = employeeOnlyRows.filter(r => r.workloadStatus === 'Fully Utilized').length;
     const workloadDistributionPct = {
-      available: Math.round((availableCount / totalForPct) * 100),
-      limited: Math.round((limitedCount / totalForPct) * 100),
-      fullyLoaded: Math.round((fullyLoadedCount / totalForPct) * 100),
+      available:  Math.round((empAvailable / totalForPct) * 100),
+      limited:    Math.round((empLimited   / totalForPct) * 100),
+      fullyLoaded:Math.round((empFull      / totalForPct) * 100),
     };
 
     // ✅ Build the last 6 calendar months
@@ -334,8 +366,8 @@ router.get('/', async (req, res) => {
         .gte('created_at', sixMonthsAgo.toISOString());
 
       if (!isSuperAdmin && userBranchId) {
-        if (projectIdsFromAssignments.length > 0) {
-          reqTrendQuery = reqTrendQuery.in('project_id', projectIdsFromAssignments);
+        if (branchProjectIds.length > 0) {
+          reqTrendQuery = reqTrendQuery.in('project_id', branchProjectIds);
         } else {
           reqTrendQuery = reqTrendQuery.eq('project_id', 0);
         }
@@ -369,11 +401,6 @@ router.get('/', async (req, res) => {
     }
 
     // ✅ Demand vs. Available Capacity
-    // Ginagamit na ang project_resource_requirements_history table (kung meron nang
-    // history entries ang isang requirement) para malaman ang totoong status niya
-    // noong bawat buwan. Kung wala pang history entries (bagong requirement, wala
-    // pang nagbabago ang status), fallback sa current status + created_at
-    // (parang yung dating simpleng snapshot logic).
     let demandVsAvailableCapacity = [];
     try {
       let reqQuery = supabase
@@ -382,8 +409,8 @@ router.get('/', async (req, res) => {
         .gte('created_at', sixMonthsAgo.toISOString());
 
       if (!isSuperAdmin && userBranchId) {
-        if (projectIdsFromAssignments.length > 0) {
-          reqQuery = reqQuery.in('project_id', projectIdsFromAssignments);
+        if (branchProjectIds.length > 0) {
+          reqQuery = reqQuery.in('project_id', branchProjectIds);
         } else {
           reqQuery = reqQuery.eq('project_id', 0);
         }
@@ -441,11 +468,12 @@ router.get('/', async (req, res) => {
         return statusAtCutoff; // null kung wala pang existed as of cutoff
       };
 
-      // Available/Limited employees (current snapshot — walang task history table pa)
+      // Available/Limited employees (current snapshot — excluding Project Managers)
       const availableCapacityEmployees = employeeRows.filter((e) => {
-        const roleMatch = (e.rawRole || '').trim().toLowerCase() === 'employee';
+        const role = (e.rawRole || e.role || '').trim().toLowerCase();
+        const isPM = role.includes('project manager') || role.includes('project_manager');
         const isAvailable = e.workloadStatus === 'Available' || e.workloadStatus === 'Limited Availability';
-        return roleMatch && isAvailable;
+        return !isPM && isAvailable;
       });
 
       demandVsAvailableCapacity = monthMeta.map(({ label, endOfMonth }) => {
@@ -469,9 +497,9 @@ router.get('/', async (req, res) => {
       demandVsAvailableCapacity = [];
     }
 
-    // ✅ Hiring Outlook
-    const overallUtilizationRate = employeeRows.length
-      ? Math.round(employeeRows.reduce((sum, e) => sum + e.utilizationRate, 0) / employeeRows.length)
+    // ✅ Hiring Outlook (employees only, excluding PMs)
+    const overallUtilizationRate = employeeOnlyRows.length
+      ? Math.round(employeeOnlyRows.reduce((sum, e) => sum + e.utilizationRate, 0) / employeeOnlyRows.length)
       : 0;
 
     const overloadedDepartments = departmentUtilization.filter((d) => d.utilization >= 85);

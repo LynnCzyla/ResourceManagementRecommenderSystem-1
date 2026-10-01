@@ -51,6 +51,26 @@ export default function PMProjectsTab({ user, onNavigate }) {
     error: '',
   });
 
+  // ✅ View Allocated Team & Requested Resources Modal state
+  const [projectAllocationsModal, setProjectAllocationsModal] = useState({
+    isOpen: false,
+    project: null,
+  });
+
+  const handleOpenProjectAllocations = (project) => {
+    setProjectAllocationsModal({
+      isOpen: true,
+      project,
+    });
+  };
+
+  const handleCloseProjectAllocations = () => {
+    setProjectAllocationsModal({
+      isOpen: false,
+      project: null,
+    });
+  };
+
   // ✅ Edit Project Modal state
   const [editingProject, setEditingProject] = useState(null);
   const [editFormData, setEditFormData] = useState({
@@ -855,6 +875,32 @@ export default function PMProjectsTab({ user, onNavigate }) {
                     }}>
                       {proj.status}
                     </span>
+
+                    {/* Small View Icon beside Active status to see allocated team and requested resources */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenProjectAllocations(proj);
+                      }}
+                      title="View Allocated Team & Resource Requirements"
+                      style={styles.smallViewBtn}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = 'var(--color-primary)';
+                        e.currentTarget.style.borderColor = 'var(--color-primary)';
+                        e.currentTarget.style.backgroundColor = 'var(--color-primary-light)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = 'var(--color-text-secondary)';
+                        e.currentTarget.style.borderColor = 'var(--color-border)';
+                        e.currentTarget.style.backgroundColor = 'var(--color-bg-card-hover)';
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
                     {proj.status === 'Active' && proj.isRestored && (
                       <span style={{
                         ...styles.statusBadge,
@@ -2302,6 +2348,197 @@ export default function PMProjectsTab({ user, onNavigate }) {
           </div>
         </div>
       )}
+
+      {/* View Allocated Team & Requested Resources Modal */}
+      {projectAllocationsModal.isOpen && projectAllocationsModal.project && (
+        <div style={styles.modalOverlay} onClick={handleCloseProjectAllocations}>
+          <div
+            className="glass-card"
+            style={{
+              ...styles.modalCard,
+              maxWidth: '820px',
+              maxHeight: '88vh',
+              padding: '24px 28px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={styles.modalHeader}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                  <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '800' }}>
+                    {projectAllocationsModal.project.name}
+                  </h2>
+                  <span style={{
+                    ...styles.statusBadge,
+                    backgroundColor: projectAllocationsModal.project.status === 'Active' ? 'var(--color-primary-light)' : 'rgba(148, 163, 184, 0.15)',
+                    color: projectAllocationsModal.project.status === 'Active' ? 'var(--color-success)' : 'var(--color-text-secondary)',
+                  }}>
+                    {projectAllocationsModal.project.status}
+                  </span>
+                  <span style={{
+                    ...styles.statusBadge,
+                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                    color: '#3b82f6',
+                  }}>
+                    Priority: {projectAllocationsModal.project.priority || 'Normal'}
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                  {projectAllocationsModal.project.duration ? `${projectAllocationsModal.project.duration} Days` : ''} 
+                  {projectAllocationsModal.project.startDate ? ` • ${new Date(projectAllocationsModal.project.startDate).toLocaleDateString()} to ${new Date(projectAllocationsModal.project.endDate).toLocaleDateString()}` : ''}
+                  {projectAllocationsModal.project.teamSize ? ` • Team Size Target: ${projectAllocationsModal.project.teamSize}` : ''}
+                </p>
+              </div>
+              <button onClick={handleCloseProjectAllocations} style={styles.closeModalBtn}>&times;</button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', overflowY: 'auto', paddingRight: '4px' }}>
+              
+              {/* SECTION 1: ALLOCATED EMPLOYEES */}
+              <div style={styles.allocSection}>
+                <div style={styles.allocSectionHeader}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="9" cy="7" r="4"></circle>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                    <h3 style={styles.allocSectionTitle}>Allocated Team Members</h3>
+                  </div>
+                  <span style={styles.allocCountBadge}>
+                    {(projectAllocationsModal.project.allocatedEmployees || []).length} Assigned
+                  </span>
+                </div>
+
+                {(projectAllocationsModal.project.allocatedEmployees || []).length === 0 ? (
+                  <div style={styles.allocEmptyCard}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.5">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <span>No employees currently allocated to this project by the Resource Manager.</span>
+                  </div>
+                ) : (
+                  <div style={styles.allocEmployeeGrid}>
+                    {projectAllocationsModal.project.allocatedEmployees.map((emp) => (
+                      <div key={emp.id || emp.profileId} style={styles.allocEmployeeCard}>
+                        <img src={emp.avatar} alt={emp.name} style={styles.allocEmpAvatar} />
+                        <div style={styles.allocEmpDetails}>
+                          <div style={styles.allocEmpName}>{emp.name}</div>
+                          <div style={styles.allocEmpRole}>{emp.role}</div>
+                          {emp.employeeId && emp.employeeId !== 'N/A' && (
+                            <span style={styles.allocEmpIdTag}>{emp.employeeId}</span>
+                          )}
+                        </div>
+                        <span style={styles.allocStatusPill}>
+                          ✓ {emp.status || 'Assigned'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 2: REQUESTED RESOURCES */}
+              <div style={styles.allocSection}>
+                <div style={styles.allocSectionHeader}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                    </svg>
+                    <h3 style={styles.allocSectionTitle}>Requested Resources</h3>
+                  </div>
+                  <span style={{ ...styles.allocCountBadge, backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+                    {(projectAllocationsModal.project.resources || []).length} Requirements
+                  </span>
+                </div>
+
+                {(projectAllocationsModal.project.resources || []).length === 0 ? (
+                  <div style={styles.allocEmptyCard}>
+                    <span>No resource requirements recorded for this project.</span>
+                  </div>
+                ) : (
+                  <div style={styles.allocRequirementsList}>
+                    {projectAllocationsModal.project.resources.map((req, idx) => (
+                      <div key={req.id || idx} style={styles.allocRequirementCard}>
+                        <div style={styles.allocReqTop}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={styles.allocReqIndex}>#{idx + 1}</span>
+                            <span style={styles.allocReqRole}>{req.role || 'Unspecified Role'}</span>
+                            <span style={styles.allocReqQtyPill}>Qty: {req.quantity || 1}</span>
+                            {req.assignment && (
+                              <span style={styles.allocReqTypePill}>{req.assignment}</span>
+                            )}
+                          </div>
+                          <span style={{
+                            ...styles.statusBadge,
+                            fontSize: '11px',
+                            backgroundColor: req.status === 'Fulfilled' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                            color: req.status === 'Fulfilled' ? '#10b981' : '#f59e0b',
+                          }}>
+                            {req.status || 'Pending'}
+                          </span>
+                        </div>
+
+                        {/* Primary Skills */}
+                        {req.primarySkills && req.primarySkills.length > 0 && (
+                          <div style={styles.allocReqSkillsRow}>
+                            <span style={styles.allocReqSkillsLabel}>Primary Skills:</span>
+                            <div style={styles.allocReqSkillsList}>
+                              {req.primarySkills.map((sk, sIdx) => (
+                                <span key={sIdx} style={styles.allocPrimarySkillTag}>{sk}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Secondary Skills */}
+                        {req.secondarySkills && req.secondarySkills.length > 0 && (
+                          <div style={styles.allocReqSkillsRow}>
+                            <span style={styles.allocReqSkillsLabel}>Secondary Skills:</span>
+                            <div style={styles.allocReqSkillsList}>
+                              {req.secondarySkills.map((sk, sIdx) => (
+                                <span key={sIdx} style={styles.allocSecondarySkillTag}>{sk}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Justification */}
+                        {req.justification && (
+                          <div style={styles.allocReqJustification}>
+                            <strong>Justification:</strong> {req.justification}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '12px', borderTop: '1px solid var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={handleCloseProjectAllocations}
+                style={styles.cancelBtn}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2968,5 +3205,212 @@ const styles = {
     fontStyle: 'italic',
     marginTop: '4px',
     lineHeight: '1.4',
+  },
+
+  // ── Small View Icon & Allocations Modal Styles ────────────────────────────
+  smallViewBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '26px',
+    height: '26px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    padding: 0,
+    outline: 'none',
+  },
+  allocSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    background: 'rgba(255, 255, 255, 0.02)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '12px',
+    padding: '16px 18px',
+  },
+  allocSectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: '8px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  allocSectionTitle: {
+    fontSize: '15px',
+    fontWeight: '700',
+    margin: 0,
+    color: 'var(--color-text-primary)',
+  },
+  allocCountBadge: {
+    fontSize: '12px',
+    fontWeight: '700',
+    padding: '3px 8px',
+    borderRadius: '12px',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    color: 'var(--color-success, #10b981)',
+  },
+  allocEmptyCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '16px',
+    borderRadius: '8px',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
+    fontStyle: 'italic',
+  },
+  allocEmployeeGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    gap: '12px',
+  },
+  allocEmployeeCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    position: 'relative',
+  },
+  allocEmpAvatar: {
+    width: '38px',
+    height: '38px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '1px solid var(--color-border)',
+    flexShrink: 0,
+  },
+  allocEmpDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+    flex: 1,
+  },
+  allocEmpName: {
+    fontSize: '13px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  allocEmpRole: {
+    fontSize: '11px',
+    color: 'var(--color-text-secondary)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  allocEmpIdTag: {
+    fontSize: '10px',
+    fontWeight: '600',
+    color: 'var(--color-primary)',
+    background: 'var(--color-primary-light)',
+    padding: '1px 5px',
+    borderRadius: '4px',
+    alignSelf: 'flex-start',
+  },
+  allocStatusPill: {
+    fontSize: '10px',
+    fontWeight: '700',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    background: 'rgba(16, 185, 129, 0.15)',
+    color: '#10b981',
+    flexShrink: 0,
+  },
+  allocRequirementsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  allocRequirementCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    padding: '12px 14px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+  },
+  allocReqTop: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+  allocReqIndex: {
+    fontSize: '11px',
+    fontWeight: '800',
+    color: 'var(--color-text-muted)',
+  },
+  allocReqRole: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  allocReqQtyPill: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 7px',
+    borderRadius: '4px',
+    background: 'rgba(59, 130, 246, 0.15)',
+    color: '#3b82f6',
+  },
+  allocReqTypePill: {
+    fontSize: '11px',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-secondary)',
+  },
+  allocReqSkillsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+    fontSize: '12px',
+  },
+  allocReqSkillsLabel: {
+    fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+    fontSize: '11px',
+  },
+  allocReqSkillsList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+  },
+  allocPrimarySkillTag: {
+    fontSize: '11px',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
+    fontWeight: '600',
+  },
+  allocSecondarySkillTag: {
+    fontSize: '11px',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    background: 'rgba(148, 163, 184, 0.12)',
+    color: 'var(--color-text-secondary)',
+    fontWeight: '500',
+  },
+  allocReqJustification: {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+    fontStyle: 'italic',
+    paddingTop: '4px',
+    borderTop: '1px dashed var(--color-border)',
   },
 };

@@ -217,7 +217,7 @@ class RecommendationEngine {
                 .from('project_tasks')
                 .select('profile_id, priority')
                 .in('profile_id', profileIds)
-                .in('status', ['Pending', 'Active', 'In Progress']),
+                .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")'),
             supabase
                 .from('performance_records')
                 .select('profile_id, rating')
@@ -767,6 +767,9 @@ class RecommendationEngine {
                     availabilityFactor * 1000
                 ) / 1000,
 
+            availabilityStatus:
+                employee.availability_status || (availabilityFactor >= 0.8 ? 'Available' : availabilityFactor >= 0.5 ? 'Limited Availability' : 'Fully Utilized'),
+
             historicalPerformance:
                 Math.round(
                     historicalPerformance * 1000
@@ -815,8 +818,9 @@ class RecommendationEngine {
                 })),
                 availability: {
                     score: Math.round(availabilityFactor * 100),
+                    percentage: workload === 0 ? 100 : Math.min(100, Math.max(1, Math.round((availabilityFactor / 0.94263) * 100))),
                     workloadPoints: workload,
-                    status: workload <= 4 ? 'Available' : workload <= 7 ? 'Partially Available' : 'High Workload'
+                    status: availabilityFactor >= 0.80 ? 'Available' : availabilityFactor >= 0.50 ? 'Limited Availability' : 'Fully Utilized'
                 },
                 performance: {
                     score: Math.round(historicalPerformance * 100)
@@ -1033,6 +1037,7 @@ class RecommendationEngine {
                     first_name, 
                     last_name, 
                     role,
+                    availability_status,
                     branch_id,
                     department_id,
                     departments:department_id (
@@ -1296,7 +1301,7 @@ class RecommendationEngine {
             .from('project_tasks')
             .select('priority')
             .eq('profile_id', profileId)
-            .in('status', ['Pending', 'Active', 'In Progress']);
+            .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")');
 
         if (error) throw error;
 

@@ -107,6 +107,30 @@ class DocumentProcessor:
             if nlp_full_result.get('auto_approved'):
                 print(f"[INTEGRATION] Auto-approved samples: {nlp_full_result.get('auto_approved', [])[:5]}")
             
+            # Calculate combined document text + ML skill extraction confidence
+            doc_conf = float(ocr_result['ocr_data'].get('ocr_confidence', 0.865))
+            ml_confs = []
+            all_preds = {
+                **nlp_full_result.get('auto_approved_predictions', {}),
+                **nlp_full_result.get('needs_review_predictions', {})
+            }
+            for meta in all_preds.values():
+                if isinstance(meta, dict) and 'confidence' in meta:
+                    try:
+                        c = float(meta['confidence'])
+                        if 0 < c <= 1.0:
+                            ml_confs.append(c)
+                    except (ValueError, TypeError):
+                        pass
+
+            if ml_confs:
+                avg_ml_conf = sum(ml_confs) / len(ml_confs)
+                final_confidence = round(0.35 * doc_conf + 0.65 * avg_ml_conf, 3)
+            else:
+                final_confidence = round(doc_conf, 3)
+
+            ocr_result['ocr_data']['ocr_confidence'] = final_confidence
+
             # Combine results with CORRECT data
             result = {
                 'success': True,
@@ -117,7 +141,7 @@ class DocumentProcessor:
                 'ocr': {
                     'raw_text': ocr_result['ocr_data']['raw_ocr_text'],
                     'cleaned_text': ocr_result['ocr_data']['cleaned_ocr_text'],
-                    'confidence': ocr_result['ocr_data']['ocr_confidence'],
+                    'confidence': final_confidence,
                     'word_count': ocr_result['ocr_data']['word_count'],
                     'char_count': ocr_result['ocr_data']['char_count'],
                     'processing_time': ocr_result['ocr_data']['processing_time_seconds']

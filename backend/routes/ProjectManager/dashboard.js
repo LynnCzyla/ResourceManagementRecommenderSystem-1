@@ -5,7 +5,7 @@ const supabase = require('../../supabase');
 
 router.get('/dashboard', async (req, res) => {
   try {
-    const { createdBy } = req.query;
+    const createdBy = req.user.id;
     
     // Get the user's branch from the request (set by auth middleware)
     const userBranchId = req.user?.branch_id;

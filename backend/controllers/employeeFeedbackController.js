@@ -84,7 +84,8 @@ const getMyFeedback = async (req, res) => {
         feedback_response:feedback_responses!performance_records_feedback_response_id_fkey ( would_recommend )
       `)
       .eq('profile_id', profileId)
-      .in('feedback_status', ['submitted', 'reviewed']);
+      // Feedback is ONLY visible if RM has granted permission (status = 'reviewed')
+      .eq('feedback_status', 'reviewed');
 
     if (recordsError) throw recordsError;
 
@@ -192,7 +193,8 @@ const getPmClientFeedback = async (req, res) => {
       `)
       .eq('profile_id', pmProfileId)
       .eq('feedback_source', 'client')
-      .in('feedback_status', ['submitted', 'reviewed']);
+      // Feedback is ONLY visible if RM has granted permission (status = 'reviewed')
+      .eq('feedback_status', 'reviewed');
 
     if (recordsError) throw recordsError;
 
@@ -261,9 +263,20 @@ const getClientFeedbackForEmployee = async (req, res) => {
       return res.status(400).json({ success: false, message: 'profileId is required' });
     }
 
+    const { data: ownedProjects, error: projectError } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('created_by', req.user.id);
+    if (projectError) throw projectError;
+    const ownedProjectIds = (ownedProjects || []).map(project => project.id);
+    if (ownedProjectIds.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
     let requestQuery = supabase
       .from('feedback_requests')
-      .select('id, project_id, client_name, completed_at, status');
+      .select('id, project_id, client_name, completed_at, status')
+      .in('project_id', ownedProjectIds);
     if (projectId) requestQuery = requestQuery.eq('project_id', projectId);
 
     const { data: requests, error: reqErr } = await requestQuery;
@@ -320,9 +333,10 @@ const submitPmEvaluation = async (req, res) => {
     }
 
     const {
-      profileId, // EMP being evaluated
+      profileId,
+      profileIds,
       projectId,
-      feedbackResponseId, // optional link to the client feedback_responses row this is based on
+      feedbackResponseId,
       rating,
       technical_skills_rating,
       communication_rating,
@@ -336,79 +350,100 @@ const submitPmEvaluation = async (req, res) => {
       projectFeedback,
     } = req.body;
 
-    if (!profileId) return res.status(400).json({ success: false, message: 'profileId (employee) is required' });
+    const targetProfileIds = Array.isArray(profileIds) && profileIds.length > 0
+      ? profileIds.filter(id => id && String(id) !== String(pmProfileId))
+      : (profileId && String(profileId) !== String(pmProfileId) ? [profileId] : []);
+
+    if (targetProfileIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'At least one valid employee is required for evaluation' });
+    }
     if (!projectId) return res.status(400).json({ success: false, message: 'projectId is required' });
     if (rating === undefined || rating === null) {
       return res.status(400).json({ success: false, message: 'Overall rating is required' });
     }
-    if (String(profileId) === String(pmProfileId)) {
-      return res.status(400).json({ success: false, message: 'You cannot submit a project_manager evaluation for yourself' });
+
+    const { data: ownedProject, error: projectError } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', projectId)
+      .eq('created_by', req.user.id)
+      .maybeSingle();
+    if (projectError) throw projectError;
+    if (!ownedProject) {
+      return res.status(403).json({ success: false, message: 'You can only evaluate employees on your own projects' });
     }
 
-    // Confirm the employee is actually assigned to this project
+    // Confirm employees are actually assigned to this project
     const { data: assignmentRows, error: assignError } = await supabase
       .from('project_assignments')
-      .select('id')
+      .select('profile_id')
       .eq('project_id', projectId)
-      .eq('profile_id', profileId)
-      .limit(1);
+      .in('profile_id', targetProfileIds)
+      .in('status', ['Assigned', 'Completed', 'Active']);
     if (assignError) throw assignError;
-    const assignment = assignmentRows?.[0];
-    if (!assignment) {
-      return res.status(400).json({ success: false, message: 'This employee is not assigned to the selected project' });
+
+    const assignedSet = new Set((assignmentRows || []).map(a => a.profile_id));
+    const validProfileIds = targetProfileIds.filter(id => assignedSet.has(id));
+    if (validProfileIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'None of the selected employees are assigned to this project' });
     }
 
-    const record = {
-      profile_id: profileId,
-      project_id: projectId,
-      created_by: pmProfileId,
-      feedback_response_id: feedbackResponseId || null,
-      rating: Number(rating),
-      technical_skills_rating: technical_skills_rating != null ? Number(technical_skills_rating) : null,
-      communication_rating: communication_rating != null ? Number(communication_rating) : null,
-      timeliness_rating: timeliness_rating != null ? Number(timeliness_rating) : null,
-      quality_of_work_rating: quality_of_work_rating != null ? Number(quality_of_work_rating) : null,
-      teamwork_rating: teamwork_rating != null ? Number(teamwork_rating) : null,
-      problem_solving_rating: problem_solving_rating != null ? Number(problem_solving_rating) : null,
-      pm_assessment: pmAssessment || null,
-      strengths: strengths || null,
-      areas_for_improvement: areasForImprovement || null,
-      project_feedback: projectFeedback || null,
-      feedback_source: 'project_manager',
-      feedback_status: 'submitted',
-      rated_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    const savedList = [];
 
-    // 1. Save or update the project manager's own evaluation record
-    const { data: existingRows, error: existingErr } = await supabase
-      .from('performance_records')
-      .select('id')
-      .eq('profile_id', profileId)
-      .eq('project_id', projectId)
-      .eq('created_by', pmProfileId)
-      .eq('feedback_source', 'project_manager')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (existingErr) throw existingErr;
-    const existing = existingRows?.[0];
+    for (const empProfileId of validProfileIds) {
+      const record = {
+        profile_id: empProfileId,
+        project_id: projectId,
+        created_by: pmProfileId,
+        feedback_response_id: feedbackResponseId || null,
+        rating: Number(rating),
+        technical_skills_rating: technical_skills_rating != null ? Number(technical_skills_rating) : null,
+        communication_rating: communication_rating != null ? Number(communication_rating) : null,
+        timeliness_rating: timeliness_rating != null ? Number(timeliness_rating) : null,
+        quality_of_work_rating: quality_of_work_rating != null ? Number(quality_of_work_rating) : null,
+        teamwork_rating: teamwork_rating != null ? Number(teamwork_rating) : null,
+        problem_solving_rating: problem_solving_rating != null ? Number(problem_solving_rating) : null,
+        pm_assessment: pmAssessment || null,
+        strengths: strengths || null,
+        areas_for_improvement: areasForImprovement || null,
+        project_feedback: projectFeedback || null,
+        feedback_source: 'project_manager',
+        feedback_status: 'submitted',
+        rated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-    let saved;
-    if (existing) {
-      const { data, error } = await supabase
+      // 1. Save or update the project manager's own evaluation record
+      const { data: existingRows, error: existingErr } = await supabase
         .from('performance_records')
-        .update(record)
-        .eq('id', existing.id)
-        .select();
-      if (error) throw error;
-      saved = data?.[0] || { id: existing.id, ...record };
-    } else {
-      const { data, error } = await supabase
-        .from('performance_records')
-        .insert(record)
-        .select();
-      if (error) throw error;
-      saved = data?.[0] || record;
+        .select('id')
+        .eq('profile_id', empProfileId)
+        .eq('project_id', projectId)
+        .eq('created_by', pmProfileId)
+        .eq('feedback_source', 'project_manager')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (existingErr) throw existingErr;
+      const existing = existingRows?.[0];
+
+      let saved;
+      if (existing) {
+        const { data, error } = await supabase
+          .from('performance_records')
+          .update(record)
+          .eq('id', existing.id)
+          .select();
+        if (error) throw error;
+        saved = data?.[0] || { id: existing.id, ...record };
+      } else {
+        const { data, error } = await supabase
+          .from('performance_records')
+          .insert(record)
+          .select();
+        if (error) throw error;
+        saved = data?.[0] || record;
+      }
+      savedList.push(saved);
     }
 
     // 2. If client feedback response exists, copy/upsert it directly into performance_records as feedback_source = 'client'
@@ -510,53 +545,91 @@ const submitPmEvaluation = async (req, res) => {
     }
 
     if (targetRequestId) {
-      const pmResponse = {
-        feedback_request_id: targetRequestId,
-        profile_id: profileId,
-        rating: Number(rating),
-        technical_skills_rating: technical_skills_rating != null ? Number(technical_skills_rating) : null,
-        communication_rating: communication_rating != null ? Number(communication_rating) : null,
-        timeliness_rating: timeliness_rating != null ? Number(timeliness_rating) : null,
-        quality_of_work_rating: quality_of_work_rating != null ? Number(quality_of_work_rating) : null,
-        teamwork_rating: teamwork_rating != null ? Number(teamwork_rating) : null,
-        problem_solving_rating: problem_solving_rating != null ? Number(problem_solving_rating) : null,
-        deliverables_feedback: pmAssessment || null,
-        strengths: strengths || null,
-        areas_for_improvement: areasForImprovement || null,
-        project_feedback: projectFeedback || null,
-        reviewed_by: pmProfileId,
-        reviewed_at: new Date().toISOString(),
-        review_status: 'approved'
-      };
+      for (const empProfileId of validProfileIds) {
+        const pmResponse = {
+          feedback_request_id: targetRequestId,
+          profile_id: empProfileId,
+          rating: Number(rating),
+          technical_skills_rating: technical_skills_rating != null ? Number(technical_skills_rating) : null,
+          communication_rating: communication_rating != null ? Number(communication_rating) : null,
+          timeliness_rating: timeliness_rating != null ? Number(timeliness_rating) : null,
+          quality_of_work_rating: quality_of_work_rating != null ? Number(quality_of_work_rating) : null,
+          teamwork_rating: teamwork_rating != null ? Number(teamwork_rating) : null,
+          problem_solving_rating: problem_solving_rating != null ? Number(problem_solving_rating) : null,
+          deliverables_feedback: pmAssessment || null,
+          strengths: strengths || null,
+          areas_for_improvement: areasForImprovement || null,
+          project_feedback: projectFeedback || null,
+          reviewed_by: pmProfileId,
+          reviewed_at: new Date().toISOString(),
+          review_status: 'approved'
+        };
 
-      const { data: existingPmRespRows, error: pmRespErr } = await supabase
-        .from('feedback_responses')
-        .select('id')
-        .eq('feedback_request_id', targetRequestId)
-        .eq('profile_id', profileId)
-        .eq('reviewed_by', pmProfileId)
-        .limit(1);
+        const { data: existingPmRespRows, error: pmRespErr } = await supabase
+          .from('feedback_responses')
+          .select('id')
+          .eq('feedback_request_id', targetRequestId)
+          .eq('profile_id', empProfileId)
+          .eq('reviewed_by', pmProfileId)
+          .limit(1);
 
-      if (!pmRespErr) {
-        const existingPmResp = existingPmRespRows?.[0];
-        if (existingPmResp) {
-          await supabase
-            .from('feedback_responses')
-            .update(pmResponse)
-            .eq('id', existingPmResp.id);
-        } else {
-          await supabase
-            .from('feedback_responses')
-            .insert(pmResponse);
+        if (!pmRespErr) {
+          const existingPmResp = existingPmRespRows?.[0];
+          if (existingPmResp) {
+            await supabase
+              .from('feedback_responses')
+              .update(pmResponse)
+              .eq('id', existingPmResp.id);
+          } else {
+            await supabase
+              .from('feedback_responses')
+              .insert(pmResponse);
+          }
         }
       }
     }
 
-    res.status(201).json({ success: true, message: 'Evaluation submitted', data: saved });
+    res.status(201).json({
+      success: true,
+      message: `Evaluation submitted successfully for ${savedList.length} employee(s)`,
+      data: savedList.length === 1 ? savedList[0] : savedList
+    });
   } catch (error) {
     console.error('Error submitting PM evaluation:', error);
     res.status(500).json({ success: false, message: 'Failed to submit evaluation', error: error.message });
   }
 };
 
-module.exports = { getMyFeedback, getClientFeedbackForEmployee, submitPmEvaluation, getPmClientFeedback };
+// GET /api/pm/performance/evaluations?projectId=<optional>
+const getPmEvaluations = async (req, res) => {
+  try {
+    const pmProfileId = req.user?.profile_id || req.user?.id;
+    const { projectId } = req.query;
+
+    let query = supabase
+      .from('performance_records')
+      .select('id, profile_id, project_id, rating, technical_skills_rating, communication_rating, timeliness_rating, quality_of_work_rating, teamwork_rating, problem_solving_rating, pm_assessment, strengths, areas_for_improvement, project_feedback, rated_at, created_at')
+      .eq('created_by', pmProfileId)
+      .eq('feedback_source', 'project_manager');
+
+    if (projectId) {
+      query = query.eq('project_id', projectId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    res.status(200).json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('Error fetching PM evaluations:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch evaluations', error: error.message });
+  }
+};
+
+module.exports = {
+  getMyFeedback,
+  getClientFeedbackForEmployee,
+  submitPmEvaluation,
+  getPmClientFeedback,
+  getPmEvaluations,
+};

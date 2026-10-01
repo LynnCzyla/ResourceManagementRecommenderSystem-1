@@ -50,8 +50,8 @@ const CACHE_TTL = 60000; // 60 seconds
 // Track pending requests for deduplication
 const pendingRequests = new Map();
 
-function getCacheKey(url, options = {}) {
-  return `${options.method || 'GET'}:${url}`;
+function getCacheKey(url, options = {}, scope = 'anonymous') {
+  return `${scope}:${options.method || 'GET'}:${url}`;
 }
 
 function getCached(key) {
@@ -80,10 +80,17 @@ function clearCache() {
 async function request(base, path, options = {}) {
   const url = `${base}${path}`;
   const method = options.method || 'GET';
-  const cacheKey = getCacheKey(url, options);
 
   // ✅ Get auth token (now session-aware, async)
   const token = await getAuthToken();
+  let storedUser = null;
+  try {
+    storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+  } catch {
+    // Ignore malformed local profile data and use the token scope fallback.
+  }
+  const scope = `${storedUser?.id || storedUser?.user_id || token?.slice(-16) || 'anonymous'}:${storedUser?.role || 'unknown'}`;
+  const cacheKey = getCacheKey(url, options, scope);
 
   // ✅ Build headers with Authorization
   const headers = {
@@ -243,7 +250,7 @@ export function invalidateCache() {
 
 // Abort all pending requests
 export function abortAllRequests() {
-  for (const [key, promise] of pendingRequests) {
+  for (const [key] of pendingRequests) {
     // We can't directly abort promises, but we can clear them
     pendingRequests.delete(key);
   }
@@ -306,19 +313,26 @@ export function updateProject(id, payload) {
 
 export function updateProjectStatus(id, status, restoreMode, reason) {
   clearCacheForEndpoints(['/projects', '/dashboard', '/employees', '/tasks']);
+  let mode = typeof restoreMode === 'string' ? restoreMode : null;
+  let r = typeof reason === 'string' ? reason : null;
+  if (typeof restoreMode === 'object' && restoreMode !== null) {
+    if (restoreMode.restoreMode) mode = restoreMode.restoreMode;
+    if (restoreMode.reason) r = restoreMode.reason;
+  }
   return pm(`/projects/${id}/status`, {
     method: 'PATCH',
-    body: JSON.stringify({ status, restoreMode, reason }),
+    body: JSON.stringify({ status, restoreMode: mode, reason: r }),
     skipCache: true
   });
 }
 
+export function cancelProject(id, reason = 'Cancelled by Project Manager') {
+  return updateProjectStatus(id, 'Cancelled', null, reason);
+}
+
 export function deleteProject(id) {
-  clearCacheForEndpoints(['/projects', '/dashboard', '/employees']);
-  return pm(`/projects/${id}`, {
-    method: 'DELETE',
-    skipCache: true
-  });
+  // Graceful alias: cancel project instead of hard delete
+  return cancelProject(id);
 }
 
 export function assignEmployeeToProject(projectId, employeeId, role, assignedBy) {
@@ -364,15 +378,12 @@ export function updateResourceRequestStatus(id, status) {
 }
 
 export function cancelResourceRequest(id) {
-  return updateResourceRequestStatus(id, 'Canceled');
+  return updateResourceRequestStatus(id, 'Cancelled');
 }
 
 export function deleteResourceRequest(id) {
-  clearCacheForEndpoints(['/resource-requests', '/dashboard']);
-  return pm(`/resource-requests/${id}`, {
-    method: 'DELETE',
-    skipCache: true
-  });
+  // Graceful alias: cancel requirement instead of delete
+  return cancelResourceRequest(id);
 }
 
 // ── Tasks ───────────────────────────────────────────────────────────────
@@ -412,12 +423,17 @@ export function logTaskProgress(id, payload) {
   });
 }
 
-export function deleteTask(id) {
+export function cancelTask(id, reason = 'Cancelled by Project Manager') {
   clearCacheForEndpoints(['/tasks', '/dashboard']);
   return pm(`/tasks/${id}`, {
     method: 'DELETE',
+    body: JSON.stringify({ reason }),
     skipCache: true
   });
+}
+
+export function deleteTask(id) {
+  return cancelTask(id);
 }
 
 // ── Weekly Reports ───────────────────────────────────────────────────────
@@ -490,6 +506,12 @@ export function submitPmEvaluation(payload) {
     body: JSON.stringify(payload),
     skipCache: true,
   });
+}
+
+export function getPmEvaluations(projectId, signal) {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', projectId);
+  return pm(`/performance/evaluations?${params.toString()}`, { signal, skipCache: true });
 }
 
 export function getPmClientFeedback(signal) {

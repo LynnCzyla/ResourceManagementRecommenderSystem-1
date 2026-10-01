@@ -95,7 +95,10 @@ export default function PMMyFeedbackTab() {
 
       {!hasFeedback ? (
         <div style={styles.emptyState}>
-          <p>No client feedback reviews received yet.</p>
+          <p>No client feedback is available yet.</p>
+          <span style={{ fontSize: 13, color: 'var(--color-text-muted)', display: 'block', marginTop: 6 }}>
+            Client feedback will appear here once reviewed and granted visibility by the Resource Manager.
+          </span>
         </div>
       ) : (
         <>

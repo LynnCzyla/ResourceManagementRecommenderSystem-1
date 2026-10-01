@@ -5,6 +5,8 @@ const supabase = require("../../supabase");
 const { sendMail, getLogoUrl } = require("../../utils/brevoMailer");
 const { logAuditEvent } = require('../../utils/auditLogger');
 const { verifyToken } = require('../Middleware/auth');
+// ✅ Finding 18: Invalidate RM employee directory cache on new user creation
+const { clearEmployeeCache } = require('../ResourceManager/Employees');
 
 // ✅ Apply auth middleware to ALL routes
 router.use(verifyToken);
@@ -394,6 +396,13 @@ router.post("/create", async (req, res) => {
       branch: adminBranchId,
       performed_by: req.user.employee_id
     });
+
+    // ✅ Finding 18: Invalidate RM employee cache so new employee is immediately visible
+    try {
+      clearEmployeeCache(adminBranchId);
+    } catch (cErr) {
+      console.warn('⚠️ Non-fatal: Failed to clear employee cache:', cErr.message);
+    }
 
     res.status(201).json({
       success: true,

@@ -105,6 +105,8 @@ router.get('/', async (req, res) => {
             : null;
         }
 
+        const isVisible = clientRow.feedback_status === 'reviewed' && pmRow.feedback_status === 'reviewed';
+
         result.push({
           id: `merged_${clientRow.id}_${pmRow.id}`,
           subjectId: clientRow.profile_id,
@@ -118,7 +120,12 @@ router.get('/', async (req, res) => {
           evaluatorName: `${clientEvaluator} & PM (${pmEvaluator})`,
           rating: averageRating,
           ratings: mergedRatings,
-          status: 'submitted',
+          status: isVisible ? 'reviewed' : 'submitted',
+          isVisible,
+          clientStatus: clientRow.feedback_status || 'submitted',
+          pmStatus: pmRow.feedback_status || 'submitted',
+          clientRecordId: clientRow.id,
+          pmRecordId: pmRow.id,
           ratedAt: clientRow.rated_at || clientRow.created_at,
           isMerged: true,
           client: {
@@ -142,6 +149,7 @@ router.get('/', async (req, res) => {
         const evaluatorName = row.feedback_source === 'client'
           ? (row.client_name || 'Client')
           : (row.evaluator ? ([row.evaluator.first_name, row.evaluator.last_name].filter(Boolean).join(' ') || 'Unnamed') : 'Unknown');
+        const isVisible = row.feedback_status === 'reviewed';
 
         result.push({
           id: row.id,
@@ -164,6 +172,9 @@ router.get('/', async (req, res) => {
             problem_solving_rating: row.problem_solving_rating,
           },
           status: row.feedback_status || 'submitted',
+          isVisible,
+          clientRecordId: row.feedback_source === 'client' ? row.id : null,
+          pmRecordId: row.feedback_source === 'project_manager' ? row.id : null,
           ratedAt: row.rated_at || row.created_at,
           isMerged: false,
           client: row.feedback_source === 'client' ? {
@@ -187,6 +198,101 @@ router.get('/', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error fetching global feedback report:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── PUT /api/rm/feedback-report/:id/visibility ─────────────────────────────
+// Allows the Resource Manager to grant or revoke permission for PMs and
+// employees to view their respective feedback.
+router.put('/:id/visibility', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { visible } = req.body;
+    const targetStatus = visible ? 'reviewed' : 'submitted';
+    const reviewedAt = visible ? new Date().toISOString() : null;
+
+    let targetIds = [];
+    if (id.startsWith('merged_')) {
+      const parts = id.replace('merged_', '').split('_');
+      targetIds = parts.filter(Boolean);
+    } else {
+      targetIds = [id];
+    }
+
+    if (targetIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'Invalid feedback record ID' });
+    }
+
+    // 1. Update performance_records
+    const { data: updatedRecords, error: updateErr } = await supabase
+      .from('performance_records')
+      .update({
+        feedback_status: targetStatus,
+        reviewed_at: reviewedAt,
+        updated_at: new Date().toISOString()
+      })
+      .in('id', targetIds)
+      .select('id, profile_id, project_id, feedback_source, feedback_response_id');
+
+    if (updateErr) throw updateErr;
+
+    // 2. Update linked feedback_responses if any
+    const responseIds = (updatedRecords || [])
+      .map(r => r.feedback_response_id)
+      .filter(Boolean);
+
+    if (responseIds.length > 0) {
+      const respReviewStatus = visible ? 'approved' : 'pending';
+      await supabase
+        .from('feedback_responses')
+        .update({
+          review_status: respReviewStatus,
+          reviewed_by: req.user.id,
+          reviewed_at: reviewedAt
+        })
+        .in('id', responseIds);
+    }
+
+    // 3. If granting permission (visible = true), notify recipient (PM or Employee)
+    if (visible && updatedRecords && updatedRecords.length > 0) {
+      const notifs = [];
+      const recipientIds = [...new Set(updatedRecords.map(r => r.profile_id).filter(Boolean))];
+
+      for (const recId of recipientIds) {
+        const rec = updatedRecords.find(r => r.profile_id === recId);
+        let projectName = 'your project';
+        if (rec?.project_id) {
+          const { data: proj } = await supabase
+            .from('projects')
+            .select('project_name')
+            .eq('id', rec.project_id)
+            .maybeSingle();
+          if (proj?.project_name) projectName = proj.project_name;
+        }
+
+        notifs.push({
+          recipient_id: recId,
+          type: 'feedback',
+          text: `Your feedback for project "${projectName}" has been reviewed and released by the Resource Manager.`,
+          read: false
+        });
+      }
+
+      if (notifs.length > 0) {
+        await supabase.from('notifications').insert(notifs);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: visible 
+        ? 'Permission granted. Feedback is now visible to the recipient.' 
+        : 'Permission revoked. Feedback is now hidden from the recipient.',
+      data: { id, visible, status: targetStatus }
+    });
+  } catch (error) {
+    console.error('Error updating feedback visibility:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -18,6 +18,18 @@ router.get('/', async (req, res) => {
       .order('log_date', { ascending: false })
       .order('id', { ascending: false });
 
+    const { data: ownedProjects, error: projectError } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('created_by', req.user.id);
+    if (projectError) throw projectError;
+
+    const ownedProjectIds = (ownedProjects || []).map(project => project.id);
+    if (ownedProjectIds.length === 0) {
+      return res.status(200).json({ success: true, data: [], count: 0 });
+    }
+    reportQuery = reportQuery.in('project_id', ownedProjectIds);
+
     if (projectId) {
       reportQuery = reportQuery.eq('project_id', projectId);
     }

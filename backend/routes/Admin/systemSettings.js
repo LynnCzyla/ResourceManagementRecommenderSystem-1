@@ -4,6 +4,10 @@ const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 const { requireIntInRange } = require('../../utils/validators');
+const { verifyToken } = require('../Middleware/auth');
+const { requireRole } = require('../Middleware/roleGuard');
+
+router.use(verifyToken, requireRole(['Admin', 'Super Admin']));
 
 // GET current system settings
 router.get('/system-settings', async (req, res) => {
@@ -101,14 +105,17 @@ router.put('/system-settings', async (req, res) => {
     // Check if settings already exist
     const { data: existing, error: fetchError } = await supabase
       .from('system_settings')
-      .select('id')
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(1);
 
     if (fetchError) throw fetchError;
 
     let result;
-    if (existing && existing.length > 0) {
+    const isUpdate = existing && existing.length > 0;
+    const old = isUpdate ? existing[0] : null;
+
+    if (isUpdate) {
       // Update existing settings
       result = await supabase
         .from('system_settings')
@@ -152,11 +159,47 @@ router.put('/system-settings', async (req, res) => {
 
     if (result.error) throw result.error;
 
+    // Build descriptive audit log
+    let logDescription;
+    if (isUpdate && old) {
+      const changes = [];
+      if (old.max_file_upload_size !== maxFileSize) {
+        changes.push(`Max file size: ${old.max_file_upload_size ?? 'N/A'}MB → ${maxFileSize}MB`);
+      }
+      if (old.session_timeout !== sessionTimeout) {
+        changes.push(`Session timeout: ${old.session_timeout ?? 'N/A'}m → ${sessionTimeout}m`);
+      }
+      if (old.max_login_attempts !== maxLoginAttempts) {
+        changes.push(`Max login attempts: ${old.max_login_attempts ?? 'N/A'} → ${maxLoginAttempts}`);
+      }
+      if (old.min_password_length !== minPasswordLength) {
+        changes.push(`Min password length: ${old.min_password_length ?? 'N/A'} → ${minPasswordLength}`);
+      }
+      if (old.require_uppercase !== requireUppercase || old.min_uppercase !== minUppercase) {
+        changes.push('Uppercase rule updated');
+      }
+      if (old.require_lowercase !== requireLowercase || old.min_lowercase !== minLowercase) {
+        changes.push('Lowercase rule updated');
+      }
+      if (old.require_number !== requireNumber || old.min_number !== minNumber) {
+        changes.push('Number rule updated');
+      }
+      if (old.require_special !== requireSpecial || old.min_special !== minSpecial) {
+        changes.push('Special character rule updated');
+      }
+
+      logDescription = changes.length > 0
+        ? `System settings updated: ${changes.join(', ')}`
+        : `System settings saved (Max file size: ${maxFileSize}MB, Session timeout: ${sessionTimeout}m)`;
+    } else {
+      logDescription = `System settings initialized (Max file size: ${maxFileSize}MB, Session timeout: ${sessionTimeout}m)`;
+    }
+
     await logAuditEvent({
       req,
-      action: existing && existing.length > 0 ? 'Updated' : 'Created',
+      action: isUpdate ? 'Updated' : 'Created',
       systemCategory: 'System Settings',
-      logDescription: `Session timeout changed to ${sessionTimeout} minutes`,
+      logDescription,
     });
 
     res.status(200).json({ 

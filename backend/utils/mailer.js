@@ -11,7 +11,11 @@ const { sendMail: brevoSendMail, getLogoHtml } = require("./brevoMailer");
 // compatibility with the rest of this file, now backed by Brevo's API
 // instead of nodemailer).
 const sendEmail = async (mailOptions) => {
-  return await brevoSendMail(mailOptions);
+  const result = await brevoSendMail(mailOptions);
+  if (result && !result.success) {
+    throw new Error(result.error || 'Failed to send email via Brevo');
+  }
+  return result;
 };
 
 // Helper: Base email wrapper
@@ -321,6 +325,7 @@ const sendFeedbackRequestEmail = async ({
   to,
   clientName,
   projectName,
+  pmName,
   employeeNames = [],
   introMessage,
   feedbackLink,
@@ -330,12 +335,13 @@ const sendFeedbackRequestEmail = async ({
     ? new Date(expiresAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
     : null;
 
-  const defaultIntro = `We hope you've been satisfied with the progress of <strong>${projectName}</strong>. We'd love to hear your feedback on the team members who worked on it.`;
+  const resolvedPmName = pmName || (employeeNames.length > 0 ? employeeNames[0] : 'Project Manager');
+  const defaultIntro = `We hope you've been satisfied with the progress of <strong>${projectName}</strong>. We would appreciate your feedback on the project and the Project Manager.`;
 
   const mailOptions = {
     from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
     to,
-    subject: `We'd love your feedback - ${projectName} at WEA`,
+    subject: `Feedback Request: ${projectName} - WEA`,
     html: getEmailWrapper(`
       <div style="background: #1e293b; border: 1px solid #334155; border-radius: 20px; overflow: hidden;">
         <div style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155;">
@@ -343,7 +349,7 @@ const sendFeedbackRequestEmail = async ({
             ${getLogoHtml()}
           </div>
           <h1 style="font-family: 'Outfit', sans-serif; color: #f8fafc; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 4px 0;">
-            We'd Love Your Feedback
+            Client Feedback Request
           </h1>
           <p style="color: #94a3b8; font-size: 13px; font-weight: 500; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">
             WEA Resource Management System
@@ -354,12 +360,11 @@ const sendFeedbackRequestEmail = async ({
             Dear ${clientName},<br/><br/>
             ${introMessage ? introMessage.replace(/\n/g, '<br/>') : defaultIntro}
           </p>
-          ${employeeNames.length ? `
           <div style="background: rgba(255,255,255,0.03); border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
-            <p style="margin: 0 0 8px 0; color: #94a3b8; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Team members on this project</p>
-            <p style="margin: 0; color: #f8fafc; font-size: 14px;">${employeeNames.join(', ')}</p>
+            <p style="margin: 0 0 6px 0; color: #94a3b8; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Project & PM to Evaluate</p>
+            <p style="margin: 0 0 4px 0; color: #f8fafc; font-size: 14px;"><strong>Project:</strong> ${projectName}</p>
+            <p style="margin: 0; color: #f8fafc; font-size: 14px;"><strong>Project Manager:</strong> ${resolvedPmName}</p>
           </div>
-          ` : ''}
           <div style="text-align: center; margin: 28px 0;">
             <a href="${feedbackLink}" style="display: inline-block; background: #3b82f6; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 14px 32px; border-radius: 10px;">
               Share Your Feedback
@@ -371,7 +376,7 @@ const sendFeedbackRequestEmail = async ({
           </p>
           ${expiryText ? `<p style="color: #64748b; font-size: 12px; margin: 0 0 20px 0; text-align: center;">This link expires on ${expiryText}.</p>` : ''}
           <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
-            Your feedback helps us improve our services and helps the team grow.<br/><br/>
+            Your feedback helps us continuously improve our service delivery.<br/><br/>
             Best regards,<br/>
             WEA Project Management Team
           </p>

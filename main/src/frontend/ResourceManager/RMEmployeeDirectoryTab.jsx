@@ -330,12 +330,14 @@ const handleViewEmployee = async (emp) => {
                     color: emp.isAssigned ? 'var(--color-success)' : 'var(--color-text-muted)',
                     border: emp.isAssigned ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)',
                   }}
-                  title={emp.isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'No active project assignments'}
+                  title={
+                    emp.rawRole === 'Project Manager'
+                      ? (emp.isAssigned ? `Assigned — Managing ${emp.assignmentCount} project(s)` : 'Unassigned — No active projects')
+                      : emp.isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'No active project assignments'
+                  }
                 >
-                  <span style={{ fontSize: '9px' }}>{emp.isAssigned ? '●' : '○'}</span>
-                  {emp.isAssigned
-                    ? `Assigned: ${emp.assignedProjects?.join(', ') || 'Active Project'}`
-                    : 'Unassigned'}
+                  <span style={{ fontSize: '9px' }}>{'●'}</span>
+                  {emp.isAssigned ? 'Assigned' : 'Unassigned'}
                 </span>
 
                 <span
@@ -365,7 +367,7 @@ const handleViewEmployee = async (emp) => {
                   }}
                 >
                   {emp.workloadStatus || 'Available'}
-                  {emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.workloadStatus !== 'Available'
+                  {emp.rawRole !== 'Project Manager' && emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.workloadStatus !== 'Available'
                     ? ` (${emp.utilizationRate}%)`
                     : ''}
                 </span>
@@ -373,9 +375,18 @@ const handleViewEmployee = async (emp) => {
 
               {/* Skills Section */}
               <div style={styles.section}>
-                <h4 style={styles.sectionHeader}>Core Skills</h4>
+                <h4 style={styles.sectionHeader}>{emp.rawRole === 'Project Manager' ? 'Role' : 'Core Skills'}</h4>
                 <div style={styles.skillsList}>
-                  {emp.skills.length === 0 ? (
+                  {emp.rawRole === 'Project Manager' ? (
+                    <>
+                      <span style={{ ...styles.skillPill, background: 'rgba(99,102,241,0.12)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.25)', fontWeight: '600' }}>
+                        Project Manager
+                      </span>
+                      <span style={{ ...styles.skillPill, background: 'rgba(99,102,241,0.08)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', fontWeight: '600' }}>
+                        {emp.assignmentCount > 0 ? `Managing ${emp.assignmentCount} Project${emp.assignmentCount === 1 ? '' : 's'}` : 'No Active Projects'}
+                      </span>
+                    </>
+                  ) : emp.skills.length === 0 ? (
                     <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No skills on file.</span>
                   ) : (
                     <>
@@ -411,8 +422,22 @@ const handleViewEmployee = async (emp) => {
                     Assign to Project
                   </button>
                 ) : (
-                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontStyle: 'italic', display: 'block', width: '100%', textAlign: 'center', alignSelf: 'center' }}>
-                    Not assignable
+                  <span style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: '#6366f1',
+                    background: 'rgba(99, 102, 241, 0.08)',
+                    border: '1px solid rgba(99, 102, 241, 0.25)',
+                    borderRadius: '6px',
+                    padding: '10px',
+                    boxSizing: 'border-box',
+                    textAlign: 'center',
+                  }}>
+                    Project Manager
                   </span>
                 )}
               </div>
@@ -570,7 +595,9 @@ const handleViewEmployee = async (emp) => {
         }}>
           <div style={{ ...styles.modal, maxWidth: '700px' }}>
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Employee Details</h2>
+              <h2 style={styles.modalTitle}>
+                {employeeDetails?.isPM ? 'Project Manager Details' : 'Employee Details'}
+              </h2>
               <button onClick={handleCloseViewModal} style={styles.modalCloseBtn}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -602,107 +629,291 @@ const handleViewEmployee = async (emp) => {
                 </div>
 
                 {/* Workload Summary */}
-                <div style={styles.viewWorkloadSection}>
-                  <div style={styles.viewWorkloadGrid}>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Workload Score</span>
-                      <span style={styles.viewWorkloadValue}>{employeeDetails.workloadScore || 0}</span>
-                    </div>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Utilization</span>
-                      <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
-                    </div>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Status</span>
-                      <span style={{
-                        ...styles.viewStatusBadge,
-                        backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' : 
-                                       employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' : 
-                                       'rgba(239, 68, 68, 0.1)',
-                        color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' : 
-                               employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' : 
-                               'var(--color-danger)'
-                      }}>
-                        {employeeDetails.workloadStatus || 'Unknown'}
-                      </span>
-                    </div>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Tasks</span>
-                      <span style={styles.viewWorkloadValue}>{employeeDetails.taskCount || 0}</span>
+                {employeeDetails.isPM ? (
+                  /* PM: show managed projects summary */
+                  <div style={styles.viewWorkloadSection}>
+                    <div style={styles.viewWorkloadGrid}>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Role</span>
+                        <span style={{ ...styles.viewWorkloadValue, color: '#6366f1' }}>Project Manager</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Active Projects</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.managedProjectCount || 0}</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Status</span>
+                        <span style={{
+                          ...styles.viewStatusBadge,
+                          backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' :
+                                         employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' :
+                                         'rgba(239, 68, 68, 0.1)',
+                          color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' :
+                                 employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' :
+                                 'var(--color-danger)'
+                        }}>
+                          {employeeDetails.workloadStatus || 'Available'}
+                        </span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Load</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  /* Employee: show workload metrics */
+                  <div style={styles.viewWorkloadSection}>
+                    <div style={styles.viewWorkloadGrid}>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Workload Score</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.workloadScore || 0}</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Utilization</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Status</span>
+                        <span style={{
+                          ...styles.viewStatusBadge,
+                          backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' : 
+                                         employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' : 
+                                         'rgba(239, 68, 68, 0.1)',
+                          color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' : 
+                                 employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' : 
+                                 'var(--color-danger)'
+                        }}>
+                          {employeeDetails.workloadStatus || 'Unknown'}
+                        </span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Active Tasks</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.activeTaskCount ?? employeeDetails.taskCount ?? 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                {/* Projects & Tasks */}
-                <div style={styles.viewSection}>
-                  <h4 style={styles.viewSectionTitle}>
-                    📋 Projects & Tasks ({employeeDetails.projects?.length || 0} projects)
-                  </h4>
-                  
-                  {employeeDetails.projects && employeeDetails.projects.length > 0 ? (
-                    <div style={styles.viewProjectList}>
-                      {employeeDetails.projects.map((project, idx) => (
-                        <div key={idx} style={styles.viewProjectCard}>
-                          <div style={styles.viewProjectHeader}>
-                            <span style={styles.viewProjectName}>
-                              {project.project_name || 'Unnamed Project'}
-                              <span style={styles.viewProjectCode}>({project.project_code || 'N/A'})</span>
-                            </span>
-                            <span style={{
-                              ...styles.viewProjectStatus,
-                              backgroundColor: project.project_status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-bg-hover)',
-                              color: project.project_status === 'Active' ? 'var(--color-success)' : 'var(--color-text-muted)'
-                            }}>
-                              {project.project_status || 'Active'}
-                            </span>
-                          </div>
-                          
-                          <div style={styles.viewProjectTasks}>
-                            {project.tasks && project.tasks.length > 0 ? (
-                              project.tasks.map((task, taskIdx) => (
-                                <div key={taskIdx} style={styles.viewTaskItem}>
-                                  <div style={{ flex: 1 }}>
-                                    <span style={styles.viewTaskName}>• {task.title || 'Untitled Task'}</span>
-                                  </div>
-                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                    <span style={{
-                                      ...styles.viewTaskPriority,
-                                      backgroundColor: task.priority === 'High' ? 'rgba(239, 68, 68, 0.1)' :
-                                                    task.priority === 'Medium' ? 'rgba(245, 158, 11, 0.1)' :
-                                                    'rgba(16, 185, 129, 0.1)',
-                                      color: task.priority === 'High' ? 'var(--color-danger)' :
-                                            task.priority === 'Medium' ? 'var(--color-warning)' :
-                                            'var(--color-success)'
-                                    }}>
-                                      {task.priority || 'Low'}
-                                    </span>
-                                    <span style={{
-                                      ...styles.viewTaskStatus,
-                                      backgroundColor: task.status === 'Completed' ? 'var(--color-primary-light)' :
-                                                    task.status === 'In Progress' ? 'rgba(245, 158, 11, 0.1)' :
-                                                    task.status === 'Completed-Hidden' ? 'var(--color-bg-hover)' :
-                                                    'rgba(239, 68, 68, 0.1)',
-                                      color: task.status === 'Completed' ? 'var(--color-success)' :
-                                            task.status === 'In Progress' ? 'var(--color-warning)' :
-                                            task.status === 'Completed-Hidden' ? 'var(--color-text-muted)' :
-                                            'var(--color-danger)'
-                                    }}>
-                                      {task.status || 'Pending'}
-                                    </span>
-                                  </div>
+                {/* PM: Managed Projects */}
+                {employeeDetails.isPM && (() => {
+                  const activeManaged = (employeeDetails.managedProjects || []).filter(p => p.status === 'Active');
+                  const pastManaged = (employeeDetails.managedProjects || []).filter(p => p.status !== 'Active');
+                  return (
+                    <div style={styles.viewSection}>
+                      <h4 style={styles.viewSectionTitle}>
+                        Managed Projects ({activeManaged.length})
+                      </h4>
+                      {activeManaged.length > 0 ? (
+                        <div style={styles.viewProjectList}>
+                          {activeManaged.map((proj, idx) => (
+                            <div key={idx} style={styles.viewProjectCard}>
+                              <div style={styles.viewProjectHeader}>
+                                <span style={styles.viewProjectName}>
+                                  {proj.name || 'Unnamed Project'}
+                                  {proj.code && (
+                                    <span style={styles.viewProjectCode}> ({proj.code})</span>
+                                  )}
+                                </span>
+                                <span style={{
+                                  ...styles.viewProjectStatus,
+                                  backgroundColor: 'var(--color-primary-light)',
+                                  color: 'var(--color-success)'
+                                }}>
+                                  {proj.status || 'Active'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                👥 {proj.memberCount || 0} team member{proj.memberCount === 1 ? '' : 's'}
+                                {proj.members && proj.members.length > 0 && (
+                                  <span style={{ marginLeft: '8px', color: 'var(--color-text-secondary)' }}>
+                                    — {proj.members.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={styles.viewEmptyText}>No active projects managed</p>
+                      )}
+
+                      {/* Completed / Past Projects */}
+                      {pastManaged.length > 0 && (
+                        <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' }}>
+                          <h4 style={{ ...styles.viewSectionTitle, color: 'var(--color-text-muted)' }}>
+                            Completed &amp; Past Projects ({pastManaged.length})
+                          </h4>
+                          <div style={styles.viewProjectList}>
+                            {pastManaged.map((proj, idx) => (
+                              <div key={idx} style={{ ...styles.viewProjectCard, opacity: 0.85 }}>
+                                <div style={styles.viewProjectHeader}>
+                                  <span style={styles.viewProjectName}>
+                                    {proj.name || 'Unnamed Project'}
+                                    {proj.code && (
+                                      <span style={styles.viewProjectCode}> ({proj.code})</span>
+                                    )}
+                                  </span>
+                                  <span style={{
+                                    ...styles.viewProjectStatus,
+                                    backgroundColor: 'var(--color-bg-hover)',
+                                    color: 'var(--color-text-muted)'
+                                  }}>
+                                    {proj.status || 'Completed'}
+                                  </span>
                                 </div>
-                              ))
-                            ) : (
-                              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No tasks in this project</span>
-                            )}
+                                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                  👥 {proj.memberCount || 0} team member{proj.memberCount === 1 ? '' : 's'}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
-                  ) : (
-                    <p style={styles.viewEmptyText}>No projects or tasks assigned</p>
-                  )}
-                </div>
+                  );
+                })()}
+
+                {/* Employee: Projects & Tasks */}
+                {!employeeDetails.isPM && (() => {
+                  const activeProjects = (employeeDetails.projects || [])
+                    .map(p => ({
+                      ...p,
+                      activeTasks: (p.tasks || []).filter(t => t.isActive !== false)
+                    }))
+                    .filter(p => p.project_status === 'Active' || p.activeTasks.length > 0);
+
+                  const pastProjects = (employeeDetails.projects || [])
+                    .map(p => ({
+                      ...p,
+                      closedTasks: (p.tasks || []).filter(t => t.isActive === false)
+                    }))
+                    .filter(p => p.project_status !== 'Active' || p.closedTasks.length > 0);
+
+                  return (
+                    <div style={styles.viewSection}>
+                      <h4 style={styles.viewSectionTitle}>
+                        Projects &amp; Tasks ({activeProjects.length} active project{activeProjects.length === 1 ? '' : 's'})
+                      </h4>
+                      
+                      {activeProjects.length > 0 ? (
+                        <div style={styles.viewProjectList}>
+                          {activeProjects.map((project, idx) => (
+                            <div key={idx} style={styles.viewProjectCard}>
+                              <div style={styles.viewProjectHeader}>
+                                <span style={styles.viewProjectName}>
+                                  {project.project_name || 'Unnamed Project'}
+                                  {project.project_code && (
+                                    <span style={styles.viewProjectCode}> ({project.project_code})</span>
+                                  )}
+                                </span>
+                                <span style={{
+                                  ...styles.viewProjectStatus,
+                                  backgroundColor: project.project_status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-bg-hover)',
+                                  color: project.project_status === 'Active' ? 'var(--color-success)' : 'var(--color-text-muted)'
+                                }}>
+                                  {project.project_status || 'Active'}
+                                </span>
+                              </div>
+                              
+                              <div style={styles.viewProjectTasks}>
+                                {project.activeTasks && project.activeTasks.length > 0 ? (
+                                  project.activeTasks.map((task, taskIdx) => (
+                                    <div key={taskIdx} style={styles.viewTaskItem}>
+                                      <div style={{ flex: 1 }}>
+                                        <span style={styles.viewTaskName}>• {task.title || 'Untitled Task'}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <span style={{
+                                          ...styles.viewTaskPriority,
+                                          backgroundColor: task.priority === 'High' ? 'rgba(239, 68, 68, 0.1)' :
+                                                        task.priority === 'Medium' ? 'rgba(245, 158, 11, 0.1)' :
+                                                        'rgba(16, 185, 129, 0.1)',
+                                          color: task.priority === 'High' ? 'var(--color-danger)' :
+                                                task.priority === 'Medium' ? 'var(--color-warning)' :
+                                                'var(--color-success)'
+                                        }}>
+                                          {task.priority || 'Low'}
+                                        </span>
+                                        <span style={{
+                                          ...styles.viewTaskStatus,
+                                          backgroundColor: task.status === 'Completed' ? 'var(--color-primary-light)' :
+                                                        task.status === 'In Progress' ? 'rgba(245, 158, 11, 0.1)' :
+                                                        task.status === 'Completed-Hidden' ? 'var(--color-bg-hover)' :
+                                                        'rgba(239, 68, 68, 0.1)',
+                                          color: task.status === 'Completed' ? 'var(--color-success)' :
+                                                task.status === 'In Progress' ? 'var(--color-warning)' :
+                                                task.status === 'Completed-Hidden' ? 'var(--color-text-muted)' :
+                                                'var(--color-danger)'
+                                        }}>
+                                          {task.status || 'Pending'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No active tasks in this project</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={styles.viewEmptyText}>No active projects or tasks assigned</p>
+                      )}
+
+                      {/* Completed / Past Tasks & Projects */}
+                      {pastProjects.length > 0 && (
+                        <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' }}>
+                          <h4 style={{ ...styles.viewSectionTitle, color: 'var(--color-text-muted)' }}>
+                            Completed Tasks &amp; Past Projects ({pastProjects.reduce((sum, p) => sum + p.closedTasks.length, 0)} completed tasks)
+                          </h4>
+                          <div style={styles.viewProjectList}>
+                            {pastProjects.map((project, idx) => (
+                              <div key={idx} style={{ ...styles.viewProjectCard, opacity: 0.85 }}>
+                                <div style={styles.viewProjectHeader}>
+                                  <span style={styles.viewProjectName}>
+                                    {project.project_name || 'Unnamed Project'}
+                                    {project.project_code && (
+                                      <span style={styles.viewProjectCode}> ({project.project_code})</span>
+                                    )}
+                                  </span>
+                                  <span style={{
+                                    ...styles.viewProjectStatus,
+                                    backgroundColor: 'var(--color-bg-hover)',
+                                    color: 'var(--color-text-muted)'
+                                  }}>
+                                    {project.project_status || 'Past'}
+                                  </span>
+                                </div>
+                                <div style={styles.viewProjectTasks}>
+                                  {project.closedTasks.map((task, taskIdx) => (
+                                    <div key={taskIdx} style={styles.viewTaskItem}>
+                                      <div style={{ flex: 1 }}>
+                                        <span style={{ ...styles.viewTaskName, textDecoration: task.status === 'Completed' ? 'line-through' : 'none', color: 'var(--color-text-muted)' }}>
+                                          ✓ {task.title || 'Untitled Task'}
+                                        </span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <span style={{
+                                          ...styles.viewTaskStatus,
+                                          backgroundColor: 'var(--color-bg-hover)',
+                                          color: 'var(--color-text-muted)'
+                                        }}>
+                                          {task.status}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Skills */}
                 <div style={styles.viewSection}>
