@@ -5,6 +5,7 @@ const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
+const workloadService = require('../../services/workloadService');
 
 // ✅ Apply auth middleware
 router.use(verifyToken);
@@ -150,19 +151,9 @@ router.post('/utilization', async (req, res) => {
       const assignedProjects = assignedList.length > 0 ? assignedList.join(', ') : 'Unassigned';
       const workloadScore = workloadScores[emp.id] || 0;
       
-      let workloadStatus;
-      let utilizationRate;
-      
-      if (workloadScore === 0) {
-        workloadStatus = 'Available';
-        utilizationRate = 0;
-      } else if (workloadScore <= 3) {
-        workloadStatus = 'Limited Availability';
-        utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
-      } else {
-        workloadStatus = 'Fully Utilized';
-        utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
-      }
+      const A = workloadService.computeAvailabilityFactor(workloadScore);
+      const workloadStatus = workloadService.toStatusLabel(A);
+      const utilizationRate = workloadService.getUtilizationRate(emp.id, workloadStatus, workloadScore);
 
       return {
         employeeId: emp.employee_id,
