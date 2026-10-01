@@ -178,4 +178,17 @@ app.listen(PORT, async () => {
         console.error('❌ Failed to preload aliases:', error.message);
         console.log('⚠️ Aliases will load on first recommendation request');
     }
-});
+
+    // ============ WARM WORKLOAD CACHE ============
+    // Recalculate availability for all employees so the in-memory cache is
+    // populated immediately — prevents "Fully Utilized (0%)" display after restarts.
+    console.log('🔄 Warming workload cache for all employees...');
+    try {
+        const workloadService = require('./services/workloadService');
+        await workloadService.recalculateBatch();
+        console.log('✅ Workload cache warmed successfully');
+    } catch (error) {
+        console.error('❌ Failed to warm workload cache:', error.message);
+        console.log('⚠️ Workload metrics will compute on first request');
+    }
+});
