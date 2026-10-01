@@ -215,7 +215,7 @@ class RecommendationEngine {
                 .in('profile_id', profileIds),
             supabase
                 .from('project_tasks')
-                .select('profile_id, priority')
+                .select('profile_id, priority, project_id, projects:project_id(status)')
                 .in('profile_id', profileIds)
                 .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")'),
             supabase
@@ -274,9 +274,11 @@ class RecommendationEngine {
             componentsByProfile[pid] = Array.from(compSet);
         }
 
-        // Map workloads by profile_id
+        // Map workloads by profile_id — only count tasks from Active projects (matches workloadService)
         const workloadByProfile = {};
         for (const task of tasksRes.data || []) {
+            // Skip tasks whose project is not Active (null project_id = standalone task, always counts)
+            if (task.projects && task.projects.status !== 'Active') continue;
             const pid = task.profile_id;
             workloadByProfile[pid] = (workloadByProfile[pid] || 0) + (this.PRIORITY_WEIGHTS[task.priority] || 1);
         }
@@ -768,7 +770,7 @@ class RecommendationEngine {
                 ) / 1000,
 
             availabilityStatus:
-                employee.availability_status || (availabilityFactor >= 0.8 ? 'Available' : availabilityFactor >= 0.5 ? 'Limited Availability' : 'Fully Utilized'),
+                availabilityFactor >= 0.80 ? 'Available' : availabilityFactor >= 0.50 ? 'Limited Availability' : 'Fully Utilized',
 
             historicalPerformance:
                 Math.round(
@@ -1299,7 +1301,7 @@ class RecommendationEngine {
     async _getWorkloadScore(profileId) {
         const { data, error } = await supabase
             .from('project_tasks')
-            .select('priority')
+            .select('priority, project_id, projects:project_id(status)')
             .eq('profile_id', profileId)
             .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")');
 
@@ -1307,6 +1309,8 @@ class RecommendationEngine {
 
         let workload = 0;
         for (const task of data || []) {
+            // Only count tasks from Active projects (standalone tasks with no project always count)
+            if (task.projects && task.projects.status !== 'Active') continue;
             workload += this.PRIORITY_WEIGHTS[task.priority] || 1;
         }
         return workload;
