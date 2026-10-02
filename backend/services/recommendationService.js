@@ -222,8 +222,9 @@ class RecommendationEngine {
                 .from('performance_records')
                 .select('profile_id, rating')
                 .in('profile_id', profileIds)
-                .eq('feedback_source', 'client')
-                .eq('feedback_status', 'submitted')
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null)
         ]);
 
         // Organize skills by profile_id and collect unique skill_ids
@@ -1331,8 +1332,9 @@ class RecommendationEngine {
                 .from('performance_records')
                 .select('rating')
                 .eq('profile_id', profileId)
-                .eq('feedback_source', 'client')
-                .eq('feedback_status', 'submitted');
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null);
 
             if (error) {
                 console.error('❌ Error fetching performance records:', error);
@@ -1373,17 +1375,25 @@ class RecommendationEngine {
                     deliverables_feedback,
                     strengths,
                     areas_for_improvement,
+                    pm_assessment,
+                    project_feedback,
                     client_name,
                     client_feedback,
                     project_id,
                     rated_at,
                     projects:project_id (
                         project_name
+                    ),
+                    evaluator:profiles!performance_records_created_by_fkey (
+                        first_name,
+                        last_name,
+                        role
                     )
                 `)
                 .eq('profile_id', profileId)
-                .eq('feedback_source', 'client')
-                .eq('feedback_status', 'submitted')
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null)
                 .order('rated_at', { ascending: false });
 
             if (error) {
@@ -1412,13 +1422,18 @@ class RecommendationEngine {
                 averageRating: avgRating,
                 ratingCount: count,
                 hasData: true,
-                ratings: data.map(r => ({
-                    rating: Number(r.rating),
-                    ratedAt: r.rated_at,
-                    clientName: r.client_name,
-                    projectName: r.projects?.project_name || null,
-                    feedback: r.deliverables_feedback || r.client_feedback || null
-                })),
+                ratings: data.map(r => {
+                    const evaluatorName = r.evaluator
+                        ? [r.evaluator.first_name, r.evaluator.last_name].filter(Boolean).join(' ')
+                        : (r.client_name || 'Project Manager');
+                    return {
+                        rating: Number(r.rating),
+                        ratedAt: r.rated_at,
+                        clientName: evaluatorName,
+                        projectName: r.projects?.project_name || null,
+                        feedback: r.pm_assessment || r.project_feedback || r.deliverables_feedback || r.client_feedback || null
+                    };
+                }),
                 technicalSkills: avgTechnical,
                 communication: avgCommunication,
                 timeliness: avgTimeliness,
@@ -1427,13 +1442,18 @@ class RecommendationEngine {
                 problemSolving: avgProblemSolving,
                 strengths: latest?.strengths || null,
                 areasForImprovement: latest?.areas_for_improvement || null,
-                recentFeedback: data.slice(0, 3).map(r => ({
-                    clientName: r.client_name,
-                    rating: Number(r.rating),
-                    feedback: r.deliverables_feedback || r.client_feedback || null,
-                    projectName: r.projects?.project_name || null,
-                    date: r.rated_at
-                }))
+                recentFeedback: data.slice(0, 3).map(r => {
+                    const evaluatorName = r.evaluator
+                        ? [r.evaluator.first_name, r.evaluator.last_name].filter(Boolean).join(' ')
+                        : (r.client_name || 'Project Manager');
+                    return {
+                        clientName: evaluatorName,
+                        rating: Number(r.rating),
+                        feedback: r.pm_assessment || r.project_feedback || r.deliverables_feedback || r.client_feedback || null,
+                        projectName: r.projects?.project_name || null,
+                        date: r.rated_at
+                    };
+                })
             };
         } catch (error) {
             console.error('❌ Error in _getPerformanceDetails:', error);

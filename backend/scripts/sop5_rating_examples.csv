@@ -1,0 +1,21 @@
+﻿Project,Employee,PM rating,Performance before->after,Rank before,Rank after,Move,Score before->after
+23,Francis Dominic Flores,3.2/5,70% -> 63%,11,16,-5,0.341 -> 0.331
+23,Raymond Carlo Navarro,5.0/5,70% -> 100%,14,11,+3,0.341 -> 0.386
+24,Francis Dominic Flores,3.2/5,70% -> 63%,11,16,-5,0.341 -> 0.331
+24,Raymond Carlo Navarro,5.0/5,70% -> 100%,14,11,+3,0.341 -> 0.386
+25,Francis Dominic Flores,3.2/5,70% -> 63%,14,17,-3,0.341 -> 0.331
+25,Joshua Miguel Diaz,5.0/5,70% -> 100%,10,8,+2,0.397 -> 0.442
+26,Mark Anthony Reyes,1.8/5,70% -> 37%,7,16,-9,0.379 -> 0.328
+26,Karen Batara,4.8/5,70% -> 97%,14,7,+7,0.341 -> 0.381
+27,Mark Anthony Reyes,1.8/5,70% -> 37%,3,7,-4,0.529 -> 0.478
+27,Charles Burgos,4.0/5,70% -> 80%,8,5,+3,0.475 -> 0.490
+28,Raymond Carlo Navarro,5.0/5,70% -> 100%,15,11,+4,0.341 -> 0.386
+28,Francis Dominic Flores,3.2/5,70% -> 63%,12,16,-4,0.341 -> 0.331
+29,Joshua Miguel Diaz,5.0/5,70% -> 100%,17,10,+7,0.326 -> 0.371
+29,Kevin John Bautista,3.2/5,70% -> 63%,8,13,-5,0.354 -> 0.344
+30,Mark Anthony Reyes,1.8/5,70% -> 37%,3,13,-10,0.383 -> 0.333
+30,Karen Batara,4.8/5,70% -> 97%,14,5,+9,0.341 -> 0.381
+31,Carlo Miguel Reyes,3.2/5,70% -> 63%,9,14,-5,0.341 -> 0.331
+31,Raymond Carlo Navarro,5.0/5,70% -> 100%,6,3,+3,0.461 -> 0.506
+32,Francis Dominic Flores,3.2/5,70% -> 63%,9,16,-7,0.341 -> 0.331
+32,Raymond Carlo Navarro,5.0/5,70% -> 100%,13,9,+4,0.341 -> 0.386

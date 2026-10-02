@@ -1,0 +1,7 @@
+﻿Project,Employee,PM rating,Performance before->after,Rank before,Rank after,Move,Score before->after
+30,Mark Anthony Reyes,1.8/5,70% -> 37%,3,13,-10,0.383 -> 0.333
+26,Mark Anthony Reyes,1.8/5,70% -> 37%,7,16,-9,0.379 -> 0.328
+30,Karen Batara,4.8/5,70% -> 97%,14,5,+9,0.341 -> 0.381
+30,Vence Gopez,2.3/5,70% -> 47%,8,16,-8,0.356 -> 0.321
+29,Joshua Miguel Diaz,5.0/5,70% -> 100%,17,10,+7,0.326 -> 0.371
+30,Aaron Joseph Garcia,5.0/5,70% -> 100%,11,4,+7,0.341 -> 0.386

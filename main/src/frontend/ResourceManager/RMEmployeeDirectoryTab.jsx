@@ -239,6 +239,114 @@ const handleViewEmployee = async (emp) => {
     }));
   };
 
+  // ✅ Unassigned if not assigned in project (not in the task)
+  const isEmployeeProjectAssigned = (emp) => {
+    if (!emp) return false;
+    if (emp.rawRole === 'Project Manager') {
+      return Boolean(emp.assignmentCount > 0 || emp.isAssigned);
+    }
+    return Boolean(
+      emp.isAssigned &&
+      ((emp.assignedProjects && emp.assignedProjects.length > 0) ||
+       (emp.assignedProjectIds && emp.assignedProjectIds.length > 0))
+    );
+  };
+
+  // ✅ Availability status and percentage based on Availability Factor (A):
+  // Formula: A = 1 / (1 + e^(0.4 * (W - 7)))
+  // Status Label Reference:
+  // W=0   -> A=1.000 / 0.943 -> Available (100%) [Green]
+  // W=1   -> A=0.916         -> Available (92%)  [Green]
+  // W=3   -> A=0.832         -> Available (83%)  [Green]
+  // W=4   -> A=0.802         -> Available (80%)  [Green]
+  // W=5   -> A=0.769         -> Limited Availability (77%) [Amber]
+  // W=6   -> A=0.599         -> Limited Availability (60%) [Amber]
+  // W=7   -> A=0.500         -> Limited Availability (50%) [Amber]
+  // W=8   -> A=0.401         -> Fully Utilized (40%) [Red]
+  // W=10  -> A=0.231         -> Fully Utilized (23%) [Red]
+  // W>=14 -> A=~0.05         -> Fully Utilized (5%)  [Red]
+  const getAvailabilityBadge = (emp) => {
+    if (!emp) {
+      return {
+        label: 'Available',
+        displayText: 'Available (100%)',
+        bg: 'rgba(16, 185, 129, 0.15)',
+        color: 'var(--color-success)',
+        border: '1px solid rgba(16, 185, 129, 0.3)',
+        percentage: 100,
+      };
+    }
+
+    const isPM = emp.rawRole === 'Project Manager' || emp.isPM;
+    if (isPM) {
+      return {
+        label: 'Available',
+        displayText: 'Available (100%)',
+        bg: 'rgba(16, 185, 129, 0.15)',
+        color: 'var(--color-success)',
+        border: '1px solid rgba(16, 185, 129, 0.3)',
+        percentage: 100,
+      };
+    }
+
+    // Determine Availability Factor A
+    let A;
+    if (typeof emp.availabilityFactor === 'number' && !isNaN(emp.availabilityFactor)) {
+      A = emp.availabilityFactor;
+    } else if (typeof emp.workloadScore === 'number' && !isNaN(emp.workloadScore)) {
+      const W = emp.workloadScore;
+      A = W === 0 ? 1.0 : (1 / (1 + Math.exp(0.4 * (W - 7))));
+    } else if (typeof emp.utilizationRate === 'number' && !isNaN(emp.utilizationRate)) {
+      const util = emp.utilizationRate;
+      if (util === 0) {
+        A = 1.0;
+      } else {
+        const W = (util / 100) * 7;
+        A = 1 / (1 + Math.exp(0.4 * (W - 7)));
+      }
+    } else {
+      A = 1.0;
+    }
+
+    // Calculate availability percentage (0-100%) from A:
+    let availPct;
+    if (A >= 0.943 || (emp.workloadScore === 0 && (!emp.activeTaskCount || emp.activeTaskCount === 0))) {
+      availPct = 100;
+    } else {
+      availPct = Math.max(1, Math.min(100, Math.round(A * 100)));
+    }
+
+    let label = 'Available';
+    let bg = 'rgba(16, 185, 129, 0.15)';
+    let color = 'var(--color-success)';
+    let border = '1px solid rgba(16, 185, 129, 0.3)';
+
+    // Status Label Reference per paper:
+    // A >= 0.80 -> Available (Green)
+    // 0.50 <= A < 0.80 -> Limited Availability (Amber)
+    // A < 0.50 -> Fully Utilized (Red)
+    if (A >= 0.80) {
+      label = 'Available';
+      bg = 'rgba(16, 185, 129, 0.15)';
+      color: 'var(--color-success)';
+      border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else if (A >= 0.50) {
+      label = 'Limited Availability';
+      bg = 'rgba(245, 158, 11, 0.15)';
+      color = 'var(--color-warning)';
+      border = '1px solid rgba(245, 158, 11, 0.3)';
+    } else {
+      label = 'Fully Utilized';
+      bg = 'rgba(239, 68, 68, 0.15)';
+      color = 'var(--color-danger)';
+      border = '1px solid rgba(239, 68, 68, 0.3)';
+    }
+
+    const displayText = `${label} (${availPct}%)`;
+
+    return { label, displayText, bg, color, border, factor: A, percentage: availPct };
+  };
+
   const MAX_VISIBLE_SKILLS = 4;
 
   if (loading) {
@@ -317,60 +425,53 @@ const handleViewEmployee = async (emp) => {
 
               {/* Assignment & Availability Badges */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '4px 10px',
-                    borderRadius: '20px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    backgroundColor: emp.isAssigned ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-                    color: emp.isAssigned ? 'var(--color-success)' : 'var(--color-text-muted)',
-                    border: emp.isAssigned ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)',
-                  }}
-                  title={
-                    emp.rawRole === 'Project Manager'
-                      ? (emp.isAssigned ? `Assigned — Managing ${emp.assignmentCount} project(s)` : 'Unassigned — No active projects')
-                      : emp.isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'No active project assignments'
-                  }
-                >
-                  <span style={{ fontSize: '9px' }}>{'●'}</span>
-                  {emp.isAssigned ? 'Assigned' : 'Unassigned'}
-                </span>
+                {(() => {
+                  const isAssigned = isEmployeeProjectAssigned(emp);
+                  return (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        backgroundColor: isAssigned ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                        color: isAssigned ? 'var(--color-success)' : 'var(--color-text-muted)',
+                        border: isAssigned ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)',
+                      }}
+                      title={
+                        emp.rawRole === 'Project Manager'
+                          ? (isAssigned ? `Assigned — Managing ${emp.assignmentCount} project(s)` : 'Unassigned — No active projects')
+                          : isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'Unassigned — Not assigned to any project'
+                      }
+                    >
+                      <span style={{ fontSize: '9px' }}>{'●'}</span>
+                      {isAssigned ? 'Assigned' : 'Unassigned'}
+                    </span>
+                  );
+                })()}
 
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '4px 10px',
-                    borderRadius: '20px',
-                    backgroundColor:
-                      emp.workloadStatus === 'Available'
-                        ? 'rgba(16, 185, 129, 0.15)'
-                        : emp.workloadStatus === 'Limited Availability'
-                        ? 'rgba(245, 158, 11, 0.15)'
-                        : 'rgba(239, 68, 68, 0.15)',
-                    color:
-                      emp.workloadStatus === 'Available'
-                        ? 'var(--color-success)'
-                        : emp.workloadStatus === 'Limited Availability'
-                        ? 'var(--color-warning)'
-                        : 'var(--color-danger)',
-                    border:
-                      emp.workloadStatus === 'Available'
-                        ? '1px solid rgba(16, 185, 129, 0.3)'
-                        : emp.workloadStatus === 'Limited Availability'
-                        ? '1px solid rgba(245, 158, 11, 0.3)'
-                        : '1px solid rgba(239, 68, 68, 0.3)',
-                  }}
-                >
-                  {emp.workloadStatus || 'Available'}
-                  {emp.rawRole !== 'Project Manager' && emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.utilizationRate > 0
-                    ? ` (${emp.utilizationRate}%)`
-                    : ''}
-                </span>
+                {(() => {
+                  const avail = getAvailabilityBadge(emp);
+                  return (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                        backgroundColor: avail.bg,
+                        color: avail.color,
+                        border: avail.border,
+                      }}
+                      title={`Availability Factor: ${typeof avail.factor === 'number' ? avail.factor.toFixed(3) : avail.factor} (${avail.displayText})`}
+                    >
+                      {avail.displayText}
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Skills Section */}
@@ -462,7 +563,7 @@ const handleViewEmployee = async (emp) => {
 
             <div style={styles.modalProfileCard}>
               <div style={styles.modalProfileBadge}>
-                [{selectedEmployee.department}] &bull; {selectedEmployee.isAssigned ? `Assigned (${selectedEmployee.assignedProjects?.join(', ')})` : 'Unassigned'} &bull; [{selectedEmployee.workloadStatus || 'Available'}]
+                [{selectedEmployee.department}] &bull; {isEmployeeProjectAssigned(selectedEmployee) ? `Assigned (${selectedEmployee.assignedProjects?.join(', ')})` : 'Unassigned'} &bull; [{getAvailabilityBadge(selectedEmployee).displayText}]
               </div>
               <h3 style={styles.modalProfileName}>{selectedEmployee.name}</h3>
               <div style={styles.modalProfileRole}>{selectedEmployee.role}</div>
@@ -645,14 +746,10 @@ const handleViewEmployee = async (emp) => {
                         <span style={styles.viewWorkloadLabel}>Status</span>
                         <span style={{
                           ...styles.viewStatusBadge,
-                          backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' :
-                                         employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' :
-                                         'rgba(239, 68, 68, 0.1)',
-                          color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' :
-                                 employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' :
-                                 'var(--color-danger)'
+                          backgroundColor: 'var(--color-primary-light)',
+                          color: 'var(--color-success)'
                         }}>
-                          {employeeDetails.workloadStatus || 'Available'}
+                          Available
                         </span>
                       </div>
                       <div style={styles.viewWorkloadItem}>
@@ -670,22 +767,23 @@ const handleViewEmployee = async (emp) => {
                         <span style={styles.viewWorkloadValue}>{employeeDetails.workloadScore || 0}</span>
                       </div>
                       <div style={styles.viewWorkloadItem}>
-                        <span style={styles.viewWorkloadLabel}>Utilization</span>
-                        <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
+                        <span style={styles.viewWorkloadLabel}>Availability</span>
+                        <span style={styles.viewWorkloadValue}>{getAvailabilityBadge(employeeDetails).percentage}%</span>
                       </div>
                       <div style={styles.viewWorkloadItem}>
                         <span style={styles.viewWorkloadLabel}>Status</span>
-                        <span style={{
-                          ...styles.viewStatusBadge,
-                          backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' : 
-                                         employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' : 
-                                         'rgba(239, 68, 68, 0.1)',
-                          color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' : 
-                                 employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' : 
-                                 'var(--color-danger)'
-                        }}>
-                          {employeeDetails.workloadStatus || 'Unknown'}
-                        </span>
+                        {(() => {
+                          const avail = getAvailabilityBadge(employeeDetails);
+                          return (
+                            <span style={{
+                              ...styles.viewStatusBadge,
+                              backgroundColor: avail.bg,
+                              color: avail.color
+                            }}>
+                              {avail.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div style={styles.viewWorkloadItem}>
                         <span style={styles.viewWorkloadLabel}>Active Tasks</span>

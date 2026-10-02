@@ -182,16 +182,18 @@ router.get('/', async (req, res) => {
         score += weight;
       }
 
-      let workloadStatus, utilizationRate;
+      let workloadStatus, utilizationRate, availabilityFactor;
       if (isPM) {
         workloadStatus = 'Available';
         utilizationRate = 0;
+        availabilityFactor = 1.0;
       } else {
         // Use cached workload details (from recalculateForEmployee) for accurate W & utilization.
         // Falls back to local task-count score if no cache entry exists yet.
         const cached = workloadService.getWorkloadDetails(p.id, p.availability_status || 'Available', score);
         workloadStatus = cached.workloadStatus || p.availability_status || 'Available';
         utilizationRate = cached.utilizationRate ?? workloadService.getUtilizationRate(p.id, workloadStatus, score);
+        availabilityFactor = score === 0 ? 1.0 : (cached.availabilityFactor ?? (1 / (1 + Math.exp(0.4 * (score - 7)))));
       }
 
       const isAssignable = !isPM;
@@ -216,6 +218,8 @@ router.get('/', async (req, res) => {
           : (isAssigned ? 'Assigned' : 'Unassigned'),
         workloadStatus,
         utilizationRate,
+        availabilityFactor: typeof availabilityFactor === 'number' ? parseFloat(availabilityFactor.toFixed(3)) : (score === 0 ? 1.0 : 0.943),
+        workloadScore: isPM ? 0 : score,
         assignmentCount: isPM ? managedCount : assignCount,
         managedProjectCount: isPM ? managedCount : undefined,
         branch_id: p.branch_id,
@@ -454,18 +458,21 @@ router.get('/:id/details', async (req, res) => {
     });
 
     // ✅ Determine workload status using Eq. (3) sigmoid formula
-    let workloadStatus, utilizationRate;
+    let workloadStatus, utilizationRate, availabilityFactor;
     if (isPM) {
       workloadScore = 0;
       workloadStatus = 'Available';
       utilizationRate = 0;
+      availabilityFactor = 1.0;
     } else if (workloadScore === 0) {
       workloadStatus = 'Available';
       utilizationRate = 0;
+      availabilityFactor = 1.0;
     } else {
       const A = 1 / (1 + Math.exp(0.4 * (workloadScore - 7)));
       workloadStatus = A >= 0.80 ? 'Available' : A >= 0.50 ? 'Limited Availability' : 'Fully Utilized';
       utilizationRate = Math.min(100, Math.max(1, Math.round((workloadScore / 7) * 100)));
+      availabilityFactor = parseFloat(A.toFixed(3));
     }
 
     const name = `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed';
@@ -508,6 +515,7 @@ router.get('/:id/details', async (req, res) => {
         workloadScore: workloadScore,
         workloadStatus: workloadStatus,
         utilizationRate: utilizationRate,
+        availabilityFactor: availabilityFactor ?? 1.0,
         // For PMs: managed projects
         managedProjects: isPM ? managedProjects.map(proj => ({
           id: proj.id,
