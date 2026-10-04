@@ -68,6 +68,11 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme, onPro
     return `${days} day${days > 1 ? 's' : ''} ago`;
   };
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // Add this useEffect to fetch notifications
   useEffect(() => {
     if (!user?.id) return;
@@ -76,7 +81,9 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme, onPro
 
     const fetchNotifications = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/notifications?userId=${user.id}`);
+        const res = await fetch(`${API_BASE_URL}/api/notifications?userId=${user.id}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await res.json();
         if (result.success) {
           setNotifications(result.data);
@@ -132,7 +139,10 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme, onPro
     try {
       await fetch(`${API_BASE_URL}/api/notifications/mark-all-read`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify({ userId: user.id }),
       });
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -145,7 +155,10 @@ export default function AdminLayout({ user, onLogout, isDark, toggleTheme, onPro
     e.stopPropagation();
     if (Date.now() < backendUnavailableUntilRef.current) return;
     try {
-      await fetch(`${API_BASE_URL}/api/notifications/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE_URL}/api/notifications/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
       setNotifications(prev => prev.filter(n => n.id !== id));
     } catch (err) {
       console.error('Failed to delete notification:', err);

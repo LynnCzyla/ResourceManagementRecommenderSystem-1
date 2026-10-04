@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
+import { formatMoney, currencySymbol } from '../../config/currency';
+import { blockInvalidNumberKeys } from '../../utils/numberInput';
 
 // Internal tab keys stay the same as before (Hired / Onboarding / Archived) so the existing
 // filtering logic doesn't need to change — only the LABEL and TOOLTIP shown to the user changes.
@@ -87,6 +89,21 @@ export default function HRHiredEmployeesTab() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
+
+  // Currency of the HR user's branch
+  const [branchCurrency, setBranchCurrency] = useState('PHP');
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await hrClient.get('/branches/my-branch');
+        if (res.data?.success && res.data.data?.currency_code) {
+          setBranchCurrency(res.data.data.currency_code);
+        }
+      } catch (e) {
+        console.warn('Could not load branch currency, using PHP');
+      }
+    })();
+  }, []);
 
   // Forms
   const [editForm, setEditForm] = useState({
@@ -245,6 +262,11 @@ export default function HRHiredEmployeesTab() {
     e.preventDefault();
     if (!selectedEmployee) return;
 
+    if (!(Number(offerForm.salary) > 0)) {
+      showErrorAlert('Salary must be greater than 0.', 'Invalid Salary');
+      return;
+    }
+
     try {
       setOfferForm(prev => ({ ...prev, sending: true }));
       await hrClient.post(`/hired-employees/${selectedEmployee.id}/send-offer`, {
@@ -321,12 +343,18 @@ export default function HRHiredEmployeesTab() {
     e.preventDefault();
     if (!selectedEmployee) return;
 
+    const hasSalary = editForm.salary !== '' && editForm.salary != null;
+    if (hasSalary && !(Number(editForm.salary) > 0)) {
+      showErrorAlert('Salary must be greater than 0.', 'Invalid Salary');
+      return;
+    }
+
     try {
       await hrClient.put(`/hired-employees/${selectedEmployee.id}`, {
         name: editForm.name,
         email: editForm.email,
         phone: editForm.phone,
-        salary: editForm.salary ? parseFloat(editForm.salary) : 0,
+        salary: hasSalary ? parseFloat(editForm.salary) : null,
         hire_date: editForm.hireDate,
         status: editForm.status,
       });
@@ -720,7 +748,7 @@ export default function HRHiredEmployeesTab() {
                   <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Offered Salary:</span>
                     <span style={styles.detailValue}>
-                      {selectedEmployee.salary ? `₱${parseInt(selectedEmployee.salary).toLocaleString()}/mo` : 'Not specified'}
+                      {selectedEmployee.salary ? `${formatMoney(selectedEmployee.salary, branchCurrency)}/mo` : 'Not specified'}
                     </span>
                   </div>
                 </div>
@@ -773,9 +801,9 @@ export default function HRHiredEmployeesTab() {
                     />
                   </div>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>Monthly Salary (₱)</label>
+                    <label style={styles.label}>Monthly Salary ({currencySymbol(branchCurrency)})</label>
                     <input
-                      type="number" min="0" step="500" style={styles.input}
+                      type="number" min="1" step="any" onKeyDown={blockInvalidNumberKeys} style={styles.input}
                       value={editForm.salary}
                       onChange={(e) => setEditForm({...editForm, salary: e.target.value})}
                     />
@@ -849,9 +877,9 @@ export default function HRHiredEmployeesTab() {
                     />
                   </div>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>Salary / Compensation (₱) *</label>
+                    <label style={styles.label}>Salary / Compensation ({currencySymbol(branchCurrency)}) *</label>
                     <input
-                      type="number" required min="0" step="500" style={styles.input}
+                      type="number" required min="1" step="any" onKeyDown={blockInvalidNumberKeys} style={styles.input}
                       value={offerForm.salary}
                       onChange={(e) => setOfferForm({...offerForm, salary: e.target.value})}
                     />

@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../Middleware/auth');
+const { requireRole } = require('../Middleware/roleGuard');
 
 console.log('✅ RM Router initializing...');
 
@@ -14,7 +15,7 @@ router.get('/test', (req, res) => {
     });
 });
 
-router.use(verifyToken);
+router.use(verifyToken, requireRole(['Resource Manager', 'Admin']));
 console.log('✅ Auth middleware applied');
 
 console.log('📦 Loading Dashboard route...');
@@ -62,8 +63,27 @@ router.use('/recommendations', recommendationsRoutes);
 router.use('/resource-requests', resourceRequestsRoutes);
 router.use('/reports', reportsRoutes);
 router.use('/feedback-report', feedbackReportRoutes);
+
+// ✅ Bulk availability recalculation endpoint
+const workloadService = require('../../services/workloadService');
+router.post('/admin/recalculate-availability', async (req, res) => {
+    try {
+        const { profileIds } = req.body || {};
+        const results = await workloadService.recalculateBatch(profileIds || null);
+        res.json({
+            success: true,
+            message: `Successfully recalculated availability for ${results.length} employees`,
+            updated: results.length,
+            results
+        });
+    } catch (e) {
+        console.error('❌ Error recalculating availability:', e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 console.log('✅ All routes registered');
 
 console.log('✅ RM Routes registered with auth middleware');
 
-module.exports = router;
+module.exports = router;

@@ -28,7 +28,16 @@ router.get('/profile', verifyToken, async (req, res) => {
 router.get('/profile/:employeeId', verifyToken, async (req, res) => {
   try {
     const { employeeId } = req.params;
-    
+    const isAdmin = req.user?.role === 'Admin';
+
+    // ✅ Non-admin users can only view their own profile via this route.
+    if (!isAdmin && req.user?.employee_id !== employeeId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied: You can only view your own profile.'
+      });
+    }
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('*, departments(department_name)')
@@ -51,7 +60,7 @@ router.get('/profile/:employeeId', verifyToken, async (req, res) => {
 router.put('/profile', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { first_name, last_name, department, role, avatar_url, contact_number, location, years_experience, email } = req.body;
+    const { first_name, last_name, department, avatar_url, contact_number, location, years_experience, email } = req.body;
     
     const { data: ownProfile, error: ownError } = await supabase
       .from('profiles')
@@ -83,7 +92,6 @@ router.put('/profile', verifyToken, async (req, res) => {
     if (first_name !== undefined) updateData.first_name = first_name;
     if (last_name !== undefined) updateData.last_name = last_name;
     updateData.department_id = department_id; // Can be null
-    if (role !== undefined) updateData.role = role;
     if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
     if (contact_number !== undefined) updateData.contact_number = contact_number;
     if (location !== undefined) updateData.location = location;

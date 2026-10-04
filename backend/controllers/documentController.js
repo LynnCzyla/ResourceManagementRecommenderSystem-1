@@ -577,13 +577,12 @@ exports.updateProfile = async (req, res) => {
         if (ownError || !ownProfile) return res.status(403).json({ success: false, error: 'Profile not found' });
 
         const employeeId = ownProfile.employee_id;
-        const { first_name, last_name, department, role, avatar_url, contact_number, location, years_experience } = req.body;
+        const { first_name, last_name, department, avatar_url, contact_number, location, years_experience } = req.body;
 
         const updateData = { updated_at: new Date().toISOString() };
         if (first_name !== undefined) updateData.first_name = first_name;
         if (last_name !== undefined) updateData.last_name = last_name;
         if (department !== undefined) updateData.department = department;
-        if (role !== undefined) updateData.role = role;
         if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
         if (contact_number !== undefined) updateData.contact_number = contact_number;
         if (location !== undefined) updateData.location = location;

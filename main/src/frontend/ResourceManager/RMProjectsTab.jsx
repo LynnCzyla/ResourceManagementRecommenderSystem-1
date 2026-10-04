@@ -10,7 +10,7 @@ import {
 } from './Rmapi';
 import RMAvatar from './RMAvatar';
 
-const COMPLETED_STATUSES = ['Completed', 'Archived'];
+const COMPLETED_STATUSES = ['Completed', 'Archived', 'Cancelled'];
 
 export default function RMProjectsTab() {
   const [projects, setProjects] = useState([]);
@@ -221,6 +221,7 @@ export default function RMProjectsTab() {
               <>
                 <option value="Completed">Completed</option>
                 <option value="Archived">Archived</option>
+                <option value="Cancelled">Cancelled</option>
               </>
             ) : (
               <>
@@ -391,6 +392,22 @@ export default function RMProjectsTab() {
                     <span>{assignedList.length} member{assignedList.length === 1 ? '' : 's'}</span>
                   </div>
                 </div>
+
+                {/* Team Leader (Project Manager) */}
+                {proj.teamLeader && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+                      Team Leader
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 10px', borderRadius: '8px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                      <RMAvatar name={proj.teamLeader.name} src={proj.teamLeader.avatar} size={30} />
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--color-text-primary)' }}>{proj.teamLeader.name}</div>
+                        <div style={{ fontSize: '11px', color: '#6366f1' }}>{proj.teamLeader.role}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Assigned Members List */}
                 <div style={styles.assignedSection}>

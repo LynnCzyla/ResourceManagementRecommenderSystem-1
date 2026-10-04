@@ -22,14 +22,14 @@ async function getSystemSettings() {
       .single();
 
     if (error) {
-      console.warn('⚠️ Could not fetch system settings, using default 5MB:', error.message);
-      return { max_file_upload_size: 5 };
+      console.warn('⚠️ Could not fetch system settings, using default 10MB:', error.message);
+      return { max_file_upload_size: 10 };
     }
 
-    return data || { max_file_upload_size: 5 };
+    return data || { max_file_upload_size: 10 };
   } catch (err) {
-    console.warn('⚠️ Error fetching system settings, using default 5MB:', err.message);
-    return { max_file_upload_size: 5 };
+    console.warn('⚠️ Error fetching system settings, using default 10MB:', err.message);
+    return { max_file_upload_size: 10 };
   }
 }
 
@@ -75,7 +75,8 @@ router.get('/job-postings', async (req, res) => {
           branches:branch_id (
             id,
             name,
-            location
+            location,
+            currency_code
           )
         )
       `)
@@ -114,6 +115,7 @@ router.get('/job-postings', async (req, res) => {
         branch_id: item.profiles?.branch_id || null,
         branch_name: item.profiles?.branches?.name || 'N/A',
         branch_location: item.profiles?.branches?.location || 'N/A',
+        currency_code: item.profiles?.branches?.currency_code || 'PHP',
         department_name: item.departments?.department_name || 'N/A',
         position_name: item.positions?.position_name || 'N/A'
       };
@@ -179,7 +181,8 @@ router.get('/job-postings/:id', async (req, res) => {
           branches:branch_id (
             id,
             name,
-            location
+            location,
+            currency_code
           )
         )
       `)
@@ -208,6 +211,7 @@ router.get('/job-postings/:id', async (req, res) => {
       branch_id: data.profiles?.branch_id || null,
       branch_name: data.profiles?.branches?.name || 'N/A',
       branch_location: data.profiles?.branches?.location || 'N/A',
+      currency_code: data.profiles?.branches?.currency_code || 'PHP',
       department_name: data.departments?.department_name || 'N/A',
       position_name: data.positions?.position_name || 'N/A'
     };
@@ -227,7 +231,7 @@ router.post('/applications', async (req, res, next) => {
   try {
     // ✅ Get system settings for file size limit
     const settings = await getSystemSettings();
-    const maxFileSizeMB = settings.max_file_upload_size || 5;
+    const maxFileSizeMB = settings.max_file_upload_size || 10;
     const maxFileSizeBytes = maxFileSizeMB * 1024 * 1024;
 
     console.log(`📋 File upload limit: ${maxFileSizeMB}MB`);

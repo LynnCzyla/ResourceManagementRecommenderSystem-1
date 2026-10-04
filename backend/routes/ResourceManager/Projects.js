@@ -1,8 +1,8 @@
-// backend/routes/ResourceManager/Projects.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
+const workloadService = require('../../services/workloadService');
 
 // ✅ Apply auth middleware
 router.use(verifyToken);
@@ -316,6 +316,12 @@ router.get('/', async (req, res) => {
       const createdByName = creator 
         ? `${creator.first_name || ''} ${creator.last_name || ''}`.trim() || 'Unknown'
         : 'Unknown';
+      const teamLeader = creator ? {
+        id: proj.created_by,
+        name: createdByName,
+        avatar: `https://ui-avatars.com/api/?background=6366f1&color=fff&name=${encodeURIComponent(createdByName)}`,
+        role: 'Project Manager',
+      } : null;
 
       let status = proj.status;
       const hasMembers = assignedEmployees.length > 0;
@@ -345,6 +351,7 @@ router.get('/', async (req, res) => {
         priority: proj.priority,
         requiredSkills,
         assignedEmployees,
+        teamLeader,
         teamSize: assignedEmployees.length,
         skillsCount: requiredSkills.length,
         createdBy: proj.created_by,
@@ -551,6 +558,22 @@ router.post('/:id/assign', async (req, res) => {
       }
     }
 
+    let reqStartDate = null;
+    let reqEndDate = null;
+    if (finalRequirementId) {
+      const { data: reqRow } = await supabase
+        .from('project_resource_requirements')
+        .select('start_date, end_date')
+        .eq('id', finalRequirementId)
+        .maybeSingle();
+      if (reqRow) {
+        reqStartDate = reqRow.start_date;
+        reqEndDate = reqRow.end_date;
+      }
+    }
+
+    const assignmentStartDate = reqStartDate || new Date().toISOString().split('T')[0];
+
     const { data, error } = await supabase
       .from('project_assignments')
       .insert({
@@ -560,7 +583,8 @@ router.post('/:id/assign', async (req, res) => {
         assigned_role: role || null,
         status: 'Assigned',
         assigned_by: req.user?.id || null,
-        start_date: new Date().toISOString().split('T')[0],
+        start_date: assignmentStartDate,
+        end_date: reqEndDate || null,
       })
       .select()
       .single();
@@ -700,11 +724,17 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       }
     }
 
+    const todayDate = new Date().toISOString().split('T')[0];
     const { error } = await supabase
       .from('project_assignments')
-      .delete()
+      .update({
+        status: 'Unassigned',
+        end_date: todayDate,
+        updated_at: new Date().toISOString(),
+      })
       .eq('project_id', id)
-      .eq('profile_id', employeeId);
+      .eq('profile_id', employeeId)
+      .eq('status', 'Assigned');
     
     if (error) throw error;
 
@@ -784,6 +814,10 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       if (clearEmployeeCache) clearEmployeeCache(isSuperAdmin ? null : userBranchId);
     } catch (cErr) {
       console.warn('Non-fatal cache clearing error in Projects delete assign:', cErr.message);
+    }
+
+    if (employeeId) {
+      workloadService.recalculateForEmployee(employeeId).catch(e => console.warn('Non-fatal workload recalc error:', e.message));
     }
 
     res.json({ 

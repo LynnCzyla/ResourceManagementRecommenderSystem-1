@@ -5,6 +5,7 @@ const {
   getClientFeedbackForEmployee,
   submitPmEvaluation,
   getPmClientFeedback,
+  getPmEvaluations,
 } = require('../../controllers/employeeFeedbackController');
 
 // GET /api/pm/performance/client-feedback?profileId=<EMP id>&projectId=<optional>
@@ -12,6 +13,9 @@ router.get('/client-feedback', getClientFeedbackForEmployee);
 
 // GET /api/pm/performance/my-client-feedback
 router.get('/my-client-feedback', getPmClientFeedback);
+
+// GET /api/pm/performance/evaluations
+router.get('/evaluations', getPmEvaluations);
 
 // POST /api/pm/performance/evaluations
 router.post('/evaluations', submitPmEvaluation);

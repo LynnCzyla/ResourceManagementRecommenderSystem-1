@@ -1,19 +1,24 @@
 // backend/routes/ProjectManager/tasks.js
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const workloadService = require('../../services/workloadService');
 
-function transformTask(row) {
+function transformTask(row, viewerId = null, viewerRole = null) {
   const profile = row.profiles || {};
+  const isMasked = viewerRole === 'Project Manager'
+    && row.projects?.created_by
+    && row.projects.created_by !== viewerId;
   return {
     id: row.id,
     projectId: row.project_id,
     projectName: row.projects?.project_name || '',
-    employeeId: row.profile_id,
-    employeeName: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unassigned',
-    employeeRole: profile.positions?.position_name || '',
-    employeeAvatar: profile.avatar_url || null,
+    employeeId: isMasked ? null : row.profile_id,
+    employeeName: isMasked ? 'Unassigned' : ([profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unassigned'),
+    employeeRole: isMasked ? '' : (profile.positions?.position_name || ''),
+    employeeAvatar: isMasked ? null : (profile.avatar_url || null),
     title: row.title,
     description: row.description,
     priority: row.priority,
@@ -35,7 +40,7 @@ const TASK_SELECT = `
   progress_logs,
   created_by,
   created_at,
-  projects ( id, project_name ),
+  projects ( id, project_name, created_by ),
   profiles!project_tasks_profile_id_fkey ( id, first_name, last_name, avatar_url, positions ( position_name ) )
 `;
 
@@ -67,7 +72,7 @@ router.get('/', async (req, res) => {
     const isSuperAdmin = req.user?.is_super_admin || false;
     const userRole = req.user?.role;
 
-    const cacheKey = `list:${projectId || ''}:${employeeId || ''}`;
+    const cacheKey = `list:${projectId || ''}:${employeeId || ''}:${userId || 'anonymous'}`;
 
     const cached = getTasksCached(cacheKey);
     if (cached) {
@@ -83,16 +88,13 @@ router.get('/', async (req, res) => {
     if (projectId) query = query.eq('project_id', projectId);
     if (employeeId) query = query.eq('profile_id', employeeId);
 
-    // ✅ For Project Managers: Only show tasks from their projects
     if (!isSuperAdmin && userRole === 'Project Manager') {
-      // Get projects created by this PM
       const { data: myProjects } = await supabase
         .from('projects')
         .select('id')
         .eq('created_by', userId);
 
-      const projectIds = myProjects?.map(p => p.id) || [];
-
+      const projectIds = myProjects?.map(project => project.id) || [];
       if (projectIds.length === 0) {
         return res.status(200).json({ success: true, data: [] });
       }
@@ -103,7 +105,7 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const transformed = (data || []).map(transformTask);
+    const transformed = (data || []).map(task => transformTask(task, userId, userRole));
     setTasksCached(cacheKey, transformed);
 
     res.status(200).json({ success: true, data: transformed });
@@ -116,7 +118,7 @@ router.get('/', async (req, res) => {
 // ✅ POST /api/pm/tasks — create/assign a new task
 router.post('/', async (req, res) => {
   try {
-    const { projectId, employeeId, title, description, priority = 'Medium', dueDate, createdBy } = req.body;
+    const { projectId, employeeId, title, description, priority = 'Medium', dueDate } = req.body;
     const userId = req.user?.id;
     const userRole = req.user?.role;
 
@@ -151,7 +153,7 @@ router.post('/', async (req, res) => {
         status: 'Pending',
         due_date: dueDate || null,
         progress_logs: [],
-        created_by: createdBy || userId || null,
+        created_by: userId,
       })
       .select(TASK_SELECT)
       .single();
@@ -171,11 +173,15 @@ router.post('/', async (req, res) => {
 
     await logAuditEvent({
       req,
-      userId: createdBy || userId || null,
+      userId,
       action: 'Assigned',
       systemCategory: 'Resource Management',
       logDescription: `Assigned task "${title}" to employee ${employeeId}`,
     });
+
+    if (employeeId) {
+      workloadService.recalculateForEmployee(employeeId).catch(e => console.warn('Workload recalc error:', e.message));
+    }
 
     invalidateTasksCache();
     res.status(201).json({ success: true, message: 'Task created successfully', data: transformTask(data) });
@@ -193,20 +199,18 @@ router.put('/:id', async (req, res) => {
     const userId = req.user?.id;
     const userRole = req.user?.role;
 
-    // ✅ Verify the user owns the project (PM only)
-    if (userRole === 'Project Manager') {
-      const { data: task } = await supabase
-        .from('project_tasks')
-        .select('project_id, projects:project_id (created_by)')
-        .eq('id', id)
-        .single();
+    // ✅ Fetch existing task to check project ownership & track previous assignee
+    const { data: existingTask } = await supabase
+      .from('project_tasks')
+      .select('profile_id, project_id, projects:project_id (created_by)')
+      .eq('id', id)
+      .single();
 
-      if (!task || task.projects?.created_by !== userId) {
-        return res.status(403).json({
-          success: false,
-          message: 'You can only update tasks from your own projects'
-        });
-      }
+    if (userRole === 'Project Manager' && (!existingTask || existingTask.projects?.created_by !== userId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update tasks from your own projects'
+      });
     }
 
     const updateData = { updated_at: new Date().toISOString() };
@@ -235,6 +239,13 @@ router.put('/:id', async (req, res) => {
       logDescription: `Updated task ${id}`,
     });
 
+    if (data.profile_id) {
+      workloadService.recalculateForEmployee(data.profile_id).catch(e => console.warn('Workload recalc error:', e.message));
+    }
+    if (existingTask?.profile_id && existingTask.profile_id !== data.profile_id) {
+      workloadService.recalculateForEmployee(existingTask.profile_id).catch(e => console.warn('Workload recalc error:', e.message));
+    }
+
     invalidateTasksCache();
     res.status(200).json({ success: true, message: 'Task updated successfully', data: transformTask(data) });
   } catch (error) {
@@ -248,6 +259,8 @@ router.post('/:id/progress', async (req, res) => {
   try {
     const { id } = req.params;
     const { percentage, note, loggedBy } = req.body;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
 
     if (percentage === undefined || percentage === null) {
       return res.status(400).json({ success: false, message: 'Percentage is required' });
@@ -255,12 +268,18 @@ router.post('/:id/progress', async (req, res) => {
 
     const { data: existing, error: fetchError } = await supabase
       .from('project_tasks')
-      .select('progress_logs')
+      .select('progress_logs, projects:project_id ( created_by )')
       .eq('id', id)
       .single();
 
     if (fetchError) throw fetchError;
     if (!existing) return res.status(404).json({ success: false, message: 'Task not found' });
+    if (userRole === 'Project Manager' && existing.projects?.created_by !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update tasks from your own projects'
+      });
+    }
 
     const newPercentageVal = Math.min(100, Math.max(0, parseInt(percentage, 10) || 0));
     const logs = existing.progress_logs || [];
@@ -274,10 +293,11 @@ router.post('/:id/progress', async (req, res) => {
     }
 
     const newLog = {
+      id: crypto.randomUUID(),
       date: new Date().toISOString(),
       percentage: newPercentageVal,
       note: note || '',
-      loggedBy: loggedBy || null,
+      loggedBy: req.user?.id || null,
     };
 
     const updatedLogs = [...logs, newLog];
@@ -303,7 +323,7 @@ router.post('/:id/progress', async (req, res) => {
         ? [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim()
         : 'Unassigned';
 
-      const reportDesc = (description || '').trim() || data.description || '';
+      const reportDesc = (note || '').trim() || data.description || '';
 
       const { error: reportInsertErr } = await supabase.from('project_report').insert({
         task_id: data.id,
@@ -326,14 +346,22 @@ router.post('/:id/progress', async (req, res) => {
 
     await logAuditEvent({
       req,
-      userId: loggedBy || null,
+      userId: req.user?.id || null,
       action: 'Updated',
       systemCategory: 'Resource Management',
       logDescription: `Logged ${newLog.percentage}% progress for task ${id}`,
     });
 
+    if (data.profile_id) {
+      workloadService.recalculateForEmployee(data.profile_id).catch(e => console.warn('Workload recalc error:', e.message));
+    }
+
     invalidateTasksCache();
-    res.status(200).json({ success: true, message: 'Progress logged successfully', data: transformTask(data) });
+    res.status(200).json({
+      success: true,
+      message: 'Progress logged successfully',
+      data: transformTask(data, userId, userRole)
+    });
   } catch (error) {
     console.error('Error logging task progress:', error);
     res.status(500).json({ success: false, message: 'Failed to log task progress', error: error.message });
@@ -368,20 +396,38 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
-    const { error } = await supabase.from('project_tasks').delete().eq('id', id);
+    const nowIso = new Date().toISOString();
+    const { data: updatedTask, error } = await supabase
+      .from('project_tasks')
+      .update({
+        status: 'Cancelled',
+        cancelled_at: nowIso,
+        cancelled_by: userId,
+        cancellation_reason: 'Cancelled by Project Manager',
+        updated_at: nowIso,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
     if (error) throw error;
 
     await logAuditEvent({
       req,
-      action: 'Deleted',
+      action: 'Cancelled',
       systemCategory: 'Resource Management',
-      logDescription: `Deleted task ${id}`,
+      logDescription: `Cancelled task ${id}`,
     });
+
+    if (updatedTask?.profile_id) {
+      workloadService.recalculateForEmployee(updatedTask.profile_id).catch(e => console.warn('Workload recalc error:', e.message));
+    }
+
     invalidateTasksCache();
-    res.status(200).json({ success: true, message: 'Task deleted successfully' });
+    res.status(200).json({ success: true, message: 'Task cancelled successfully', data: updatedTask });
   } catch (error) {
-    console.error('Error deleting task:', error);
-    res.status(500).json({ success: false, message: 'Failed to delete task', error: error.message });
+    console.error('Error cancelling task:', error);
+    res.status(500).json({ success: false, message: 'Failed to cancel task', error: error.message });
   }
 });
 

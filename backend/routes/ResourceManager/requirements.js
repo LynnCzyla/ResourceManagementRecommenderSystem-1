@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { parsePositiveInt } = require('../../utils/validators');
 
 console.log('✅ requirements route loaded');
 
@@ -36,7 +37,8 @@ router.get('/', async (req, res) => {
                         )
                     )
                 `)
-                .not('status', 'in', '("Cancelled","Canceled","Completed","Done","Rejected")')
+                .not('status', 'in', '("Cancelled","Canceled","Completed","Done")')
+                // ✅ Note: 'Rejected' is intentionally kept visible so RM can see rejection history
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -121,7 +123,8 @@ router.get('/', async (req, res) => {
                 )
             `)
             .in('project_id', projectIds)
-            .not('status', 'in', '("Cancelled","Canceled","Completed","Done","Rejected")')
+            .not('status', 'in', '("Cancelled","Canceled","Completed","Done")')
+            // ✅ Note: 'Rejected' is intentionally kept visible so RM can see rejection history
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -151,7 +154,8 @@ router.get('/', async (req, res) => {
 async function transformRequirements(data) {
     if (!data || data.length === 0) return [];
 
-    // Filter out requirements for completed or archived projects or completed/cancelled requirements
+    // Filter out requirements for completed or archived projects or completed/cancelled requirements.
+    // ✅ 'Rejected' is intentionally NOT filtered — RMs need to see rejection history.
     const activeData = (data || []).filter(item => {
         const projStatus = item.projects?.status;
         if (projStatus === 'Completed' || projStatus === 'Archived') return false;
@@ -160,6 +164,18 @@ async function transformRequirements(data) {
     });
 
     if (activeData.length === 0) return [];
+
+    const requirementIds = activeData.map(item => item.id).filter(Boolean);
+    const { data: assignments, error: assignmentError } = await supabase
+        .from('project_assignments')
+        .select('requirement_id')
+        .in('requirement_id', requirementIds)
+        .eq('status', 'Assigned');
+    if (assignmentError) throw assignmentError;
+    const allocationCounts = (assignments || []).reduce((map, assignment) => {
+        map[assignment.requirement_id] = (map[assignment.requirement_id] || 0) + 1;
+        return map;
+    }, {});
 
     const transformedData = await Promise.all(activeData.map(async (item) => {
         // Get skills for this requirement
@@ -178,6 +194,9 @@ async function transformRequirements(data) {
             id: item.id,
             project_id: item.project_id,
             quantity: item.quantity_needed || item.quantity || 1,
+            required: item.quantity_needed || item.quantity || 1,
+            allocated: allocationCounts[item.id] || 0,
+            remaining: Math.max(0, (item.quantity_needed || item.quantity || 1) - (allocationCounts[item.id] || 0)),
             role_title: item.role_title || null,
             justification: item.justification || null,
             start_date: item.start_date || null,
@@ -302,6 +321,14 @@ router.put('/:id/status', async (req, res) => {
         const { status } = req.body;
         const userBranchId = req.user?.branch_id;
         const isSuperAdmin = req.user?.is_super_admin || false;
+
+        const VALID_REQ_STATUSES = ['Pending', 'Approved', 'Rejected', 'Partially Allocated', 'Filled', 'Cancelled', 'Completed'];
+        if (!status || !VALID_REQ_STATUSES.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid status: "${status}". Valid statuses: ${VALID_REQ_STATUSES.join(', ')}`
+            });
+        }
         
         console.log(`📋 Updating requirement ${id} to ${status}...`);
         
@@ -338,11 +365,19 @@ router.put('/:id/status', async (req, res) => {
             });
         }
         
+        const nowIso = new Date().toISOString();
+        const updatePayload = { 
+            status: status
+        };
+        if (status === 'Cancelled') {
+            updatePayload.cancelled_at = nowIso;
+            updatePayload.cancelled_by = req.user?.id || null;
+            updatePayload.cancellation_reason = 'Cancelled by Resource Manager';
+        }
+
         const { data, error } = await supabase
             .from('project_resource_requirements')
-            .update({ 
-                status: status
-            })
+            .update(updatePayload)
             .eq('id', id)
             .select()
             .single();
@@ -362,6 +397,27 @@ router.put('/:id/status', async (req, res) => {
             if (clearProjectsCache) clearProjectsCache(isSuperAdmin ? null : userBranchId);
         } catch (cErr) {
             console.warn('⚠️ Non-fatal error clearing cache after requirement status update:', cErr.message);
+        }
+
+        // ✅ Notify PM when RM rejects or approves a requirement (Finding 17)
+        if (['Rejected', 'Approved'].includes(status)) {
+            try {
+                const pmId = requirement.projects?.created_by;
+                if (pmId) {
+                    const notifText = status === 'Rejected'
+                        ? `Your resource request (ID: ${id}) has been rejected by the Resource Manager.`
+                        : `Your resource request (ID: ${id}) has been approved by the Resource Manager.`;
+                    await supabase.from('notifications').insert({
+                        recipient_id: pmId,
+                        type: status === 'Rejected' ? 'request_rejected' : 'request_approved',
+                        text: notifText,
+                        read: false
+                    });
+                    console.log(`✅ Notification sent to PM ${pmId} for requirement ${id} (${status})`);
+                }
+            } catch (notifErr) {
+                console.warn('⚠️ Non-fatal: Failed to send notification to PM:', notifErr.message);
+            }
         }
 
         console.log(`✅ Requirement ${id} updated to ${status}`);
@@ -394,6 +450,11 @@ router.post('/', async (req, res) => {
                 success: false,
                 error: 'Project ID, role title, and quantity are required'
             });
+        }
+
+        const qtyCheck = parsePositiveInt(quantity, 'Quantity');
+        if (qtyCheck.error) {
+            return res.status(400).json({ success: false, error: qtyCheck.error });
         }
 
         // Check if project exists and user has access
@@ -432,7 +493,7 @@ router.post('/', async (req, res) => {
             .insert({
                 project_id,
                 role_title,
-                quantity_needed: quantity,
+                quantity_needed: qtyCheck.value,
                 justification: justification || null,
                 priority: priority || 'Medium',
                 status: 'Open',
@@ -522,30 +583,30 @@ router.delete('/:id', async (req, res) => {
             });
         }
 
-        // Delete skills first (foreign key constraint)
-        await supabase
-            .from('requirement_skills')
-            .delete()
-            .eq('requirement_id', id);
-
-        // Delete requirement
+        // Cancel requirement (preserve skills and assignment history)
+        const nowIso = new Date().toISOString();
         const { error } = await supabase
             .from('project_resource_requirements')
-            .delete()
+            .update({
+                status: 'Cancelled',
+                cancelled_at: nowIso,
+                cancelled_by: req.user?.id,
+                cancellation_reason: 'Cancelled by Resource Manager'
+            })
             .eq('id', id);
 
         if (error) {
-            console.error('❌ Error deleting requirement:', error);
+            console.error('❌ Error cancelling requirement:', error);
             return res.status(500).json({
                 success: false,
                 error: error.message
             });
         }
 
-        console.log(`✅ Requirement ${id} deleted`);
+        console.log(`✅ Requirement ${id} cancelled`);
         res.json({
             success: true,
-            message: 'Requirement deleted successfully'
+            message: 'Requirement cancelled successfully'
         });
     } catch (error) {
         console.error('❌ Error deleting requirement:', error);

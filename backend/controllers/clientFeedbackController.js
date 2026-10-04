@@ -33,7 +33,7 @@ function isExpired(row) {
   return row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false;
 }
 
-async function getEmployeeSummaries(employeeIds) {
+async function getEmployeeSummaries(employeeIds, pmProfileId = null) {
   if (!employeeIds || employeeIds.length === 0) return [];
 
   const { data, error } = await supabase
@@ -48,10 +48,12 @@ async function getEmployeeSummaries(employeeIds) {
 
   return employeeIds.map(id => {
     const p = byId[id];
+    const isPm = (pmProfileId && String(id) === String(pmProfileId)) || p?.role === 'Project Manager';
     return {
       id,
       name: p ? ([p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unnamed') : 'Unknown',
-      role: p?.role || null,
+      role: p?.role || (isPm ? 'Project Manager' : null),
+      isPm,
     };
   });
 }
@@ -61,11 +63,9 @@ async function getEmployeeSummaries(employeeIds) {
 // Non-fatal: a failure here must never make the client's
 // feedback submission look like it failed — the feedback_responses rows
 // are already saved by the time this runs.
-async function syncPerformanceRecords({ feedbackRequestRow, insertedResponses }) {
+async function syncPerformanceRecords({ feedbackRequestRow, insertedResponses, projectRating, deliverablesFeedback, projectFeedback, additionalComments }) {
   try {
-    if (!insertedResponses || insertedResponses.length === 0) return;
-
-    const perfRows = insertedResponses.map(r => ({
+    const perfRows = (insertedResponses || []).map(r => ({
       profile_id: r.profile_id,
       project_id: feedbackRequestRow.project_id,
       // feedback_requests.created_by is the PM/staff member who set the
@@ -90,9 +90,31 @@ async function syncPerformanceRecords({ feedbackRequestRow, insertedResponses })
       areas_for_improvement: r.areas_for_improvement,
       project_feedback: r.project_feedback,
       feedback_source: 'client',
-      feedback_status: 'submitted',
+      feedback_status: 'submitted', // Initially submitted; requires RM permission to be visible to employee/PM
       rated_at: new Date().toISOString(),
     }));
+
+    // If PM was not explicitly evaluated as a team member, but client gave project feedback,
+    // generate a client performance record for the PM so the RM can review it and grant visibility.
+    const alreadyHasPm = (insertedResponses || []).some(r => r.profile_id === feedbackRequestRow.created_by);
+    if (!alreadyHasPm && feedbackRequestRow.created_by && (projectRating || projectFeedback || deliverablesFeedback)) {
+      perfRows.push({
+        profile_id: feedbackRequestRow.created_by,
+        project_id: feedbackRequestRow.project_id,
+        created_by: feedbackRequestRow.created_by,
+        client_name: feedbackRequestRow.client_name,
+        client_email: feedbackRequestRow.client_email,
+        feedback_request_id: feedbackRequestRow.id,
+        rating: projectRating ? Number(projectRating) : 5,
+        client_original_rating: projectRating ? Number(projectRating) : 5,
+        deliverables_feedback: deliverablesFeedback || null,
+        client_feedback: additionalComments || null,
+        project_feedback: projectFeedback ? `[Rating: ${projectRating || '-'}/5] ${projectFeedback}`.trim() : null,
+        feedback_source: 'client',
+        feedback_status: 'submitted', // Requires RM permission to be visible to PM
+        rated_at: new Date().toISOString(),
+      });
+    }
 
     if (perfRows.length > 0) {
       const { error: insertError } = await supabase.from('performance_records').insert(perfRows);
@@ -180,15 +202,20 @@ const getFeedbackRequestByToken = async (req, res) => {
 
     let employees = [];
     try {
-      employees = await getEmployeeSummaries(row.employee_ids || []);
+      // Client evaluates ONLY the project and the Project Manager
+      const pmId = row.created_by;
+      const idsToFetch = pmId ? [pmId] : (row.employee_ids || []);
+      employees = await getEmployeeSummaries(idsToFetch, row.created_by);
     } catch (empError) {
-      console.error('Error loading employees for feedback request:', empError);
+      console.error('Error loading project manager for feedback request:', empError);
       return res.status(500).json({
         success: false,
-        message: 'Failed to load team members for this feedback request',
+        message: 'Failed to load project manager for this feedback request',
         error: empError.message,
       });
     }
+
+    const pm = employees.find(e => e.isPm || (row.created_by && String(e.id) === String(row.created_by))) || employees[0] || null;
 
     res.status(200).json({
       success: true,
@@ -196,7 +223,8 @@ const getFeedbackRequestByToken = async (req, res) => {
         id: row.id,
         clientName: row.client_name,
         projectName: project ? project.project_name : 'your project',
-        employees,
+        pm,
+        employees: pm ? [pm] : [],
         expiresAt: row.expires_at,
       },
     });
@@ -259,15 +287,16 @@ const submitFeedbackResponses = async (req, res) => {
     }
 
     const validEmployeeIds = new Set(row.employee_ids || []);
+    if (row.created_by) validEmployeeIds.add(row.created_by);
     for (const r of responses) {
       if (!r.employeeId || !validEmployeeIds.has(r.employeeId)) {
         return res.status(400).json({
           success: false,
-          message: 'One or more submitted employees do not belong to this feedback request',
+          message: 'One or more submitted recipients do not belong to this feedback request',
         });
       }
       if (!r.rating) {
-        return res.status(400).json({ success: false, message: 'Overall rating is required for every employee' });
+        return res.status(400).json({ success: false, message: 'Overall rating is required for the Project Manager' });
       }
     }
 
@@ -322,10 +351,18 @@ const submitFeedbackResponses = async (req, res) => {
       console.error('Non-fatal: failed to mark feedback_requests row as completed:', updateError);
     }
 
-    // ✅ NEW: auto-create performance_records for all rated respondents
-    await syncPerformanceRecords({ feedbackRequestRow: row, insertedResponses: insertedResponses || [] });
+    // Auto-create performance_records for all rated respondents and PM project feedback
+    await syncPerformanceRecords({
+      feedbackRequestRow: row,
+      insertedResponses: insertedResponses || [],
+      projectRating,
+      deliverablesFeedback,
+      projectFeedback,
+      additionalComments,
+    });
 
-    // Cross-role notifications: notify PM, RM(s), and rated employees
+    // Cross-role notifications: Sent ONLY to the Resource Manager (RM)
+    // PMs and Employees will only be notified when the RM reviews and grants permission.
     try {
       const { data: project } = await supabase
         .from('projects')
@@ -336,42 +373,31 @@ const submitFeedbackResponses = async (req, res) => {
       const projectName = project?.project_name || 'your project';
       const notifs = [];
 
-      // Notify PM (created_by)
-      if (project?.created_by) {
-        notifs.push({
-          recipient_id: project.created_by,
-          type: 'feedback',
-          text: `Client feedback has been submitted for project "${projectName}".`,
-          read: false
-        });
-      }
-
-      // Notify Branch Resource Manager(s)
+      // Look up branch Resource Manager(s)
+      let targetRms = [];
       if (project?.branch_id) {
         const { data: rms } = await supabase
           .from('profiles')
           .select('id')
           .eq('role', 'Resource Manager')
           .eq('branch_id', project.branch_id);
-        (rms || []).forEach(rm => {
-          if (rm.id !== project.created_by) {
-            notifs.push({
-              recipient_id: rm.id,
-              type: 'feedback',
-              text: `Client feedback has been submitted for project "${projectName}".`,
-              read: false
-            });
-          }
-        });
+        targetRms = rms || [];
       }
 
-      // Notify rated employees
-      const ratedIds = (responses || []).map(r => r.employeeId).filter(Boolean);
-      ratedIds.forEach(empId => {
+      // Fallback: if no branch RM found, find all Resource Managers
+      if (targetRms.length === 0) {
+        const { data: allRms } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'Resource Manager');
+        targetRms = allRms || [];
+      }
+
+      targetRms.forEach(rm => {
         notifs.push({
-          recipient_id: empId,
+          recipient_id: rm.id,
           type: 'feedback',
-          text: `You have received new client performance feedback for project "${projectName}".`,
+          text: `New client feedback submitted for project "${projectName}". Please review and grant visibility.`,
           read: false
         });
       });

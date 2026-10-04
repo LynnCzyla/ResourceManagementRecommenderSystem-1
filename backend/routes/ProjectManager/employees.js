@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const workloadService = require('../../services/workloadService');
 
 // Simple in-memory cache with TTL
 const cache = new Map();
@@ -32,26 +33,14 @@ function setCache(key, data) {
 }
 
 // Transform a profiles row into the shape the PM tabs expect
-function transformEmployee(row) {
+function transformEmployee(row, projectIds = []) {
   const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unnamed';
   
-  // Calculate availability based on workload if not provided
-  let availability = row.availability_status || 'Available';
-  let totalAvailableHours = 40; // Default value
-  
-  // If we have workload data, calculate availability
-  if (row.workload_score !== undefined) {
-    const availabilityFactor = Math.max(0, 1 - (row.workload_score / 10));
-    totalAvailableHours = Math.round(availabilityFactor * 40);
-    
-    if (availabilityFactor < 0.3) {
-      availability = 'Overloaded';
-    } else if (availabilityFactor < 0.6) {
-      availability = 'Limited';
-    } else {
-      availability = 'Available';
-    }
-  }
+  // Directly read availability_status from profiles, with sigmoid factor calculation
+  const details = workloadService.getWorkloadDetails(row.id, row.availability_status || 'Available');
+  const availability = row.availability_status || details.workloadStatus || 'Available';
+  const totalAvailableHours = Math.round((details.availabilityFactor ?? 1.0) * 40);
+
   
   return {
     id: row.id,
@@ -62,6 +51,23 @@ function transformEmployee(row) {
     avatar: row.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`,
     availability: availability,
     totalAvailableHours: totalAvailableHours,
+    projectIds: projectIds,
+    projectId: projectIds.length > 0 ? projectIds[0] : null,
+  };
+}
+
+function transformMaskedEmployee(projectId, index, assignment = {}) {
+  return {
+    id: `masked-${projectId}-${index}`,
+    employeeId: null,
+    name: 'Unassigned',
+    role: assignment.assigned_role || 'Unassigned',
+    department: '',
+    avatar: null,
+    availability: 'Unavailable',
+    totalAvailableHours: 0,
+    projectId,
+    isMasked: true,
   };
 }
 
@@ -83,10 +89,19 @@ const EMPLOYEE_SELECT = `
 router.get('/', async (req, res) => {
   try {
     const { departmentId, pmId, projectId } = req.query;
+    const effectivePmId = req.user?.role === 'Project Manager'
+      ? req.user.id
+      : pmId;
 
     // Check cache for this exact query
     const useCache = !projectId;
-    const cacheKey = getCacheKey({ departmentId, pmId, projectId });
+    const cacheKey = getCacheKey({
+      departmentId,
+      pmId: effectivePmId,
+      projectId,
+      viewerId: req.user?.id,
+      viewerRole: req.user?.role,
+    });
     if (useCache) {
       const cachedData = getCached(cacheKey);
       if (cachedData) {
@@ -98,10 +113,12 @@ router.get('/', async (req, res) => {
     console.log(`🔍 Cache miss for employees: ${cacheKey}`);
 
     let allowedProfileIds = null;
+    let maskedAssignments = [];
+    const profileToProjectsMap = {};
 
     // Optimize: If no pmId and no projectId, return all active employees
     // (but only if no pmId or projectId filter)
-    if (!pmId && !projectId && !departmentId) {
+    if (!effectivePmId && !projectId && !departmentId) {
       const { data, error } = await supabase
         .from('profiles')
         .select(EMPLOYEE_SELECT)
@@ -110,7 +127,7 @@ router.get('/', async (req, res) => {
 
       if (error) throw error;
       
-      const transformed = (data || []).map(transformEmployee);
+      const transformed = (data || []).map(row => transformEmployee(row));
       setCache(cacheKey, transformed);
       
       return res.status(200).json({ success: true, data: transformed });
@@ -118,40 +135,49 @@ router.get('/', async (req, res) => {
 
     if (projectId) {
       // Scoped to a single project
-      if (pmId) {
-        // Verify project belongs to this PM
-        const { data: project, error: projectError } = await supabase
-          .from('projects')
-          .select('id')
-          .eq('id', projectId)
-          .eq('created_by', pmId)
-          .maybeSingle();
-        
-        if (projectError) throw projectError;
-        if (!project) {
-          return res.status(200).json({ success: true, data: [] });
-        }
-      }
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('id, created_by')
+        .eq('id', projectId)
+        .maybeSingle();
+
+      if (projectError) throw projectError;
+      if (!project) return res.status(200).json({ success: true, data: [] });
 
       const { data: assignments, error: assignmentsError } = await supabase
         .from('project_assignments')
-        .select('profile_id')
+        .select('profile_id, assigned_role')
         .eq('project_id', projectId)
-        .eq('status', 'Assigned');
+        .in('status', ['Assigned', 'Active']);
       
       if (assignmentsError) throw assignmentsError;
+
+      if (req.user?.role === 'Project Manager' && project.created_by !== req.user.id) {
+        const masked = (assignments || []).map((assignment, index) =>
+          transformMaskedEmployee(projectId, index, assignment)
+        );
+        return res.status(200).json({ success: true, data: [] });
+      }
+
+      (assignments || []).forEach(a => {
+        if (!profileToProjectsMap[a.profile_id]) profileToProjectsMap[a.profile_id] = [];
+        profileToProjectsMap[a.profile_id].push(projectId);
+      });
 
       allowedProfileIds = [...new Set((assignments || []).map(a => a.profile_id))];
       if (allowedProfileIds.length === 0) {
         return res.status(200).json({ success: true, data: [] });
       }
-    } else if (pmId) {
-      // Get all active projects for this PM (exclude Completed and Archived)
-      const { data: pmProjects, error: projectsError } = await supabase
+    } else if (effectivePmId) {
+      // Get only Active projects for this PM (exclude Completed, Cancelled, Deleted)
+      let projectsQuery = supabase
         .from('projects')
-        .select('id')
-        .eq('created_by', pmId)
-        .not('status', 'in', '("Completed","Archived")');
+        .select('id, created_by')
+        .eq('status', 'Active');
+
+      projectsQuery = projectsQuery.eq('created_by', effectivePmId);
+
+      const { data: pmProjects, error: projectsError } = await projectsQuery;
       
       if (projectsError) throw projectsError;
 
@@ -160,14 +186,19 @@ router.get('/', async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
       }
 
-      // Get active assignments for these active projects
+      // Get active assignments for these projects
       const { data: assignments, error: assignmentsError } = await supabase
         .from('project_assignments')
-        .select('profile_id')
+        .select('profile_id, project_id, assigned_role')
         .in('project_id', projectIds)
-        .eq('status', 'Assigned');
+        .in('status', ['Assigned', 'Active']);
       
       if (assignmentsError) throw assignmentsError;
+
+      (assignments || []).forEach(a => {
+        if (!profileToProjectsMap[a.profile_id]) profileToProjectsMap[a.profile_id] = [];
+        profileToProjectsMap[a.profile_id].push(a.project_id);
+      });
 
       allowedProfileIds = [...new Set((assignments || []).map(a => a.profile_id))];
       if (allowedProfileIds.length === 0) {
@@ -231,21 +262,27 @@ router.get('/', async (req, res) => {
     // Transform with workload data and evaluated flag
     const transformed = (data || []).map(emp => {
       const workloadScore = workloadMap[emp.id] || 0;
+      const empProjectIds = profileToProjectsMap[emp.id] || (projectId ? [projectId] : []);
       return {
         ...transformEmployee({
           ...emp,
           workload_score: workloadScore
-        }),
+        }, empProjectIds),
         isEvaluated: evaluatedProfileIds.has(emp.id)
       };
     });
     
+    const masked = maskedAssignments.map((assignment, index) =>
+      transformMaskedEmployee(assignment.project_id, index, assignment)
+    );
+    const result = [...transformed, ...masked];
+
     // Cache the result if caching is enabled
     if (useCache) {
-      setCache(cacheKey, transformed);
+      setCache(cacheKey, result);
     }
 
-    res.status(200).json({ success: true, data: transformed });
+    res.status(200).json({ success: true, data: result });
   } catch (error) {
     console.error('Error fetching employees:', error);
     res.status(500).json({ 

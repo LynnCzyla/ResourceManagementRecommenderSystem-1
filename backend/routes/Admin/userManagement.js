@@ -956,6 +956,8 @@ router.delete("/:id", async (req, res) => {
 
       if (error) throw error;
       
+      clearProfileCache(id);
+
       await logAuditEvent({
         req,
         userId: id,

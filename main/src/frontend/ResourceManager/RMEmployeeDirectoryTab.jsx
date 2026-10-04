@@ -239,6 +239,114 @@ const handleViewEmployee = async (emp) => {
     }));
   };
 
+  // ✅ Unassigned if not assigned in project (not in the task)
+  const isEmployeeProjectAssigned = (emp) => {
+    if (!emp) return false;
+    if (emp.rawRole === 'Project Manager') {
+      return Boolean(emp.assignmentCount > 0 || emp.isAssigned);
+    }
+    return Boolean(
+      emp.isAssigned &&
+      ((emp.assignedProjects && emp.assignedProjects.length > 0) ||
+       (emp.assignedProjectIds && emp.assignedProjectIds.length > 0))
+    );
+  };
+
+  // ✅ Availability status and percentage based on Availability Factor (A):
+  // Formula: A = 1 / (1 + e^(0.4 * (W - 7)))
+  // Status Label Reference:
+  // W=0   -> A=1.000 / 0.943 -> Available (100%) [Green]
+  // W=1   -> A=0.916         -> Available (92%)  [Green]
+  // W=3   -> A=0.832         -> Available (83%)  [Green]
+  // W=4   -> A=0.802         -> Available (80%)  [Green]
+  // W=5   -> A=0.769         -> Limited Availability (77%) [Amber]
+  // W=6   -> A=0.599         -> Limited Availability (60%) [Amber]
+  // W=7   -> A=0.500         -> Limited Availability (50%) [Amber]
+  // W=8   -> A=0.401         -> Fully Utilized (40%) [Red]
+  // W=10  -> A=0.231         -> Fully Utilized (23%) [Red]
+  // W>=14 -> A=~0.05         -> Fully Utilized (5%)  [Red]
+  const getAvailabilityBadge = (emp) => {
+    if (!emp) {
+      return {
+        label: 'Available',
+        displayText: 'Available (100%)',
+        bg: 'rgba(16, 185, 129, 0.15)',
+        color: 'var(--color-success)',
+        border: '1px solid rgba(16, 185, 129, 0.3)',
+        percentage: 100,
+      };
+    }
+
+    const isPM = emp.rawRole === 'Project Manager' || emp.isPM;
+    if (isPM) {
+      return {
+        label: 'Available',
+        displayText: 'Available (100%)',
+        bg: 'rgba(16, 185, 129, 0.15)',
+        color: 'var(--color-success)',
+        border: '1px solid rgba(16, 185, 129, 0.3)',
+        percentage: 100,
+      };
+    }
+
+    // Determine Availability Factor A
+    let A;
+    if (typeof emp.availabilityFactor === 'number' && !isNaN(emp.availabilityFactor)) {
+      A = emp.availabilityFactor;
+    } else if (typeof emp.workloadScore === 'number' && !isNaN(emp.workloadScore)) {
+      const W = emp.workloadScore;
+      A = W === 0 ? 1.0 : (1 / (1 + Math.exp(0.4 * (W - 7))));
+    } else if (typeof emp.utilizationRate === 'number' && !isNaN(emp.utilizationRate)) {
+      const util = emp.utilizationRate;
+      if (util === 0) {
+        A = 1.0;
+      } else {
+        const W = (util / 100) * 7;
+        A = 1 / (1 + Math.exp(0.4 * (W - 7)));
+      }
+    } else {
+      A = 1.0;
+    }
+
+    // Calculate availability percentage (0-100%) from A:
+    let availPct;
+    if (A >= 0.943 || (emp.workloadScore === 0 && (!emp.activeTaskCount || emp.activeTaskCount === 0))) {
+      availPct = 100;
+    } else {
+      availPct = Math.max(1, Math.min(100, Math.round(A * 100)));
+    }
+
+    let label = 'Available';
+    let bg = 'rgba(16, 185, 129, 0.15)';
+    let color = 'var(--color-success)';
+    let border = '1px solid rgba(16, 185, 129, 0.3)';
+
+    // Status Label Reference per paper:
+    // A >= 0.80 -> Available (Green)
+    // 0.50 <= A < 0.80 -> Limited Availability (Amber)
+    // A < 0.50 -> Fully Utilized (Red)
+    if (A >= 0.80) {
+      label = 'Available';
+      bg = 'rgba(16, 185, 129, 0.15)';
+      color: 'var(--color-success)';
+      border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else if (A >= 0.50) {
+      label = 'Limited Availability';
+      bg = 'rgba(245, 158, 11, 0.15)';
+      color = 'var(--color-warning)';
+      border = '1px solid rgba(245, 158, 11, 0.3)';
+    } else {
+      label = 'Fully Utilized';
+      bg = 'rgba(239, 68, 68, 0.15)';
+      color = 'var(--color-danger)';
+      border = '1px solid rgba(239, 68, 68, 0.3)';
+    }
+
+    const displayText = `${label} (${availPct}%)`;
+
+    return { label, displayText, bg, color, border, factor: A, percentage: availPct };
+  };
+
   const MAX_VISIBLE_SKILLS = 4;
 
   if (loading) {
@@ -317,65 +425,69 @@ const handleViewEmployee = async (emp) => {
 
               {/* Assignment & Availability Badges */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '4px 10px',
-                    borderRadius: '20px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    backgroundColor: emp.isAssigned ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-                    color: emp.isAssigned ? 'var(--color-success)' : 'var(--color-text-muted)',
-                    border: emp.isAssigned ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)',
-                  }}
-                  title={emp.isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'No active project assignments'}
-                >
-                  <span style={{ fontSize: '9px' }}>{emp.isAssigned ? '●' : '○'}</span>
-                  {emp.isAssigned
-                    ? `Assigned: ${emp.assignedProjects?.join(', ') || 'Active Project'}`
-                    : 'Unassigned'}
-                </span>
+                {(() => {
+                  const isAssigned = isEmployeeProjectAssigned(emp);
+                  return (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        backgroundColor: isAssigned ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                        color: isAssigned ? 'var(--color-success)' : 'var(--color-text-muted)',
+                        border: isAssigned ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)',
+                      }}
+                      title={
+                        emp.rawRole === 'Project Manager'
+                          ? (isAssigned ? `Assigned — Managing ${emp.assignmentCount} project(s)` : 'Unassigned — No active projects')
+                          : isAssigned ? `Assigned to: ${emp.assignedProjects?.join(', ')}` : 'Unassigned — Not assigned to any project'
+                      }
+                    >
+                      <span style={{ fontSize: '9px' }}>{'●'}</span>
+                      {isAssigned ? 'Assigned' : 'Unassigned'}
+                    </span>
+                  );
+                })()}
 
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '4px 10px',
-                    borderRadius: '20px',
-                    backgroundColor:
-                      emp.workloadStatus === 'Available'
-                        ? 'rgba(16, 185, 129, 0.15)'
-                        : emp.workloadStatus === 'Limited Availability'
-                        ? 'rgba(245, 158, 11, 0.15)'
-                        : 'rgba(239, 68, 68, 0.15)',
-                    color:
-                      emp.workloadStatus === 'Available'
-                        ? 'var(--color-success)'
-                        : emp.workloadStatus === 'Limited Availability'
-                        ? 'var(--color-warning)'
-                        : 'var(--color-danger)',
-                    border:
-                      emp.workloadStatus === 'Available'
-                        ? '1px solid rgba(16, 185, 129, 0.3)'
-                        : emp.workloadStatus === 'Limited Availability'
-                        ? '1px solid rgba(245, 158, 11, 0.3)'
-                        : '1px solid rgba(239, 68, 68, 0.3)',
-                  }}
-                >
-                  {emp.workloadStatus || 'Available'}
-                  {emp.utilizationRate !== undefined && emp.utilizationRate !== null && emp.workloadStatus !== 'Available'
-                    ? ` (${emp.utilizationRate}%)`
-                    : ''}
-                </span>
+                {(() => {
+                  const avail = getAvailabilityBadge(emp);
+                  return (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                        backgroundColor: avail.bg,
+                        color: avail.color,
+                        border: avail.border,
+                      }}
+                      title={`Availability Factor: ${typeof avail.factor === 'number' ? avail.factor.toFixed(3) : avail.factor} (${avail.displayText})`}
+                    >
+                      {avail.displayText}
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Skills Section */}
               <div style={styles.section}>
-                <h4 style={styles.sectionHeader}>Core Skills</h4>
+                <h4 style={styles.sectionHeader}>{emp.rawRole === 'Project Manager' ? 'Role' : 'Core Skills'}</h4>
                 <div style={styles.skillsList}>
-                  {emp.skills.length === 0 ? (
+                  {emp.rawRole === 'Project Manager' ? (
+                    <>
+                      <span style={{ ...styles.skillPill, background: 'rgba(99,102,241,0.12)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.25)', fontWeight: '600' }}>
+                        Project Manager
+                      </span>
+                      <span style={{ ...styles.skillPill, background: 'rgba(99,102,241,0.08)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', fontWeight: '600' }}>
+                        {emp.assignmentCount > 0 ? `Managing ${emp.assignmentCount} Project${emp.assignmentCount === 1 ? '' : 's'}` : 'No Active Projects'}
+                      </span>
+                    </>
+                  ) : emp.skills.length === 0 ? (
                     <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No skills on file.</span>
                   ) : (
                     <>
@@ -411,8 +523,22 @@ const handleViewEmployee = async (emp) => {
                     Assign to Project
                   </button>
                 ) : (
-                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontStyle: 'italic', display: 'block', width: '100%', textAlign: 'center', alignSelf: 'center' }}>
-                    Not assignable
+                  <span style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: '#6366f1',
+                    background: 'rgba(99, 102, 241, 0.08)',
+                    border: '1px solid rgba(99, 102, 241, 0.25)',
+                    borderRadius: '6px',
+                    padding: '10px',
+                    boxSizing: 'border-box',
+                    textAlign: 'center',
+                  }}>
+                    Project Manager
                   </span>
                 )}
               </div>
@@ -437,7 +563,7 @@ const handleViewEmployee = async (emp) => {
 
             <div style={styles.modalProfileCard}>
               <div style={styles.modalProfileBadge}>
-                [{selectedEmployee.department}] &bull; {selectedEmployee.isAssigned ? `Assigned (${selectedEmployee.assignedProjects?.join(', ')})` : 'Unassigned'} &bull; [{selectedEmployee.workloadStatus || 'Available'}]
+                [{selectedEmployee.department}] &bull; {isEmployeeProjectAssigned(selectedEmployee) ? `Assigned (${selectedEmployee.assignedProjects?.join(', ')})` : 'Unassigned'} &bull; [{getAvailabilityBadge(selectedEmployee).displayText}]
               </div>
               <h3 style={styles.modalProfileName}>{selectedEmployee.name}</h3>
               <div style={styles.modalProfileRole}>{selectedEmployee.role}</div>
@@ -570,7 +696,9 @@ const handleViewEmployee = async (emp) => {
         }}>
           <div style={{ ...styles.modal, maxWidth: '700px' }}>
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Employee Details</h2>
+              <h2 style={styles.modalTitle}>
+                {employeeDetails?.isPM ? 'Project Manager Details' : 'Employee Details'}
+              </h2>
               <button onClick={handleCloseViewModal} style={styles.modalCloseBtn}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -602,107 +730,288 @@ const handleViewEmployee = async (emp) => {
                 </div>
 
                 {/* Workload Summary */}
-                <div style={styles.viewWorkloadSection}>
-                  <div style={styles.viewWorkloadGrid}>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Workload Score</span>
-                      <span style={styles.viewWorkloadValue}>{employeeDetails.workloadScore || 0}</span>
-                    </div>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Utilization</span>
-                      <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
-                    </div>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Status</span>
-                      <span style={{
-                        ...styles.viewStatusBadge,
-                        backgroundColor: employeeDetails.workloadStatus === 'Available' ? 'var(--color-primary-light)' : 
-                                       employeeDetails.workloadStatus === 'Limited Availability' ? 'rgba(245, 158, 11, 0.1)' : 
-                                       'rgba(239, 68, 68, 0.1)',
-                        color: employeeDetails.workloadStatus === 'Available' ? 'var(--color-success)' : 
-                               employeeDetails.workloadStatus === 'Limited Availability' ? 'var(--color-warning)' : 
-                               'var(--color-danger)'
-                      }}>
-                        {employeeDetails.workloadStatus || 'Unknown'}
-                      </span>
-                    </div>
-                    <div style={styles.viewWorkloadItem}>
-                      <span style={styles.viewWorkloadLabel}>Tasks</span>
-                      <span style={styles.viewWorkloadValue}>{employeeDetails.taskCount || 0}</span>
+                {employeeDetails.isPM ? (
+                  /* PM: show managed projects summary */
+                  <div style={styles.viewWorkloadSection}>
+                    <div style={styles.viewWorkloadGrid}>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Role</span>
+                        <span style={{ ...styles.viewWorkloadValue, color: '#6366f1' }}>Project Manager</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Active Projects</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.managedProjectCount || 0}</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Status</span>
+                        <span style={{
+                          ...styles.viewStatusBadge,
+                          backgroundColor: 'var(--color-primary-light)',
+                          color: 'var(--color-success)'
+                        }}>
+                          Available
+                        </span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Load</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.utilizationRate || 0}%</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                {/* Projects & Tasks */}
-                <div style={styles.viewSection}>
-                  <h4 style={styles.viewSectionTitle}>
-                    📋 Projects & Tasks ({employeeDetails.projects?.length || 0} projects)
-                  </h4>
-                  
-                  {employeeDetails.projects && employeeDetails.projects.length > 0 ? (
-                    <div style={styles.viewProjectList}>
-                      {employeeDetails.projects.map((project, idx) => (
-                        <div key={idx} style={styles.viewProjectCard}>
-                          <div style={styles.viewProjectHeader}>
-                            <span style={styles.viewProjectName}>
-                              {project.project_name || 'Unnamed Project'}
-                              <span style={styles.viewProjectCode}>({project.project_code || 'N/A'})</span>
-                            </span>
+                ) : (
+                  /* Employee: show workload metrics */
+                  <div style={styles.viewWorkloadSection}>
+                    <div style={styles.viewWorkloadGrid}>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Workload Score</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.workloadScore || 0}</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Availability</span>
+                        <span style={styles.viewWorkloadValue}>{getAvailabilityBadge(employeeDetails).percentage}%</span>
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Status</span>
+                        {(() => {
+                          const avail = getAvailabilityBadge(employeeDetails);
+                          return (
                             <span style={{
-                              ...styles.viewProjectStatus,
-                              backgroundColor: project.project_status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-bg-hover)',
-                              color: project.project_status === 'Active' ? 'var(--color-success)' : 'var(--color-text-muted)'
+                              ...styles.viewStatusBadge,
+                              backgroundColor: avail.bg,
+                              color: avail.color
                             }}>
-                              {project.project_status || 'Active'}
+                              {avail.label}
                             </span>
-                          </div>
-                          
-                          <div style={styles.viewProjectTasks}>
-                            {project.tasks && project.tasks.length > 0 ? (
-                              project.tasks.map((task, taskIdx) => (
-                                <div key={taskIdx} style={styles.viewTaskItem}>
-                                  <div style={{ flex: 1 }}>
-                                    <span style={styles.viewTaskName}>• {task.title || 'Untitled Task'}</span>
-                                  </div>
-                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                    <span style={{
-                                      ...styles.viewTaskPriority,
-                                      backgroundColor: task.priority === 'High' ? 'rgba(239, 68, 68, 0.1)' :
-                                                    task.priority === 'Medium' ? 'rgba(245, 158, 11, 0.1)' :
-                                                    'rgba(16, 185, 129, 0.1)',
-                                      color: task.priority === 'High' ? 'var(--color-danger)' :
-                                            task.priority === 'Medium' ? 'var(--color-warning)' :
-                                            'var(--color-success)'
-                                    }}>
-                                      {task.priority || 'Low'}
-                                    </span>
-                                    <span style={{
-                                      ...styles.viewTaskStatus,
-                                      backgroundColor: task.status === 'Completed' ? 'var(--color-primary-light)' :
-                                                    task.status === 'In Progress' ? 'rgba(245, 158, 11, 0.1)' :
-                                                    task.status === 'Completed-Hidden' ? 'var(--color-bg-hover)' :
-                                                    'rgba(239, 68, 68, 0.1)',
-                                      color: task.status === 'Completed' ? 'var(--color-success)' :
-                                            task.status === 'In Progress' ? 'var(--color-warning)' :
-                                            task.status === 'Completed-Hidden' ? 'var(--color-text-muted)' :
-                                            'var(--color-danger)'
-                                    }}>
-                                      {task.status || 'Pending'}
-                                    </span>
-                                  </div>
+                          );
+                        })()}
+                      </div>
+                      <div style={styles.viewWorkloadItem}>
+                        <span style={styles.viewWorkloadLabel}>Active Tasks</span>
+                        <span style={styles.viewWorkloadValue}>{employeeDetails.activeTaskCount ?? employeeDetails.taskCount ?? 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* PM: Managed Projects */}
+                {employeeDetails.isPM && (() => {
+                  const activeManaged = (employeeDetails.managedProjects || []).filter(p => p.status === 'Active');
+                  const pastManaged = (employeeDetails.managedProjects || []).filter(p => p.status !== 'Active');
+                  return (
+                    <div style={styles.viewSection}>
+                      <h4 style={styles.viewSectionTitle}>
+                        Managed Projects ({activeManaged.length})
+                      </h4>
+                      {activeManaged.length > 0 ? (
+                        <div style={styles.viewProjectList}>
+                          {activeManaged.map((proj, idx) => (
+                            <div key={idx} style={styles.viewProjectCard}>
+                              <div style={styles.viewProjectHeader}>
+                                <span style={styles.viewProjectName}>
+                                  {proj.name || 'Unnamed Project'}
+                                  {proj.code && (
+                                    <span style={styles.viewProjectCode}> ({proj.code})</span>
+                                  )}
+                                </span>
+                                <span style={{
+                                  ...styles.viewProjectStatus,
+                                  backgroundColor: 'var(--color-primary-light)',
+                                  color: 'var(--color-success)'
+                                }}>
+                                  {proj.status || 'Active'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                👥 {proj.memberCount || 0} team member{proj.memberCount === 1 ? '' : 's'}
+                                {proj.members && proj.members.length > 0 && (
+                                  <span style={{ marginLeft: '8px', color: 'var(--color-text-secondary)' }}>
+                                    — {proj.members.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={styles.viewEmptyText}>No active projects managed</p>
+                      )}
+
+                      {/* Completed / Past Projects */}
+                      {pastManaged.length > 0 && (
+                        <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' }}>
+                          <h4 style={{ ...styles.viewSectionTitle, color: 'var(--color-text-muted)' }}>
+                            Completed &amp; Past Projects ({pastManaged.length})
+                          </h4>
+                          <div style={styles.viewProjectList}>
+                            {pastManaged.map((proj, idx) => (
+                              <div key={idx} style={{ ...styles.viewProjectCard, opacity: 0.85 }}>
+                                <div style={styles.viewProjectHeader}>
+                                  <span style={styles.viewProjectName}>
+                                    {proj.name || 'Unnamed Project'}
+                                    {proj.code && (
+                                      <span style={styles.viewProjectCode}> ({proj.code})</span>
+                                    )}
+                                  </span>
+                                  <span style={{
+                                    ...styles.viewProjectStatus,
+                                    backgroundColor: 'var(--color-bg-hover)',
+                                    color: 'var(--color-text-muted)'
+                                  }}>
+                                    {proj.status || 'Completed'}
+                                  </span>
                                 </div>
-                              ))
-                            ) : (
-                              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No tasks in this project</span>
-                            )}
+                                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                  👥 {proj.memberCount || 0} team member{proj.memberCount === 1 ? '' : 's'}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
-                  ) : (
-                    <p style={styles.viewEmptyText}>No projects or tasks assigned</p>
-                  )}
-                </div>
+                  );
+                })()}
+
+                {/* Employee: Projects & Tasks */}
+                {!employeeDetails.isPM && (() => {
+                  const activeProjects = (employeeDetails.projects || [])
+                    .map(p => ({
+                      ...p,
+                      activeTasks: (p.tasks || []).filter(t => t.isActive !== false)
+                    }))
+                    .filter(p => p.project_status === 'Active' || p.activeTasks.length > 0);
+
+                  const pastProjects = (employeeDetails.projects || [])
+                    .map(p => ({
+                      ...p,
+                      closedTasks: (p.tasks || []).filter(t => t.isActive === false)
+                    }))
+                    .filter(p => p.project_status !== 'Active' || p.closedTasks.length > 0);
+
+                  return (
+                    <div style={styles.viewSection}>
+                      <h4 style={styles.viewSectionTitle}>
+                        Projects &amp; Tasks ({activeProjects.length} active project{activeProjects.length === 1 ? '' : 's'})
+                      </h4>
+                      
+                      {activeProjects.length > 0 ? (
+                        <div style={styles.viewProjectList}>
+                          {activeProjects.map((project, idx) => (
+                            <div key={idx} style={styles.viewProjectCard}>
+                              <div style={styles.viewProjectHeader}>
+                                <span style={styles.viewProjectName}>
+                                  {project.project_name || 'Unnamed Project'}
+                                  {project.project_code && (
+                                    <span style={styles.viewProjectCode}> ({project.project_code})</span>
+                                  )}
+                                </span>
+                                <span style={{
+                                  ...styles.viewProjectStatus,
+                                  backgroundColor: project.project_status === 'Active' ? 'var(--color-primary-light)' : 'var(--color-bg-hover)',
+                                  color: project.project_status === 'Active' ? 'var(--color-success)' : 'var(--color-text-muted)'
+                                }}>
+                                  {project.project_status || 'Active'}
+                                </span>
+                              </div>
+                              
+                              <div style={styles.viewProjectTasks}>
+                                {project.activeTasks && project.activeTasks.length > 0 ? (
+                                  project.activeTasks.map((task, taskIdx) => (
+                                    <div key={taskIdx} style={styles.viewTaskItem}>
+                                      <div style={{ flex: 1 }}>
+                                        <span style={styles.viewTaskName}>• {task.title || 'Untitled Task'}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <span style={{
+                                          ...styles.viewTaskPriority,
+                                          backgroundColor: task.priority === 'High' ? 'rgba(239, 68, 68, 0.1)' :
+                                                        task.priority === 'Medium' ? 'rgba(245, 158, 11, 0.1)' :
+                                                        'rgba(16, 185, 129, 0.1)',
+                                          color: task.priority === 'High' ? 'var(--color-danger)' :
+                                                task.priority === 'Medium' ? 'var(--color-warning)' :
+                                                'var(--color-success)'
+                                        }}>
+                                          {task.priority || 'Low'}
+                                        </span>
+                                        <span style={{
+                                          ...styles.viewTaskStatus,
+                                          backgroundColor: task.status === 'Completed' ? 'var(--color-primary-light)' :
+                                                        task.status === 'In Progress' ? 'rgba(245, 158, 11, 0.1)' :
+                                                        task.status === 'Completed-Hidden' ? 'var(--color-bg-hover)' :
+                                                        'rgba(239, 68, 68, 0.1)',
+                                          color: task.status === 'Completed' ? 'var(--color-success)' :
+                                                task.status === 'In Progress' ? 'var(--color-warning)' :
+                                                task.status === 'Completed-Hidden' ? 'var(--color-text-muted)' :
+                                                'var(--color-danger)'
+                                        }}>
+                                          {task.status || 'Pending'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>No active tasks in this project</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={styles.viewEmptyText}>No active projects or tasks assigned</p>
+                      )}
+
+                      {/* Completed / Past Tasks & Projects */}
+                      {pastProjects.length > 0 && (
+                        <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' }}>
+                          <h4 style={{ ...styles.viewSectionTitle, color: 'var(--color-text-muted)' }}>
+                            Completed Tasks &amp; Past Projects ({pastProjects.reduce((sum, p) => sum + p.closedTasks.length, 0)} completed tasks)
+                          </h4>
+                          <div style={styles.viewProjectList}>
+                            {pastProjects.map((project, idx) => (
+                              <div key={idx} style={{ ...styles.viewProjectCard, opacity: 0.85 }}>
+                                <div style={styles.viewProjectHeader}>
+                                  <span style={styles.viewProjectName}>
+                                    {project.project_name || 'Unnamed Project'}
+                                    {project.project_code && (
+                                      <span style={styles.viewProjectCode}> ({project.project_code})</span>
+                                    )}
+                                  </span>
+                                  <span style={{
+                                    ...styles.viewProjectStatus,
+                                    backgroundColor: 'var(--color-bg-hover)',
+                                    color: 'var(--color-text-muted)'
+                                  }}>
+                                    {project.project_status || 'Past'}
+                                  </span>
+                                </div>
+                                <div style={styles.viewProjectTasks}>
+                                  {project.closedTasks.map((task, taskIdx) => (
+                                    <div key={taskIdx} style={styles.viewTaskItem}>
+                                      <div style={{ flex: 1 }}>
+                                        <span style={{ ...styles.viewTaskName, textDecoration: task.status === 'Completed' ? 'line-through' : 'none', color: 'var(--color-text-muted)' }}>
+                                          ✓ {task.title || 'Untitled Task'}
+                                        </span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <span style={{
+                                          ...styles.viewTaskStatus,
+                                          backgroundColor: 'var(--color-bg-hover)',
+                                          color: 'var(--color-text-muted)'
+                                        }}>
+                                          {task.status}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Skills */}
                 <div style={styles.viewSection}>

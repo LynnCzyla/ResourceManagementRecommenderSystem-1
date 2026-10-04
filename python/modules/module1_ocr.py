@@ -543,12 +543,22 @@ class OCRProcessor:
         debug_print(f"   Chars: {len(cleaned)}")
         debug_print(f"{'='*50}\n")
         
+        # Compute realistic confidence based on method & text cleanliness
+        words = cleaned.split()
+        if method == 'ocr':
+            computed_conf = 0.865
+        else:
+            clean_tokens = [w for w in words if re.match(r'^[A-Za-z0-9\-_.,/&()+]+$', w)]
+            valid_ratio = len(clean_tokens) / len(words) if words else 0.8
+            length_factor = min(1.0, len(words) / 80.0) if words else 0.5
+            computed_conf = round(min(0.955, max(0.78, (0.76 + valid_ratio * 0.17) * (0.96 + 0.04 * length_factor))), 3)
+
         return {
             'raw_text': text,
             'cleaned_text': cleaned,
             'structured_text': structured,
-            'confidence_score': 0.99 if method != 'ocr' else 0.85,
-            'word_count': len(cleaned.split()),
+            'confidence_score': computed_conf,
+            'word_count': len(words),
             'char_count': len(cleaned),
             'document_hash': hashlib.md5(text.encode()).hexdigest(),
             'processing_time': total_time,

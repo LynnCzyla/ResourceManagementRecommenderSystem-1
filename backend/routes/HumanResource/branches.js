@@ -24,7 +24,7 @@ router.get('/my-branch', async (req, res) => {
 
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, location, address, contact_number, manager_name')
+      .select('id, name, location, address, contact_number, manager_name, currency_code')
       .eq('id', userBranchId)
       .single();
 
@@ -63,7 +63,7 @@ router.get('/:id', async (req, res) => {
     
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, location, address, contact_number, manager_name')
+      .select('id, name, location, address, contact_number, manager_name, currency_code')
       .eq('id', id)
       .single();
 

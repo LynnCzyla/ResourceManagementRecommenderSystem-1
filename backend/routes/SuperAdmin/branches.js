@@ -4,6 +4,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
+const { resolveCurrency, SUPPORTED_CURRENCIES } = require('../../utils/currency');
 
 function isTableNotFoundError(err) {
   if (!err) return false;
@@ -229,13 +230,22 @@ router.post('/branches', async (req, res) => {
     address,
     contact_number,
     manager_name,
-    status
+    status,
+    currency_code
   } = req.body;
 
   if (!name) {
     return res.status(400).json({
       success: false,
       error: 'name is required.'
+    });
+  }
+
+  const currency = resolveCurrency(currency_code, 'PHP');
+  if (!currency) {
+    return res.status(400).json({
+      success: false,
+      error: `Unsupported currency. Allowed: ${SUPPORTED_CURRENCIES.join(', ')}`
     });
   }
 
@@ -249,6 +259,7 @@ router.post('/branches', async (req, res) => {
         contact_number: contact_number || null,
         manager_name: manager_name || null,
         status: status || 'Active',
+        currency_code: currency,
       })
       .select()
       .single();
@@ -291,13 +302,23 @@ router.put('/branches/:id', async (req, res) => {
     address,
     contact_number,
     manager_name,
-    status
+    status,
+    currency_code
   } = req.body;
 
   if (!name) {
     return res.status(400).json({
       success: false,
       error: 'name is required.'
+    });
+  }
+
+  // Only change the currency when the client sends one
+  const currency = currency_code === undefined ? undefined : resolveCurrency(currency_code);
+  if (currency === null) {
+    return res.status(400).json({
+      success: false,
+      error: `Unsupported currency. Allowed: ${SUPPORTED_CURRENCIES.join(', ')}`
     });
   }
 
@@ -311,6 +332,7 @@ router.put('/branches/:id', async (req, res) => {
         contact_number: contact_number || null,
         manager_name: manager_name || null,
         status: status || 'Active',
+        ...(currency ? { currency_code: currency } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)

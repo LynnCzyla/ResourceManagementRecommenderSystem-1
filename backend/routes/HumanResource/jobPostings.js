@@ -1,8 +1,18 @@
 // backend/routes/HumanResource/jobPostings.js
 const express = require('express');
 const router = express.Router();
+
+// True when a YYYY-MM-DD date is in the past. Allows 1 day of grace because the
+// server clock (UTC) can be a day behind the HR user's local date.
+function isPastDate(dateStr) {
+  const d = String(dateStr || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  const yesterdayUtc = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return d < yesterdayUtc;
+}
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { parseSalaryRange } = require('../../utils/validators');
 
 // Helper to parse quantity and clean description
 function parsePostingQuantityAndDescription(row) {
@@ -153,7 +163,7 @@ router.get('/', async (req, res) => {
           *,
           departments ( id, department_name ),
           positions ( id, position_name ),
-          profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+          profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
           hr_resource_requests:source_request_id ( 
             id, 
             quantity_needed,
@@ -230,7 +240,7 @@ router.get('/', async (req, res) => {
         *,
         departments ( id, department_name ),
         positions ( id, position_name ),
-        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
         hr_resource_requests:source_request_id ( 
           id, 
           quantity_needed,
@@ -299,7 +309,7 @@ router.get('/:id', async (req, res) => {
         *,
         departments ( id, department_name ),
         positions ( id, position_name ),
-        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location)),
+        profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
         hr_resource_requests:source_request_id ( id, quantity_needed ),
         job_applications ( id, status )
       `)
@@ -355,6 +365,18 @@ router.post('/', async (req, res) => {
 
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
+    }
+
+    const salary = parseSalaryRange(salary_min, salary_max);
+    if (salary.error) {
+      return res.status(400).json({ success: false, error: salary.error });
+    }
+
+    if (closing_date && isPastDate(closing_date)) {
+      return res.status(400).json({
+        success: false,
+        error: 'The posting end date cannot be in the past.'
+      });
     }
 
     // ✅ Check if user belongs to a branch
@@ -417,8 +439,8 @@ router.post('/', async (req, res) => {
         position_id: position_id || null,
         location: locationValue,
         employment_type: employment_type || 'Full-time',
-        salary_min: salary_min || null,
-        salary_max: salary_max || null,
+        salary_min: salary.min,
+        salary_max: salary.max,
         requirements: requirements?.trim() || null,
         responsibilities: responsibilities?.trim() || null,
         benefits: benefits?.trim() || null,
@@ -494,6 +516,28 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Job title is required.' });
     }
 
+    const salary = parseSalaryRange(salary_min, salary_max);
+    if (salary.error) {
+      return res.status(400).json({ success: false, error: salary.error });
+    }
+
+    // Only reject a past end date when it was changed (old postings can keep theirs)
+    if (closing_date) {
+      const { data: current } = await supabase
+        .from('job_postings')
+        .select('closing_date')
+        .eq('id', id)
+        .maybeSingle();
+      const unchanged = current?.closing_date &&
+        String(current.closing_date).slice(0, 10) === String(closing_date).slice(0, 10);
+      if (!unchanged && isPastDate(closing_date)) {
+        return res.status(400).json({
+          success: false,
+          error: 'The posting end date cannot be in the past.'
+        });
+      }
+    }
+
     let rawDescription = (description || '').replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
     if (quantity !== undefined && quantity !== null) {
       const numericQuantity = Math.max(1, parseInt(quantity, 10) || 1);
@@ -509,8 +553,8 @@ router.put('/:id', async (req, res) => {
         position_id: position_id || null,
         location: location || null,
         employment_type,
-        salary_min: salary_min || null,
-        salary_max: salary_max || null,
+        salary_min: salary.min,
+        salary_max: salary.max,
         requirements: requirements?.trim() || null,
         responsibilities: responsibilities?.trim() || null,
         benefits: benefits?.trim() || null,

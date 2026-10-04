@@ -4,9 +4,13 @@ const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
 const { verifyToken } = require('../Middleware/auth');
+const { requireRole } = require('../Middleware/roleGuard');
 
 // ✅ Apply auth middleware to ALL routes
 router.use(verifyToken);
+
+// 🔒 Shorthand guard for mutation-only routes
+const adminOnly = requireRole(['Admin', 'Super Admin']);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DEPARTMENTS - Filtered by Branch
@@ -51,7 +55,7 @@ router.get('/departments', async (req, res) => {
 });
 
 // POST /api/admin/departments — create a new department (branch-aware)
-router.post('/departments', async (req, res) => {
+router.post('/departments', adminOnly, async (req, res) => {
   try {
     const { department_name, description } = req.body;
 
@@ -132,7 +136,7 @@ router.post('/departments', async (req, res) => {
 });
 
 // PUT /api/admin/departments/:id — update a department (with branch check)
-router.put('/departments/:id', async (req, res) => {
+router.put('/departments/:id', adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     const { department_name, description } = req.body;
@@ -226,7 +230,7 @@ router.put('/departments/:id', async (req, res) => {
 });
 
 // DELETE /api/admin/departments/:id — delete a department (with branch check)
-router.delete('/departments/:id', async (req, res) => {
+router.delete('/departments/:id', adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -377,7 +381,7 @@ router.get('/positions', async (req, res) => {
 });
 
 // POST /api/admin/positions — create a new position (branch-aware)
-router.post('/positions', async (req, res) => {
+router.post('/positions', adminOnly, async (req, res) => {
   try {
     const { position_name, department_id, description } = req.body;
 
@@ -470,7 +474,7 @@ router.post('/positions', async (req, res) => {
 });
 
 // PUT /api/admin/positions/:id — update a position (with branch check)
-router.put('/positions/:id', async (req, res) => {
+router.put('/positions/:id', adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     const { position_name, department_id, description } = req.body;
@@ -598,7 +602,7 @@ router.put('/positions/:id', async (req, res) => {
 });
 
 // DELETE /api/admin/positions/:id — delete a position (with branch check)
-router.delete('/positions/:id', async (req, res) => {
+router.delete('/positions/:id', adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
 

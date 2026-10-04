@@ -77,14 +77,137 @@ class DocumentProcessor:
         }
         
         try:
-            ocr_result = self._do_ocr_stage(image_path, doc_id, employee_id, document_type, log_entry)
-            result = self._do_nlp_stage(ocr_result, doc_id, employee_id, document_type, log_entry)
+            # Step 1: Module 1 - OCR Processing
+            print(f" Module 1: Processing document {doc_id}")
+            ocr_result = self.ocr.process_document(
+                image_path, doc_id, employee_id, document_type
+            )
+            
+            if not ocr_result['success']:
+                raise Exception("OCR processing failed")
+            
+            log_entry['ocr_complete'] = datetime.now().isoformat()
+            log_entry['ocr_confidence'] = ocr_result['ocr_data']['ocr_confidence']
+            log_entry['ocr_word_count'] = ocr_result['ocr_data']['word_count']
+            
+            # Step 2: Module 2 - NLP Processing
+            print(f" Module 2: NLP processing for {doc_id}")
+            
+            # ============ FIX: Get full NLP result with auto_approved/needs_review ============
+            structured_text = ocr_result['ocr_data'].get('structured_ocr_text',
+                                                           ocr_result['ocr_data']['cleaned_ocr_text'])
+            nlp_full_result = self.nlp.extract_skills_with_categories(
+                ocr_result['ocr_data']['cleaned_ocr_text'],
+                structured_text  # ← NEW: line-preserved text for section/candidate detection
+            )
+            
+            # Prepare database records — reuse the result above instead of re-running
+            # extraction a second time (was calling NLP twice on the same document).
+            # ============ FIX (duplicate-pipeline bug) ============
+            # This comment already claimed extraction wasn't re-run, but
+            # prepare_db_records() was calling extract_skills_with_categories()
+            # internally regardless, which re-ran the full candidate
+            # extraction + _learn_from_document() + merge_synonyms_dynamically()
+            # a second time per document (visible as documents_analyzed
+            # incrementing twice and two identical [MERGE STATS] lines per
+            # upload). Passing the already-computed result through actually
+            # makes this comment true.
+            nlp_result = self.nlp.prepare_db_records(
+                employee_id,
+                ocr_result['ocr_data']['cleaned_ocr_text'],
+                structured_text,
+                extracted=nlp_full_result
+            )
+            # ========================================================
+            
+            log_entry['nlp_complete'] = datetime.now().isoformat()
+            log_entry['skills_found'] = nlp_result['summary']['total_skills_found']
+            log_entry['licenses_found'] = nlp_result['summary']['licenses_found']
+            
+            # ============ FIX: Log the separation ============
+            print(f"[INTEGRATION] Auto-approved: {len(nlp_full_result.get('auto_approved', []))}")
+            print(f"[INTEGRATION] Needs review: {len(nlp_full_result.get('needs_review', []))}")
+            if nlp_full_result.get('auto_approved'):
+                print(f"[INTEGRATION] Auto-approved samples: {nlp_full_result.get('auto_approved', [])[:5]}")
+            
+            # Calculate combined document text + ML skill extraction confidence
+            doc_conf = float(ocr_result['ocr_data'].get('ocr_confidence', 0.865))
+            ml_confs = []
+            all_preds = {
+                **nlp_full_result.get('auto_approved_predictions', {}),
+                **nlp_full_result.get('needs_review_predictions', {})
+            }
+            for meta in all_preds.values():
+                if isinstance(meta, dict) and 'confidence' in meta:
+                    try:
+                        c = float(meta['confidence'])
+                        if 0 < c <= 1.0:
+                            ml_confs.append(c)
+                    except (ValueError, TypeError):
+                        pass
+
+            if ml_confs:
+                avg_ml_conf = sum(ml_confs) / len(ml_confs)
+                final_confidence = round(0.35 * doc_conf + 0.65 * avg_ml_conf, 3)
+            else:
+                final_confidence = round(doc_conf, 3)
+
+            ocr_result['ocr_data']['ocr_confidence'] = final_confidence
+
+            # Combine results with CORRECT data
+            result = {
+                'success': True,
+                'document_id': doc_id,
+                'employee_id': employee_id,
+                'document_type': document_type,
+                'processing_timestamp': datetime.now().isoformat(),
+                'ocr': {
+                    'raw_text': ocr_result['ocr_data']['raw_ocr_text'],
+                    'cleaned_text': ocr_result['ocr_data']['cleaned_ocr_text'],
+                    'confidence': final_confidence,
+                    'word_count': ocr_result['ocr_data']['word_count'],
+                    'char_count': ocr_result['ocr_data']['char_count'],
+                    'processing_time': ocr_result['ocr_data']['processing_time_seconds']
+                },
+                'nlp': {
+                    # ============ FIX: Use actual skill names, not objects ============
+                    'skills': nlp_full_result.get('skills', []),
+                    'categorized_skills': nlp_full_result.get('categorized', {}),
+                    'auto_approved': nlp_full_result.get('auto_approved', []),
+                    'needs_review': nlp_full_result.get('needs_review', []),
+                    # Original ML prediction + confidence per needs-review skill,
+                    # e.g. {"Electrical Design": {"prediction": "Skill", "confidence": 0.82}}.
+                    # Carried unchanged through runner.py/pythonService.js so the
+                    # backend/frontend never has to re-run the model.
+                    'needs_review_predictions': nlp_full_result.get('needs_review_predictions', {}),
+                    # Original ML prediction + confidence per ML-auto-approved
+                    # skill (>= 0.85 confidence). Previously discarded; now
+                    # preserved the same way needs_review_predictions is.
+                    'auto_approved_predictions': nlp_full_result.get('auto_approved_predictions', {}),
+                    'prc_license': nlp_full_result.get('licenses', [None])[0] if nlp_full_result.get('licenses') else None,
+                    'prc_verified': bool(nlp_full_result.get('licenses'))
+                },
+                'db_records': {
+                    'documents_table': ocr_result['ocr_data'],
+                    'employees_update': nlp_result['employee_update'],
+                    'skills_master': nlp_result['skills_master'],
+                    'employee_skills': nlp_result['employee_skills']
+                },
+                'summary': {
+                    'total_skills_extracted': nlp_result['summary']['total_skills_found'],
+                    'licenses_found': nlp_result['summary']['licenses_found'],
+                    'processing_success': True
+                }
+            }
+            
             log_entry['status'] = 'success'
             log_entry['end_time'] = datetime.now().isoformat()
+            
         except Exception as e:
             log_entry['status'] = 'failed'
             log_entry['error'] = str(e)
             log_entry['end_time'] = datetime.now().isoformat()
+            
             result = {
                 'success': False,
                 'document_id': doc_id,
@@ -92,10 +215,9 @@ class DocumentProcessor:
                 'error': str(e),
                 'log_entry': log_entry
             }
-
+        
         self.process_log.append(log_entry)
         self._save_log(log_entry)
-        return result
 
     def _do_ocr_stage(self, image_path, doc_id, employee_id, document_type, log_entry):
         """Step 1 only: OCR. Raises on failure (caller decides how to report it).

@@ -165,20 +165,20 @@ router.post('/', async (req, res) => {
             if (!reqError && requirement) {
                 const quantityNeeded = requirement?.quantity_needed || 1;
 
-                // Mark requirement as Filled if fully assigned
-                if (assignedCount >= quantityNeeded) {
-                    const { error: updateReqErr } = await supabase
-                        .from('project_resource_requirements')
-                        .update({ 
-                            status: 'Filled'
-                        })
-                        .eq('id', requirement_id);
+                const nextStatus = assignedCount >= quantityNeeded
+                    ? 'Filled'
+                    : assignedCount > 0
+                        ? 'Partially Allocated'
+                        : 'Pending';
+                const { error: updateReqErr } = await supabase
+                    .from('project_resource_requirements')
+                    .update({ status: nextStatus })
+                    .eq('id', requirement_id);
 
-                    if (updateReqErr) {
-                        console.error('❌ Error updating requirement status to Filled:', updateReqErr);
-                    } else {
-                        console.log(`✅ Requirement ${requirement_id} marked as Filled`);
-                    }
+                if (updateReqErr) {
+                    console.error(`❌ Error updating requirement status to ${nextStatus}:`, updateReqErr);
+                } else {
+                    console.log(`✅ Requirement ${requirement_id} marked as ${nextStatus}`);
                 }
             }
         }

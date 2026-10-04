@@ -766,20 +766,35 @@ export default function RMRequestsTab() {
                               }}>
                                 {rec.score}% Score
                               </span>
-                              <span style={{
-                                fontSize: '11px',
-                                fontWeight: '500',
-                                padding: '2px 8px',
-                                borderRadius: '10px',
-                                backgroundColor: (rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0) >= 8
-                                  ? 'rgba(239, 68, 68, 0.12)'
-                                  : 'rgba(107, 114, 128, 0.12)',
-                                color: (rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0) >= 8
-                                  ? '#ef4444'
-                                  : 'var(--color-text-muted)'
-                              }}>
-                                {rec.breakdown?.availability?.status || 'Available'} ({rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0} pts)
-                              </span>
+                              {(() => {
+                                const wScore = rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0;
+                                const rawFactor = rec.availabilityFactor ?? (1 / (1 + Math.exp(0.4 * (wScore - 7))));
+                                const availPct = wScore === 0 ? 100 : Math.min(100, Math.max(1, Math.round((rawFactor / 0.94263) * 100)));
+                                const statusLabel = rec.availabilityStatus || rec.breakdown?.availability?.status || (availPct >= 80 ? 'Available' : availPct >= 50 ? 'Limited Availability' : 'Fully Utilized');
+                                const isHeavy = statusLabel === 'Fully Utilized' || availPct < 50;
+                                const isLimited = !isHeavy && (statusLabel === 'Limited Availability' || availPct < 80);
+
+                                return (
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '500',
+                                    padding: '2px 8px',
+                                    borderRadius: '10px',
+                                    backgroundColor: isHeavy
+                                      ? 'rgba(239, 68, 68, 0.12)'
+                                      : isLimited
+                                      ? 'rgba(245, 158, 11, 0.12)'
+                                      : 'rgba(34, 197, 94, 0.12)',
+                                    color: isHeavy
+                                      ? '#ef4444'
+                                      : isLimited
+                                      ? '#f59e0b'
+                                      : '#22c55e'
+                                  }}>
+                                    {statusLabel} ({availPct}%)
+                                  </span>
+                                );
+                              })()}
                               {rec.breakdown?.primarySkills?.fulfillment && (
                                 <span style={{
                                   fontSize: '10px',

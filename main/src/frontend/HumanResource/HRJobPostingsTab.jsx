@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
+import { formatMoney, currencySymbol } from '../../config/currency';
+import { blockInvalidNumberKeys } from '../../utils/numberInput';
 import { API_BASE_URL } from '../../config/api';
+
+// Today's date as YYYY-MM-DD in the user's local timezone (what <input type="date"> uses)
+const getTodayStr = () => {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+};
 
 // Maps a job_postings row (with joined departments/positions) coming back from the
 // API into the flat shape this component's UI was built around.
@@ -14,6 +24,7 @@ const mapPosting = (row) => ({
   position_id: row.position_id || null,
   location: row.location || '',
   employmentType: row.employment_type || 'Full-time',
+  currency: row.profiles?.branches?.currency_code || '',
   salaryMin: row.salary_min ?? '',
   salaryMax: row.salary_max ?? '',
   status: row.status || 'Active',
@@ -235,6 +246,27 @@ export default function HRJobPostingsTab() {
     }));
   };
 
+  // The end date that the posting already had (only when editing)
+  const getOriginalClosingDate = () =>
+    showEditModal ? String(selectedPosting?.closingDate || '').slice(0, 10) : '';
+
+  // Earliest date the picker allows. If an old posting already has a past end
+  // date, don't block the form (the JS check below lets the unchanged date through).
+  const getClosingMin = () => {
+    const today = getTodayStr();
+    const original = getOriginalClosingDate();
+    return original && original < today ? undefined : today;
+  };
+
+  const closingDateError = () => {
+    const value = formData.closingDate;
+    if (!value) return '';
+    if (value < getTodayStr() && value !== getOriginalClosingDate()) {
+      return 'The posting end date cannot be in the past. Please choose today or a later date.';
+    }
+    return '';
+  };
+
   const buildPayload = () => ({
     title: formData.title,
     description: formData.description,
@@ -253,8 +285,27 @@ export default function HRJobPostingsTab() {
     quantity: formData.quantity || 1,
   });
 
+  const salaryError = () => {
+    const min = formData.salaryMin === '' || formData.salaryMin == null ? null : Number(formData.salaryMin);
+    const max = formData.salaryMax === '' || formData.salaryMax == null ? null : Number(formData.salaryMax);
+    if (min !== null && (!Number.isFinite(min) || min <= 0)) return 'Minimum salary must be greater than 0.';
+    if (max !== null && (!Number.isFinite(max) || max <= 0)) return 'Maximum salary must be greater than 0.';
+    if (min !== null && max !== null && min > max) return 'Minimum salary cannot be greater than maximum salary.';
+    return null;
+  };
+
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
+    const salaryErr = salaryError();
+    if (salaryErr) {
+      showErrorAlert(salaryErr, 'Invalid Salary');
+      return;
+    }
+    const dateError = closingDateError();
+    if (dateError) {
+      showErrorAlert(dateError, 'Invalid End Date');
+      return;
+    }
     try {
       await hrClient.post(`/job-postings`, buildPayload());
       window.dispatchEvent(new Event('resourceRequestsUpdated'));
@@ -271,6 +322,16 @@ export default function HRJobPostingsTab() {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    const salaryErr = salaryError();
+    if (salaryErr) {
+      showErrorAlert(salaryErr, 'Invalid Salary');
+      return;
+    }
+    const dateError = closingDateError();
+    if (dateError) {
+      showErrorAlert(dateError, 'Invalid End Date');
+      return;
+    }
     try {
       const result = await showConfirmationAlert(
         'Confirm Changes',
@@ -503,20 +564,32 @@ export default function HRJobPostingsTab() {
       </div>
       <div style={styles.formRow}>
         <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Min Salary (₱)</label>
+          <label style={styles.formLabel}>Min Salary ({currencySymbol(userBranch?.currency_code)})</label>
           <input
             type="number"
+            min="1"
+            step="any"
             value={formData.salaryMin}
-            onChange={(e) => setFormData({ ...formData, salaryMin: e.target.value })}
+            onKeyDown={blockInvalidNumberKeys}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '' || Number(v) > 0) setFormData({ ...formData, salaryMin: v });
+            }}
             style={styles.formInput}
           />
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Max Salary (₱)</label>
+          <label style={styles.formLabel}>Max Salary ({currencySymbol(userBranch?.currency_code)})</label>
           <input
             type="number"
+            min="1"
+            step="any"
             value={formData.salaryMax}
-            onChange={(e) => setFormData({ ...formData, salaryMax: e.target.value })}
+            onKeyDown={blockInvalidNumberKeys}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '' || Number(v) > 0) setFormData({ ...formData, salaryMax: v });
+            }}
             style={styles.formInput}
           />
         </div>
@@ -526,6 +599,7 @@ export default function HRJobPostingsTab() {
           <label style={styles.formLabel}>Posting End Date</label>
           <input
             type="date"
+            min={getClosingMin()}
             value={formData.closingDate}
             onChange={(e) => setFormData({ ...formData, closingDate: e.target.value })}
             style={styles.formInput}
@@ -722,7 +796,7 @@ export default function HRJobPostingsTab() {
                         </span>
                       </td>
                       <td style={styles.td}>{posting.employmentType}</td>
-                      <td style={styles.td}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}</td>
+                      <td style={styles.td}>{formatMoney(posting.salaryMin, posting.currency || userBranch?.currency_code)} - {formatMoney(posting.salaryMax, posting.currency || userBranch?.currency_code)}</td>
                       <td style={styles.td}>
                         <span style={{
                           ...styles.badge,

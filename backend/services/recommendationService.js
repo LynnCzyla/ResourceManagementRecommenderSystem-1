@@ -215,15 +215,16 @@ class RecommendationEngine {
                 .in('profile_id', profileIds),
             supabase
                 .from('project_tasks')
-                .select('profile_id, priority')
+                .select('profile_id, priority, project_id, projects:project_id(status)')
                 .in('profile_id', profileIds)
-                .in('status', ['Active', 'In Progress']),
+                .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")'),
             supabase
                 .from('performance_records')
                 .select('profile_id, rating')
                 .in('profile_id', profileIds)
-                .eq('feedback_source', 'client')
-                .eq('feedback_status', 'submitted')
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null)
         ]);
 
         // Organize skills by profile_id and collect unique skill_ids
@@ -274,9 +275,11 @@ class RecommendationEngine {
             componentsByProfile[pid] = Array.from(compSet);
         }
 
-        // Map workloads by profile_id
+        // Map workloads by profile_id — only count tasks from Active projects (matches workloadService)
         const workloadByProfile = {};
         for (const task of tasksRes.data || []) {
+            // Skip tasks whose project is not Active (null project_id = standalone task, always counts)
+            if (task.projects && task.projects.status !== 'Active') continue;
             const pid = task.profile_id;
             workloadByProfile[pid] = (workloadByProfile[pid] || 0) + (this.PRIORITY_WEIGHTS[task.priority] || 1);
         }
@@ -767,6 +770,9 @@ class RecommendationEngine {
                     availabilityFactor * 1000
                 ) / 1000,
 
+            availabilityStatus:
+                availabilityFactor >= 0.80 ? 'Available' : availabilityFactor >= 0.50 ? 'Limited Availability' : 'Fully Utilized',
+
             historicalPerformance:
                 Math.round(
                     historicalPerformance * 1000
@@ -815,8 +821,9 @@ class RecommendationEngine {
                 })),
                 availability: {
                     score: Math.round(availabilityFactor * 100),
+                    percentage: workload === 0 ? 100 : Math.min(100, Math.max(1, Math.round((availabilityFactor / 0.94263) * 100))),
                     workloadPoints: workload,
-                    status: workload <= 4 ? 'Available' : workload <= 7 ? 'Partially Available' : 'High Workload'
+                    status: availabilityFactor >= 0.80 ? 'Available' : availabilityFactor >= 0.50 ? 'Limited Availability' : 'Fully Utilized'
                 },
                 performance: {
                     score: Math.round(historicalPerformance * 100)
@@ -1033,6 +1040,7 @@ class RecommendationEngine {
                     first_name, 
                     last_name, 
                     role,
+                    availability_status,
                     branch_id,
                     department_id,
                     departments:department_id (
@@ -1294,14 +1302,16 @@ class RecommendationEngine {
     async _getWorkloadScore(profileId) {
         const { data, error } = await supabase
             .from('project_tasks')
-            .select('priority')
+            .select('priority, project_id, projects:project_id(status)')
             .eq('profile_id', profileId)
-            .in('status', ['Active', 'In Progress']);
+            .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")');
 
         if (error) throw error;
 
         let workload = 0;
         for (const task of data || []) {
+            // Only count tasks from Active projects (standalone tasks with no project always count)
+            if (task.projects && task.projects.status !== 'Active') continue;
             workload += this.PRIORITY_WEIGHTS[task.priority] || 1;
         }
         return workload;
@@ -1322,8 +1332,9 @@ class RecommendationEngine {
                 .from('performance_records')
                 .select('rating')
                 .eq('profile_id', profileId)
-                .eq('feedback_source', 'client')
-                .eq('feedback_status', 'submitted');
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null);
 
             if (error) {
                 console.error('❌ Error fetching performance records:', error);
@@ -1364,17 +1375,25 @@ class RecommendationEngine {
                     deliverables_feedback,
                     strengths,
                     areas_for_improvement,
+                    pm_assessment,
+                    project_feedback,
                     client_name,
                     client_feedback,
                     project_id,
                     rated_at,
                     projects:project_id (
                         project_name
+                    ),
+                    evaluator:profiles!performance_records_created_by_fkey (
+                        first_name,
+                        last_name,
+                        role
                     )
                 `)
                 .eq('profile_id', profileId)
-                .eq('feedback_source', 'client')
-                .eq('feedback_status', 'submitted')
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null)
                 .order('rated_at', { ascending: false });
 
             if (error) {
@@ -1403,13 +1422,18 @@ class RecommendationEngine {
                 averageRating: avgRating,
                 ratingCount: count,
                 hasData: true,
-                ratings: data.map(r => ({
-                    rating: Number(r.rating),
-                    ratedAt: r.rated_at,
-                    clientName: r.client_name,
-                    projectName: r.projects?.project_name || null,
-                    feedback: r.deliverables_feedback || r.client_feedback || null
-                })),
+                ratings: data.map(r => {
+                    const evaluatorName = r.evaluator
+                        ? [r.evaluator.first_name, r.evaluator.last_name].filter(Boolean).join(' ')
+                        : (r.client_name || 'Project Manager');
+                    return {
+                        rating: Number(r.rating),
+                        ratedAt: r.rated_at,
+                        clientName: evaluatorName,
+                        projectName: r.projects?.project_name || null,
+                        feedback: r.pm_assessment || r.project_feedback || r.deliverables_feedback || r.client_feedback || null
+                    };
+                }),
                 technicalSkills: avgTechnical,
                 communication: avgCommunication,
                 timeliness: avgTimeliness,
@@ -1418,13 +1442,18 @@ class RecommendationEngine {
                 problemSolving: avgProblemSolving,
                 strengths: latest?.strengths || null,
                 areasForImprovement: latest?.areas_for_improvement || null,
-                recentFeedback: data.slice(0, 3).map(r => ({
-                    clientName: r.client_name,
-                    rating: Number(r.rating),
-                    feedback: r.deliverables_feedback || r.client_feedback || null,
-                    projectName: r.projects?.project_name || null,
-                    date: r.rated_at
-                }))
+                recentFeedback: data.slice(0, 3).map(r => {
+                    const evaluatorName = r.evaluator
+                        ? [r.evaluator.first_name, r.evaluator.last_name].filter(Boolean).join(' ')
+                        : (r.client_name || 'Project Manager');
+                    return {
+                        clientName: evaluatorName,
+                        rating: Number(r.rating),
+                        feedback: r.pm_assessment || r.project_feedback || r.deliverables_feedback || r.client_feedback || null,
+                        projectName: r.projects?.project_name || null,
+                        date: r.rated_at
+                    };
+                })
             };
         } catch (error) {
             console.error('❌ Error in _getPerformanceDetails:', error);

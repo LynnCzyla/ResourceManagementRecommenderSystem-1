@@ -18,6 +18,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============ IMPORT AUTH MIDDLEWARE ============
 const { verifyToken } = require("./routes/Middleware/auth");
+const { requireRole } = require("./routes/Middleware/roleGuard");
 
 // Routes
 const userRoutes = require("./routes/Admin/createUsers");
@@ -44,41 +45,55 @@ const superAdminAccountsRoutes  = require('./routes/SuperAdmin/accounts');
 const superAdminAdminsRoutes    = require('./routes/SuperAdmin/admins');
 const superAdminBranchesRoutes  = require('./routes/SuperAdmin/branches');
 const superAdminAuditLogsRoutes = require('./routes/SuperAdmin/audit-logs');
+const superAdminBackupRoutes = require('./routes/SuperAdmin/backup');
 
 // ============ MOUNT SUPER ADMIN ROUTES ============
-app.use('/api/superadmin', verifyToken, superAdminDashboardRoutes);
-app.use('/api/superadmin', verifyToken, superAdminAccountsRoutes);
-app.use('/api/superadmin', verifyToken, superAdminAdminsRoutes);
-app.use('/api/superadmin', verifyToken, superAdminBranchesRoutes);
-app.use('/api/superadmin', verifyToken, superAdminAuditLogsRoutes);
+app.use('/api/superadmin', verifyToken, requireRole(['Super Admin', 'Admin']), superAdminDashboardRoutes);
+app.use('/api/superadmin', verifyToken, requireRole(['Super Admin', 'Admin']), superAdminAccountsRoutes);
+app.use('/api/superadmin', verifyToken, requireRole(['Super Admin', 'Admin']), superAdminAdminsRoutes);
+app.use('/api/superadmin', verifyToken, requireRole(['Super Admin', 'Admin']), superAdminBranchesRoutes);
+app.use('/api/superadmin', verifyToken, requireRole(['Super Admin', 'Admin']), superAdminAuditLogsRoutes);
+app.use('/api/superadmin', verifyToken, requireRole(['Super Admin', 'Admin']), superAdminBackupRoutes);
 
 // ============ MOUNT OTHER ROUTES ============
 app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
-app.use('/api/hr', require('./routes/HumanResource/Index'));
+app.use('/api/hr', verifyToken, requireRole(['Human Resources', 'HR', 'Admin', 'Super Admin']), require('./routes/HumanResource/Index'));
 app.use('/api/public', require('./routes/Public/clientFeedback'));
 
 app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
 
+app.use('/api/employee', verifyToken, requireRole(['Employee', 'Admin', 'Super Admin']));
+
+// ✅ Departments/Positions are readable by ALL authenticated users (Employees, RMs, HRs use them for dropdowns).
+// MUST be mounted BEFORE contactProtectedRoutes so the requireRole guard on that route doesn't block the request.
+app.use('/api/admin', verifyToken, departmentsPositionsRoutes);
+
 // ✅ MOUNT CONTACT ROUTES - PUBLIC (no auth) and PROTECTED (with auth)
 app.use('/api/public/admin', contactPublicRoutes);    // Public routes - NO auth required
-app.use('/api/admin', contactProtectedRoutes);         // Protected routes - Auth required
+app.use('/api/admin', verifyToken, requireRole(['Admin', 'Super Admin']), contactProtectedRoutes);
 
-app.use('/api/admin', departmentsPositionsRoutes);
-app.use('/api/admin', dashboardRoutes);
-app.use('/api/admin', auditLogsRoutes);
+app.use('/api/admin', verifyToken, requireRole(['Admin', 'Super Admin']), dashboardRoutes);
+app.use('/api/admin', verifyToken, requireRole(['Admin', 'Super Admin']), auditLogsRoutes);
+app.use('/api/admin', verifyToken, requireRole(['Admin', 'Super Admin']), unlockRoutes);
+
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", loginRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/users", verifyToken, userManagementRoutes);
-app.use("/api/admin", unlockRoutes);
+
+// ✅ Every /api/users sub-route explicitly carries verifyToken + requireRole(['Admin', 'Super Admin'])
+app.use("/api/users", verifyToken, requireRole(['Admin', 'Super Admin']), userRoutes);
+app.use("/api/users", verifyToken, requireRole(['Admin', 'Super Admin']), userManagementRoutes);
+
 app.use("/api/settings", systemSettingsRoutes);
 app.use('/api/employee', documentRoutes);
 
-// ⭐ ADDED
+// ✅ ADDED Employee Routes
 app.use('/api/employee', require('./routes/Employee/Assignments'));
 app.use('/api/employee', require('./routes/Employee/History'));
+app.use('/api/employee', require('./routes/Employee/Feedback'));
+app.use('/api/employee', require('./routes/Employee/Profile'));
+app.use('/api/employee', require('./routes/Employee/dashboard'));
 
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -163,4 +178,17 @@ app.listen(PORT, async () => {
         console.error('❌ Failed to preload aliases:', error.message);
         console.log('⚠️ Aliases will load on first recommendation request');
     }
-});
+
+    // ============ WARM WORKLOAD CACHE ============
+    // Recalculate availability for all employees so the in-memory cache is
+    // populated immediately — prevents "Fully Utilized (0%)" display after restarts.
+    console.log('🔄 Warming workload cache for all employees...');
+    try {
+        const workloadService = require('./services/workloadService');
+        await workloadService.recalculateBatch();
+        console.log('✅ Workload cache warmed successfully');
+    } catch (error) {
+        console.error('❌ Failed to warm workload cache:', error.message);
+        console.log('⚠️ Workload metrics will compute on first request');
+    }
+});

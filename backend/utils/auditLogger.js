@@ -1,5 +1,4 @@
 const supabase = require('../supabase');
-const jwt = require('jsonwebtoken');
 
 /**
  * Resolve the actor ID from the request object
@@ -11,21 +10,13 @@ const resolveActorId = async (req) => {
     return req.user.id;
   }
 
-  // ⚠️ FALLBACK: Try to decode token without extra network call
+  // Fallback verification for callers that do not have req.user yet.
   const authHeader = req?.headers?.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
 
   try {
     const token = authHeader.split(' ')[1];
     
-    // ✅ Try to decode without verification (faster, no network call)
-    const decoded = jwt.decode(token);
-    if (decoded?.sub) {
-      return decoded.sub;
-    }
-    
-    // Only verify if decode fails (rare - should almost never happen)
-    // This is the only case where we make the extra call
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user?.id) return null;
     return data.user.id;

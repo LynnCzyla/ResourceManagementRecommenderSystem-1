@@ -150,76 +150,54 @@ const verifyToken = async (req, res, next) => {
       });
     }
 
-    // Check if it is a local dev/testing token
-    if (token && token.startsWith('hr-token-')) {
-      req.user = {
-        id: '733cc8de-259c-43a8-9c82-48bb575d07b5',
-        email: 'hr@wea.com',
-        role: 'Human Resources',
-        branch_id: '08ba1bf3-c17a-4927-ad5a-44a87fecd413',
-        employee_id: 'WEA-PHIL-015',
-        is_super_admin: false,
-        is_admin: false
-      };
-      return next();
-    }
-
-    // ✅ Try to verify the token
+    let userId = null;
+    let userEmail = null;
     let decoded = null;
-    let usedAlgorithm = null;
 
-    // First, try to decode the header to check the algorithm
-    const decodedHeader = jwt.decode(token, { complete: true });
-    const alg = decodedHeader?.header?.alg;
-
-    console.log(`🔑 Token algorithm: ${alg}`);
-
-    // ✅ Try HS256 first (if we have the secret)
+    // 1. Try verifying with SUPABASE_JWT_SECRET (HS256) - used by custom JWTs created at login
     if (process.env.SUPABASE_JWT_SECRET) {
       try {
         decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET, { algorithms: ['HS256'] });
-        usedAlgorithm = 'HS256';
-        console.log('✅ Token verified using HS256');
-      } catch (hsError) {
-        // HS256 failed - will try RS256
-        console.log('⚠️ HS256 verification failed, will try RS256...');
+        userId = decoded.sub || decoded.id;
+        userEmail = decoded.email;
+      } catch (err) {
+        // Fall through to next verification method
       }
     }
 
-    // ✅ If HS256 failed and token uses RS256, verify with RS256
-    if (!decoded && (alg === 'RS256' || alg === 'ES256')) {
+    // 2. If not verified yet, try Supabase auth getUser(token)
+    if (!userId) {
       try {
-        // Use simple verification without JWKS
-        // The token might already be verified by Supabase
-        // Just decode and trust it since we're using Supabase auth
-        decoded = jwt.decode(token);
-        usedAlgorithm = 'RS256 (decoded)';
-        console.log('✅ Token decoded (trusted from Supabase)');
-      } catch (rsError) {
-        console.error('❌ RS256 verification failed:', rsError.message);
-        throw rsError;
+        const { data: authData, error: authError } = await supabase.auth.getUser(token);
+        if (!authError && authData?.user?.id) {
+          userId = authData.user.id;
+          userEmail = authData.user.email;
+        }
+      } catch (err) {
+        // Verification failed
       }
     }
 
-    // If still no decoded token, try one more time with just decode
-    if (!decoded) {
+    // 3. Fallback: decode token from Supabase client (handles RS256 / ES256 / frontend Supabase sessions)
+    if (!userId) {
       try {
         decoded = jwt.decode(token);
-        usedAlgorithm = 'decode only';
-        console.log('✅ Token decoded (no verification - trust from Supabase)');
+        if (decoded && (decoded.sub || decoded.id)) {
+          userId = decoded.sub || decoded.id;
+          userEmail = decoded.email;
+        }
       } catch (err) {
         console.error('❌ Failed to decode token:', err.message);
-        throw err;
       }
     }
 
-    // If still no decoded token, fail
-    if (!decoded) {
-      throw new Error('Could not decode token');
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication failed',
+        error: 'Invalid or expired token'
+      });
     }
-
-    const userId = decoded.sub;
-    const userEmail = decoded.email;
 
     // ✅ Get profile with branch_id from profiles table (CACHED)
     const profile = await getProfileWithBranch(userId);
@@ -281,7 +259,7 @@ const verifyToken = async (req, res, next) => {
     // ✅ Only log every Nth request
     requestCounter++;
     if (requestCounter % LOG_EVERY_N_REQUESTS === 0) {
-      console.log(`✅ Auth [${requestCounter}]: ${profile.employee_id} (${profile.role}) - Branch: ${profile.branch_id} (${usedAlgorithm})`);
+      console.log(`✅ Auth [${requestCounter}]: ${profile.employee_id} (${profile.role}) - Branch: ${profile.branch_id}`);
     }
 
     next();

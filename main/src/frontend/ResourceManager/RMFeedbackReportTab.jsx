@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchGlobalFeedbackReport } from './Rmapi';
+import Swal from 'sweetalert2';
+import { fetchGlobalFeedbackReport, updateFeedbackVisibility } from './Rmapi';
 
 const styles = {
   container: { padding: '8px 0' },
@@ -30,6 +31,7 @@ const styles = {
 export default function RMFeedbackReportTab() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
   const [filters, setFilters] = useState({ projectId: '', pmId: '', empId: '', feedbackSource: '' });
   const [selectedRecord, setSelectedRecord] = useState(null);
 
@@ -54,6 +56,53 @@ export default function RMFeedbackReportTab() {
   );
 
   const handleFilterChange = (field, value) => setFilters(prev => ({ ...prev, [field]: value }));
+
+  const handleToggleVisibility = async (record) => {
+    const isVisible = record.isVisible;
+    const actionText = isVisible ? 'Revoke Visibility' : 'Grant Visibility';
+    const confirmText = isVisible
+      ? `Are you sure you want to hide this feedback from ${record.subjectName}? They will no longer be able to view it.`
+      : `Are you sure you want to grant permission for ${record.subjectName} to view this feedback? It will become visible on their dashboard.`;
+
+    const result = await Swal.fire({
+      title: `${actionText}?`,
+      text: confirmText,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: isVisible ? '#ef4444' : '#10b981',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: isVisible ? 'Yes, hide feedback' : 'Yes, grant visibility',
+    });
+
+    if (!result.isConfirmed) return;
+
+    setActionLoadingId(record.id);
+    try {
+      const res = await updateFeedbackVisibility(record.id, !isVisible);
+      if (res.success) {
+        Swal.fire({
+          icon: 'success',
+          title: isVisible ? 'Visibility Revoked' : 'Visibility Granted',
+          text: res.message || 'Updated successfully.',
+          timer: 2000,
+          showConfirmButton: false,
+        });
+        await load();
+        if (selectedRecord && selectedRecord.id === record.id) {
+          setSelectedRecord(prev => prev ? { ...prev, isVisible: !isVisible, status: !isVisible ? 'reviewed' : 'submitted' } : null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update feedback visibility:', err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Update Failed',
+        text: err.message || 'Could not update feedback visibility.',
+      });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   return (
     <div style={styles.container}>
@@ -98,8 +147,9 @@ export default function RMFeedbackReportTab() {
                 <th style={styles.th}>Evaluator Source</th>
                 <th style={styles.th}>Rating</th>
                 <th style={styles.th}>Status</th>
+                <th style={styles.th}>Visibility / Access</th>
                 <th style={styles.th}>Date</th>
-                <th style={styles.th}>Action</th>
+                <th style={styles.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -116,25 +166,81 @@ export default function RMFeedbackReportTab() {
                     </span>
                   </td>
                   <td style={styles.td}>{r.rating ?? '—'}/5</td>
-                  <td style={styles.td}>{r.status}</td>
-                  <td style={styles.td}>{r.ratedAt ? new Date(r.ratedAt).toLocaleDateString() : '—'}</td>
                   <td style={styles.td}>
-                    <button
-                      style={{
-                        padding: '6px 14px',
+                    <span style={{ textTransform: 'capitalize', fontWeight: 500 }}>
+                      {r.status === 'reviewed' ? 'Reviewed' : 'Submitted'}
+                    </span>
+                  </td>
+                  <td style={styles.td}>
+                    {r.isVisible ? (
+                      <span style={{
+                        padding: '4px 10px',
+                        borderRadius: 12,
                         fontSize: 12,
                         fontWeight: 600,
-                        borderRadius: 6,
-                        border: '1px solid var(--color-border)',
-                        background: 'var(--color-primary-light)',
-                        color: 'var(--color-primary)',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                      }}
-                      onClick={() => setSelectedRecord(r)}
-                    >
-                      Details
-                    </button>
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: '#10b981',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}>
+                        ● Visible to User
+                      </span>
+                    ) : (
+                      <span style={{
+                        padding: '4px 10px',
+                        borderRadius: 12,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        color: '#d97706',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}>
+                        ○ Hidden (Pending Release)
+                      </span>
+                    )}
+                  </td>
+                  <td style={styles.td}>{r.ratedAt ? new Date(r.ratedAt).toLocaleDateString() : '—'}</td>
+                  <td style={styles.td}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <button
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-primary-light)',
+                          color: 'var(--color-primary)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                        }}
+                        onClick={() => setSelectedRecord(r)}
+                      >
+                        Details
+                      </button>
+                      <button
+                        disabled={actionLoadingId === r.id}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          border: '1px solid transparent',
+                          background: r.isVisible ? 'rgba(239, 68, 68, 0.12)' : '#10b981',
+                          color: r.isVisible ? '#ef4444' : '#ffffff',
+                          cursor: actionLoadingId === r.id ? 'wait' : 'pointer',
+                          opacity: actionLoadingId === r.id ? 0.6 : 1,
+                          transition: 'all 0.2s ease',
+                        }}
+                        onClick={() => handleToggleVisibility(r)}
+                        title={r.isVisible ? 'Revoke user visibility' : 'Grant user visibility'}
+                      >
+                        {actionLoadingId === r.id ? 'Saving…' : (r.isVisible ? 'Revoke' : 'Grant Visibility')}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -311,15 +417,39 @@ export default function RMFeedbackReportTab() {
             )}
 
             {/* Modal Footer */}
-            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <button
+                disabled={actionLoadingId === selectedRecord.id}
+                onClick={() => handleToggleVisibility(selectedRecord)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  border: '1px solid transparent',
+                  background: selectedRecord.isVisible ? 'rgba(239, 68, 68, 0.15)' : '#10b981',
+                  color: selectedRecord.isVisible ? '#ef4444' : '#ffffff',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: actionLoadingId === selectedRecord.id ? 'wait' : 'pointer',
+                  opacity: actionLoadingId === selectedRecord.id ? 0.6 : 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                {actionLoadingId === selectedRecord.id
+                  ? 'Saving…'
+                  : selectedRecord.isVisible
+                    ? '🔒 Revoke Visibility (Hide from User)'
+                    : '✅ Grant Permission (Make Visible to User)'}
+              </button>
               <button
                 onClick={() => setSelectedRecord(null)}
                 style={{
                   padding: '10px 24px',
                   borderRadius: '8px',
                   border: '1px solid var(--color-border)',
-                  background: 'var(--color-primary)',
-                  color: '#ffffff',
+                  background: 'var(--color-bg-secondary)',
+                  color: 'var(--color-text-primary)',
                   fontWeight: 600,
                   fontSize: '14px',
                   cursor: 'pointer',

@@ -227,6 +227,17 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
       });
 
       if (updateError) {
+        // ✅ Handle 422: new password must be different from old
+        if (
+          updateError.status === 422 ||
+          updateError.message?.toLowerCase().includes('different from the old') ||
+          updateError.message?.toLowerCase().includes('same password') ||
+          updateError.message?.toLowerCase().includes('should be different')
+        ) {
+          setError('Your new password must be different from your current password. Please choose a different one.');
+          setIsLoading(false);
+          return;
+        }
         // Check if error is about expired token
         if (updateError.message?.toLowerCase().includes('expired') || 
             updateError.status === 400 || 
@@ -249,8 +260,12 @@ export default function ResetPassword({ onBackToLogin, isDark, toggleTheme }) {
       console.error('❌ Reset password error:', err);
       const errorMessage = err.message || 'Failed to reset password. Please try again.';
       
-      // Check for expired-related errors in the caught error
-      if (errorMessage.toLowerCase().includes('expired') || 
+      // ✅ Handle same-password from caught error
+      if (errorMessage.toLowerCase().includes('different from the old') ||
+          errorMessage.toLowerCase().includes('same password') ||
+          errorMessage.toLowerCase().includes('should be different')) {
+        setError('Your new password must be different from your current password. Please choose a different one.');
+      } else if (errorMessage.toLowerCase().includes('expired') || 
           errorMessage.toLowerCase().includes('invalid') ||
           errorMessage.toLowerCase().includes('token')) {
         // Redirect to login where the modal will be shown

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../../config/api';
+import { formatMoney } from '../../config/currency';
 
 // ✅ Use the correct public applicant API endpoint
 const API = `${API_BASE_URL}/api/applicant`;
@@ -152,6 +153,7 @@ export default function ApplicantJobPostingsTab() {
     department_id: row.department_id,
     position_id: row.position_id,
     location: row.location || '',
+    currency: row.currency_code || 'PHP',
     branch: row.branch_name || row.profiles?.branches?.name || '',
     branch_id: row.branch_id || row.profiles?.branch_id || '',
     employmentType: row.employment_type || 'Full-time',
@@ -478,7 +480,7 @@ export default function ApplicantJobPostingsTab() {
                   </div>
                 </div>
                 <div className="applicant-job-card-right" style={styles.jobCardRight}>
-                  <span style={styles.salary}>₱{parseInt(posting.salaryMin || 0).toLocaleString()} - ₱{parseInt(posting.salaryMax || 0).toLocaleString()}/mo</span>
+                  <span style={styles.salary}>{formatMoney(posting.salaryMin, posting.currency)} - {formatMoney(posting.salaryMax, posting.currency)}/mo</span>
                   <span style={styles.postedDate}>Posted {posting.postedDate}</span>
                 </div>
               </div>
@@ -528,7 +530,7 @@ export default function ApplicantJobPostingsTab() {
                   </div>
                   <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Salary Range:</span>
-                    <span style={styles.detailValue}>₱{parseInt(selectedPosting.salaryMin || 0).toLocaleString()} - ₱{parseInt(selectedPosting.salaryMax || 0).toLocaleString()}/mo</span>
+                    <span style={styles.detailValue}>{formatMoney(selectedPosting.salaryMin, selectedPosting.currency)} - {formatMoney(selectedPosting.salaryMax, selectedPosting.currency)}/mo</span>
                   </div>
                 </div>
               </div>

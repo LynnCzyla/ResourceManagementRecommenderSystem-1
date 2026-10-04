@@ -583,6 +583,10 @@ function App() {
       <Routes>
         {/* ✅ Public routes - no authentication required */}
         <Route path="/applicant-portal" element={<ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />} />
+        {/* Job postings list has its own URL so the link can be copied/shared */}
+        <Route path="/applicant-portal/jobs" element={<ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />} />
+        {/* Shareable link to one specific job posting */}
+        <Route path="/applicant-portal/jobs/:jobId" element={<ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />} />
         <Route path="/feedback/:token" element={<ClientFeedbackPage />} />
         {/* ✅ Catch-all route for everything else */}
         <Route path="*" element={mainAppContent} />

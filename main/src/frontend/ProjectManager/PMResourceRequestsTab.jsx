@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { getResourceRequests, createResourceRequest, getProjects, getSkills, cancelResourceRequest } from './pmApi';
+import { blockInvalidNumberKeys } from '../../utils/numberInput';
 
 // Helpers to format date range and dynamic duration nicely
 const formatDateRange = (startDate, endDate) => {
@@ -831,7 +832,7 @@ export default function PMResourceRequestsTab({ user }) {
                         <div style={{ ...styles.formGroup, flex: 1 }}>
                           <label style={styles.formLabel}>Quantity Needed <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                           <input
-                            type="number"
+                            type="number" onKeyDown={blockInvalidNumberKeys}
                             min="1"
                             value={res.quantity}
                             onChange={(e) => handleResourceChange(index, 'quantity', e.target.value)}

@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getDashboardStats, getEmployees, getTasks, getProjects } from './pmApi';
-import { supabase } from '../../lib/supabaseClient';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { getEmployees, getTasks, getProjects } from './pmApi';
 
 export default function PMDashboardTab({ user }) {
   const [stats, setStats] = useState({
@@ -63,147 +62,22 @@ export default function PMDashboardTab({ user }) {
       const projectsData = await getProjects(userId, controller.signal);
       setProjects(projectsData || []);
       
-      // ✅ STEP 2: Get tasks ONLY for this PM's projects with employee data joined
-      let tasksData = [];
-      let employeeIdsFromTasks = new Set();
-      
-      if (projectsData && projectsData.length > 0) {
-        const projectIds = projectsData.map(p => p.id);
-        console.log(`📋 Fetching tasks for ${projectIds.length} projects:`, projectIds);
-        
-        // Fetch tasks for these projects with employee info
-        const { data, error } = await supabase
-          .from('project_tasks')
-          .select(`
-            *,
-            projects:project_id (
-              project_name
-            ),
-            profiles:profile_id (
-              id,
-              first_name,
-              last_name,
-              employee_id,
-              role,
-              avatar_url,
-              position_id,
-              positions:position_id (
-                position_name,
-                description
-              )
-            )
-          `)
-          .in('project_id', projectIds);
-        
-        if (error) {
-          console.error('❌ Error fetching tasks:', error);
-        } else {
-          // Transform tasks to include employee info from joined data
-          tasksData = (data || []).map(task => ({
-            ...task,
-            employeeId: task.profiles?.id || null,
-            employeeName: task.profiles 
-              ? `${task.profiles.first_name || ''} ${task.profiles.last_name || ''}`.trim() || 'Unnamed'
-              : null,
-            employeePosition: task.profiles?.positions?.position_name || null,
-            employeeRole: task.profiles?.role || null,
-            employeeAvatar: task.profiles?.avatar_url || null,
-            projectName: task.projects?.project_name || null,
-          }));
-          
-          console.log(`✅ Found ${tasksData.length} tasks for PM's projects`);
-          
-          // Extract employee IDs strictly from tasks belonging to ACTIVE projects
-          const activeIds = new Set(projectsData.filter(p => p.status === 'Active').map(p => p.id));
-          tasksData.forEach(task => {
-            if (task.profile_id && activeIds.has(task.project_id)) {
-              employeeIdsFromTasks.add(task.profile_id);
-            }
-          });
-        }
-      } else {
-        console.log('📋 No projects found for this PM');
-      }
+      // ✅ STEP 2: Load only server-authorized PM tasks and employees.
+      const [apiTasks, employeesData] = await Promise.all([
+        getTasks({}, controller.signal),
+        getEmployees(userId, undefined, undefined, controller.signal),
+      ]);
+      const tasksData = (apiTasks || []).map(task => ({
+        ...task,
+        project_id: task.projectId,
+        profile_id: task.employeeId,
+        employeeName: task.employeeName || 'Unassigned',
+      }));
+      const employeeIdsFromTasks = new Set(
+        (employeesData || []).filter(employee => !employee.isMasked).map(employee => employee.id)
+      );
       setTasks(tasksData || []);
-      
-      // ✅ STEP 3: ALSO get employees from project assignments for active projects
-      if (projectsData && projectsData.length > 0) {
-        const projectIds = projectsData.map(p => p.id);
-        const activeIds = new Set(projectsData.filter(p => p.status === 'Active').map(p => p.id));
-        console.log(`📋 Fetching assignments for ${projectIds.length} projects`);
-        
-        const { data: assignments, error: assignError } = await supabase
-          .from('project_assignments')
-          .select(`
-            project_id,
-            profile_id,
-            status,
-            projects:project_id (
-              project_name
-            )
-          `)
-          .in('project_id', projectIds);
-        
-        if (!assignError && assignments) {
-          console.log(`✅ Found ${assignments.length} assignments`);
-          assignments.forEach(a => {
-            if (a.profile_id && (a.status === 'Assigned' || !a.status)) {
-              if (activeIds.has(a.project_id)) {
-                employeeIdsFromTasks.add(a.profile_id);
-              }
-            }
-          });
-        }
-      }
-
-      console.log(`📋 Found ${employeeIdsFromTasks.size} active unique employee IDs for active projects`);
-
-      // ✅ STEP 4: Fetch employees from active sources with position data
-      let employeesData = [];
-      if (employeeIdsFromTasks.size > 0) {
-        const employeeIds = Array.from(employeeIdsFromTasks);
-        const { data: empData, error: empError } = await supabase
-          .from('profiles')
-          .select(`
-            id, 
-            employee_id, 
-            first_name, 
-            last_name, 
-            role, 
-            avatar_url, 
-            branch_id,
-            position_id,
-            departments:department_id (
-              department_name
-            ),
-            positions:position_id (
-              position_name,
-              description
-            )
-          `)
-          .in('id', employeeIds)
-          .eq('status', 'Active');
-        
-        if (!empError && empData) {
-          // Filter by branch (non-super admin)
-          let filteredData = empData;
-          if (!user?.is_super_admin && user?.branch_id) {
-            filteredData = empData.filter(emp => emp.branch_id === user.branch_id);
-          }
-          
-          // Transform to match frontend expectations
-          employeesData = filteredData.map(emp => ({
-            id: emp.id,
-            employeeId: emp.employee_id,
-            name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unnamed',
-            position: emp.positions?.position_name || 'No position set',
-            department: emp.departments?.department_name || '',
-            role: emp.role || 'Employee',
-            avatar: emp.avatar_url || `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(`${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unnamed')}`,
-            branchId: emp.branch_id,
-          }));
-        }
-      }
+      console.log(`📋 Found ${employeeIdsFromTasks.size} active team members for active projects`);
 
       // ✅ STEP 5: Calculate stats from actual active data
       console.log('📊 Calculating stats from projects:', projectsData.length);
@@ -271,7 +145,7 @@ export default function PMDashboardTab({ user }) {
         abortControllerRef.current = null;
       }
     }
-  }, [user]);
+  }, [employees.length]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -359,24 +233,43 @@ export default function PMDashboardTab({ user }) {
       const employeesInActiveProjects = new Set();
       tasks.forEach(task => {
         if (activeIds.has(String(task.project_id)) && task.profile_id) {
-          employeesInActiveProjects.add(task.profile_id);
+          employeesInActiveProjects.add(String(task.profile_id));
         }
       });
-      return allEmployees.filter(emp => 
-        employeesInActiveProjects.has(emp.id) || 
-        employees.some(e => e.id === emp.id && (!e.project_id || activeIds.has(String(e.project_id))))
-      );
+
+      return allEmployees.filter(emp => {
+        if (emp.isMasked) return true;
+        // Has a task in an active project
+        if (employeesInActiveProjects.has(String(emp.id))) return true;
+        // Is assigned to an active project
+        const empProjIds = emp.projectIds || (emp.projectId ? [emp.projectId] : []);
+        if (empProjIds.some(pid => activeIds.has(String(pid)))) return true;
+        // Also check if any employee record has an active project match
+        return employees.some(e => String(e.id) === String(emp.id) && (
+          (e.projectIds && e.projectIds.some(pid => activeIds.has(String(pid)))) ||
+          (e.projectId && activeIds.has(String(e.projectId)))
+        ));
+      });
     }
     
-    // Filter employees who have tasks in the selected project
+    // Filter employees assigned to or who have tasks in the selected project
     const employeesWithTasksInProject = new Set();
     tasks.forEach(task => {
       if (String(task.project_id) === String(selectedProjectId) && task.profile_id) {
-        employeesWithTasksInProject.add(task.profile_id);
+        employeesWithTasksInProject.add(String(task.profile_id));
       }
     });
     
-    return allEmployees.filter(emp => employeesWithTasksInProject.has(emp.id));
+    return allEmployees.filter(emp => {
+      if (emp.isMasked && String(emp.projectId) === String(selectedProjectId)) return true;
+      if (employeesWithTasksInProject.has(String(emp.id))) return true;
+      const empProjIds = emp.projectIds || (emp.projectId ? [emp.projectId] : []);
+      if (empProjIds.some(pid => String(pid) === String(selectedProjectId))) return true;
+      return employees.some(e => String(e.id) === String(emp.id) && (
+        (e.projectIds && e.projectIds.some(pid => String(pid) === String(selectedProjectId))) ||
+        (e.projectId && String(e.projectId) === String(selectedProjectId))
+      ));
+    });
   }, [allEmployees, tasks, selectedProjectId, projects, employees]);
 
   // Pre-group tasks by employee using profile_id

@@ -71,11 +71,15 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme, onProfil
     if (user?.avatar) setCurrentAvatar(user.avatar);
   }, [user?.avatar]);
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const fetchUnpostedJobPostings = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/hr/job-postings/resource-requests', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      const response = await axios.get(`${API_BASE_URL}/api/hr/job-postings/resource-requests`, {
+        headers: getAuthHeaders(),
       });
       if (response.data.success) {
         const rows = response.data.data || [];
@@ -89,7 +93,9 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme, onProfil
   const fetchNotifications = async () => {
     if (!user?.id) return;
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/notifications?userId=${user.id}`);
+      const response = await axios.get(`${API_BASE_URL}/api/notifications?userId=${user.id}`, {
+        headers: getAuthHeaders(),
+      });
       if (response.data.success) {
         setNotifications(response.data.data || []);
       }
@@ -153,7 +159,11 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme, onProfil
   const markAllRead = async () => {
     if (!user?.id) return;
     try {
-      const response = await axios.patch(`${API_BASE_URL}/api/notifications/mark-all-read`, { userId: user.id });
+      const response = await axios.patch(
+        `${API_BASE_URL}/api/notifications/mark-all-read`,
+        { userId: user.id },
+        { headers: getAuthHeaders() }
+      );
       if (response.data.success) {
         setNotifications(notifications.map(n => ({ ...n, read: true })));
       }
@@ -165,7 +175,9 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme, onProfil
   const deleteNotification = async (id, e) => {
     e.stopPropagation();
     try {
-      const response = await axios.delete(`${API_BASE_URL}/api/notifications/${id}`);
+      const response = await axios.delete(`${API_BASE_URL}/api/notifications/${id}`, {
+        headers: getAuthHeaders(),
+      });
       if (response.data.success) {
         setNotifications(notifications.filter(n => n.id !== id));
       }

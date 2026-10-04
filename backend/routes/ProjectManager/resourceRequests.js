@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { logAuditEvent } = require('../../utils/auditLogger');
+const { parsePositiveInt } = require('../../utils/validators');
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -101,11 +102,32 @@ function transformRequest(row) {
     endDate: effectiveEndDate,
     status: row.status,
     quantity: row.quantity_needed,
+    required: row.quantity_needed,
+    allocated: row.allocated_count || 0,
+    remaining: Math.max(0, (row.quantity_needed || 0) - (row.allocated_count || 0)),
     justification: row.justification,
     createdBy: row.created_by,
     requestedBy: row.created_by, // Alias for clarity
     projectOwner: row.projects?.created_by,
   };
+}
+
+async function addAllocationCounts(rows) {
+  const requirementIds = (rows || []).map(row => row.id).filter(Boolean);
+  if (requirementIds.length === 0) return rows || [];
+
+  const { data: assignments, error } = await supabase
+    .from('project_assignments')
+    .select('requirement_id')
+    .in('requirement_id', requirementIds)
+    .eq('status', 'Assigned');
+  if (error) throw error;
+
+  const counts = (assignments || []).reduce((map, assignment) => {
+    map[assignment.requirement_id] = (map[assignment.requirement_id] || 0) + 1;
+    return map;
+  }, {});
+  return rows.map(row => ({ ...row, allocated_count: counts[row.id] || 0 }));
 }
 
 const REQUEST_SELECT = `
@@ -144,24 +166,19 @@ router.get('/', async (req, res) => {
       query = query.eq('project_id', projectId);
     }
 
-    // ✅ For Project Managers: Only show requests from their projects
+    // Project Managers may only view requests for projects they own.
     if (!isSuperAdmin && userRole === 'Project Manager') {
-      // Get projects created by this PM
       const { data: myProjects } = await supabase
         .from('projects')
         .select('id')
         .eq('created_by', userId);
 
-      const projectIds = myProjects?.map(p => p.id) || [];
-
+      const projectIds = myProjects?.map(project => project.id) || [];
       if (projectIds.length === 0) {
         return res.status(200).json({ success: true, data: [] });
       }
 
-      // ✅ Filter by projects owned by this PM
       query = query.in('project_id', projectIds);
-
-      console.log(`🔍 Filtering by ${projectIds.length} projects owned by PM`);
     }
 
     // ✅ For Resource Managers: Filter by branch
@@ -202,7 +219,8 @@ router.get('/', async (req, res) => {
 
     console.log(`✅ Found ${data?.length || 0} resource requests`);
 
-    res.status(200).json({ success: true, data: (data || []).map(transformRequest) });
+    const rowsWithCounts = await addAllocationCounts(data || []);
+    res.status(200).json({ success: true, data: rowsWithCounts.map(transformRequest) });
   } catch (error) {
     console.error('Error fetching resource requests:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch resource requests', error: error.message });
@@ -283,6 +301,13 @@ router.post('/', async (req, res) => {
       }
     }
 
+    for (const resource of resources) {
+      const qtyCheck = parsePositiveInt(resource.quantity, 'Quantity needed', { defaultValue: 1 });
+      if (qtyCheck.error) {
+        return res.status(400).json({ success: false, message: qtyCheck.error });
+      }
+    }
+
     const createdIds = [];
 
     for (const resource of resources) {
@@ -294,7 +319,7 @@ router.post('/', async (req, res) => {
           project_id: projectId,
           position_id: positionId,
           role_title: positionId ? null : (resource.role || null),
-          quantity_needed: parseInt(resource.quantity, 10) || 1,
+          quantity_needed: parsePositiveInt(resource.quantity, 'Quantity needed', { defaultValue: 1 }).value,
           assignment_type: resource.assignment || 'Full-Time (40 hours/week)',
           justification: resource.justification || null,
           start_date: resource.startDate || project.start_date || null,
@@ -360,6 +385,12 @@ router.patch('/:id/status', async (req, res) => {
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: `Status must be one of: ${validStatuses.join(', ')}` });
     }
+    if (userRole === 'Project Manager' && !['Cancelled', 'Canceled'].includes(status)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Project Managers may only cancel their own resource requests'
+      });
+    }
 
     // ✅ Check if user has permission to update this request
     const { data: existing, error: findError } = await supabase
@@ -385,10 +416,10 @@ router.patch('/:id/status', async (req, res) => {
     const projectOwnerId = existing.projects?.created_by;
     const isProjectOwner = projectOwnerId === userId;
 
-    let hasPermission = isSuperAdmin || !userId || isProjectOwner;
+    let hasPermission = isSuperAdmin || isProjectOwner;
 
     if (userRole === 'Project Manager') {
-      hasPermission = isProjectOwner || !userId;
+      hasPermission = isProjectOwner;
     } else if (userRole === 'Resource Manager') {
       const { data: projectOwner } = await supabase
         .from('profiles')
@@ -473,19 +504,31 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    const { error } = await supabase.from('project_resource_requirements').delete().eq('id', id);
+    const nowIso = new Date().toISOString();
+    const { data: updatedReq, error } = await supabase
+      .from('project_resource_requirements')
+      .update({
+        status: 'Cancelled',
+        cancelled_at: nowIso,
+        cancelled_by: userId,
+        cancellation_reason: 'Cancelled by requester'
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
     if (error) throw error;
 
     await logAuditEvent({
       req,
-      action: 'Deleted',
+      action: 'Cancelled',
       systemCategory: 'Resource Management',
-      logDescription: `Deleted resource request ${id}`,
+      logDescription: `Cancelled resource request ${id}`,
     });
-    res.status(200).json({ success: true, message: 'Resource request deleted successfully' });
+    res.status(200).json({ success: true, message: 'Resource request cancelled successfully', data: updatedReq });
   } catch (error) {
-    console.error('Error deleting resource request:', error);
-    res.status(500).json({ success: false, message: 'Failed to delete resource request', error: error.message });
+    console.error('Error cancelling resource request:', error);
+    res.status(500).json({ success: false, message: 'Failed to cancel resource request', error: error.message });
   }
 });
 

@@ -1,8 +1,8 @@
-// backend/routes/ResourceManager/Employees.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
+const workloadService = require('../../services/workloadService');
 
 // ✅ Apply auth middleware
 router.use(verifyToken);
@@ -65,6 +65,7 @@ router.get('/', async (req, res) => {
         last_name,
         status,
         role,
+        availability_status,
         avatar_url,
         branch_id,
         positions ( position_name ),
@@ -72,7 +73,7 @@ router.get('/', async (req, res) => {
         employee_skills ( skills ( skill_name ) )
       `)
       .eq('status', 'Active')
-      .eq('role', 'Employee');
+      .in('role', ['Employee', 'Project Manager']);
 
     if (!isSuperAdmin && userBranchId) {
       query = query.eq('branch_id', userBranchId);
@@ -83,10 +84,12 @@ router.get('/', async (req, res) => {
 
     const employeeIds = profiles.map(p => p.employee_id);
     const profileIds = profiles.map(p => p.id);
+    const pmProfileIds = profiles.filter(p => (p.role||'').toLowerCase().includes('project')).map(p => p.id);
     
     let documents = [];
     let activeAssignments = [];
     let activeTasks = [];
+    let pmProjects = [];
 
     const asyncQueries = [];
     if (employeeIds.length > 0) {
@@ -118,8 +121,18 @@ router.get('/', async (req, res) => {
           .from('project_tasks')
           .select('id, profile_id, project_id, priority, status')
           .in('profile_id', profileIds)
-          .not('status', 'in', '("Completed","Completed-Hidden","Archived")')
+          .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")')
           .then(res => { if (!res.error && res.data) activeTasks = res.data; })
+      );
+    }
+    if (pmProfileIds.length > 0) {
+      asyncQueries.push(
+        supabase
+          .from('projects')
+          .select('id, project_name, project_code, status, created_by')
+          .in('created_by', pmProfileIds)
+          .eq('status', 'Active')
+          .then(res => { if (!res.error && res.data) pmProjects = res.data; })
       );
     }
 
@@ -132,6 +145,7 @@ router.get('/', async (req, res) => {
     const employees = (profiles || []).map((p) => {
       const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unnamed';
       const fallbackAvatar = `https://ui-avatars.com/api/?background=3b82f6&color=fff&name=${encodeURIComponent(name)}`;
+      const isPM = (p.role || '').toLowerCase().includes('project');
       
       const certifications = (documents || [])
         .filter((d) => d.employee_id === p.employee_id)
@@ -146,10 +160,17 @@ router.get('/', async (req, res) => {
       const empAssignments = (activeAssignments || []).filter(
         a => a.profile_id === p.id && a.projects?.status === 'Active'
       );
-      const assignedProjects = [...new Set(empAssignments.map(a => a.projects?.project_name).filter(Boolean))];
       const assignedProjectIds = [...new Set(empAssignments.map(a => a.project_id).filter(Boolean))];
       const assignCount = empAssignments.length;
       const isAssigned = assignCount > 0;
+
+      // For PMs: managed active projects
+      const managedProjects = isPM
+        ? pmProjects.filter(proj => proj.created_by === p.id)
+        : [];
+      const managedProjectNames = managedProjects.map(proj => proj.project_name);
+      const assignedProjects = isPM ? managedProjectNames : [...new Set(empAssignments.map(a => a.projects?.project_name).filter(Boolean))];
+      const managedCount = managedProjects.length;
 
       // Only count active tasks for projects where the employee is actually actively assigned
       const empActiveTasks = (activeTasks || []).filter(
@@ -161,39 +182,46 @@ router.get('/', async (req, res) => {
         score += weight;
       }
 
-      let workloadStatus;
-      let utilizationRate;
-      if (score === 0 && assignCount === 0) {
+      let workloadStatus, utilizationRate, availabilityFactor;
+      if (isPM) {
         workloadStatus = 'Available';
         utilizationRate = 0;
-      } else if (score <= 3 && assignCount <= 1) {
-        workloadStatus = 'Limited Availability';
-        utilizationRate = Math.min(Math.round(((score + assignCount * 2) / 6) * 100), 80) || 50;
+        availabilityFactor = 1.0;
       } else {
-        workloadStatus = 'Fully Utilized';
-        utilizationRate = 100;
+        // Use cached workload details (from recalculateForEmployee) for accurate W & utilization.
+        // Falls back to local task-count score if no cache entry exists yet.
+        const cached = workloadService.getWorkloadDetails(p.id, p.availability_status || 'Available', score);
+        workloadStatus = cached.workloadStatus || p.availability_status || 'Available';
+        utilizationRate = cached.utilizationRate ?? workloadService.getUtilizationRate(p.id, workloadStatus, score);
+        availabilityFactor = score === 0 ? 1.0 : (cached.availabilityFactor ?? (1 / (1 + Math.exp(0.4 * (score - 7)))));
       }
 
-      const isAssignable = true;
+      const isAssignable = !isPM;
 
       return {
         id: p.id,
         employeeId: p.employee_id,
         name,
         avatar: p.avatar_url || fallbackAvatar,
-        role: p.positions?.position_name || p.role || null,
+        rawRole: p.role,
+        role: isPM ? 'Project Manager' : (p.positions?.position_name || p.role || null),
         department: p.departments?.department_name || 'Unassigned',
         skills: (p.employee_skills || []).map((es) => es.skills?.skill_name).filter(Boolean),
         certifications,
         isVerified: p.is_verified || false,
         isAssignable,
-        isAssigned,
+        isAssigned: isPM ? managedCount > 0 : isAssigned,
         assignedProjects,
         assignedProjectIds,
-        projectStatus: isAssigned ? 'Assigned' : 'Unassigned',
+        projectStatus: isPM
+          ? (managedCount > 0 ? 'Assigned' : 'Unassigned')
+          : (isAssigned ? 'Assigned' : 'Unassigned'),
         workloadStatus,
         utilizationRate,
-        assignmentCount: assignCount,
+        availabilityFactor: typeof availabilityFactor === 'number' ? parseFloat(availabilityFactor.toFixed(3)) : (score === 0 ? 1.0 : 0.943),
+        workloadScore: isPM ? 0 : score,
+        assignmentCount: isPM ? managedCount : assignCount,
+        managedProjectCount: isPM ? managedCount : undefined,
         branch_id: p.branch_id,
       };
     });
@@ -316,7 +344,7 @@ router.get('/:id/details', async (req, res) => {
         departments ( department_name )
       `)
       .eq('id', id)
-      .eq('role', 'Employee')
+      .in('role', ['Employee', 'Project Manager'])
       .single();
 
     if (profileError) {
@@ -334,6 +362,23 @@ router.get('/:id/details', async (req, res) => {
         success: false,
         error: 'You do not have permission to view this employee'
       });
+    }
+
+    const isPM = (profile.role || '').toLowerCase().includes('project');
+    const PRIORITY_WEIGHTS = { 'Low': 1, 'Medium': 2, 'High': 3 };
+
+    // ✅ For PMs: fetch their managed projects
+    let managedProjects = [];
+    if (isPM) {
+      const { data: pmProj } = await supabase
+        .from('projects')
+        .select(`
+          id, project_code, project_name, status, start_date, end_date,
+          project_assignments ( profile_id, status, profiles:profile_id ( first_name, last_name ) )
+        `)
+        .eq('created_by', profile.id)
+        .order('created_at', { ascending: false });
+      managedProjects = pmProj || [];
     }
 
     // ✅ Get tasks with project information
@@ -365,7 +410,13 @@ router.get('/:id/details', async (req, res) => {
 
     console.log(`📊 Found ${tasks?.length || 0} tasks for employee`);
 
-    // ✅ Group tasks by project
+    // Separate active vs closed tasks (Eq. 2: only active tasks count toward W)
+    const CLOSED_STATUSES = ['Completed', 'Completed-Hidden', 'Archived', 'Cancelled'];
+    const activeTasksOnly = (tasks || []).filter(
+      t => !CLOSED_STATUSES.includes(t.status) && t.projects?.status === 'Active'
+    );
+
+    // ✅ Group ALL tasks by project (for display, including history)
     const projectsMap = {};
     (tasks || []).forEach(task => {
       const project = task.projects || {};
@@ -375,7 +426,7 @@ router.get('/:id/details', async (req, res) => {
         projectsMap[projectId] = {
           project_id: projectId,
           project_name: project.project_name || 'No Project',
-          project_code: project.project_code || 'N/A',
+          project_code: project.project_code || null,
           project_status: project.status || 'Active',
           tasks: []
         };
@@ -389,35 +440,39 @@ router.get('/:id/details', async (req, res) => {
         status: task.status || 'Pending',
         due_date: task.due_date,
         created_at: task.created_at,
+        isActive: !CLOSED_STATUSES.includes(task.status) && task.projects?.status === 'Active',
       });
     });
 
     // Convert to array
     const projectsWithTasks = Object.values(projectsMap);
 
-    // ✅ Calculate workload score
-    const PRIORITY_WEIGHTS = { 'Low': 1, 'Medium': 2, 'High': 3 };
+    // ✅ Calculate workload score using ACTIVE tasks only (Eq. 2)
     let workloadScore = 0;
-    let taskCount = tasks?.length || 0;
+    const taskCount = tasks?.length || 0;
+    const activeTaskCount = activeTasksOnly.length;
     
-    (tasks || []).forEach(task => {
+    activeTasksOnly.forEach(task => {
       const weight = PRIORITY_WEIGHTS[task.priority] || 1;
       workloadScore += weight;
     });
 
-    // ✅ Determine workload status
-    let workloadStatus;
-    let utilizationRate;
-    
-    if (workloadScore === 0) {
+    // ✅ Determine workload status using Eq. (3) sigmoid formula
+    let workloadStatus, utilizationRate, availabilityFactor;
+    if (isPM) {
+      workloadScore = 0;
       workloadStatus = 'Available';
       utilizationRate = 0;
-    } else if (workloadScore <= 3) {
-      workloadStatus = 'Limited Availability';
-      utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
+      availabilityFactor = 1.0;
+    } else if (workloadScore === 0) {
+      workloadStatus = 'Available';
+      utilizationRate = 0;
+      availabilityFactor = 1.0;
     } else {
-      workloadStatus = 'Fully Utilized';
-      utilizationRate = Math.min(Math.round((workloadScore / 6) * 100), 100);
+      const A = 1 / (1 + Math.exp(0.4 * (workloadScore - 7)));
+      workloadStatus = A >= 0.80 ? 'Available' : A >= 0.50 ? 'Limited Availability' : 'Fully Utilized';
+      utilizationRate = Math.min(100, Math.max(1, Math.round((workloadScore / 7) * 100)));
+      availabilityFactor = parseFloat(A.toFixed(3));
     }
 
     const name = `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed';
@@ -446,16 +501,35 @@ router.get('/:id/details', async (req, res) => {
         employeeId: profile.employee_id,
         name: name,
         avatar: profile.avatar_url || fallbackAvatar,
-        role: profile.positions?.position_name || profile.role || null,
+        rawRole: profile.role,
+        role: isPM ? 'Project Manager' : (profile.positions?.position_name || profile.role || null),
         department: profile.departments?.department_name || 'Unassigned',
         skills: skills,
         isVerified: profile.is_verified || false,
-        projects: projectsWithTasks,
-        tasks: tasks || [],
-        taskCount: taskCount,
+        isPM,
+        // For employees: tasks grouped by project
+        projects: isPM ? [] : projectsWithTasks,
+        tasks: isPM ? [] : (tasks || []),
+        taskCount: isPM ? 0 : taskCount,
+        activeTaskCount: isPM ? 0 : activeTaskCount,
         workloadScore: workloadScore,
         workloadStatus: workloadStatus,
         utilizationRate: utilizationRate,
+        availabilityFactor: availabilityFactor ?? 1.0,
+        // For PMs: managed projects
+        managedProjects: isPM ? managedProjects.map(proj => ({
+          id: proj.id,
+          name: proj.project_name,
+          code: proj.project_code || null,
+          status: proj.status,
+          startDate: proj.start_date,
+          endDate: proj.end_date,
+          memberCount: (proj.project_assignments || []).filter(a => a.status === 'Assigned').length,
+          members: (proj.project_assignments || [])
+            .filter(a => a.status === 'Assigned' && a.profiles)
+            .map(a => `${a.profiles.first_name || ''} ${a.profiles.last_name || ''}`.trim()),
+        })) : [],
+        managedProjectCount: isPM ? managedProjects.length : 0,
       }
     });
   } catch (error) {
@@ -671,6 +745,9 @@ router.post('/:id/assign', async (req, res) => {
         branch: userBranchId,
       });
     }
+
+    // Recalculate employee availability status
+    workloadService.recalculateForEmployee(id).catch(e => console.warn('Non-fatal workload recalc error:', e.message));
 
     clearEmployeeCache(isSuperAdmin ? null : userBranchId);
     try {
