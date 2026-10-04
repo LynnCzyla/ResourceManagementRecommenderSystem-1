@@ -202,6 +202,51 @@ class OCRProcessor:
                     confs.append(conf)
             return sum(confs) / len(confs) if confs else 0.0
 
+        def _ocr_text_and_conf(pil_img):
+            """ONE Tesseract run -> (text, mean_confidence).
+
+            Same engine and config ('--oem 3 --psm 6') as the old
+            image_to_string() + _mean_confidence() pair, but that pair ran
+            Tesseract TWICE on the same image. This runs it once and reads
+            both the .txt and .tsv outputs. On ANY failure it falls back to
+            the original two-call path, so extraction can never get worse.
+            """
+            import subprocess, tempfile, shutil
+            tmp_dir = None
+            try:
+                tmp_dir = tempfile.mkdtemp(prefix='ocr_')
+                in_path = os.path.join(tmp_dir, 'in.png')
+                out_base = os.path.join(tmp_dir, 'out')
+                pil_img.save(in_path)
+                cmd = getattr(pytesseract.pytesseract, 'tesseract_cmd', None) or 'tesseract'
+                subprocess.run(
+                    [cmd, in_path, out_base, '--oem', '3', '--psm', '6', 'txt', 'tsv'],
+                    check=True, capture_output=True, timeout=900
+                )
+                with open(out_base + '.txt', encoding='utf-8') as f:
+                    text = f.read()
+                confs = []
+                with open(out_base + '.tsv', encoding='utf-8') as f:
+                    next(f, None)  # header
+                    for line in f:
+                        parts = line.rstrip('\n').split('\t')
+                        if len(parts) < 11:
+                            continue
+                        try:
+                            c = float(parts[10])
+                        except ValueError:
+                            continue
+                        if c >= 0:
+                            confs.append(c)
+                return text, (sum(confs) / len(confs) if confs else 0.0)
+            except Exception as e:
+                debug_print(f"[OCR] single-run OCR failed ({e}); using two-call fallback")
+                text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
+                return text, _mean_confidence(pil_img)
+            finally:
+                if tmp_dir:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+
         def _ocr_page(args):
             """Process a single page image and return (page_num, text)."""
             page_num, image = args
@@ -223,9 +268,9 @@ class OCRProcessor:
                 minimal_gray = _deskew(raw_gray.copy())
                 _, minimal_binary = cv2.threshold(minimal_gray, 0, 255,
                                                    cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                minimal_text = pytesseract.image_to_string(
-                    Image.fromarray(minimal_binary), config='--oem 3 --psm 6'
-                )
+                # One Tesseract run gives BOTH the text and its confidence
+                # (previously: image_to_string, then image_to_data = 2 runs).
+                minimal_text, minimal_conf = _ocr_text_and_conf(Image.fromarray(minimal_binary))
 
                 # NEW: Early exit — if the minimal pass already reads
                 # cleanly, don't bother computing the enhanced pipeline at
@@ -233,7 +278,6 @@ class OCRProcessor:
                 # skipping the second OCR pass on them keeps runtime close
                 # to the single-pass baseline; only genuinely hard pages
                 # pay the cost of running both candidates.
-                minimal_conf = _mean_confidence(Image.fromarray(minimal_binary))
                 EARLY_EXIT_CONFIDENCE = 75
                 if minimal_conf >= EARLY_EXIT_CONFIDENCE:
                     debug_print(f"[OCR] Page {page_num}: minimal conf {minimal_conf:.1f} already good — skipped enhanced pass")
@@ -543,22 +587,12 @@ class OCRProcessor:
         debug_print(f"   Chars: {len(cleaned)}")
         debug_print(f"{'='*50}\n")
         
-        # Compute realistic confidence based on method & text cleanliness
-        words = cleaned.split()
-        if method == 'ocr':
-            computed_conf = 0.865
-        else:
-            clean_tokens = [w for w in words if re.match(r'^[A-Za-z0-9\-_.,/&()+]+$', w)]
-            valid_ratio = len(clean_tokens) / len(words) if words else 0.8
-            length_factor = min(1.0, len(words) / 80.0) if words else 0.5
-            computed_conf = round(min(0.955, max(0.78, (0.76 + valid_ratio * 0.17) * (0.96 + 0.04 * length_factor))), 3)
-
         return {
             'raw_text': text,
             'cleaned_text': cleaned,
             'structured_text': structured,
-            'confidence_score': computed_conf,
-            'word_count': len(words),
+            'confidence_score': 0.99 if method != 'ocr' else 0.85,
+            'word_count': len(cleaned.split()),
             'char_count': len(cleaned),
             'document_hash': hashlib.md5(text.encode()).hexdigest(),
             'processing_time': total_time,
