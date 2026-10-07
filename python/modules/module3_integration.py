@@ -218,6 +218,7 @@ class DocumentProcessor:
         
         self.process_log.append(log_entry)
         self._save_log(log_entry)
+        return result
 
     def _do_ocr_stage(self, image_path, doc_id, employee_id, document_type, log_entry):
         """Step 1 only: OCR. Raises on failure (caller decides how to report it).
