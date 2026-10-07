@@ -14,3 +14,6 @@ backend/.env
 python/.env
 *.log
 .DS_Store
+python/modules/shared-data/skills_db/alias_backups
+python/scripts/*.csv
+python/*.csv

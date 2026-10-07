@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 class PythonService {
     constructor() {
@@ -18,43 +19,72 @@ class PythonService {
         console.log(`Daemon URL: ${this.daemonUrl}`);
     }
 
-    async processDocument(imagePath, employeeId, docType) {
+    // Auth header for the remote Python service (Railway). Must match PYTHON_API_KEY there.
+    _headers(extra = {}) {
+        const h = { ...extra };
+        if (process.env.PYTHON_API_KEY) h['X-API-Key'] = process.env.PYTHON_API_KEY;
+        return h;
+    }
+
+    // true on a dev machine with python/venv; false on Render (Node-only image)
+    _hasLocalPython() {
+        return fs.existsSync(this.pythonPath);
+    }
+
+    async processDocument(fileBuffer, filename, employeeId, docType) {
         console.log('🐍 Starting Python document processing...');
 
-        // ⚡ Try warm Python daemon first — avoids reloading spaCy/sklearn
-        // and re-triggering an ML retrain on every single upload, which is
-        // what happens when this always falls through to a cold spawn().
-        // Daemon must be running (see python/scripts/daemon.py) and reachable
-        // at PYTHON_DAEMON_URL for this path to be used at all.
+        // The file is sent to the Python service as multipart. Render and Railway
+        // do not share a disk, so a local file path would be meaningless there.
         try {
             const controller = new AbortController();
-            // OCR can legitimately take minutes on a CPU-constrained instance,
-            // so give this the same generous ceiling as the spawn fallback,
-            // not the 2-minute one used for retrain-if-needed.
+            // OCR can legitimately take minutes on scanned multi-page PDFs.
             const timeoutId = setTimeout(() => controller.abort(), 600000);
+            const form = new FormData();
+            form.append('file', new Blob([fileBuffer]), filename);
+            form.append('employee_id', String(employeeId));
+            form.append('doc_type', String(docType || ''));
+
             const res = await fetch(`${this.daemonUrl}/process-document`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    image_path: imagePath,
-                    employee_id: employeeId,
-                    doc_type: docType
-                }),
+                headers: this._headers(), // do NOT set Content-Type: fetch adds the multipart boundary
+                body: form,
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
+
             if (res.ok) {
                 const data = await res.json();
-                console.log('⚡ Processed via warm Python daemon!');
+                console.log('⚡ Processed via Python service!');
                 console.log(`📊 Skills found: ${data?.nlp?.skills?.length || 0}`);
                 return data;
             }
-            console.log(`⚠️ Daemon responded with ${res.status}, falling back to spawn`);
-        } catch (daemonErr) {
-            console.log(`⚠️ Daemon unavailable (${daemonErr.message}), falling back to spawn`);
+            const body = await res.text().catch(() => '');
+            console.log(`⚠️ Python service responded ${res.status}: ${body.slice(0, 200)}`);
+            if (!this._hasLocalPython()) {
+                throw new Error(`Python service error ${res.status}`);
+            }
+        } catch (err) {
+            // In production there is no local venv, so surface the error instead of a doomed spawn.
+            if (!this._hasLocalPython()) throw err;
+            console.log(`⚠️ Python service unavailable (${err.message}), falling back to local spawn`);
         }
 
-        return this._spawnProcessDocument(imagePath, employeeId, docType);
+        // Local-dev fallback only (python/venv exists, no service running).
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rmrs_'));
+        const tempPath = path.join(tmpDir, path.basename(filename));
+        fs.writeFileSync(tempPath, fileBuffer);
+        try {
+            return await this._spawnProcessDocument(tempPath, employeeId, docType);
+        } finally {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+
+    async getStats() {
+        const res = await fetch(`${this.daemonUrl}/get-stats`, { headers: this._headers() });
+        if (!res.ok) throw new Error(`Python service error ${res.status}`);
+        return res.json();
     }
 
     // Original cold-start path — kept as the fallback for local dev (no
@@ -194,7 +224,7 @@ class PythonService {
             const timeoutId = setTimeout(() => controller.abort(), 120000);
             const res = await fetch(`${this.daemonUrl}/retrain-if-needed`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this._headers({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ threshold }),
                 signal: controller.signal
             });
@@ -205,7 +235,8 @@ class PythonService {
                 return data;
             }
         } catch (daemonErr) {
-            // Fallback to spawn
+            if (!this._hasLocalPython()) throw daemonErr;
+            // else: fall back to local spawn (dev)
         }
 
         return new Promise((resolve, reject) => {
@@ -254,7 +285,19 @@ class PythonService {
 
     async cleanupLearnedSkills() {
         console.log('🧹 Cleaning up learned skills...');
-        
+
+        try {
+            const res = await fetch(`${this.daemonUrl}/cleanup-learned-skills`, {
+                method: 'POST',
+                headers: this._headers()
+            });
+            if (res.ok) return await res.json();
+            if (!this._hasLocalPython()) throw new Error(`Python service error ${res.status}`);
+        } catch (daemonErr) {
+            if (!this._hasLocalPython()) throw daemonErr;
+            // else: fall back to local spawn (dev)
+        }
+
         return new Promise((resolve, reject) => {
             const args = [
                 '-u',

@@ -166,18 +166,9 @@ exports.processDocument = async (req, res) => {
 
         console.log(`📄 Processing: ${filename} for employee: ${employeeId}`);
 
-        // Save file temporarily for Python/OCR processing
-        const tempPath = path.join(__dirname, '../../shared-data/uploads', filename);
-        if (!fs.existsSync(path.dirname(tempPath))) {
-            fs.mkdirSync(path.dirname(tempPath), { recursive: true });
-        }
-        fs.writeFileSync(tempPath, file.buffer);
-
-        // Run OCR + NLP via Python
-        const result = await pythonService.processDocument(tempPath, employeeId, documentType);
-
-        // Clean up temp file
-        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e) {}
+        // Run OCR + NLP via the Python service. The file is sent as multipart,
+        // so nothing is written to this server's disk.
+        const result = await pythonService.processDocument(file.buffer, filename, employeeId, documentType);
 
         if (!result || !result.success) {
             return res.status(500).json({ success: false, error: result?.error || 'Python processing failed' });
