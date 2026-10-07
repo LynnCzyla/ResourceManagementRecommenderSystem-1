@@ -25,4 +25,4 @@ COPY python/ /app/python/
 ENV PYTHONUNBUFFERED=1
 # Railway injects PORT. 1 worker (spaCy + OCR are RAM-heavy), 2 threads so /health
 # answers while a document is processing. Timeout 900s: OCR of big scans is slow.
-CMD gunicorn --bind 0.0.0.0:${PORT:-5001} --workers 1 --threads 2 --timeout 900 scripts.daemon:app
+CMD gunicorn --bind 0.0.0.0:${PORT:-5001} --workers 1 --threads 2 --timeout 1500 scripts.daemon:app
