@@ -69,14 +69,21 @@ router.get('/resource-requests', async (req, res) => {
 
       if (postingsError) throw postingsError;
 
-      const usedIds = new Set((postings || []).map((p) => p.source_request_id));
+      const usedIds = new Set((postings || []).map((p) => String(p.source_request_id)));
 
       const shaped = (requests || []).map((r) => ({
         ...r,
-        already_posted: usedIds.has(r.id),
+        already_posted: usedIds.has(String(r.id)),
       }));
 
-      return res.status(200).json({ success: true, data: shaped });
+      const unposted = shaped.filter((r) => !r.already_posted);
+
+      return res.status(200).json({ 
+        success: true, 
+        data: unposted,
+        unposted_count: unposted.length,
+        total_approved_count: shaped.length
+      });
     }
 
     // ✅ For non-super admins: Check branch
@@ -120,11 +127,11 @@ router.get('/resource-requests', async (req, res) => {
 
     if (postingsError) throw postingsError;
 
-    const usedIds = new Set((postings || []).map((p) => p.source_request_id));
+    const usedIds = new Set((postings || []).map((p) => String(p.source_request_id)));
 
     const shaped = (requests || []).map((r) => ({
       ...r,
-      already_posted: usedIds.has(r.id),
+      already_posted: usedIds.has(String(r.id)),
     }));
 
     // ✅ Filter out already posted requests so dropdown only shows unposted approved requests
@@ -446,7 +453,7 @@ router.post('/', async (req, res) => {
         benefits: benefits?.trim() || null,
         status: status || 'Active',
         closing_date: closing_date || null,
-        source_request_id: source_request_id || null,
+        source_request_id: source_request_id ? parseInt(source_request_id, 10) : null,
         created_by: userId || null,
       })
       .select()
@@ -560,7 +567,7 @@ router.put('/:id', async (req, res) => {
         benefits: benefits?.trim() || null,
         status,
         closing_date: closing_date || null,
-        source_request_id: source_request_id || null,
+        source_request_id: source_request_id ? parseInt(source_request_id, 10) : null,
       })
       .eq('id', id)
       .select()
