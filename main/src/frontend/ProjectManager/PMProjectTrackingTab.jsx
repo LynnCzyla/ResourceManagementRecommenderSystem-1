@@ -12,9 +12,12 @@ import { getEmployees, getTasks, createTask, updateTask, deleteTask, getProjects
 // team lists or "assign to" dropdowns.
 function mergeEmployeesFromTasks(employeesList, tasksList) {
   const map = new Map();
-  (employeesList || []).forEach(emp => map.set(emp.id, emp));
+  (employeesList || []).forEach(emp => {
+    if (emp.status && emp.status !== 'Active') return;
+    map.set(emp.id, emp);
+  });
   (tasksList || []).forEach(t => {
-    if (!t.employeeId || map.has(t.employeeId)) return;
+    if (!t.employeeId || t.employeeDeactivated || map.has(t.employeeId)) return;
     const name = t.employeeName || 'Unnamed Employee';
     map.set(t.employeeId, {
       id: t.employeeId,
@@ -63,6 +66,7 @@ export default function PMProjectTrackingTab({ user }) {
   const [taskToEdit, setTaskToEdit] = useState(null);
   const [isRedoMode, setIsRedoMode] = useState(false);
   const [deletingTask, setDeletingTask] = useState(false);
+  const [submittingTask, setSubmittingTask] = useState(false);
   // Employees assigned to the SPECIFIC project a task belongs to — used only
   // for the Edit/Redo Assignment modal, so the dropdown is correct even when
   // the header filter is set to "All Projects" (where `employees` is scoped
@@ -159,15 +163,22 @@ export default function PMProjectTrackingTab({ user }) {
       });
       setCreateModalEmployees(employees);
     } else {
+      const defaultProj = activeProjects.length > 0 ? activeProjects[0] : null;
       setNewTaskData({
         title: '',
         description: '',
         employeeId: '',
         priority: 'Medium',
         dueDate: '',
-        projectId: ''
+        projectId: defaultProj ? defaultProj.id : ''
       });
-      setCreateModalEmployees([]);
+      if (defaultProj) {
+        getEmployees(user?.id, undefined, defaultProj.id)
+          .then(data => setCreateModalEmployees(data || []))
+          .catch(() => setCreateModalEmployees([]));
+      } else {
+        setCreateModalEmployees([]);
+      }
     }
     setShowCreateTaskModal(true);
   };
@@ -187,6 +198,7 @@ export default function PMProjectTrackingTab({ user }) {
 
   const handleCreateTask = async (e) => {
     e.preventDefault();
+    if (submittingTask) return; // prevent double-click
     const targetProjectId = selectedProjectId !== 'all' ? selectedProjectId : newTaskData.projectId;
     if (!targetProjectId) {
       setFormError('Please select a project');
@@ -195,6 +207,7 @@ export default function PMProjectTrackingTab({ user }) {
     if (!newTaskData.title || !newTaskData.employeeId) return;
 
     setFormError('');
+    setSubmittingTask(true);
     try {
       await createTask({
         projectId: targetProjectId,
@@ -211,6 +224,8 @@ export default function PMProjectTrackingTab({ user }) {
     } catch (err) {
       console.error('Failed to create task:', err);
       setFormError(err.message || 'Failed to create task');
+    } finally {
+      setSubmittingTask(false);
     }
   };
 
@@ -397,8 +412,8 @@ export default function PMProjectTrackingTab({ user }) {
   // (even if, for some reason, they're missing from that project fetch) so
   // the PM can see/keep the current assignee and not just replacements.
   const getModalAssignableEmployees = () => {
-    const list = getModalProjectEmployees();
-    if (taskToEdit && taskToEdit.employeeId && !list.some(e => e.id === taskToEdit.employeeId)) {
+    const list = getModalProjectEmployees().filter(e => !e.employeeDeactivated && (!e.status || e.status === 'Active'));
+    if (taskToEdit && taskToEdit.employeeId && !taskToEdit.employeeDeactivated && !list.some(e => e.id === taskToEdit.employeeId)) {
       list.unshift({
         id: taskToEdit.employeeId,
         name: taskToEdit.employeeName || 'Currently assigned',
@@ -456,7 +471,7 @@ export default function PMProjectTrackingTab({ user }) {
 
   // Group projects into active and completed
   const activeProjects = React.useMemo(() => 
-    projects.filter(p => !['Completed', 'Archived'].includes(p.status)),
+    projects.filter(p => !['Completed', 'Archived', 'Cancelled', 'Cancelled-Hidden'].includes(p.status)),
     [projects]
   );
   const completedProjects = React.useMemo(() => 
@@ -479,12 +494,14 @@ export default function PMProjectTrackingTab({ user }) {
   // assignee never disappears from "All Team Members" just because that
   // row doesn't exist (see mergeEmployeesFromTasks above).
   const currentProjectEmployees = mergeEmployeesFromTasks(employees, currentProjectTasks);
-  const selectedProject = projects.find(p => p.id === selectedProjectId);
+  const selectedProject = projects.find(p => String(p.id) === String(selectedProjectId));
   // When viewing "All Projects" the dropdown has no single selected project,
   // but each task still belongs to a real project — use that for the deadline.
-  const taskProject = taskToEdit ? projects.find(p => p.id === taskToEdit.projectId) : null;
+  const taskProject = taskToEdit ? projects.find(p => String(p.id) === String(taskToEdit.projectId)) : null;
   const modalProject = selectedProject || taskProject;
   const modalAssignableEmployees = showEditTaskModal && taskToEdit ? getModalAssignableEmployees() : [];
+  // For the Create Task modal: when in "All Projects" mode, use the project selected in the dropdown
+  const createModalProject = (newTaskData.projectId ? projects.find(p => String(p.id) === String(newTaskData.projectId)) : null) || selectedProject;
 
   const filteredActiveProjects = activeProjects.filter(p => 
     p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
@@ -494,13 +511,15 @@ export default function PMProjectTrackingTab({ user }) {
     p.name.toLowerCase().includes(completedSearchQuery.toLowerCase())
   );
 
-  const deadlineUrgency = getDeadlineUrgency(selectedProject?.endDate);
-  const deadlineBadgeStyle = {
-    ...styles.deadlineBadge,
-    ...(deadlineUrgency === 'overdue' ? styles.deadlineBadgeOverdue :
-        deadlineUrgency === 'urgent' ? styles.deadlineBadgeUrgent :
-        deadlineUrgency === 'soon' ? styles.deadlineBadgeSoon :
-        styles.deadlineBadgeNeutral),
+  const getDeadlineBadgeStyle = (endDate) => {
+    const urgency = getDeadlineUrgency(endDate);
+    return {
+      ...styles.deadlineBadge,
+      ...(urgency === 'overdue' ? styles.deadlineBadgeOverdue :
+          urgency === 'urgent' ? styles.deadlineBadgeUrgent :
+          urgency === 'soon' ? styles.deadlineBadgeSoon :
+          styles.deadlineBadgeNeutral),
+    };
   };
 
   return (
@@ -822,7 +841,7 @@ export default function PMProjectTrackingTab({ user }) {
                               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                               <circle cx="12" cy="7" r="4"></circle>
                             </svg>
-                            {task.employeeName.split(' ')[0]}
+                            {(task.employeeName || 'Unassigned').split(' ')[0]}
                           </span>
                           <span style={{ ...styles.dueDate, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle' }}>
@@ -869,16 +888,16 @@ export default function PMProjectTrackingTab({ user }) {
             <div style={styles.modalHeader}>
               <div style={styles.modalHeaderLeft}>
                 <h2 style={{ margin: 0, fontSize: 20 }}>Assign Daily Task</h2>
-                {selectedProject && (
-                  <span style={deadlineBadgeStyle}>
+                {createModalProject && (
+                  <span style={getDeadlineBadgeStyle(createModalProject.endDate)}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                       <line x1="16" y1="2" x2="16" y2="6"></line>
                       <line x1="8" y1="2" x2="8" y2="6"></line>
                       <line x1="3" y1="10" x2="21" y2="10"></line>
                     </svg>
-                    {selectedProject.endDate
-                      ? `Project Deadline: ${formatDeadline(selectedProject.endDate)}`
+                    {createModalProject.endDate
+                      ? `Project Deadline: ${formatDeadline(createModalProject.endDate)}`
                       : 'No deadline set'}
                   </span>
                 )}
@@ -953,7 +972,7 @@ export default function PMProjectTrackingTab({ user }) {
                   required
                 >
                   <option value="">-- Choose Resource --</option>
-                  {(selectedProjectId !== 'all' ? employees : createModalEmployees).map(emp => (
+                  {(selectedProjectId !== 'all' ? employees : createModalEmployees).filter(emp => !emp.status || emp.status === 'Active').map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
                   ))}
                 </select>
@@ -980,7 +999,7 @@ export default function PMProjectTrackingTab({ user }) {
                     value={newTaskData.dueDate} 
                     onChange={(e) => setNewTaskData({ ...newTaskData, dueDate: e.target.value })} 
                     style={styles.modalInput} 
-                    max={selectedProject?.endDate ? String(selectedProject.endDate).slice(0, 10) : undefined}
+                    max={createModalProject?.endDate ? String(createModalProject.endDate).slice(0, 10) : undefined}
                     required
                   />
                 </div>
@@ -988,7 +1007,9 @@ export default function PMProjectTrackingTab({ user }) {
 
               <div style={styles.modalActions}>
                 <button type="button" onClick={handleCloseCreateModal} style={styles.cancelBtn}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Assign Task</button>
+                <button type="submit" style={styles.saveBtn} disabled={submittingTask}>
+                  {submittingTask ? 'Assigning...' : 'Assign Task'}
+                </button>
               </div>
             </form>
           </div>
@@ -1006,7 +1027,7 @@ export default function PMProjectTrackingTab({ user }) {
                   {isRedoMode ? 'Redo Task' : 'Edit Assignment'}
                 </h2>
                 {modalProject && (
-                  <span style={deadlineBadgeStyle}>
+                  <span style={getDeadlineBadgeStyle(modalProject.endDate)}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                       <line x1="16" y1="2" x2="16" y2="6"></line>
