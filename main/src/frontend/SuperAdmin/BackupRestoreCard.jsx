@@ -260,9 +260,9 @@ export default function BackupRestoreCard() {
             style={styles.select}
             disabled={loadingBranches || !!busy}
           >
-            <option value="all">🌐 All Branches (full system backup)</option>
+            <option value="all" style={styles.option}>🌐 All Branches (full system backup)</option>
             {branches.map((b) => (
-              <option key={b.id} value={b.id}>
+              <option key={b.id} value={b.id} style={styles.option}>
                 🏢 {b.name}
               </option>
             ))}
@@ -377,9 +377,13 @@ const styles = {
   warn: { fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.4, marginBottom: '12px' },
   select: {
     display: 'block', width: '100%', maxWidth: '380px', padding: '10px 12px', marginBottom: '14px',
-    borderRadius: '6px', border: '1px solid var(--color-border)', fontSize: '13px',
-    background: 'var(--color-bg-secondary, #fff)', color: 'var(--color-text-primary)',
+    borderRadius: '6px', border: '1px solid var(--color-border, #cbd5e1)', fontSize: '13px',
+    backgroundColor: '#ffffff', color: '#000000',
     cursor: 'pointer',
+  },
+  option: {
+    backgroundColor: '#ffffff',
+    color: '#000000',
   },
   input: {
     display: 'block', width: '100%', maxWidth: '280px', padding: '10px 12px', marginBottom: '14px',
