@@ -332,7 +332,7 @@ export default function DashboardTab({ setActiveTab }) {
 
       {/* Quick Action Cards */}
       <div style={styles.quickActionsGrid}>
-        <div onClick={() => handleQuickAction('admin-management')} className="glass-card" style={styles.actionCard}>
+        <div onClick={() => handleQuickAction('admin-management')} className="glass-card" style={styles.actionCard} title="Create, update, or revoke administrator accounts across branches">
           <div style={{ ...styles.iconBg, background: 'rgba(34, 197, 94, 0.15)', color: 'var(--color-primary)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -347,7 +347,7 @@ export default function DashboardTab({ setActiveTab }) {
           </div>
         </div>
 
-        <div onClick={() => handleQuickAction('branch-management')} className="glass-card" style={styles.actionCard}>
+        <div onClick={() => handleQuickAction('branch-management')} className="glass-card" style={styles.actionCard} title="Register and configure company branch locations and settings">
           <div style={{ ...styles.iconBg, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 21h18"></path>
@@ -361,7 +361,7 @@ export default function DashboardTab({ setActiveTab }) {
           </div>
         </div>
 
-        <div onClick={() => handleQuickAction('account-management')} className="glass-card" style={styles.actionCard}>
+        <div onClick={() => handleQuickAction('account-management')} className="glass-card" style={styles.actionCard} title="Audit and alter general user roles and permissions">
           <div style={{ ...styles.iconBg, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -382,7 +382,7 @@ export default function DashboardTab({ setActiveTab }) {
           <p style={styles.chartSubtitle}>Consolidated counts of active entities in the system</p>
 
           <div style={styles.statsList}>
-            <div style={styles.statItem}>
+            <div style={styles.statItem} title="Total registered branch administrators in the platform">
               <div style={{ ...styles.statIcon, background: 'rgba(34, 197, 94, 0.15)', color: 'var(--color-primary)' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -395,7 +395,7 @@ export default function DashboardTab({ setActiveTab }) {
               </div>
             </div>
 
-            <div style={styles.statItem}>
+            <div style={styles.statItem} title="Total operational company branch offices">
               <div style={{ ...styles.statIcon, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 21h18"></path>
@@ -413,7 +413,7 @@ export default function DashboardTab({ setActiveTab }) {
               </div>
             </div>
 
-            <div style={styles.statItem}>
+            <div style={styles.statItem} title="Total user accounts across all roles in all branches">
               <div style={{ ...styles.statIcon, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -426,7 +426,7 @@ export default function DashboardTab({ setActiveTab }) {
               </div>
             </div>
 
-            <div style={styles.statItem}>
+            <div style={styles.statItem} title="Total historical events recorded in system audit logs">
               <div style={{ ...styles.statIcon, background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -447,25 +447,25 @@ export default function DashboardTab({ setActiveTab }) {
           <p style={styles.chartSubtitle}>Key operational indicators and admin activity overview</p>
 
           <div style={styles.sessionMonitorWrapper}>
-            <div style={styles.sessionRow}>
+            <div style={styles.sessionRow} title="Operational vs total registered branches">
               <span style={styles.sessionLabel}>Branch Status</span>
               <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
                 {loading ? '—' : `${stats.activeBranches} Active / ${stats.totalBranches} Total`}
               </span>
             </div>
-            <div style={styles.sessionRow}>
+            <div style={styles.sessionRow} title="Active vs total administrator accounts">
               <span style={styles.sessionLabel}>Admin Status</span>
               <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
                 {loading ? '—' : `${stats.activeAdmins} Active / ${stats.totalAdmins} Total`}
               </span>
             </div>
-            <div style={styles.sessionRow}>
+            <div style={styles.sessionRow} title="Active vs inactive accounts across the organization">
               <span style={styles.sessionLabel}>Account Breakdown</span>
               <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
                 {loading ? '—' : `${stats.activeAccounts} Active / ${stats.inactiveAccounts} Inactive`}
               </span>
             </div>
-            <div style={styles.sessionRow}>
+            <div style={styles.sessionRow} title="Accounts locked due to security policy or excessive failed logins">
               <span style={styles.sessionLabel}>Locked Accounts</span>
               <span style={{ ...styles.sessionValueBadge, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
                 {loading ? '—' : stats.lockedAccounts}
@@ -509,7 +509,7 @@ export default function DashboardTab({ setActiveTab }) {
 
               <div style={styles.legendContainer}>
                 {roleBreakdown.map((role, idx) => (
-                  <div key={idx} style={styles.legendItem}>
+                  <div key={idx} style={styles.legendItem} title={`${role.count} accounts (${Math.round(role.percentage || (role.count / totalAccounts * 100))}%) with role ${role.role}`}>
                     <div style={{ ...styles.legendDot, backgroundColor: role.color || '#6b7280' }}></div>
                     <div style={styles.legendTextContainer}>
                       <span style={styles.legendLabel}>{role.role}</span>
@@ -710,6 +710,7 @@ const styles = {
     fontSize: '18px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+    cursor: 'default',
   },
   sessionMonitorWrapper: {
     display: 'flex',
@@ -736,6 +737,7 @@ const styles = {
     borderRadius: '4px',
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
     color: '#3b82f6',
+    cursor: 'default',
   },
   donutContainer: {
     display: 'flex',
