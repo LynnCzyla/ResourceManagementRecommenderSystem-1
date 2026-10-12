@@ -5,6 +5,7 @@ import hrClient from './Hrclient';
 const mapRequest = (row) => ({
   id: row.id,
   requestId: `RR-${row.id}`,
+  requestTitle: row.request_title || '—',
   project: `${row.position_title || ''}${row.department_name ? ` (${row.department_name})` : ''}`,
   requestedBy: row.requester
     ? (`${row.requester.first_name || ''} ${row.requester.last_name || ''}`.trim() || row.requester.employee_id)
@@ -164,6 +165,7 @@ export default function HRResourceRequestsTab() {
   const filteredRequests = resourceRequests.filter(req => {
     const matchesSearch =
       req.requestId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      req.requestTitle?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       req.project?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       req.requestedBy?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
@@ -213,6 +215,7 @@ export default function HRResourceRequestsTab() {
             <thead>
               <tr style={styles.tableHeader}>
                 <th style={styles.th}>Request ID</th>
+                <th style={styles.th}>Request Title</th>
                 <th style={styles.th}>Position / Department</th>
                 <th style={styles.th}>Requested By</th>
                 <th style={styles.th}>Request Date</th>
@@ -224,11 +227,12 @@ export default function HRResourceRequestsTab() {
             </thead>
             <tbody>
               {filteredRequests.length === 0 ? (
-                <tr><td colSpan="8" style={styles.emptyRow}>No resource requests found.</td></tr>
+                <tr><td colSpan="9" style={styles.emptyRow}>No resource requests found.</td></tr>
               ) : (
                 filteredRequests.map(req => (
                   <tr key={req.id} style={styles.tableRow}>
                     <td style={{ ...styles.td, fontWeight: '600', color: 'var(--color-primary)' }}>{req.requestId}</td>
+                    <td style={{ ...styles.td, fontWeight: '500' }}>{req.requestTitle}</td>
                     <td style={styles.td}>{req.project}</td>
                     <td style={styles.td}>{req.requestedBy}</td>
                     <td style={styles.td}>{req.requestDate}</td>
@@ -302,6 +306,14 @@ export default function HRResourceRequestsTab() {
                     <span style={styles.detailValue}>{selectedRequest.requestId}</span>
                   </div>
                   <div style={styles.detailItem}>
+                    <span style={styles.detailLabel}>Request Date:</span>
+                    <span style={styles.detailValue}>{selectedRequest.requestDate}</span>
+                  </div>
+                  <div style={{ ...styles.detailItem, gridColumn: 'span 2' }}>
+                    <span style={styles.detailLabel}>Request Title:</span>
+                    <span style={{ ...styles.detailValue, fontWeight: '600', fontSize: '15px' }}>{selectedRequest.requestTitle}</span>
+                  </div>
+                  <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Position / Department:</span>
                     <span style={styles.detailValue}>{selectedRequest.project}</span>
                   </div>
@@ -310,15 +322,13 @@ export default function HRResourceRequestsTab() {
                     <span style={styles.detailValue}>{selectedRequest.requestedBy}</span>
                   </div>
                   <div style={styles.detailItem}>
-                    <span style={styles.detailLabel}>Request Date:</span>
-                    <span style={styles.detailValue}>{selectedRequest.requestDate}</span>
-                  </div>
-                  <div style={styles.detailItem}>
                     <span style={styles.detailLabel}>Priority:</span>
                     <span style={{
                       ...styles.detailValue,
                       ...styles.priorityBadge,
-                      ...getPriorityStyle(selectedRequest.priority)
+                      ...getPriorityStyle(selectedRequest.priority),
+                      display: 'inline-block',
+                      width: 'fit-content'
                     }}>
                       {selectedRequest.priority}
                     </span>
@@ -328,7 +338,9 @@ export default function HRResourceRequestsTab() {
                     <span style={{
                       ...styles.detailValue,
                       ...styles.statusBadge,
-                      ...getStatusColorStyle(selectedRequest.status)
+                      ...getStatusColorStyle(selectedRequest.status),
+                      display: 'inline-block',
+                      width: 'fit-content'
                     }}>
                       {selectedRequest.status}
                     </span>
