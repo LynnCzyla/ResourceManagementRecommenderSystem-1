@@ -189,7 +189,7 @@ router.get('/', async (req, res) => {
     if (assignedProfileIds.length > 0) {
       const { data: assignedProfiles, error: profileErr } = await supabase
         .from('profiles')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, status')
         .in('id', assignedProfileIds);
       
       if (!profileErr && assignedProfiles) {
@@ -295,7 +295,12 @@ router.get('/', async (req, res) => {
       const relevantAssignments = proj.status === 'Completed'
         ? projectAssignments
         : projectAssignments.filter(a => a.status === 'Assigned');
-      const assignedEmployees = relevantAssignments.map((a) => {
+      const assignedEmployees = relevantAssignments
+        .filter(a => {
+          const profile = profileById.get(a.profile_id);
+          return profile && (!profile.status || profile.status === 'Active');
+        })
+        .map((a) => {
         const profile = profileById.get(a.profile_id);
         return {
           assignmentId: a.id,
@@ -435,7 +440,8 @@ router.get('/:id', async (req, res) => {
             first_name,
             last_name,
             avatar_url,
-            branch_id
+            branch_id,
+            status
           )
         )
       `)
@@ -482,12 +488,14 @@ router.get('/:id', async (req, res) => {
       project: {
         ...project,
         createdByName: createdByName,
-        assignedEmployees: (project.project_assignments || []).map((a) => ({
-          employeeId: a.profile_id,
-          employeeName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : 'Unknown',
-          role: a.assigned_role,
-          avatar: a.profiles?.avatar_url || null,
-        }))
+        assignedEmployees: (project.project_assignments || [])
+          .filter(a => a.profiles && (!a.profiles.status || a.profiles.status === 'Active'))
+          .map((a) => ({
+            employeeId: a.profile_id,
+            employeeName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : 'Unknown',
+            role: a.assigned_role,
+            avatar: a.profiles?.avatar_url || null,
+          }))
       }
     });
   } catch (error) {

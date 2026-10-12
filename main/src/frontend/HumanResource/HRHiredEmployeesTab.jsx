@@ -416,27 +416,24 @@ export default function HRHiredEmployeesTab() {
         <p style={styles.subtitle}>Manage hired applicants, job offer emails, onboarding, and archived records</p>
       </div>
 
-      {/* 1. Summary Cards (3 Equal Sized Cards, each with a tooltip explaining what it means) */}
+      {/* 1. Summary Cards (3 Equal Sized Cards, tooltip appears when mouse points to card/title/number) */}
       <div style={styles.summaryGrid}>
-        <div className="glass-card" style={styles.summaryCard}>
+        <div className="glass-card" style={styles.summaryCard} title={TAB_META.Hired.tooltip}>
           <div style={styles.summaryValue}>{hiredCount}</div>
           <div style={styles.summaryLabelRow}>
             <span style={styles.summaryLabel}>{TAB_META.Hired.label}</span>
-            <span style={styles.tooltipIcon} title={TAB_META.Hired.tooltip}>ⓘ</span>
           </div>
         </div>
-        <div className="glass-card" style={styles.summaryCard}>
+        <div className="glass-card" style={styles.summaryCard} title={TAB_META.Onboarding.tooltip}>
           <div style={styles.summaryValue}>{employeeCount}</div>
           <div style={styles.summaryLabelRow}>
             <span style={styles.summaryLabel}>{TAB_META.Onboarding.label}</span>
-            <span style={styles.tooltipIcon} title={TAB_META.Onboarding.tooltip}>ⓘ</span>
           </div>
         </div>
-        <div className="glass-card" style={styles.summaryCard}>
+        <div className="glass-card" style={styles.summaryCard} title={TAB_META.Archived.tooltip}>
           <div style={styles.summaryValue}>{archivedCount}</div>
           <div style={styles.summaryLabelRow}>
             <span style={styles.summaryLabel}>{TAB_META.Archived.label}</span>
-            <span style={styles.tooltipIcon} title={TAB_META.Archived.tooltip}>ⓘ</span>
           </div>
         </div>
       </div>
@@ -1039,6 +1036,7 @@ const styles = {
     fontSize: '34px',
     fontWeight: '800',
     color: 'var(--color-primary)',
+    cursor: 'default',
   },
   summaryLabelRow: {
     display: 'flex',

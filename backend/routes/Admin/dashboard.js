@@ -47,9 +47,10 @@ router.get('/dashboard/stats', async (req, res) => {
       .select('role');
 
     // ✅ Filter by branch for non-super admins
-    if (!req.user.is_super_admin) {
+    if (!req.user.is_super_admin && req.user.branch_id) {
       usersQuery = usersQuery.eq('branch_id', req.user.branch_id);
       roleQuery = roleQuery.eq('branch_id', req.user.branch_id);
+      deptQuery = deptQuery.eq('branch_id', req.user.branch_id);
     }
 
     const [usersResult, deptResult, roleResult] = await Promise.all([

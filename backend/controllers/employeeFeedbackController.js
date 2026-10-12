@@ -51,6 +51,13 @@ function average(nums) {
   return Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10;
 }
 
+// 🔒 Privacy Sanitizer: Strips client overall project ratings (e.g. [Rating: 5/5])
+// so that employees and PMs can NEVER see project-level ratings.
+function sanitizeProjectRating(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text.replace(/^\[Rating:\s*[1-5](?:\.\d+)?\/5\]\s*/i, '').trim();
+}
+
 /// GET /api/employee/feedback
 const getMyFeedback = async (req, res) => {
   try {
@@ -134,7 +141,7 @@ const getMyFeedback = async (req, res) => {
         areasForImprovement: r.areas_for_improvement || '',
         wouldRecommend: isClient && r.feedback_response ? r.feedback_response.would_recommend : null,
         feedbackSource: r.feedback_source,
-        detailFeedback: detailFeedback,
+        detailFeedback: sanitizeProjectRating(detailFeedback),
       };
     });
 
@@ -232,7 +239,7 @@ const getPmClientFeedback = async (req, res) => {
       areasForImprovement: r.areas_for_improvement || '',
       wouldRecommend: r.feedback_response ? r.feedback_response.would_recommend : null,
       feedbackSource: r.feedback_source,
-      detailFeedback: r.client_feedback || r.deliverables_feedback || '',
+      detailFeedback: sanitizeProjectRating(r.client_feedback || r.deliverables_feedback || ''),
     }));
 
     feedback.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
@@ -309,7 +316,7 @@ const getClientFeedbackForEmployee = async (req, res) => {
         strengths: r.strengths || '',
         areasForImprovement: r.areas_for_improvement || '',
         deliverablesFeedback: r.deliverables_feedback || '',
-        projectFeedback: r.project_feedback || '',
+        projectFeedback: sanitizeProjectRating(r.project_feedback),
         additionalComments: r.additional_comments || '',
         wouldRecommend: typeof r.would_recommend === 'boolean' ? r.would_recommend : null,
       };
