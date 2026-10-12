@@ -281,7 +281,7 @@ export default function HRJobPostingsTab() {
     benefits: formData.benefits,
     status: formData.status,
     closing_date: formData.closingDate || null,
-    source_request_id: formData.sourceRequestId || null,
+    source_request_id: formData.sourceRequestId ? Number(formData.sourceRequestId) : null,
     quantity: formData.quantity || 1,
   });
 
@@ -434,7 +434,15 @@ export default function HRJobPostingsTab() {
     return matchesSearch && matchesStatus;
   });
 
-  const availableRequests = resourceRequests.filter((r) => !r.alreadyPosted);
+  const usedRequestIds = new Set(
+    jobPostings
+      .filter((p) => p.sourceRequestId && (!showEditModal || String(p.id) !== String(selectedPosting?.id)))
+      .map((p) => String(p.sourceRequestId))
+  );
+
+  const availableRequests = resourceRequests.filter(
+    (r) => (!r.alreadyPosted && !usedRequestIds.has(String(r.id))) || (showEditModal && String(r.id) === String(formData.sourceRequestId))
+  );
 
   const renderResourceRequestField = () => (
     <div style={styles.formGroup}>
@@ -460,11 +468,14 @@ export default function HRJobPostingsTab() {
         style={styles.formInput}
       >
         <option value="">— None, start blank —</option>
-        {availableRequests.map((r) => (
-          <option key={r.id} value={r.id}>
-            {r.positionTitle || r.requestTitle} ({r.quantity || 1}x) • {r.departmentName || ''}
-          </option>
-        ))}
+        {availableRequests.map((r) => {
+          const reqTitle = r.requestTitle ? `${r.requestTitle} — ` : '';
+          return (
+            <option key={r.id} value={r.id}>
+              {reqTitle}{r.positionTitle || 'Resource'} ({r.quantity || 1}x) • {r.departmentName || 'General'}
+            </option>
+          );
+        })}
         {availableRequests.length === 0 && (
           <option value="" disabled>— No unposted approved requests available —</option>
         )}

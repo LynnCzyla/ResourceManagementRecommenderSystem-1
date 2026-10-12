@@ -22,15 +22,15 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
   const [userActivityData, setUserActivityData] = useState([]);
   const [activityFilter, setActivityFilter] = useState('30'); // '7', '14', '30', '60', '90'
   const [loadingActivity, setLoadingActivity] = useState(false);
+  const [hoveredBarIndex, setHoveredBarIndex] = useState(null);
 
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionDuration, setSessionDuration] = useState('00:00');
 
-  // ── Department filter (Total Departments stat) ──────────────────────────────
+  // ── Departments state & modal ──────────────────────────────────────────────
   const [departments, setDepartments] = useState([]);
-  const [selectedDeptId, setSelectedDeptId] = useState('all');
-  const [deptPositionCount, setDeptPositionCount] = useState(null);
-  const [loadingDeptFilter, setLoadingDeptFilter] = useState(false);
+  const [showDepartmentsModal, setShowDepartmentsModal] = useState(false);
+  const [deptSearchTerm, setDeptSearchTerm] = useState('');
 
   useEffect(() => {
     const startTime = Date.now();
@@ -148,11 +148,33 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
         const token = localStorage.getItem('token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        const res = await fetch(`${API_BASE_URL}/api/admin/departments`, { headers });
-        const json = await res.json();
+        const [deptRes, posRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/admin/departments`, { headers }),
+          fetch(`${API_BASE_URL}/api/admin/positions`, { headers }),
+        ]);
+        const deptJson = await deptRes.json();
+        const posJson = await posRes.json();
 
-        if (json.success) {
-          setDepartments(json.data || []);
+        if (deptJson.success) {
+          const deptList = deptJson.data || [];
+          const positionsList = posJson.success ? (posJson.data || []) : [];
+
+          const deptsWithPositions = deptList.map((dept) => {
+            const deptPositions = positionsList.filter(
+              (p) => String(p.department_id) === String(dept.id)
+            );
+            return {
+              ...dept,
+              positions: deptPositions,
+              positionsCount: deptPositions.length,
+            };
+          });
+
+          setDepartments(deptsWithPositions);
+          setStatusInfo((prev) => ({
+            ...prev,
+            totalDepartments: deptList.length,
+          }));
         }
       } catch (err) {
         console.error('Error fetching departments:', err);
@@ -165,39 +187,9 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
     fetchDepartments();
   }, []);
 
-  // ── Handle department filter change ─────────────────────────────────────────
-  const handleDepartmentFilterChange = async (deptId) => {
-    setSelectedDeptId(deptId);
-
-    if (deptId === 'all') {
-      setDeptPositionCount(null);
-      return;
-    }
-
-    try {
-      setLoadingDeptFilter(true);
-      const token = localStorage.getItem('token');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-      const res = await fetch(`${API_BASE_URL}/api/admin/positions?dept_id=${deptId}`, { headers });
-      const json = await res.json();
-
-      if (json.success) {
-        setDeptPositionCount((json.data || []).length);
-      } else {
-        setDeptPositionCount(null);
-      }
-    } catch (err) {
-      console.error('Error fetching positions for department:', err);
-      setDeptPositionCount(null);
-    } finally {
-      setLoadingDeptFilter(false);
-    }
-  };
-
-  const selectedDeptName = selectedDeptId === 'all'
-    ? null
-    : departments.find((d) => String(d.id) === String(selectedDeptId))?.department_name || null;
+  const filteredDepartments = departments.filter((dept) =>
+    (dept.department_name || '').toLowerCase().includes(deptSearchTerm.toLowerCase())
+  );
 
   // Build cumulative stroke-dasharray/dashoffset for each donut segment.
   let cumulative = 0;
@@ -269,7 +261,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
       </div>
 
       <div style={styles.quickActionsGrid}>
-        <div onClick={() => navigateTo('user-accounts', 'user')} className="glass-card" style={styles.actionCard}>
+        <div onClick={() => navigateTo('user-accounts', 'user')} className="glass-card" style={styles.actionCard} title="Register a new employee or staff user account">
           <div style={{ ...styles.iconBg, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-primary)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -283,7 +275,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
           </div>
         </div>
 
-        <div onClick={() => navigateTo('system-settings')} className="glass-card" style={styles.actionCard}>
+        <div onClick={() => navigateTo('departments')} className="glass-card" style={styles.actionCard} title="Manage branch departments and job positions">
           <div style={{ ...styles.iconBg, background: 'rgba(2, 132, 199, 0.15)', color: 'var(--color-accent)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="3"></circle>
@@ -291,7 +283,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
             </svg>
           </div>
           <div style={styles.actionTextContainer}>
-            <h3 style={styles.actionTitle}>Edit System Settings</h3>
+            <h3 style={styles.actionTitle}>Department and Position</h3>
           </div>
         </div>
       </div>
@@ -304,7 +296,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
           </p>
 
           <div style={styles.statusGrid}>
-            <div style={styles.statusItem}>
+            <div style={styles.statusItem} title="Operational status of branch services and database">
               <div style={{ ...styles.statusIcon, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-primary)' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -317,7 +309,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
               </div>
             </div>
 
-            <div style={styles.statusItem}>
+            <div style={styles.statusItem} title="Current release version of the platform">
               <div style={{ ...styles.statusIcon, background: 'rgba(2, 132, 199, 0.15)', color: 'var(--color-accent)' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10"></circle>
@@ -331,12 +323,18 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
               </div>
             </div>
 
-            <div style={{ ...styles.statusItem, alignItems: 'flex-start' }}>
+            <div style={{ ...styles.statusItem, alignItems: 'flex-start' }} title={`Total registered departments in this branch (${statusInfo.totalDepartments})`}>
               <div style={{ ...styles.statusIcon, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                {/* Organization / Building Icon */}
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                  <path d="M9 22v-4h6v4"></path>
+                  <path d="M8 6h.01"></path>
+                  <path d="M16 6h.01"></path>
+                  <path d="M8 10h.01"></path>
+                  <path d="M16 10h.01"></path>
+                  <path d="M8 14h.01"></path>
+                  <path d="M16 14h.01"></path>
                 </svg>
               </div>
               <div style={{ width: '100%' }}>
@@ -344,31 +342,34 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                   Total Departments {branchInfo ? `(${branchInfo.name})` : ''}
                 </div>
                 <div style={styles.statusValue}>{statusInfo.totalDepartments}</div>
-
-                <select
-                  value={selectedDeptId}
-                  onChange={(e) => handleDepartmentFilterChange(e.target.value)}
-                  style={styles.deptFilterSelect}
-                >
-                  <option value="all">Filter by department…</option>
-                  {departments.map((dept) => (
-                    <option key={dept.id} value={dept.id}>
-                      {dept.department_name}
-                    </option>
-                  ))}
-                </select>
-
-                {selectedDeptId !== 'all' && (
-                  <div style={styles.deptFilterResult}>
-                    {loadingDeptFilter
-                      ? 'Loading…'
-                      : `${deptPositionCount ?? 0} position${deptPositionCount === 1 ? '' : 's'} in ${selectedDeptName || 'this department'}`}
-                  </div>
-                )}
+                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                  <button
+                    onClick={() => setShowDepartmentsModal(true)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#a78bfa',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      padding: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    Inspect all {departments.length} departments
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div style={styles.statusItem}>
+            <div style={styles.statusItem} title="Total user accounts registered under this branch">
               <div style={{ ...styles.statusIcon, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -414,7 +415,7 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                 <span style={styles.legendCount}>No role data yet.</span>
               )}
               {userRolesData.map((role, idx) => (
-                <div key={idx} style={styles.legendItem}>
+                <div key={idx} style={styles.legendItem} title={`${role.count} accounts (${role.percentage}%) assigned to ${role.label}`}>
                   <div style={{ ...styles.legendDot, backgroundColor: role.color }}></div>
                   <div style={styles.legendTextContainer}>
                     <span style={styles.legendLabel}>{role.label}</span>
@@ -505,19 +506,111 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                 const height = (day.count / maxActivityValue) * 100;
                 const date = new Date(day.date);
                 const dayLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const fullDateLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
                 const isWeekend = date.getDay() === 0 || date.getDay() === 6;
                 const isToday = date.toDateString() === new Date().toDateString();
+                const isHovered = hoveredBarIndex === index;
+                const dayTypeLabel = isToday ? 'Today' : (isWeekend ? 'Weekend' : 'Weekday');
+                const barColor = isToday ? 'var(--color-danger)' : (isWeekend ? 'var(--color-accent)' : 'var(--color-primary)');
                 
+                const isLeftSide = index < userActivityData.length / 2;
+                // Calculate vertical position adjacent to the bar height
+                const barTopOffset = 145 - (height * 1.45);
+                const tooltipTop = Math.max(10, Math.min(barTopOffset - 20, 85));
+
                 return (
-                  <div key={index} style={styles.barWrapper}>
+                  <div 
+                    key={index} 
+                    style={styles.barWrapper}
+                    onMouseEnter={() => setHoveredBarIndex(index)}
+                    onMouseLeave={() => setHoveredBarIndex(null)}
+                  >
+                    {/* Tooltip on hover - pops up LEFT or RIGHT to prevent any top slicing */}
+                    {isHovered && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: `${tooltipTop}px`,
+                          ...(isLeftSide
+                            ? { left: 'calc(100% + 8px)' }
+                            : { right: 'calc(100% + 8px)' }),
+                          backgroundColor: '#0f172a',
+                          color: '#ffffff',
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          whiteSpace: 'nowrap',
+                          zIndex: 9999,
+                          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.6), 0 0 1px rgba(255, 255, 255, 0.2)',
+                          border: '1px solid #334155',
+                          pointerEvents: 'none',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                          minWidth: '150px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '500' }}>
+                            {fullDateLabel}
+                          </span>
+                          <span style={{
+                            fontSize: '9px',
+                            fontWeight: '700',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: isToday ? 'rgba(239, 68, 68, 0.25)' : (isWeekend ? 'rgba(56, 189, 248, 0.25)' : 'rgba(16, 185, 129, 0.25)'),
+                            color: isToday ? '#f87171' : (isWeekend ? '#38bdf8' : '#34d399'),
+                            textTransform: 'uppercase',
+                          }}>
+                            {dayTypeLabel}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '2px' }}>
+                          <span style={{ fontSize: '17px', fontWeight: '800', color: '#ffffff' }}>
+                            {day.count}
+                          </span>
+                          <span style={{ fontSize: '11px', color: '#cbd5e1' }}>
+                            {day.count === 1 ? 'active user' : 'active users'}
+                          </span>
+                        </div>
+                        {/* Caret arrow pointing toward the bar */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '20px',
+                            ...(isLeftSide
+                              ? {
+                                  left: '-6px',
+                                  borderTop: '6px solid transparent',
+                                  borderBottom: '6px solid transparent',
+                                  borderRight: '6px solid #334155',
+                                }
+                              : {
+                                  right: '-6px',
+                                  borderTop: '6px solid transparent',
+                                  borderBottom: '6px solid transparent',
+                                  borderLeft: '6px solid #334155',
+                                }),
+                            width: 0,
+                            height: 0,
+                          }}
+                        />
+                      </div>
+                    )}
+
                     <div style={styles.barContainer}>
                       <div 
                         style={{
                           ...styles.bar,
                           height: `${Math.max(height, 5)}%`,
-                          backgroundColor: isToday ? 'var(--color-danger)' : (isWeekend ? 'var(--color-accent)' : 'var(--color-primary)'),
+                          backgroundColor: barColor,
                           opacity: day.count === 0 ? 0.3 : 1,
                           border: isToday ? '2px solid var(--color-danger)' : 'none',
+                          transform: isHovered ? 'scaleY(1.04)' : 'none',
+                          transformOrigin: 'bottom',
+                          filter: isHovered ? 'brightness(1.2)' : 'none',
+                          boxShadow: isHovered ? `0 0 12px ${barColor}` : 'none',
                         }}
                       >
                         <span style={styles.barValue}>{day.count}</span>
@@ -525,8 +618,8 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
                     </div>
                     <span style={{
                       ...styles.barLabel,
-                      fontWeight: isToday ? '800' : '600',
-                      color: isToday ? '#38bdf8' : '#ffffff',
+                      fontWeight: isToday ? '800' : (isHovered ? '700' : '600'),
+                      color: isToday ? '#38bdf8' : (isHovered ? '#67e8f9' : '#ffffff'),
                       textShadow: '0 1px 3px rgba(0, 0, 0, 0.8)',
                     }}>
                       {isToday ? 'Today' : dayLabel}
@@ -644,6 +737,187 @@ export default function DashboardTab({ setActiveTab, setUserMgmtOpen }) {
           </div>
         </div>
       </div>
+
+      {/* ── Departments Overview Modal ────────────────────────────────────── */}
+      {showDepartmentsModal && (
+        <div 
+          style={styles.modalOverlay}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowDepartmentsModal(false);
+          }}
+        >
+          <div style={styles.modalBox} className="glass-card">
+            <div style={styles.modalHeader}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ ...styles.statusIcon, width: '36px', height: '36px', background: 'rgba(139, 92, 246, 0.2)', color: '#8b5cf6' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+                    <path d="M9 22v-4h6v4"></path>
+                    <path d="M8 6h.01"></path>
+                    <path d="M16 6h.01"></path>
+                    <path d="M8 10h.01"></path>
+                    <path d="M16 10h.01"></path>
+                    <path d="M8 14h.01"></path>
+                    <path d="M16 14h.01"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={styles.modalTitle}>
+                    Departments Directory ({departments.length})
+                  </h3>
+                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                    {branchInfo ? `Branch: ${branchInfo.name}` : 'All Branch Departments'}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDepartmentsModal(false)}
+                style={styles.modalCloseBtn}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={styles.modalBody}>
+              {/* Search filter input */}
+              <div style={{ marginBottom: '14px' }}>
+                <input
+                  type="text"
+                  placeholder="Filter departments by name..."
+                  value={deptSearchTerm}
+                  onChange={(e) => setDeptSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg-root)',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              {/* Department list */}
+              <div style={{ maxHeight: '340px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+                {filteredDepartments.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                    No departments match "{deptSearchTerm}".
+                  </div>
+                ) : (
+                  filteredDepartments.map((dept, index) => (
+                    <div
+                      key={dept.id || index}
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--color-bg-root)',
+                        border: '1px solid var(--color-border)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            color: 'var(--color-text-muted)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                          }}>
+                            #{index + 1}
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
+                            {dept.department_name}
+                          </span>
+                        </div>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          padding: '3px 8px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(139, 92, 246, 0.15)',
+                          color: '#a78bfa',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {dept.positionsCount ?? 0} {(dept.positionsCount === 1) ? 'position' : 'positions'}
+                        </span>
+                      </div>
+
+                      {/* Position badges */}
+                      {dept.positions && dept.positions.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '2px' }}>
+                          {dept.positions.map((pos) => (
+                            <span
+                              key={pos.id}
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                                color: '#38bdf8',
+                                border: '1px solid rgba(56, 189, 248, 0.2)',
+                              }}
+                            >
+                              {pos.position_name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div style={styles.modalFooter}>
+              <button
+                onClick={() => {
+                  setShowDepartmentsModal(false);
+                  navigateTo('departments');
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  backgroundColor: 'var(--color-primary)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>Open Departments & Positions</span>
+                <span>→</span>
+              </button>
+              <button
+                onClick={() => setShowDepartmentsModal(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  backgroundColor: 'transparent',
+                  color: 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -912,29 +1186,67 @@ const styles = {
     fontSize: '16px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+    cursor: 'default',
   },
-  deptFilterSelect: {
-    marginTop: '8px',
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    padding: '16px',
+  },
+  modalBox: {
     width: '100%',
-    padding: '6px 8px',
-    borderRadius: '6px',
+    maxWidth: '560px',
+    backgroundColor: 'var(--color-bg-card)',
+    borderRadius: '12px',
     border: '1px solid var(--color-border)',
-    background: 'var(--color-bg-card)',
-    color: 'var(--color-text-primary)',
-    fontSize: '12px',
-    outline: 'none',
+    overflow: 'hidden',
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5)',
   },
-  deptFilterResult: {
-    marginTop: '6px',
-    fontSize: '12px',
-    fontWeight: '600',
-    color: 'var(--color-primary)',
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '18px 24px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  modalTitle: {
+    fontSize: '16px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    margin: 0,
+  },
+  modalCloseBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--color-text-muted)',
+    fontSize: '20px',
+    cursor: 'pointer',
+    lineHeight: 1,
+    padding: '4px 8px',
+    borderRadius: '4px',
+  },
+  modalBody: {
+    padding: '20px 24px',
+  },
+  modalFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px',
+    padding: '16px 24px',
+    borderTop: '1px solid var(--color-border)',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
   },
   // Chart styles
   chartContainer: {
-    padding: '16px 8px 32px',
+    padding: '48px 8px 32px',
     overflowX: 'auto',
-    minHeight: '290px',
+    minHeight: '310px',
   },
   loadingContainer: {
     display: 'flex',

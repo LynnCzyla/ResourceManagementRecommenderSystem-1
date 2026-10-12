@@ -286,15 +286,15 @@ export default function SuperAdminAuditLogsTab() {
       </div>
 
       <div style={styles.stats}>
-        <div style={styles.statCard}>
+        <div style={styles.statCard} title="Total audit events recorded in the system">
           <span style={styles.statLabel}>Total Logs</span>
           <span style={styles.statValue}>{stats.total}</span>
         </div>
-        <div style={styles.statCard}>
+        <div style={styles.statCard} title="Audit events recorded today">
           <span style={styles.statLabel}>Today</span>
           <span style={styles.statValue}>{stats.today}</span>
         </div>
-        <div style={styles.statCard}>
+        <div style={styles.statCard} title="Audit events recorded in the last 7 days">
           <span style={styles.statLabel}>This Week</span>
           <span style={styles.statValue}>{stats.week}</span>
         </div>
@@ -693,6 +693,7 @@ const styles = {
     fontSize: '24px',
     fontWeight: '700',
     color: 'var(--color-primary)',
+    cursor: 'default',
   },
   pagination: {
     display: 'flex',

@@ -72,9 +72,9 @@ export default function PMDashboardTab({ user }) {
         project_id: task.projectId,
         profile_id: task.employeeId,
         employeeName: task.employeeName || 'Unassigned',
-      }));
+      })).filter(task => task.status !== 'Cancelled'); // exclude cancelled tasks
       const employeeIdsFromTasks = new Set(
-        (employeesData || []).filter(employee => !employee.isMasked).map(employee => employee.id)
+        (employeesData || []).filter(employee => !employee.isMasked && (!employee.status || employee.status === 'Active')).map(employee => employee.id)
       );
       setTasks(tasksData || []);
       console.log(`📋 Found ${employeeIdsFromTasks.size} active team members for active projects`);
@@ -190,14 +190,16 @@ export default function PMDashboardTab({ user }) {
   const allEmployees = useMemo(() => {
     const map = new Map();
     
-    // Add all employees from state
-    employees.forEach(emp => {
+    // Add all employees from state (only active employees)
+    (employees || []).forEach(emp => {
+      if (emp.status && emp.status !== 'Active') return;
       map.set(emp.id, emp);
     });
 
     // Also add employees from tasks using profile_id
-    tasks.forEach(task => {
-      if (!task.profile_id) return; // Skip unassigned tasks
+    (tasks || []).forEach(task => {
+      if (!task.profile_id || task.employeeDeactivated) return; // Skip unassigned or deactivated tasks
+      if (task.profiles?.status && task.profiles.status !== 'Active') return;
       
       const employeeId = task.profile_id;
       
@@ -232,12 +234,14 @@ export default function PMDashboardTab({ user }) {
       if (activeIds.size === 0) return [];
       const employeesInActiveProjects = new Set();
       tasks.forEach(task => {
-        if (activeIds.has(String(task.project_id)) && task.profile_id) {
+        if (!task.employeeDeactivated && activeIds.has(String(task.project_id)) && task.profile_id) {
           employeesInActiveProjects.add(String(task.profile_id));
         }
       });
 
       return allEmployees.filter(emp => {
+        if (emp.status && emp.status !== 'Active') return false;
+        if (emp.employeeDeactivated) return false;
         if (emp.isMasked) return true;
         // Has a task in an active project
         if (employeesInActiveProjects.has(String(emp.id))) return true;
@@ -255,12 +259,14 @@ export default function PMDashboardTab({ user }) {
     // Filter employees assigned to or who have tasks in the selected project
     const employeesWithTasksInProject = new Set();
     tasks.forEach(task => {
-      if (String(task.project_id) === String(selectedProjectId) && task.profile_id) {
+      if (!task.employeeDeactivated && String(task.project_id) === String(selectedProjectId) && task.profile_id) {
         employeesWithTasksInProject.add(String(task.profile_id));
       }
     });
     
     return allEmployees.filter(emp => {
+      if (emp.status && emp.status !== 'Active') return false;
+      if (emp.employeeDeactivated) return false;
       if (emp.isMasked && String(emp.projectId) === String(selectedProjectId)) return true;
       if (employeesWithTasksInProject.has(String(emp.id))) return true;
       const empProjIds = emp.projectIds || (emp.projectId ? [emp.projectId] : []);
@@ -277,7 +283,7 @@ export default function PMDashboardTab({ user }) {
     const map = new Map();
     for (const t of tasks) {
       const empId = t.profile_id;
-      if (!empId || t.status === 'Completed-Hidden') continue;
+      if (!empId || t.status === 'Completed-Hidden' || t.status === 'Cancelled') continue;
       if (!map.has(empId)) map.set(empId, []);
       map.get(empId).push(t);
     }
@@ -435,7 +441,7 @@ export default function PMDashboardTab({ user }) {
 
       {/* Stats Grid */}
       <div className="stats-grid" style={styles.statsGrid}>
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Current ongoing and active projects assigned to you">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
@@ -447,7 +453,7 @@ export default function PMDashboardTab({ user }) {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Total unique team members allocated to your active projects">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'var(--color-accent-light)', color: 'var(--color-accent)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -460,7 +466,7 @@ export default function PMDashboardTab({ user }) {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Total tasks scheduled across all your active projects">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 6v6l4 2"></path>
@@ -474,7 +480,7 @@ export default function PMDashboardTab({ user }) {
         </div>
 
         {/* Total Projects Card */}
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="All projects created under your account">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
@@ -505,13 +511,13 @@ export default function PMDashboardTab({ user }) {
                 <option value="all">All Active Projects</option>
                 <optgroup label="Active Projects">
                   {projects.filter(p => p.status === 'Active').map(proj => (
-                    <option key={proj.id} value={proj.id}>{proj.project_name}</option>
+                    <option key={proj.id} value={proj.id}>{proj.name}</option>
                   ))}
                 </optgroup>
                 {projects.some(p => p.status === 'Completed') && (
                   <optgroup label="Completed Projects">
                     {projects.filter(p => p.status === 'Completed').map(proj => (
-                      <option key={proj.id} value={proj.id}>{proj.project_name} (Completed)</option>
+                      <option key={proj.id} value={proj.id}>{proj.name} (Completed)</option>
                     ))}
                   </optgroup>
                 )}
@@ -545,7 +551,7 @@ export default function PMDashboardTab({ user }) {
           </div>
 
           <div style={styles.tableWrapper}>
-            {filteredEmployees.length === 0 && unassignedTasks.length === 0 ? (
+            {filteredEmployees.length === 0 ? (
               <div style={styles.emptyState}>
                 <div style={styles.emptyTitle}>No Active Team Members or Tasks</div>
                 <div style={styles.emptyDescription}>
@@ -602,27 +608,6 @@ export default function PMDashboardTab({ user }) {
                       </tr>
                     );
                   })}
-
-                  {/* Unassigned Tasks */}
-                  {unassignedTasks.map(task => {
-                    const completion = calculateSingleTaskCompletion(task);
-                    
-                    return (
-                      <tr key={`unassigned-${task.id}`} style={styles.trRow}>
-                        <td style={styles.tdEmployee}>
-                          <div style={styles.unassignedAvatar}>?</div>
-                          <div>
-                            <div style={styles.empName}>Unassigned</div>
-                            <div style={styles.empRole}>No Assignee</div>
-                          </div>
-                        </td>
-                        <td style={styles.tdVal}>{task.title}</td>
-                        <td style={styles.tdVal}>1</td>
-                        <td style={styles.tdVal}>{completion}%</td>
-                        <td style={styles.tdVal}>{task.status}</td>
-                      </tr>
-                    );
-                  })}
                 </tbody>
               </table>
             )}
@@ -635,15 +620,15 @@ export default function PMDashboardTab({ user }) {
           <p style={styles.panelSubtitle}>How your team's tasks are distributed right now.</p>
 
           <div style={styles.attendanceStats}>
-            <div style={styles.attendanceMetric}>
+            <div style={styles.attendanceMetric} title="Tasks waiting to be started">
               <span style={styles.attendanceValue}>{taskStatusCounts.Pending}</span>
               <span style={styles.attendanceLabel}>Pending</span>
             </div>
-            <div style={styles.attendanceMetric}>
+            <div style={styles.attendanceMetric} title="Tasks currently in progress by team members">
               <span style={styles.attendanceValue}>{taskStatusCounts['In Progress']}</span>
               <span style={styles.attendanceLabel}>In Progress</span>
             </div>
-            <div style={styles.attendanceMetric}>
+            <div style={styles.attendanceMetric} title="Tasks successfully completed">
               <span style={styles.attendanceValue}>{taskStatusCounts.Completed}</span>
               <span style={styles.attendanceLabel}>Completed</span>
             </div>
@@ -773,6 +758,7 @@ const styles = {
     fontSize: '24px',
     fontWeight: '800',
     color: 'var(--color-text-primary)',
+    cursor: 'default',
   },
   statLabel: {
     fontSize: '12px',
@@ -919,6 +905,7 @@ const styles = {
     color: 'var(--color-text-primary)',
     display: 'block',
     marginBottom: '6px',
+    cursor: 'default',
   },
   attendanceLabel: {
     fontSize: '12px',

@@ -572,19 +572,19 @@ export default function PMResourceRequestsTab({ user }) {
 
       {/* Metric Cards */}
       <div style={styles.metricsGrid}>
-        <div className="glass-card" style={styles.metricCard}>
+        <div className="glass-card" style={styles.metricCard} title="Total currently active resource requests for your projects">
           <div style={styles.metricValue}>{activeRequests.length}</div>
           <div style={styles.metricLabel}>Active Requests</div>
         </div>
-        <div className="glass-card" style={styles.metricCard}>
+        <div className="glass-card" style={styles.metricCard} title="Total headcount needed across active requests">
           <div style={styles.metricValue}>{activeQuantityNeeded}</div>
           <div style={styles.metricLabel}>Employees Needed</div>
         </div>
-        <div className="glass-card" style={styles.metricCard}>
+        <div className="glass-card" style={styles.metricCard} title="Requests awaiting review by the Resource Manager">
           <div style={{ ...styles.metricValue, color: 'var(--color-warning)' }}>{pendingCount}</div>
           <div style={styles.metricLabel}>Pending Approval</div>
         </div>
-        <div className="glass-card" style={styles.metricCard}>
+        <div className="glass-card" style={styles.metricCard} title="Completed, fulfilled, or closed resource requests in history">
           <div style={{ ...styles.metricValue, color: 'var(--color-primary)' }}>{historyCount}</div>
           <div style={styles.metricLabel}>In History</div>
         </div>
@@ -779,14 +779,14 @@ export default function PMResourceRequestsTab({ user }) {
                 >
                   <option value="">Select an active project</option>
                   {projects
-                    .filter(p => !['Completed', 'Archived'].includes(p.status))
+                    .filter(p => !['Completed', 'Archived', 'Cancelled', 'Cancelled-Hidden'].includes(p.status))
                     .map(p => (
                       <option key={p.id} value={p.id}>
                         {p.name}{p.isRestored ? ' (Restored)' : ''}
                       </option>
                     ))}
                 </select>
-                {projects.filter(p => !['Completed', 'Archived'].includes(p.status)).length === 0 && (
+                {projects.filter(p => !['Completed', 'Archived', 'Cancelled', 'Cancelled-Hidden'].includes(p.status)).length === 0 && (
                   <span style={{ fontSize: '11px', color: 'var(--color-warning)', marginTop: '4px', display: 'block' }}>
                     No active projects available. Create or restore a project first.
                   </span>
@@ -1198,6 +1198,7 @@ const styles = {
     fontWeight: '800',
     color: 'var(--color-text-primary)',
     marginBottom: '4px',
+    cursor: 'default',
   },
   metricLabel: {
     fontSize: '12px',

@@ -460,6 +460,45 @@ export default function UserManagementTab({ activeSubTab: initialSubTab, onSubTa
       
       const data = await response.json();
 
+      // ⚠️ User has pending/in-progress tasks — show restriction popup (Admin cannot proceed)
+      if (response.status === 409 && data.hasPendingTasks) {
+        const taskListHtml = data.pendingTasks
+          .map(t => `<li style="text-align:left;margin:4px 0;font-size:13px;">
+            <strong>${t.title}</strong><br/>
+            <span style="color:#94a3b8;font-size:11px;">${t.projectName} · Status: ${t.status}</span>
+          </li>`)
+          .join('');
+
+        await Swal.fire({
+          icon: 'error',
+          title: 'Cannot Deactivate Account',
+          html: `
+            <div style="text-align:left;font-size:13px;line-height:1.5;">
+              <p style="margin-bottom:12px;color:#f87171;font-weight:600;">
+                Action Restricted: This user currently has pending or in-progress tasks in Project Management.
+              </p>
+              <p style="margin-bottom:8px;color:#cbd5e1;">
+                <strong>${user.name}</strong> is assigned to <strong>${data.pendingTasks.length}</strong> active task(s):
+              </p>
+              <ul style="list-style:disc;padding-left:20px;max-height:160px;overflow-y:auto;border:1px solid #334155;border-radius:8px;padding:10px 10px 10px 24px;background:#0f172a;margin-bottom:12px;">
+                ${taskListHtml}
+              </ul>
+              <p style="color:#94a3b8;font-size:12px;margin:0;">
+                You cannot proceed with deactivation until the Project Manager reassigns or completes these pending tasks.
+              </p>
+            </div>
+          `,
+          confirmButtonText: 'Understood',
+          confirmButtonColor: '#3b82f6',
+          customClass: {
+            popup: 'swal-custom-popup',
+            title: 'swal-custom-title',
+            htmlContainer: 'swal-custom-text',
+          }
+        });
+        return;
+      }
+
       if (data.success) {
         await fetchUsers();
         showSuccessAlert(

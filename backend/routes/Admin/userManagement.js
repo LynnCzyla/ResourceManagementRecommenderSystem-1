@@ -831,6 +831,36 @@ router.patch("/:id/status", async (req, res) => {
       });
     }
 
+    // ✅ If deactivating, check for pending/in-progress tasks first (strictly restricted)
+    if (status === 'Deactivated') {
+      const { data: activeTasks, error: tasksError } = await supabase
+        .from('project_tasks')
+        .select('id, title, status, projects(project_name)')
+        .eq('profile_id', id)
+        .in('status', ['Pending', 'In Progress', 'Active']);
+
+      if (!tasksError && activeTasks && activeTasks.length > 0) {
+        return res.status(409).json({
+          success: false,
+          hasPendingTasks: true,
+          error: `Cannot deactivate account. This user has ${activeTasks.length} pending/in-progress task(s) in Project Manager. Please reassign or complete them before deactivating.`,
+          pendingTasks: activeTasks.map(t => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            projectName: t.projects?.project_name || 'Unknown Project'
+          }))
+        });
+      }
+
+      // Mark any active assignments for this deactivated user as Inactive
+      await supabase
+        .from('project_assignments')
+        .update({ status: 'Inactive' })
+        .eq('profile_id', id)
+        .in('status', ['Assigned', 'Active']);
+    }
+
     // ✅ If setting to Active, also sync user_login_attempts
     if (status === 'Active') {
       await supabase
