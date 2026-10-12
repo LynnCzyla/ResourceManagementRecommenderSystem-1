@@ -52,9 +52,15 @@ router.get('/', async (req, res) => {
             if (item.profile_id) {
                 const { data: profileData } = await supabase
                     .from('profiles')
-                    .select('first_name, middle_name, last_name, employee_id')
+                    .select('first_name, middle_name, last_name, employee_id, status')
                     .eq('id', item.profile_id)
                     .single();
+                
+                // Skip assignments for deactivated employees
+                if (profileData && profileData.status !== 'Active') {
+                    return null;
+                }
+
                 employeeName = profileData
                     ? `${profileData.first_name || ''}${profileData.middle_name ? ` ${profileData.middle_name}` : ''} ${profileData.last_name || ''}`.trim()
                     : null;
@@ -78,8 +84,9 @@ router.get('/', async (req, res) => {
             };
         }));
 
-        console.log(`✅ Found ${transformedData.length} assignments`);
-        res.json(transformedData);
+        const filteredAssignments = transformedData.filter(Boolean);
+        console.log(`✅ Found ${filteredAssignments.length} active assignments`);
+        res.json(filteredAssignments);
     } catch (error) {
         console.error('❌ Error in assignments route:', error);
         res.status(500).json({ 
