@@ -460,6 +460,19 @@ export async function fetchGlobalFeedbackReport(filters = {}) {
   }
 }
 
+// ---- Project Client Ratings (Exclusive to RM) ----
+export async function fetchProjectClientRatings() {
+  console.log('🏢 Fetching project client ratings...');
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/feedback-report/project-ratings`, { headers });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Project client ratings fetch error:', error);
+    throw error;
+  }
+}
+
 // ---- Update Feedback Visibility (Grant / Revoke Permission) ----
 export async function updateFeedbackVisibility(recordId, visible) {
   console.log(`🔐 Updating feedback visibility for ${recordId}: visible=${visible}`);
@@ -473,6 +486,23 @@ export async function updateFeedbackVisibility(recordId, visible) {
     return handle(res);
   } catch (error) {
     console.error('❌ Update feedback visibility error:', error);
+    throw error;
+  }
+}
+
+// ---- Bulk Update Feedback Visibility (by Employee or by Project) ----
+export async function updateFeedbackBulkVisibility({ target, id, recordIds, visible = true }) {
+  console.log(`🔐 Updating bulk feedback visibility: target=${target}, id=${id}, visible=${visible}`);
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${API_BASE}/feedback-report/bulk-visibility`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ target, id, recordIds, visible })
+    });
+    return handle(res);
+  } catch (error) {
+    console.error('❌ Bulk update feedback visibility error:', error);
     throw error;
   }
 }
@@ -497,5 +527,7 @@ export default {
   fetchResourceRequests,
   createResourceRequest,
   fetchGlobalFeedbackReport,
+  fetchProjectClientRatings,
   updateFeedbackVisibility,
+  updateFeedbackBulkVisibility,
 };
