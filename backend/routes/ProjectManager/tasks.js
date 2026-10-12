@@ -11,14 +11,17 @@ function transformTask(row, viewerId = null, viewerRole = null) {
   const isMasked = viewerRole === 'Project Manager'
     && row.projects?.created_by
     && row.projects.created_by !== viewerId;
+  const isDeactivated = !isMasked && profile.status && profile.status !== 'Active';
   return {
     id: row.id,
     projectId: row.project_id,
     projectName: row.projects?.project_name || '',
-    employeeId: isMasked ? null : row.profile_id,
-    employeeName: isMasked ? 'Unassigned' : ([profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unassigned'),
-    employeeRole: isMasked ? '' : (profile.positions?.position_name || ''),
-    employeeAvatar: isMasked ? null : (profile.avatar_url || null),
+    // Treat deactivated-user tasks as unassigned so PM/RM views don't show them
+    employeeId: (isMasked || isDeactivated) ? null : row.profile_id,
+    employeeName: (isMasked || isDeactivated) ? 'Unassigned' : ([profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unassigned'),
+    employeeRole: (isMasked || isDeactivated) ? '' : (profile.positions?.position_name || ''),
+    employeeAvatar: (isMasked || isDeactivated) ? null : (profile.avatar_url || null),
+    employeeDeactivated: isDeactivated,
     title: row.title,
     description: row.description,
     priority: row.priority,
@@ -41,7 +44,7 @@ const TASK_SELECT = `
   created_by,
   created_at,
   projects ( id, project_name, created_by ),
-  profiles!project_tasks_profile_id_fkey ( id, first_name, last_name, avatar_url, positions ( position_name ) )
+  profiles!project_tasks_profile_id_fkey ( id, first_name, last_name, avatar_url, status, positions ( position_name ) )
 `;
 
 const tasksCache = new Map();
@@ -83,6 +86,7 @@ router.get('/', async (req, res) => {
       .from('project_tasks')
       .select(TASK_SELECT)
       .neq('status', 'Archived')
+      .neq('status', 'Cancelled')
       .order('created_at', { ascending: false });
 
     if (projectId) query = query.eq('project_id', projectId);
@@ -138,6 +142,22 @@ router.post('/', async (req, res) => {
         return res.status(403).json({
           success: false,
           message: 'You can only create tasks for your own projects'
+        });
+      }
+    }
+
+    // ✅ Verify the assigned employee is active
+    if (employeeId) {
+      const { data: assigneeProfile } = await supabase
+        .from('profiles')
+        .select('status')
+        .eq('id', employeeId)
+        .single();
+
+      if (assigneeProfile && assigneeProfile.status !== 'Active') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot assign tasks to a deactivated employee'
         });
       }
     }
@@ -211,6 +231,22 @@ router.put('/:id', async (req, res) => {
         success: false,
         message: 'You can only update tasks from your own projects'
       });
+    }
+
+    // ✅ Verify the assigned employee is active
+    if (employeeId) {
+      const { data: assigneeProfile } = await supabase
+        .from('profiles')
+        .select('status')
+        .eq('id', employeeId)
+        .single();
+
+      if (assigneeProfile && assigneeProfile.status !== 'Active') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot assign tasks to a deactivated employee'
+        });
+      }
     }
 
     const updateData = { updated_at: new Date().toISOString() };
