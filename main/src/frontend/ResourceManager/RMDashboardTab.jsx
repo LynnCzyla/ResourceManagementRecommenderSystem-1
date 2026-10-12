@@ -41,7 +41,10 @@ export default function RMDashboardTab() {
   const [error, setError] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [workloadFilter, setWorkloadFilter] = useState('All');
+  const [assignmentFilter, setAssignmentFilter] = useState('All'); // 'All' | 'Assigned' | 'Unassigned'
+  const [alertDismissed, setAlertDismissed] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState(null);
+  const [hoveredCrossover, setHoveredCrossover] = useState(false);
 
   useEffect(() => {
     loadDashboard();
@@ -74,8 +77,13 @@ export default function RMDashboardTab() {
   };
 
   const filteredEmployees = employees.filter((emp) => {
-    if (workloadFilter === 'All') return true;
-    return emp.workloadStatus === workloadFilter;
+    const workloadMatch = workloadFilter === 'All' || emp.workloadStatus === workloadFilter;
+    const isAssigned = emp.projectName && emp.projectName !== 'Unassigned';
+    const assignmentMatch =
+      assignmentFilter === 'All'        ? true :
+      assignmentFilter === 'Assigned'   ? isAssigned :
+      /* Unassigned */                    !isAssigned;
+    return workloadMatch && assignmentMatch;
   });
 
   const roleDistribution = employees.reduce((acc, emp) => {
@@ -169,7 +177,9 @@ export default function RMDashboardTab() {
     return !r.includes('project manager') && !r.includes('project_manager');
   });
   const hasEmployeesData = workforce.length > 0;
-  const activeEmployeesCount = workforce.filter((e) => e.workloadStatus !== 'Available').length;
+  const assignedEmployeesCount = workforce.filter(
+    (e) => e.projectName && e.projectName !== 'Unassigned'
+  ).length;
   
   const avgUtilization = hasEmployeesData
     ? Math.round(workforce.reduce((sum, e) => sum + (e.utilizationRate || 0), 0) / workforce.length)
@@ -220,6 +230,21 @@ export default function RMDashboardTab() {
   const capacityPoints = demandVsAvailableCapacity.map((d, i) => `${getX(i)},${getY(d.availableCapacity)}`).join(' ');
   const demandPoints = demandVsAvailableCapacity.map((d, i) => `${getX(i)},${getY(d.openDemand)}`).join(' ');
 
+  // ── Automated Alert: Demand vs. Capacity ─────────────────────────────────
+  const latestMonth = demandVsAvailableCapacity[demandVsAvailableCapacity.length - 1];
+  const latestDemand = latestMonth?.openDemand ?? 0;
+  const latestCapacity = latestMonth?.availableCapacity ?? 0;
+  const deficit = latestDemand - latestCapacity;
+  const buffer = latestCapacity > 0 ? ((latestCapacity - latestDemand) / latestCapacity) * 100 : 100;
+  const alertState =
+    deficit > 0   ? 'critical' :   // demand > capacity
+    buffer <= 10  ? 'warning'  :   // within 10% buffer
+                    'healthy';
+  // First month where demand > 0 AND demand >= capacity (true crossover, not a 0=0 false positive)
+  const crossoverIndex = demandVsAvailableCapacity.findIndex(
+    d => d.openDemand > 0 && d.openDemand >= d.availableCapacity
+  );
+
   if (loading) {
     return <div style={styles.container}><p>Loading dashboard…</p></div>;
   }
@@ -239,7 +264,7 @@ export default function RMDashboardTab() {
 
       {/* Overview Cards */}
       <div style={styles.cardGrid}>
-        <div className="glass-card" style={styles.overviewCard}>
+        <div className="glass-card" style={styles.overviewCard} title="Total registered employees in your branch/organization">
           <div style={{ ...styles.cardIconWrapper, backgroundColor: 'rgba(59, 130, 246, 0.1)', color: 'var(--color-primary)' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -252,7 +277,7 @@ export default function RMDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.overviewCard}>
+        <div className="glass-card" style={styles.overviewCard} title="Total currently active projects requiring resources">
           <div style={{ ...styles.cardIconWrapper, backgroundColor: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
@@ -264,7 +289,7 @@ export default function RMDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.overviewCard}>
+        <div className="glass-card" style={styles.overviewCard} title="Employees with 0-49% workload, available for project assignment">
           <div style={{ ...styles.cardIconWrapper, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-success)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" fill="currentColor"></circle>
@@ -276,7 +301,7 @@ export default function RMDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.overviewCard}>
+        <div className="glass-card" style={styles.overviewCard} title="Employees with 50-84% workload, limited capacity for more tasks">
           <div style={{ ...styles.cardIconWrapper, backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--color-warning)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" fill="currentColor"></circle>
@@ -288,7 +313,7 @@ export default function RMDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.overviewCard}>
+        <div className="glass-card" style={styles.overviewCard} title="Employees at 85%+ workload, fully utilized with maximum capacity">
           <div style={{ ...styles.cardIconWrapper, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" fill="currentColor"></circle>
@@ -360,6 +385,18 @@ export default function RMDashboardTab() {
               <option value="Available">Available</option>
               <option value="Limited Availability">Limited Availability</option>
               <option value="Fully Utilized">Fully Utilized</option>
+            </select>
+
+            {/* ✅ Feature 2 — Assignment filter */}
+            <label style={{ ...styles.filterLabel, marginLeft: '12px' }}>Filter by assignment:</label>
+            <select
+              value={assignmentFilter}
+              onChange={(e) => setAssignmentFilter(e.target.value)}
+              style={styles.selectFilterCompact}
+            >
+              <option value="All">All</option>
+              <option value="Assigned">Assigned</option>
+              <option value="Unassigned">Unassigned</option>
             </select>
           </div>
 
@@ -444,7 +481,7 @@ export default function RMDashboardTab() {
 
           {/* 1. Workforce Utilization Card */}
           <div style={styles.analyticsSection}>
-            <h3 style={styles.analyticsTitle}>Workforce Utilization</h3>
+            <h3 style={styles.analyticsTitle} title="Overall average workload percentage of active employees across the branch">Workforce Utilization</h3>
             {!hasEmployeesData ? (
               <div style={styles.insufficientDataCard}>
                 <span style={styles.insufficientDataText}>Insufficient data</span>
@@ -453,12 +490,12 @@ export default function RMDashboardTab() {
             ) : (
               <div style={styles.metricCard}>
                 <div style={styles.metricHeader}>
-                  <span style={styles.metricVal}>{avgUtilization}%</span>
+                  <span style={styles.metricVal} title="Average percentage of total employee capacity currently utilized">{avgUtilization}%</span>
                   <span style={{
                     ...styles.metricBadge,
                     color: utilizationStatus.color,
                     backgroundColor: utilizationStatus.bg
-                  }}>
+                  }} title={`Workforce status: ${utilizationStatus.label}`}>
                     {utilizationStatus.label}
                   </span>
                 </div>
@@ -470,15 +507,15 @@ export default function RMDashboardTab() {
                   }}></div>
                 </div>
                 <div style={styles.metricBreakdown}>
-                  <div style={styles.breakdownItem}>
+                  <div style={styles.breakdownItem} title="Employees currently assigned to active projects or tasks">
                     <span style={styles.breakdownLabel}>Assigned Employees</span>
-                    <span style={styles.breakdownVal}>{activeEmployeesCount}</span>
+                    <span style={styles.breakdownVal}>{assignedEmployeesCount}</span>
                   </div>
-                  <div style={styles.breakdownItem}>
+                  <div style={styles.breakdownItem} title="Employees free and ready to take on tasks">
                     <span style={styles.breakdownLabel}>Available Pool</span>
                     <span style={styles.breakdownVal}>{availablePoolCount}</span>
                   </div>
-                  <div style={styles.breakdownItem}>
+                  <div style={styles.breakdownItem} title="Employees with full task workload">
                     <span style={styles.breakdownLabel}>Fully Utilized</span>
                     <span style={styles.breakdownVal}>{fullyUtilizedCount}</span>
                   </div>
@@ -496,7 +533,48 @@ export default function RMDashboardTab() {
                 <span style={styles.insufficientDataSubtext}>No historical demand/capacity data available.</span>
               </div>
             ) : (
-              <div style={styles.metricCard}>
+              <div style={{
+                ...styles.metricCard,
+                // ── Card glow on Critical state ──
+                ...(alertState === 'critical' ? {
+                  boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.45), 0 0 22px rgba(239, 68, 68, 0.18)',
+                  animation: 'pulse-border 2s ease-in-out infinite',
+                } : {}),
+              }}>
+
+                {/* ── Automated Alert Banner ── */}
+                {!alertDismissed && alertState !== 'healthy' && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    borderLeft: `4px solid ${alertState === 'critical' ? '#ef4444' : '#f59e0b'}`,
+                    backgroundColor: alertState === 'critical' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    marginBottom: '14px',
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: '700', fontSize: '13px', color: alertState === 'critical' ? '#ef4444' : '#f59e0b', marginBottom: '3px' }}>
+                        {alertState === 'critical' ? ' Resource Shortage Detected' : ' Capacity Warning'}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                        {alertState === 'critical'
+                          ? `Open demand (${latestDemand}) exceeds available capacity (${latestCapacity}). Deficit: ${deficit} position${deficit !== 1 ? 's' : ''} unfilled this month.`
+                          : `Demand is approaching capacity limits — buffer is critically low (${Math.round(buffer)}%).`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setAlertDismissed(true)}
+                      title="Dismiss"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '16px', lineHeight: 1, padding: '0', flexShrink: 0 }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
                 <div style={styles.chartTitleRow}>
                   <span style={styles.chartTitle}>Open Demand vs. Available Capacity</span>
                   <span style={styles.chartSubtitle}>Comparison of cumulative unfulfilled requests vs. currently available employees over time.</span>
@@ -585,6 +663,42 @@ export default function RMDashboardTab() {
                       />
                     ))}
 
+                    {/* ── Crossover Point Marker (amber dot where demand >= capacity) ── */}
+                    {crossoverIndex >= 0 && (() => {
+                      const cd = demandVsAvailableCapacity[crossoverIndex];
+                      const cx = getX(crossoverIndex);
+                      const cy = getY(cd.openDemand);
+                      return (
+                        <g key="crossover">
+                          {/* Dashed vertical line at crossover */}
+                          <line
+                            x1={cx} y1={paddingTop}
+                            x2={cx} y2={paddingTop + chartHeight}
+                            stroke="#f59e0b"
+                            strokeWidth="1.5"
+                            strokeDasharray="4 3"
+                            opacity="0.6"
+                          />
+                          {/* Outer glow ring */}
+                          <circle cx={cx} cy={cy} r={hoveredCrossover ? 11 : 9}
+                            fill="rgba(245,158,11,0.15)" stroke="none" />
+                          {/* Main amber dot */}
+                          <circle
+                            cx={cx} cy={cy} r={hoveredCrossover ? 7 : 6}
+                            fill="#f59e0b"
+                            stroke="#ffffff"
+                            strokeWidth="2"
+                            style={{ cursor: 'pointer' }}
+                            onMouseEnter={() => setHoveredCrossover(true)}
+                            onMouseLeave={() => setHoveredCrossover(false)}
+                          />
+                          {/* ⚠ icon text inside dot */}
+                          <text x={cx} y={cy + 4} textAnchor="middle" fontSize="7"
+                            fill="#ffffff" fontWeight="bold" pointerEvents="none">!</text>
+                        </g>
+                      );
+                    })()}
+
                     {/* X-axis Month Labels */}
                     {demandVsAvailableCapacity.map((d, i) => (
                       <text
@@ -623,6 +737,7 @@ export default function RMDashboardTab() {
                   {/* Hover Tooltip Card */}
                   {hoveredIndex !== null && (() => {
                     const hoveredData = demandVsAvailableCapacity[hoveredIndex];
+                    const isCrossover = hoveredIndex === crossoverIndex;
                     return (
                       <div
                         style={{
@@ -638,12 +753,28 @@ export default function RMDashboardTab() {
                           borderRadius: '8px',
                           padding: '12px 16px',
                           boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-                          border: '1px solid rgba(0, 0, 0, 0.08)',
+                          border: isCrossover ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(0, 0, 0, 0.08)',
                           zIndex: 10,
-                          minWidth: '180px',
+                          minWidth: '190px',
                         }}
                       >
-                        <div style={styles.tooltipHeader}>{hoveredData.month}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ ...styles.tooltipHeader, marginBottom: 0 }}>{hoveredData.month}</div>
+                          {isCrossover && (
+                            <span style={{
+                              fontSize: '10px',
+                              fontWeight: '700',
+                              color: '#b45309',
+                              backgroundColor: '#fef3c7',
+                              border: '1px solid #fde68a',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              letterSpacing: '0.2px',
+                            }}>
+                              Crossover Point
+                            </span>
+                          )}
+                        </div>
                         <div style={styles.tooltipRow}>
                           <div style={styles.tooltipLabelCol}>
                             <span style={{ ...styles.tooltipDot, backgroundColor: '#3b82f6' }}></span>
@@ -658,6 +789,31 @@ export default function RMDashboardTab() {
                           </div>
                           <span style={styles.tooltipVal}>{hoveredData.availableCapacity}</span>
                         </div>
+                        {isCrossover && (
+                          <div style={{
+                            ...styles.tooltipRow,
+                            marginTop: '8px',
+                            paddingTop: '6px',
+                            borderTop: '1px solid rgba(0, 0, 0, 0.08)',
+                          }}>
+                            <div style={styles.tooltipLabelCol}>
+                              <span style={{ ...styles.tooltipDot, backgroundColor: '#f59e0b' }}></span>
+                              <span style={{ color: '#b45309', fontWeight: '600' }}>Crossover point</span>
+                            </div>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#b45309',
+                              backgroundColor: '#fef3c7',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                            }}>
+                              {hoveredData.openDemand > hoveredData.availableCapacity
+                                ? `Deficit: ${hoveredData.openDemand - hoveredData.availableCapacity}`
+                                : 'Demand ≥ Capacity'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -672,14 +828,21 @@ export default function RMDashboardTab() {
                     <span style={{ ...styles.legendDot, backgroundColor: '#22c55e' }}></span>
                     <span style={styles.legendLabel}>Available capacity</span>
                   </div>
+                  {crossoverIndex >= 0 && (
+                    <div style={styles.legendItem}>
+                      <span style={{ ...styles.legendDot, backgroundColor: '#f59e0b' }}></span>
+                      <span style={styles.legendLabel}>Crossover point</span>
+                    </div>
+                  )}
                 </div>
+
               </div>
             )}
           </div>
 
           {/* 3. Resource Utilization by Department Card */}
           <div style={styles.analyticsSection}>
-            <h3 style={styles.analyticsTitle}>Resource Utilization by Department</h3>
+            <h3 style={styles.analyticsTitle} title="Average employee capacity and workload utilization grouped by department">Resource Utilization by Department</h3>
             {departmentUtilization.length === 0 ? (
               <div style={styles.insufficientDataCard}>
                 <span style={styles.insufficientDataText}>Insufficient data</span>
@@ -689,7 +852,7 @@ export default function RMDashboardTab() {
               <div style={styles.metricCard}>
                 <div style={styles.deptList}>
                   {departmentUtilization.map((dept, i) => (
-                    <div key={dept.department} style={styles.deptRow}>
+                    <div key={dept.department} style={styles.deptRow} title={`Average workload utilization of ${dept.department}: ${dept.utilization}% (${dept.employeeCount} staff)`}>
                       <div style={styles.deptHeader}>
                         <span style={styles.deptName}>{dept.department} ({dept.employeeCount} staff)</span>
                         <span style={styles.deptVal}>{dept.utilization}%</span>
@@ -804,6 +967,7 @@ const styles = {
   cardVal: {
     fontSize: '24px',
     fontWeight: '800',
+    cursor: 'default',
   },
   cardLabel: {
     fontSize: '11px',
@@ -894,6 +1058,7 @@ const styles = {
     fontSize: '28px',
     fontWeight: '800',
     color: 'var(--color-text-primary)',
+    cursor: 'default',
   },
   metricBadge: {
     fontSize: '11px',
@@ -936,6 +1101,7 @@ const styles = {
     fontSize: '16px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+    cursor: 'default',
   },
   chartTitleRow: {
     display: 'flex',
@@ -1038,6 +1204,7 @@ const styles = {
     fontSize: '12px',
     fontWeight: '700',
     color: 'var(--color-text-primary)',
+    cursor: 'default',
   },
   insufficientDataCard: {
     border: '1px dashed var(--color-border)',
