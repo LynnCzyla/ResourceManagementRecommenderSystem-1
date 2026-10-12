@@ -76,7 +76,7 @@ router.get('/tasks', verifyToken, async (req, res) => {
 
     // Only active/in-progress tasks on active projects belong in the active list
     const activeTasks = (data || []).filter(row => {
-      const isTaskActive = row.status !== 'Completed' && row.status !== 'Completed-Hidden';
+      const isTaskActive = row.status !== 'Completed' && row.status !== 'Completed-Hidden' && row.status !== 'Cancelled';
       const isProjectActive = !row.projects || row.projects.status === 'Active';
       return isTaskActive && isProjectActive;
     });
