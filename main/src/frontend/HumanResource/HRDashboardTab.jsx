@@ -98,7 +98,7 @@ export default function HRDashboardTab() {
 
       {/* Stats Grid */}
       <div style={styles.statsGrid}>
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Total number of job postings created in the system">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-primary)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="2" y="7" width="20" height="14" rx="2"></rect>
@@ -111,7 +111,7 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Total applications received across all job postings">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--color-warning)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -126,7 +126,7 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Applications waiting for review or interview scheduling">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10"></circle>
@@ -139,7 +139,7 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Applicants recommended for employment by interviewers">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(59, 130, 246, 0.1)', color: 'var(--color-accent)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -154,7 +154,7 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Resource requests submitted by managers awaiting HR approval">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(139, 92, 246, 0.1)', color: 'var(--color-primary)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -168,7 +168,7 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard}>
+        <div className="glass-card" style={styles.statCard} title="Currently open job postings accepting applications">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-success)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -317,6 +317,7 @@ const styles = {
     fontWeight: '700',
     color: 'var(--color-text-primary)',
     marginBottom: '4px',
+    cursor: 'default',
   },
   statLabel: {
     fontSize: '13px',
