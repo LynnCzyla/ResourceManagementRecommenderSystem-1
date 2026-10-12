@@ -107,7 +107,7 @@ router.get('/', async (req, res) => {
       employeeQuery,
       supabase
         .from('project_assignments')
-        .select('profile_id, project_id, status')
+        .select('profile_id, project_id, status, requirement_id, assigned_at')
         .eq('status', 'Assigned'),
       projectsQuery,
       supabase
@@ -425,25 +425,40 @@ router.get('/', async (req, res) => {
         return !excludedKeywords.some((kw) => title.includes(kw));
       });
 
-      // ✅ Kunin ang history entries ng mga requirements na ito (kung meron)
+      // ✅ Kunin ang history entries at active assignments ng mga requirements na ito (kung meron)
       const reqIds = filteredReqs.map(r => r.id);
       let historyByReqId = {};
-      if (reqIds.length > 0) {
-        const { data: historyRows, error: historyError } = await supabase
-          .from('project_resource_requirements_history')
-          .select('requirement_id, status, changed_at')
-          .in('requirement_id', reqIds)
-          .order('changed_at', { ascending: true });
+      let reqAssignmentsByReqId = {};
 
-        if (historyError) {
-          // Hindi natin gustong bumagsak ang buong dashboard kung may isyu lang
-          // sa history table (halimbawa, bagong-bago pa ito). Mag-log na lang
-          // at gamitin ang fallback logic.
-          console.warn('⚠️ History table read error, falling back to current-status only:', historyError.message);
+      if (reqIds.length > 0) {
+        const [historyRes, assignmentsRes] = await Promise.all([
+          supabase
+            .from('project_resource_requirements_history')
+            .select('requirement_id, status, changed_at')
+            .in('requirement_id', reqIds)
+            .order('changed_at', { ascending: true }),
+          supabase
+            .from('project_assignments')
+            .select('requirement_id, assigned_at, status')
+            .in('requirement_id', reqIds)
+            .eq('status', 'Assigned')
+        ]);
+
+        if (historyRes.error) {
+          console.warn('⚠️ History table read error, falling back to current-status only:', historyRes.error.message);
         } else {
-          for (const h of (historyRows || [])) {
+          for (const h of (historyRes.data || [])) {
             if (!historyByReqId[h.requirement_id]) historyByReqId[h.requirement_id] = [];
             historyByReqId[h.requirement_id].push(h);
+          }
+        }
+
+        if (assignmentsRes.error) {
+          console.warn('⚠️ Requirement assignments read error:', assignmentsRes.error.message);
+        } else {
+          for (const a of (assignmentsRes.data || [])) {
+            if (!reqAssignmentsByReqId[a.requirement_id]) reqAssignmentsByReqId[a.requirement_id] = [];
+            reqAssignmentsByReqId[a.requirement_id].push(a);
           }
         }
       }
@@ -479,7 +494,21 @@ router.get('/', async (req, res) => {
       demandVsAvailableCapacity = monthMeta.map(({ label, endOfMonth }) => {
         const openDemand = filteredReqs.reduce((sum, r) => {
           const statusThen = statusAsOf(r, endOfMonth);
-          return statusThen === 'Pending' ? sum + (r.quantity_needed || r.quantity || 1) : sum;
+          if (!statusThen) return sum;
+
+          const needed = Number(r.quantity_needed || r.quantity || 1);
+          const assignmentsThen = (reqAssignmentsByReqId[r.id] || []).filter(
+            (a) => (a.assigned_at ? new Date(a.assigned_at) <= endOfMonth : true)
+          );
+          const assignedCount = assignmentsThen.length;
+
+          // Open demand is the remaining unfilled positions for active/unfulfilled requests
+          if (['Pending', 'Partially Allocated', 'Approved', 'Open'].includes(statusThen)) {
+            const unfilled = Math.max(0, needed - assignedCount);
+            return sum + unfilled;
+          }
+
+          return sum;
         }, 0);
 
         const availableCapacity = availableCapacityEmployees
