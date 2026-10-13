@@ -22,8 +22,8 @@ export default function EmployeeDashboardTab({ user }) {
   };
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      setLoading(true);
+    const fetchDashboardData = async (isBackground = false) => {
+      if (!isBackground) setLoading(true);
       try {
         const authHeader = await getAuthHeader();
         
@@ -47,11 +47,33 @@ export default function EmployeeDashboardTab({ user }) {
       } catch (error) {
         console.error('Error loading employee dashboard data:', error);
       } finally {
-        setLoading(false);
+        if (!isBackground) setLoading(false);
       }
     };
 
-    fetchDashboardData();
+    if (user?.id) {
+      fetchDashboardData(false);
+
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchDashboardData(true);
+        }
+      }, 10000);
+
+      const handleFocus = () => {
+        if (document.visibilityState === 'visible') {
+          fetchDashboardData(true);
+        }
+      };
+      window.addEventListener('focus', handleFocus);
+      document.addEventListener('visibilitychange', handleFocus);
+
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('focus', handleFocus);
+        document.removeEventListener('visibilitychange', handleFocus);
+      };
+    }
   }, [user?.id]);
 
   if (loading || !employeeInfo) return <div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading dashboard...</div>;

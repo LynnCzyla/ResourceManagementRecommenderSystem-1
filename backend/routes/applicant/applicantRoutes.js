@@ -34,12 +34,178 @@ async function getSystemSettings() {
 }
 
 // ------------------------------------------------------------
+// Helper: Check if email belongs to an internal employee or admin
+// ------------------------------------------------------------
+async function checkInternalUser(email) {
+  if (!email) return null;
+  const normalizedEmail = email.trim().toLowerCase();
+
+  try {
+    const { data: authData, error: authError } = await supabase.auth.admin.listUsers();
+    if (authError || !authData?.users) {
+      console.warn('⚠️ Could not check auth users for internal staff:', authError?.message);
+      return null;
+    }
+
+    const matchedUser = authData.users.find(
+      (u) => u.email && u.email.trim().toLowerCase() === normalizedEmail
+    );
+    if (!matchedUser) return null;
+
+    const { data: profile, error: profError } = await supabase
+      .from('profiles')
+      .select('id, role, first_name, last_name, employee_id')
+      .eq('id', matchedUser.id)
+      .maybeSingle();
+
+    if (profError || !profile) return null;
+
+    const internalRoles = [
+      'Employee',
+      'Resource Manager',
+      'Project Manager',
+      'Human Resources',
+      'Admin',
+      'Super Admin',
+      'Administrator'
+    ];
+
+    if (internalRoles.includes(profile.role)) {
+      return profile;
+    }
+    return null;
+  } catch (err) {
+    console.error('❌ Error checking internal user:', err);
+    return null;
+  }
+}
+
+// ------------------------------------------------------------
+// Helper: Check application eligibility (duplicate & 3-month rejection cooldown)
+// ------------------------------------------------------------
+async function checkApplicationEligibility(email, jobPostingId, positionApplied) {
+  if (!email) return { eligible: true };
+  const normalizedEmail = email.trim().toLowerCase();
+
+  try {
+    let query = supabase
+      .from('job_applications')
+      .select('id, email, job_posting_id, position_applied, status, applied_date')
+      .ilike('email', normalizedEmail)
+      .order('applied_date', { ascending: false });
+
+    if (jobPostingId) {
+      query = query.eq('job_posting_id', jobPostingId);
+    } else if (positionApplied) {
+      query = query.ilike('position_applied', positionApplied.trim());
+    }
+
+    const { data: existingApps, error } = await query;
+    if (error) {
+      console.error('🚨 Error querying previous applications:', error);
+      return { eligible: true };
+    }
+
+    if (!existingApps || existingApps.length === 0) {
+      return { eligible: true };
+    }
+
+    // 1. Check for active application
+    const activeStatuses = ['Pending', 'Under Review', 'Recommended', 'Interview Scheduled', 'Hired'];
+    const activeApp = existingApps.find(a => activeStatuses.includes(a.status));
+    if (activeApp) {
+      return {
+        eligible: false,
+        reason: 'already_applied',
+        error: 'This email has already submitted an active application for this position. You can only have one active application per job posting.'
+      };
+    }
+
+    // 2. Check for rejected application (3-month / 90-day cooldown)
+    const rejectedApp = existingApps.find(a => a.status === 'Rejected');
+    if (rejectedApp) {
+      const appliedTime = rejectedApp.applied_date ? new Date(rejectedApp.applied_date).getTime() : Date.now();
+      const threeMonthsMs = 90 * 24 * 60 * 60 * 1000;
+      const cooldownEndTime = appliedTime + threeMonthsMs;
+      const now = Date.now();
+
+      if (now < cooldownEndTime) {
+        const eligibleDate = new Date(cooldownEndTime).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+        const daysRemaining = Math.max(1, Math.ceil((cooldownEndTime - now) / (1000 * 60 * 60 * 24)));
+        return {
+          eligible: false,
+          reason: 'cooldown',
+          eligibleDate,
+          daysRemaining,
+          error: `You were previously rejected for this position. You are eligible to apply again after 3 months (eligible on ${eligibleDate}, approximately ${daysRemaining} day(s) remaining).`
+        };
+      }
+    }
+
+    return { eligible: true };
+  } catch (err) {
+    console.error('❌ Error in checkApplicationEligibility:', err);
+    return { eligible: true };
+  }
+}
+
+// ------------------------------------------------------------
 // Multer storage configuration with dynamic file size
 // ------------------------------------------------------------
 const storage = multer.memoryStorage();
 
-// We'll create the multer instance dynamically in the route
-// since we need to get settings from the database first
+// ------------------------------------------------------------
+// GET /api/applicant/validate-email
+// Public endpoint to check if an email can be used for an application
+// ------------------------------------------------------------
+router.get('/validate-email', async (req, res) => {
+  try {
+    const email = (req.query.email || '').trim();
+    const jobPostingId = req.query.job_posting_id;
+    const position = (req.query.position || '').trim();
+
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email parameter is required.' });
+    }
+
+    // 1. Check internal employee
+    const internalUser = await checkInternalUser(email);
+    if (internalUser) {
+      return res.status(403).json({
+        success: false,
+        valid: false,
+        reason: 'internal_user',
+        error: `This email is registered to an internal ${internalUser.role} account (${internalUser.first_name} ${internalUser.last_name}). Internal staff cannot submit job applications through the applicant portal. Please use a personal email address or coordinate with HR internally.`
+      });
+    }
+
+    // 2. Check eligibility (active or rejected within 3 months)
+    const eligibility = await checkApplicationEligibility(email, jobPostingId, position);
+    if (!eligibility.eligible) {
+      return res.status(409).json({
+        success: false,
+        valid: false,
+        reason: eligibility.reason,
+        eligibleDate: eligibility.eligibleDate,
+        daysRemaining: eligibility.daysRemaining,
+        error: eligibility.error
+      });
+    }
+
+    return res.json({
+      success: true,
+      valid: true,
+      message: 'Email is eligible for application.'
+    });
+  } catch (err) {
+    console.error('Error validating email:', err);
+    res.status(500).json({ success: false, error: 'Failed to validate email' });
+  }
+});
 
 // ------------------------------------------------------------
 // GET /api/applicant/job-postings
@@ -310,38 +476,30 @@ async function processApplication(req, res) {
     }
 
     // ------------------------------------------------------------
-    // ✅ Block duplicate applications: same email + same job posting
+    // 🛡️ Block applications from internal company staff (Employee, RM, PM, HR, Admin)
     // ------------------------------------------------------------
-    if (job_posting_id) {
-      const normalizedEmail = email.trim().toLowerCase();
-      console.log(`🔎 Checking duplicate: job_posting_id=${job_posting_id}, email=${normalizedEmail}`);
+    const internalUser = await checkInternalUser(email);
+    if (internalUser) {
+      console.warn(`⛔ Internal staff member attempted to apply: email=${email}, role=${internalUser.role}`);
+      return res.status(403).json({
+        success: false,
+        error: `This email is registered to an active ${internalUser.role} company account. Company employees and management cannot apply through the external applicant portal. Please use a personal email address or contact HR internally.`
+      });
+    }
 
-      // ✅ Use a plain select + limit instead of maybeSingle().
-      // maybeSingle() throws PGRST116 if more than one row matches
-      // (which can happen from earlier test submissions), and that
-      // error was silently letting duplicates through.
-      const { data: existingApplications, error: dupeCheckError } = await supabase
-        .from('job_applications')
-        .select('id, email, job_posting_id')
-        .eq('job_posting_id', job_posting_id)
-        .ilike('email', normalizedEmail)
-        .limit(1);
-
-      if (dupeCheckError) {
-        // ✅ Made this loud on purpose: a silent failure here means
-        // duplicates slip through without anyone noticing.
-        console.error('🚨 DUPLICATE CHECK QUERY FAILED (duplicates will NOT be blocked):', dupeCheckError);
-      } else if (existingApplications && existingApplications.length > 0) {
-        console.log(`⛔ Duplicate found, blocking submission:`, existingApplications[0]);
-        return res.status(409).json({
-          success: false,
-          error: 'This email has already applied for this position. You can only submit one application per job posting.',
-        });
-      } else {
-        console.log('✅ No duplicate found, proceeding with submission.');
-      }
-    } else {
-      console.warn('⚠️ No job_posting_id received — duplicate check was skipped entirely.');
+    // ------------------------------------------------------------
+    // ✅ Check duplicate & 3-month rejection cooldown
+    // ------------------------------------------------------------
+    const eligibility = await checkApplicationEligibility(email, job_posting_id, position_applied);
+    if (!eligibility.eligible) {
+      console.log(`⛔ Application blocked for ${email}: ${eligibility.error}`);
+      return res.status(409).json({
+        success: false,
+        error: eligibility.error,
+        reason: eligibility.reason,
+        eligibleDate: eligibility.eligibleDate,
+        daysRemaining: eligibility.daysRemaining
+      });
     }
 
     // ✅ FETCH BRANCH_ID FROM JOB POSTING

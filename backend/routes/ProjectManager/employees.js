@@ -6,7 +6,7 @@ const workloadService = require('../../services/workloadService');
 
 // Simple in-memory cache with TTL
 const cache = new Map();
-const CACHE_TTL = 60000; // 60 seconds
+const CACHE_TTL = 3000; // 3 seconds
 
 function getCacheKey(params) {
   return JSON.stringify(Object.keys(params).sort().reduce((obj, key) => {
@@ -169,11 +169,12 @@ router.get('/', async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
       }
     } else if (effectivePmId) {
-      // Get only Active projects for this PM (exclude Completed, Cancelled, Deleted)
+      // Get all active/in-flight projects for this PM (exclude Completed, Cancelled, Deleted)
       let projectsQuery = supabase
         .from('projects')
         .select('id, created_by')
-        .eq('status', 'Active');
+        .neq('status', 'Deleted')
+        .not('status', 'in', '("Completed","Cancelled","Archived")');
 
       projectsQuery = projectsQuery.eq('created_by', effectivePmId);
 

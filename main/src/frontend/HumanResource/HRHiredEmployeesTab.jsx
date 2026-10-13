@@ -28,8 +28,11 @@ const mapHire = (row) => {
   let uiStatus = 'Hired';
   const notesStr = row.job_applications?.notes || row.notes || '';
   const isAccepted = notesStr.includes('OFFER_ACCEPTED') || Boolean(row.offer_accepted) || row.status === 'Offer Accepted';
+  const isDeclined = notesStr.includes('OFFER_DECLINED') || row.status === 'Offer Declined';
 
-  if (row.status === 'Inactive' || row.status === 'Archived') {
+  if (isDeclined) {
+    uiStatus = 'Offer Declined';
+  } else if (row.status === 'Inactive' || row.status === 'Archived') {
     uiStatus = 'Archived';
   } else if (isAccepted) {
     uiStatus = 'Offer Accepted';
@@ -52,6 +55,7 @@ const mapHire = (row) => {
     rawStatus: row.status,
     notes: notesStr,
     offerAccepted: isAccepted,
+    offerDeclined: isDeclined,
   };
 };
 
@@ -126,7 +130,7 @@ export default function HRHiredEmployeesTab() {
     workLocation: 'Main Office Headquarters',
     workingHours: '8:00 AM - 5:00 PM (Mon-Fri)',
     conditions: 'Offer is subject to medical exam and routine background check.',
-    instructions: 'Please reply to this email confirming your formal acceptance within 5 business days.',
+    instructions: 'Please click the "Yes, I accept" or "No, I decline" button in this email within 14 days to confirm your formal response.',
     subject: '',
     customMessage: '',
     sending: false,
@@ -250,7 +254,7 @@ export default function HRHiredEmployeesTab() {
       workLocation: 'Main Office Headquarters',
       workingHours: '8:00 AM - 5:00 PM (Mon-Fri)',
       conditions: 'Offer is subject to medical exam and background check verification.',
-      instructions: 'Please reply to this email confirming your formal acceptance within 5 business days.',
+      instructions: 'Please click the "Yes, I accept" or "No, I decline" button in this email within 14 days to confirm your formal response.',
       subject: `Official Job Offer: ${emp.position || 'Position'} - WEA Resource Management`,
       customMessage: `Dear ${emp.name},\n\nWe are delighted to extend this formal offer of employment for the position of ${emp.position || 'Position'} at WEA.`,
       sending: false,
@@ -370,7 +374,7 @@ export default function HRHiredEmployeesTab() {
 
   // Status breakdown counters
   const hiredCount = hiredEmployees.filter(e => e.status === 'Hired' || e.status === 'Offer Sent' || e.status === 'Offer Accepted').length;
-  const archivedCount = hiredEmployees.filter(e => e.status === 'Archived' || e.status === 'Inactive').length;
+  const archivedCount = hiredEmployees.filter(e => e.status === 'Archived' || e.status === 'Inactive' || e.status === 'Offer Declined').length;
   const employeeCount = employees.length;
 
   const filteredEmployees = hiredEmployees.filter(emp => {
@@ -384,7 +388,7 @@ export default function HRHiredEmployeesTab() {
     if (activeSubTab === 'Hired') {
       matchesTab = emp.status === 'Hired' || emp.status === 'Offer Sent' || emp.status === 'Offer Accepted';
     } else if (activeSubTab === 'Archived') {
-      matchesTab = emp.status === 'Archived' || emp.status === 'Inactive';
+      matchesTab = emp.status === 'Archived' || emp.status === 'Inactive' || emp.status === 'Offer Declined';
     }
 
     return matchesSearch && matchesDepartment && matchesTab;
@@ -591,25 +595,31 @@ export default function HRHiredEmployeesTab() {
                         ...styles.statusBadge,
                         backgroundColor: (emp.offerAccepted || emp.status === 'Offer Accepted')
                           ? 'rgba(34, 197, 94, 0.15)'
-                          : emp.status === 'Offer Sent'
-                            ? 'rgba(59, 130, 246, 0.15)'
-                            : emp.status === 'Archived'
-                              ? 'rgba(148, 163, 184, 0.15)'
-                              : 'var(--color-accent-light)',
+                          : emp.status === 'Offer Declined'
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : emp.status === 'Offer Sent'
+                              ? 'rgba(59, 130, 246, 0.15)'
+                              : emp.status === 'Archived'
+                                ? 'rgba(148, 163, 184, 0.15)'
+                                : 'var(--color-accent-light)',
                         color: (emp.offerAccepted || emp.status === 'Offer Accepted')
                           ? '#22c55e'
-                          : emp.status === 'Offer Sent'
-                            ? '#3b82f6'
-                            : emp.status === 'Archived'
-                              ? '#94a3b8'
-                              : 'var(--color-accent)',
+                          : emp.status === 'Offer Declined'
+                            ? '#ef4444'
+                            : emp.status === 'Offer Sent'
+                              ? '#3b82f6'
+                              : emp.status === 'Archived'
+                                ? '#94a3b8'
+                                : 'var(--color-accent)',
                         fontWeight: '600'
                       }}>
                         {(emp.offerAccepted || emp.status === 'Offer Accepted')
                           ? 'Offer Accepted'
-                          : emp.status === 'Offer Sent'
-                            ? 'Offer Sent ✓'
-                            : emp.status}
+                          : emp.status === 'Offer Declined'
+                            ? 'Offer Declined'
+                            : emp.status === 'Offer Sent'
+                              ? 'Offer Sent ✓'
+                              : emp.status}
                       </span>
                     </td>
                     <td style={styles.td}>

@@ -151,7 +151,27 @@ const EmployeeProfileModal = ({
                   {employee.firstName?.[0]}{employee.lastName?.[0]}
                 </div>
                 <div style={modalStyles.employeeInfo}>
-                  <h3 style={modalStyles.employeeName}>{employee.name}</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h3 style={modalStyles.employeeName}>{employee.name}</h3>
+                    {Boolean(employee.isNewEmployee && !employee.hasPerformanceData) && (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(59, 130, 246, 0.2))',
+                        color: '#34d399',
+                        border: '1px solid rgba(52, 211, 153, 0.4)',
+                        boxShadow: '0 0 8px rgba(16, 185, 129, 0.15)',
+                        letterSpacing: '0.2px'
+                      }}>
+                        🌱 New Employee
+                      </span>
+                    )}
+                  </div>
                   <p style={modalStyles.employeeRole}>{employee.role || 'Employee'}</p>
                   <p style={modalStyles.employeeDepartment}>{employee.department || 'No Department'}</p>
                 </div>

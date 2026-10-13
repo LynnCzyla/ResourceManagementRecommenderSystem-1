@@ -61,13 +61,33 @@ export default function RMRequestsTab() {
     return statusMap[status] || { color: '#6b7280', bg: 'rgba(107, 114, 128, 0.15)', label: status || 'Unknown' };
   };
 
-  const renderStars = (rating) => {
+  const renderStars = (rating, hasRating = true) => {
+    if (!hasRating || rating === null || rating === undefined || rating === 0) {
+      return (
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '3px',
+          fontSize: '11px',
+          fontWeight: '500',
+          color: 'var(--color-text-muted, #94a3b8)',
+          backgroundColor: 'rgba(148, 163, 184, 0.12)',
+          padding: '2px 8px',
+          borderRadius: '10px',
+          fontStyle: 'italic',
+          letterSpacing: '0.2px'
+        }}>
+          No rating yet
+        </span>
+      );
+    }
+
     const fullStars = Math.floor(rating);
     const halfStar = rating % 1 >= 0.5 ? 1 : 0;
-    const emptyStars = 5 - fullStars - halfStar;
-    
+    const emptyStars = Math.max(0, 5 - fullStars - halfStar);
+
     return (
-      <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
         {[...Array(fullStars)].map((_, i) => (
           <span key={`full-${i}`} style={{ color: '#f59e0b' }}>★</span>
         ))}
@@ -173,7 +193,7 @@ export default function RMRequestsTab() {
   // ============================================
   // 3. ALL useMemo hooks
   // ============================================
-  
+
   const filteredRequests = useMemo(() => {
     return requests.filter(req => {
       // Exclude requests for completed/archived projects
@@ -204,8 +224,8 @@ export default function RMRequestsTab() {
   );
 
   const displayedRecommendations = useMemo(() => {
-    let candidates = recommendationTab === 'View all' 
-      ? recommendations.all 
+    let candidates = recommendationTab === 'View all'
+      ? recommendations.all
       : recommendations.recommended;
     if (!candidates || candidates.length === 0) return [];
     if (recommendationTab === 'Recommended') {
@@ -217,7 +237,7 @@ export default function RMRequestsTab() {
   // ============================================
   // 4. ALL useEffect hooks
   // ============================================
-  
+
   useEffect(() => {
     fetchData();
     const handleUpdate = () => {
@@ -242,7 +262,7 @@ export default function RMRequestsTab() {
   // ============================================
   // 5. Event Handlers and other functions
   // ============================================
-  
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -251,9 +271,9 @@ export default function RMRequestsTab() {
         fetchEmployees(),
         fetchAssignments()
       ]);
-      setRequests(requestsData.data || requestsData || []);
-      setEmployees(employeesData.data || employeesData || []);
-      setAssignments(assignmentsData.data || assignmentsData || []);
+      setRequests(Array.isArray(requestsData) ? requestsData : (requestsData?.requirements || requestsData?.data || []));
+      setEmployees(Array.isArray(employeesData) ? employeesData : (employeesData?.employees || employeesData?.data || []));
+      setAssignments(Array.isArray(assignmentsData) ? assignmentsData : (assignmentsData?.assignments || assignmentsData?.data || []));
     } catch (error) {
       console.error('❌ Error fetching data:', error);
       Swal.fire({
@@ -291,19 +311,41 @@ export default function RMRequestsTab() {
   };
 
   const handleViewProfile = (employee) => {
+    const safeEmployees = Array.isArray(employees) ? employees : (employees?.employees || employees?.data || []);
     const recData = displayedRecommendations.find(r => r.employee.id === employee.id);
-    let performanceRating = 0;
-    if (recData?.historicalPerformance) {
-      performanceRating = recData.historicalPerformance * 5;
-    }
+    const hasPerf = Boolean(
+      recData?.hasPerformanceRating ??
+      recData?.employee?.hasPerformanceRating ??
+      (recData?.performanceRating !== null && recData?.performanceRating !== undefined && recData?.performanceRating > 0) ??
+      (recData?.breakdown?.performance?.hasRating) ??
+      (recData?.historicalPerformance && recData?.historicalPerformance !== 0.7 && recData?.historicalPerformance > 0)
+    );
+    const performanceRating = hasPerf
+      ? (recData?.performanceRating ?? (recData?.historicalPerformance ? recData.historicalPerformance * 5 : 0))
+      : 0;
+
+    const isNew = Boolean(
+      (
+        recData?.isNewEmployee ||
+        recData?.employee?.isNewEmployee ||
+        employee.isNewEmployee ||
+        (() => {
+          const empRecord = safeEmployees.find(e => e.id === employee.id);
+          if (!empRecord) return false;
+          const jDate = empRecord.join_date || empRecord.created_at;
+          return jDate ? (Date.now() - new Date(jDate).getTime() <= 60 * 24 * 60 * 60 * 1000) : false;
+        })()
+      ) && !hasPerf
+    );
     setSelectedEmployee({
       ...employee,
       matchedSkills: recData?.matchedSkills || [],
       missingSkills: recData?.missingSkills || [],
       performanceRating: performanceRating,
-      hasPerformanceData: performanceRating > 0,
+      hasPerformanceData: hasPerf,
       status: recData?.status || 'Not Recommended',
-      requirementId: activeRequestDetails?.id
+      requirementId: activeRequestDetails?.id,
+      isNewEmployee: isNew
     });
     setShowProfileModal(true);
   };
@@ -394,12 +436,12 @@ export default function RMRequestsTab() {
     console.log('📋 Requirement ID from frontend:', req.id);
     console.log('📋 Skills from frontend:', req.skills);
     console.log('📋 Project ID:', req.project_id);
-    
+
     setLoadingRecommendations(true);
     setActiveRequestDetails(req);
     setRecommendationTab('Recommended');
     setSelectedCandidateId(null);
-    
+
     try {
       await fetchRecommendationsData(req.id);
     } catch (error) {
@@ -470,8 +512,8 @@ export default function RMRequestsTab() {
           <div style={styles.requestList}>
             {groupedProjects.length === 0 ? (
               <div style={styles.emptyState}>
-                {showUnassignedOnly 
-                  ? 'No unassigned requests found.' 
+                {showUnassignedOnly
+                  ? 'No unassigned requests found.'
                   : 'No pending resource requests. All active requirements have been allocated or projects are completed.'}
               </div>
             ) : (
@@ -491,35 +533,9 @@ export default function RMRequestsTab() {
                         <div style={styles.projectInfo}>
                           <h3 style={styles.projectName}>{project.projectName}</h3>
                           <div style={styles.projectSubtitle}>
-                            <span>{project.requirements.length} role{project.requirements.length > 1 ? 's' : ''}</span>
+                            <span>{project.requirements.length} {project.requirements.length === 1 ? 'role' : 'roles'}</span>
                             <span style={styles.dot}>•</span>
                             <span>{project.totalFilled}/{project.totalNeeded} filled</span>
-                            <span style={styles.dot}>•</span>
-                            <span style={{
-                              color: project.isFullyAssigned ? '#22c55e' : '#f59e0b',
-                              fontWeight: '600',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                            }}>
-                              {project.isFullyAssigned ? (
-                                <>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                                  </svg>
-                                  Fully Staffed
-                                </>
-                              ) : (
-                                <>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <polyline points="12 6 12 12 16 14"></polyline>
-                                  </svg>
-                                  Needs Staff
-                                </>
-                              )}
-                            </span>
                           </div>
                         </div>
                       </div>
@@ -538,7 +554,7 @@ export default function RMRequestsTab() {
                                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                                 <polyline points="22 4 12 14.01 9 11.01"></polyline>
                               </svg>
-                              Staffed
+                              Fully Staffed
                             </>
                           ) : (
                             <>
@@ -736,18 +752,60 @@ export default function RMRequestsTab() {
                   </div>
                 ) : (
                   displayedRecommendations.map((rec) => {
-                    const isAlreadyAssigned = assignments.some(
+                    const safeAssignments = Array.isArray(assignments) ? assignments : (assignments?.assignments || assignments?.data || []);
+                    const safeEmployees = Array.isArray(employees) ? employees : (employees?.employees || employees?.data || []);
+                    const isAlreadyAssigned = safeAssignments.some(
                       a => a.requirement_id === activeRequestDetails.id && a.profile_id === rec.employee.id
                     );
                     const statusInfo = getStatusInfo(rec.status);
-                    const performanceRating = rec.historicalPerformance * 5 || 0;
+                    const hasRating = Boolean(
+                      rec.hasPerformanceRating ??
+                      rec.employee?.hasPerformanceRating ??
+                      (rec.performanceRating !== null && rec.performanceRating !== undefined && rec.performanceRating > 0) ??
+                      (rec.breakdown?.performance?.hasRating) ??
+                      (rec.historicalPerformance && rec.historicalPerformance !== 0.7 && rec.historicalPerformance > 0)
+                    );
+                    const performanceRating = hasRating
+                      ? (rec.performanceRating || (rec.historicalPerformance * 5) || 0)
+                      : 0;
 
                     return (
                       <div key={rec.employee.id} style={styles.recCard}>
                         <div style={styles.recHeader}>
                           <RMAvatar name={rec.employee.name} src={rec.employee.avatar} size={40} />
                           <div style={styles.recInfo}>
-                            <div style={styles.recName}>{rec.employee.name}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <div style={styles.recName}>{rec.employee.name}</div>
+                              {Boolean(
+                                (
+                                  rec.isNewEmployee ||
+                                  rec.employee?.isNewEmployee ||
+                                  (() => {
+                                    const empRecord = safeEmployees.find(e => e.id === rec.employee?.id);
+                                    if (!empRecord) return false;
+                                    const jDate = empRecord.join_date || empRecord.created_at;
+                                    return jDate ? (Date.now() - new Date(jDate).getTime() <= 60 * 24 * 60 * 60 * 1000) : false;
+                                  })()
+                                ) && !hasRating
+                              ) && (
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  padding: '2px 8px',
+                                  borderRadius: '12px',
+                                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(59, 130, 246, 0.2))',
+                                  color: '#34d399',
+                                  border: '1px solid rgba(52, 211, 153, 0.4)',
+                                  boxShadow: '0 0 8px rgba(16, 185, 129, 0.15)',
+                                  letterSpacing: '0.2px'
+                                }}>
+                                  New Employee
+                                </span>
+                              )}
+                            </div>
                             <div style={styles.recRole}>{rec.employee.role || 'Employee'}</div>
                             <div style={styles.recDepartment}>{rec.employee.department || ''}</div>
                             {/* Score & Workload Pills */}
@@ -818,7 +876,7 @@ export default function RMRequestsTab() {
                               {statusInfo.label}
                             </span>
                             <div style={styles.recStars}>
-                              {renderStars(performanceRating)}
+                              {renderStars(performanceRating, hasRating)}
                             </div>
                           </div>
                         </div>

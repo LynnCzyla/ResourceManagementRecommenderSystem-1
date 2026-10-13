@@ -10,8 +10,15 @@ const { sendMail: brevoSendMail, getLogoHtml } = require("./brevoMailer");
 // Helper: Send email with consistent error handling (kept for backward
 // compatibility with the rest of this file, now backed by Brevo's API
 // instead of nodemailer).
+const NO_REPLY_FROM = '"WEA Resource Management (No-Reply)" <wearesourcemanagement@gmail.com>';
+
 const sendEmail = async (mailOptions) => {
-  const result = await brevoSendMail(mailOptions);
+  // Enforce single unified no-reply sender for all outgoing mail
+  const optionsWithNoReply = {
+    ...mailOptions,
+    from: NO_REPLY_FROM,
+  };
+  const result = await brevoSendMail(optionsWithNoReply);
   if (result && !result.success) {
     throw new Error(result.error || 'Failed to send email via Brevo');
   }
@@ -179,7 +186,7 @@ const sendInterviewEmail = async ({ to, applicantName, position, date, time, int
             ${notes ? `<p style="margin: 4px 0; color: #cbd5e1; font-size: 13px;"><strong>Additional Notes:</strong> ${notes}</p>` : ''}
           </div>
           <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
-            Please confirm your attendance by replying to this email.<br/><br/>
+            Please confirm your attendance by contacting the HR office.<br/><br/>
             Best regards,<br/>
             WEA HR Team
           </p>
@@ -206,12 +213,15 @@ const sendOnboardingOfferEmail = async ({
   subject,
   customMessage,
   currency,
+  token,
 }) => {
   const { formatMoney } = require('./currency');
   const salaryNum = Number(String(salary ?? '').replace(/,/g, ''));
   const formattedSalary = salary
     ? (Number.isFinite(salaryNum) ? `${formatMoney(salaryNum, currency)}/month` : salary)
     : 'As agreed upon';
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const cleanAppUrl = appUrl.replace(/\/+$/, '');
   const mailSubject = subject || `Job Offer: ${position} - WEA Resource Management System`;
 
   const mailOptions = {
@@ -257,6 +267,33 @@ const sendOnboardingOfferEmail = async ({
             <p style="color: #cbd5e1; font-size: 13px; margin: 0; line-height: 1.5;">${instructions}</p>
           </div>
           ` : ''}
+          <!-- Decision Action Buttons (Accept / Decline) -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 16px; padding: 24px; margin: 28px 0; text-align: center;">
+            <h4 style="color: #f8fafc; font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">
+              Formal Job Offer Decision
+            </h4>
+            <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin: 0 0 20px 0;">
+              Please review the offer details and click your decision below. Each button opens a confirmation page where you will review and confirm your answer. This link is valid for <strong>14 days</strong> and allows <strong>only one response</strong>.
+            </p>
+            <table style="margin: 0 auto; border-collapse: separate; border-spacing: 14px 0;">
+              <tr>
+                <td>
+                  <a href="${token ? `${cleanAppUrl}/offer/${token}?choice=accept` : `${cleanAppUrl}/login`}" target="_blank" style="display: inline-block; background: #10b981; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);">
+                    ✓ Yes, I accept
+                  </a>
+                </td>
+                <td>
+                  <a href="${token ? `${cleanAppUrl}/offer/${token}?choice=decline` : `${cleanAppUrl}/login`}" target="_blank" style="display: inline-block; background: #1e293b; color: #f87171; border: 1px solid #ef4444; text-decoration: none; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 10px;">
+                    ✕ No, I decline
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="color: #64748b; font-size: 12px; margin: 16px 0 0 0;">
+              Have questions prior to responding? Please contact the HR office.
+            </p>
+          </div>
+
           <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
             Sincerely,<br/>
             <strong>WEA HR & Recruitment Team</strong>
@@ -308,6 +345,14 @@ const sendRejectionEmail = async ({ to, applicantName, position, reason }) => {
           <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">
             We were very impressed by your background, and we will keep your resume in our database for future opportunities that may fit your skills.
           </p>
+          <div style="background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 14px 16px; margin: 20px 0;">
+            <p style="color: #93c5fd; font-size: 13px; font-weight: 600; margin: 0 0 4px 0;">
+              ℹ️ Re-application Policy
+            </p>
+            <p style="color: #cbd5e1; font-size: 13px; line-height: 1.5; margin: 0;">
+              You can apply again for this position after <strong>3 to 6 months</strong>. We warmly encourage you to continue enhancing your skills and re-apply in the next recruitment cycle.
+            </p>
+          </div>
           <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
             Thank you again for your time, and we wish you the best of luck in your job search.<br/><br/>
             Best regards,<br/>
@@ -456,7 +501,7 @@ const sendApplicationReceivedEmail = async ({
 
           <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0;">
             Keep this email for your records. If you need to update any detail in your application,
-            reply to this message and include your reference number.<br/><br/>
+            please contact the HR office and provide your reference number.<br/><br/>
             Best regards,<br/>
             <strong>WEA HR &amp; Recruitment Team</strong>
           </p>

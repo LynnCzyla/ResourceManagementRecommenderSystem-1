@@ -43,9 +43,10 @@ async function getAuthToken() {
 
 // ── Caching & Deduplication ──────────────────────────────────────────
 
-// Simple in-memory cache for GET requests
+// In-memory cache for request deduplication — 2s TTL prevents duplicate concurrent
+// fetches while ensuring user actions and updates reflect immediately without delay.
 const cache = new Map();
-const CACHE_TTL = 60000; // 60 seconds
+const CACHE_TTL = 2000; // 2 seconds
 
 // Track pending requests for deduplication
 const pendingRequests = new Map();
@@ -71,7 +72,7 @@ function setCache(key, data) {
   });
 }
 
-function clearCache() {
+export function clearCache() {
   cache.clear();
 }
 

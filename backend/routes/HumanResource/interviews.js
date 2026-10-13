@@ -16,6 +16,33 @@ const hasHrOrAdminRole = (user) => {
   return false;
 };
 
+// Helper to convert time strings (e.g. "09:00", "09:00 AM", "14:30", "2:30 PM") to total minutes from midnight
+const parseTimeToMinutes = (timeStr) => {
+  if (!timeStr) return null;
+  const str = String(timeStr).trim().toUpperCase();
+  const match = str.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const modifier = match[3];
+    if (modifier === 'PM' && hours < 12) hours += 12;
+    if (modifier === 'AM' && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  }
+  return null;
+};
+
+// Check if two times conflict (within 30 minutes window or exact string match)
+const areTimesConflicting = (time1, time2, bufferMinutes = 30) => {
+  if (!time1 || !time2) return false;
+  const m1 = parseTimeToMinutes(time1);
+  const m2 = parseTimeToMinutes(time2);
+  if (m1 === null || m2 === null) {
+    return String(time1).trim().toLowerCase() === String(time2).trim().toLowerCase();
+  }
+  return Math.abs(m1 - m2) < bufferMinutes;
+};
+
 // Transform interview data helper
 const transformInterview = (item) => {
   if (!item) return null;
@@ -236,6 +263,48 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // ------------------------------------------------------------
+    // 🛡️ Time-Slot Collision Check: Block date/time already booked
+    // ------------------------------------------------------------
+    const { data: existingOnDate, error: collisionCheckError } = await supabase
+      .from('interviews')
+      .select(`
+        id,
+        interview_date,
+        interview_time,
+        interviewer,
+        status,
+        job_applications (
+          id,
+          first_name,
+          last_name,
+          branch_id
+        )
+      `)
+      .eq('interview_date', interview_date)
+      .neq('status', 'Cancelled');
+
+    if (!collisionCheckError && existingOnDate && existingOnDate.length > 0) {
+      const conflict = existingOnDate.find((item) => {
+        const sameBranch = isSuperAdmin || !userBranchId || !item.job_applications?.branch_id || item.job_applications.branch_id === userBranchId;
+        if (!sameBranch) return false;
+        return areTimesConflicting(item.interview_time, interview_time, 30);
+      });
+
+      if (conflict) {
+        const conflictName = conflict.job_applications
+          ? `${conflict.job_applications.first_name || ''} ${conflict.job_applications.last_name || ''}`.trim()
+          : 'another candidate';
+        console.warn(`⛔ Time conflict on ${interview_date} at ${interview_time} with #${conflict.id}`);
+        return res.status(409).json({
+          success: false,
+          error: `Time-slot collision: An interview is already scheduled on ${interview_date} at ${conflict.interview_time} (${conflictName}, Interviewer: ${conflict.interviewer || 'N/A'}). Please select a different time or date.`,
+          conflictInterviewId: conflict.id,
+          conflictTime: conflict.interview_time,
+        });
+      }
+    }
+
     const { data: interview, error: interviewError } = await supabase
       .from('interviews')
       .insert({
@@ -304,6 +373,182 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Error scheduling interview:', error);
     res.status(500).json({ success: false, error: 'Failed to schedule interview.' });
+  }
+});
+
+// PUT /api/hr/interviews/:id — Reschedule/Update interview details with collision check
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      interview_date,
+      interview_time,
+      interviewer,
+      interview_type,
+      location,
+      notes,
+    } = req.body;
+
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userId = req.user?.id;
+
+    if (!hasHrOrAdminRole(req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Human Resources, Admin, or Super Admin role required.'
+      });
+    }
+
+    // Fetch existing interview
+    const { data: currentInterview, error: fetchError } = await supabase
+      .from('interviews')
+      .select(`
+        *,
+        job_applications (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone,
+          position_applied,
+          branch_id
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !currentInterview) {
+      return res.status(404).json({ success: false, error: 'Interview not found.' });
+    }
+
+    // Branch check
+    if (!isSuperAdmin) {
+      const interviewBranchId = currentInterview.job_applications?.branch_id;
+      if (!interviewBranchId || interviewBranchId !== userBranchId) {
+        return res.status(403).json({
+          success: false,
+          error: 'You do not have permission to modify this interview'
+        });
+      }
+    }
+
+    const newDate = interview_date || currentInterview.interview_date;
+    const newTime = interview_time || currentInterview.interview_time;
+
+    // Check collision if date or time changed
+    if (newDate && newTime && (newDate !== currentInterview.interview_date || newTime !== currentInterview.interview_time)) {
+      const { data: existingOnDate } = await supabase
+        .from('interviews')
+        .select(`
+          id,
+          interview_date,
+          interview_time,
+          interviewer,
+          status,
+          job_applications (
+            id,
+            first_name,
+            last_name,
+            branch_id
+          )
+        `)
+        .eq('interview_date', newDate)
+        .neq('status', 'Cancelled')
+        .neq('id', id);
+
+      if (existingOnDate && existingOnDate.length > 0) {
+        const conflict = existingOnDate.find((item) => {
+          const sameBranch = isSuperAdmin || !userBranchId || !item.job_applications?.branch_id || item.job_applications.branch_id === userBranchId;
+          if (!sameBranch) return false;
+          return areTimesConflicting(item.interview_time, newTime, 30);
+        });
+
+        if (conflict) {
+          const applicantName = conflict.job_applications
+            ? `${conflict.job_applications.first_name || ''} ${conflict.job_applications.last_name || ''}`.trim()
+            : 'another applicant';
+          return res.status(409).json({
+            success: false,
+            error: `Time-slot is already occupied: An interview is already scheduled on ${newDate} at ${conflict.interview_time} (${applicantName}). Please choose a different date or time.`,
+            conflictInterviewId: conflict.id,
+            conflictTime: conflict.interview_time,
+          });
+        }
+      }
+    }
+
+    const updatePayload = {
+      interview_date: newDate,
+      interview_time: newTime,
+      interviewer: interviewer ?? currentInterview.interviewer,
+      interview_type: interview_type ?? currentInterview.interview_type,
+      location: location ?? currentInterview.location,
+      notes: notes ?? currentInterview.notes,
+    };
+
+    const { data: updatedInterview, error: updateError } = await supabase
+      .from('interviews')
+      .update(updatePayload)
+      .eq('id', id)
+      .select(`
+        *,
+        job_applications (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone,
+          position_applied,
+          department,
+          branch_id,
+          branches:branch_id (
+            id,
+            name,
+            location
+          )
+        ),
+        profiles:created_by (
+          id,
+          first_name,
+          last_name
+        )
+      `)
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Send updated invitation if date or time changed and email is available
+    const app = currentInterview.job_applications;
+    if (app?.email && (newDate !== currentInterview.interview_date || newTime !== currentInterview.interview_time)) {
+      try {
+        await sendInterviewEmail({
+          to: app.email,
+          applicantName: `${app.first_name || ''} ${app.last_name || ''}`.trim(),
+          position: app.position_applied || 'Position',
+          date: newDate,
+          time: newTime,
+          interviewer: updatePayload.interviewer,
+          interviewType: updatePayload.interview_type,
+          location: updatePayload.location,
+          notes: updatePayload.notes,
+        });
+      } catch (mailErr) {
+        console.error('Failed to send rescheduled email:', mailErr);
+      }
+    }
+
+    await logAuditEvent({
+      req,
+      action: 'Updated',
+      systemCategory: 'HR - Interviews',
+      logDescription: `Rescheduled interview ${id} to ${newDate} at ${newTime}`,
+    });
+
+    res.status(200).json({ success: true, message: 'Interview updated successfully.', data: transformInterview(updatedInterview) });
+  } catch (error) {
+    console.error('Error updating interview:', error);
+    res.status(500).json({ success: false, error: 'Failed to update interview.' });
   }
 });
 

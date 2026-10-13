@@ -12,6 +12,7 @@ import RMLayout from './frontend/ResourceManager/RMLayout';
 import HRLayout from './frontend/HumanResource/HRLayout';
 import EmployeeLayout from './frontend/Employee/EmployeeLayout';
 import ClientFeedbackPage from './frontend/Feedback/ClientFeedbackPage';
+import JobOfferDecisionPage from './frontend/Public/JobOfferDecisionPage';
 import { supabase, getSession, establishSessionFromUrl } from './lib/supabaseClient';
 import Swal from 'sweetalert2';
 import axios from 'axios';
@@ -588,6 +589,7 @@ function App() {
         {/* Shareable link to one specific job posting */}
         <Route path="/applicant-portal/jobs/:jobId" element={<ApplicantPortal isDark={isDark} toggleTheme={toggleTheme} />} />
         <Route path="/feedback/:token" element={<ClientFeedbackPage />} />
+        <Route path="/offer/:token" element={<JobOfferDecisionPage isDark={isDark} />} />
         {/* ✅ Catch-all route for everything else */}
         <Route path="*" element={mainAppContent} />
       </Routes>

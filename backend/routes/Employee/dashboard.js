@@ -29,8 +29,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     const assignedProjectsCount = (assignments || []).filter(a => {
       const isAssignmentActive = a.status !== 'Completed' && a.status !== 'Inactive';
-      const isProjectActive = a.projects && a.projects.status === 'Active';
-      return isAssignmentActive && isProjectActive;
+      const isProjectClosed = a.projects && ['Completed', 'Cancelled', 'Archived', 'Deleted'].includes(a.projects.status);
+      return isAssignmentActive && !isProjectClosed;
     }).length;
 
     // Fetch tasks count & status breakdown
@@ -43,8 +43,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     const activeTasksCount = (tasks || []).filter(t => {
       const isTaskActive = t.status === 'In Progress' || t.status === 'Pending';
-      const isProjectActive = !t.projects || t.projects.status === 'Active';
-      return isTaskActive && isProjectActive;
+      const isProjectClosed = t.projects && ['Completed', 'Cancelled', 'Archived', 'Deleted'].includes(t.projects.status);
+      return isTaskActive && !isProjectClosed;
     }).length;
 
     const completedTasksCount = (tasks || []).filter(t => {

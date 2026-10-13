@@ -991,6 +991,13 @@ const styles = {
     color: 'var(--color-text-secondary)',
     lineHeight: '1.5',
     margin: 0,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
   },
   skillsRow: {
     display: 'flex',

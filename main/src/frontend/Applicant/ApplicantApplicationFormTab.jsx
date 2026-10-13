@@ -18,6 +18,8 @@ export default function ApplicantApplicationFormTab() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [maxFileSize, setMaxFileSize] = useState(5); // ✅ Use separate state for max file size
+  const [emailError, setEmailError] = useState('');
+  const [validatingEmail, setValidatingEmail] = useState(false);
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -151,6 +153,45 @@ export default function ApplicantApplicationFormTab() {
     setFormData(prev => ({ ...prev, phone: sanitizePhone(prev.phone + pasted) }));
   };
 
+  const validateEmailWithServer = async (emailToTest, positionToTest) => {
+    const trimmed = (emailToTest || '').trim();
+    if (!trimmed || !/\S+@\S+\.\S+/.test(trimmed)) {
+      return { valid: false, error: 'Please enter a valid email address.' };
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/applicant/validate-email?email=${encodeURIComponent(trimmed)}&position=${encodeURIComponent(positionToTest || '')}`
+      );
+      const data = await res.json();
+      if (!res.ok || !data.valid) {
+        return {
+          valid: false,
+          error: data.error || 'This email cannot be used for this application.',
+          reason: data.reason
+        };
+      }
+      return { valid: true };
+    } catch (err) {
+      console.warn('Email validation check failed:', err);
+      return { valid: true };
+    }
+  };
+
+  const handleEmailBlur = async () => {
+    if (!formData.email?.trim()) {
+      setEmailError('');
+      return;
+    }
+    setValidatingEmail(true);
+    const result = await validateEmailWithServer(formData.email, formData.position);
+    if (!result.valid) {
+      setEmailError(result.error);
+    } else {
+      setEmailError('');
+    }
+    setValidatingEmail(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -163,8 +204,71 @@ export default function ApplicantApplicationFormTab() {
 
     setSubmitting(true);
 
+    // 🛡️ Validate email with server first
+    const emailCheck = await validateEmailWithServer(formData.email, formData.position);
+    if (!emailCheck.valid) {
+      setSubmitting(false);
+      setEmailError(emailCheck.error);
+      if (emailCheck.reason === 'internal_user') {
+        showErrorAlert(
+          emailCheck.error,
+          'Internal Account Detected'
+        );
+      } else if (emailCheck.reason === 'cooldown') {
+        showErrorAlert(
+          emailCheck.error,
+          'Re-application Cooldown'
+        );
+      } else {
+        showErrorAlert(emailCheck.error, 'Invalid Email');
+      }
+      return;
+    }
+
     try {
-      // Mock submission
+      // Real submission
+      const fd = new FormData();
+      fd.append('first_name', formData.firstName);
+      fd.append('middle_name', formData.middleName || '');
+      fd.append('last_name', formData.lastName);
+      fd.append('email', formData.email.trim());
+      fd.append('phone', phoneDigits);
+      fd.append('position_applied', formData.position);
+      fd.append('location', formData.address || '');
+      fd.append('experience', formData.experience);
+      fd.append('education', formData.education);
+      fd.append('skills', formData.skills);
+      fd.append('cover_letter', formData.coverLetter || '');
+      if (formData.resume) fd.append('resume', formData.resume);
+
+      const res = await fetch(`${API_BASE_URL}/api/applicant/applications`, {
+        method: 'POST',
+        body: fd
+      });
+
+      const raw = await res.text();
+      let data = null;
+      try { data = JSON.parse(raw); } catch { data = null; }
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          showErrorAlert(
+            (data && data.error) || 'Internal company accounts cannot apply as external applicants. Please use a personal email.',
+            'Internal Email Restricted'
+          );
+        } else if (res.status === 409) {
+          showErrorAlert(
+            (data && data.error) || 'This email has already applied or is in a 3-month cooldown period.',
+            data?.reason === 'cooldown' ? 'Re-application Cooldown' : 'Already Applied'
+          );
+        } else if (res.status === 413) {
+          showErrorAlert(`Your resume exceeds the ${maxFileSize}MB limit.`, 'File Too Large');
+        } else {
+          showErrorAlert((data && data.error) || 'Failed to submit application. Please try again.');
+        }
+        return;
+      }
+
       const newApplication = {
         id: myApplications.length + 1,
         position: formData.position,
@@ -174,6 +278,7 @@ export default function ApplicantApplicationFormTab() {
       setMyApplications([...myApplications, newApplication]);
       setShowForm(false);
       resetForm();
+      setEmailError('');
       showSuccessAlert('Your application has been submitted successfully! We will review it and get back to you soon.');
     } catch (err) {
       showErrorAlert('Failed to submit application. Please try again.');
@@ -366,9 +471,27 @@ export default function ApplicantApplicationFormTab() {
                     type="email"
                     required
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    style={styles.formInput}
+                    onChange={(e) => {
+                      setFormData({ ...formData, email: e.target.value });
+                      if (emailError) setEmailError('');
+                    }}
+                    onBlur={handleEmailBlur}
+                    placeholder="your.email@example.com"
+                    style={{
+                      ...styles.formInput,
+                      ...(emailError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.05)' } : {})
+                    }}
                   />
+                  {validatingEmail && (
+                    <span style={{ fontSize: '11px', color: 'var(--color-primary, #3b82f6)', marginTop: '4px', display: 'block' }}>
+                      ⏳ Verifying email eligibility...
+                    </span>
+                  )}
+                  {emailError && (
+                    <span style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px', display: 'block', lineHeight: '1.4' }}>
+                      ⚠️ {emailError}
+                    </span>
+                  )}
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Phone Number *</label>

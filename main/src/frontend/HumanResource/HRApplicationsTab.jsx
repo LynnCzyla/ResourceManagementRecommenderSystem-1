@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import InterviewSchedulePicker, { parseTimeToMinutes, formatTimeDisplay } from './InterviewSchedulePicker';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
 import { API_BASE_URL } from '../../config/api';
@@ -7,7 +8,7 @@ import { API_BASE_URL } from '../../config/api';
 const mapApplication = (row) => {
   let location = row.location || '';
   let coverLetter = row.cover_letter || '';
-  
+
   if (!location && coverLetter.includes('[Applicant Address:')) {
     const match = coverLetter.match(/\[Applicant Address:\s*(.*?)\]/);
     if (match) {
@@ -58,11 +59,13 @@ export default function HRApplicationsTab() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [positionFilter, setPositionFilter] = useState('All');
   const [scheduling, setScheduling] = useState(false);
+  const [interviews, setInterviews] = useState([]);
 
   // Active / History tab
   const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
   const [hoveredTab, setHoveredTab] = useState(null);
 
+  // Declare scheduleForm FIRST before using it in scheduleConflict
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
     time: '',
@@ -72,8 +75,44 @@ export default function HRApplicationsTab() {
     notes: '',
   });
 
+  const scheduleConflict = useMemo(() => {
+    if (!scheduleForm.date || !scheduleForm.time) return null;
+    const targetMins = parseTimeToMinutes(scheduleForm.time);
+    return interviews.find(int => {
+      // If interview is marked as done (Completed, Hired, Rejected), it is not a conflict
+      if (int.status !== 'Scheduled') return false;
+      if (int.interviewDate !== scheduleForm.date) return false;
+      const intMins = parseTimeToMinutes(int.interviewTime);
+      if (targetMins !== null && intMins !== null) {
+        return Math.abs(targetMins - intMins) < 30;
+      }
+      return String(int.interviewTime).trim().toLowerCase() === String(scheduleForm.time).trim().toLowerCase();
+    });
+  }, [interviews, scheduleForm.date, scheduleForm.time]);
+
+  const loadInterviews = async () => {
+    try {
+      const res = await hrClient.get('/interviews');
+      const rows = res.data?.data || [];
+      setInterviews(rows.map(row => ({
+        id: row.id,
+        applicantName: row.applicant_name || (row.job_applications ? `${row.job_applications.first_name || ''} ${row.job_applications.last_name || ''}`.trim() : 'Candidate'),
+        position: row.position || row.job_applications?.position_applied || '',
+        interviewDate: row.interview_date,
+        interviewTime: row.interview_time,
+        interviewer: row.interviewer,
+        interviewType: row.interview_type,
+        location: row.location,
+        status: row.status,
+      })));
+    } catch (err) {
+      console.warn('Failed to load interviews:', err);
+    }
+  };
+
   useEffect(() => {
     loadApplications();
+    loadInterviews();
   }, []);
 
   const loadApplications = async () => {
@@ -241,7 +280,7 @@ export default function HRApplicationsTab() {
   const historyCount = applications.filter(app => isHistoryApplication(app)).length;
 
   const filteredApplications = applications.filter(app => {
-    const matchesSearch = 
+    const matchesSearch =
       app.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.position?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -392,11 +431,11 @@ export default function HRApplicationsTab() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
                         <span style={{
                           ...styles.statusBadge,
-                          backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' : 
+                          backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' :
                                  app.status === 'Interview Scheduled' ? 'rgba(56, 189, 248, 0.15)' :
                                  app.status === 'Hired' ? 'rgba(34, 197, 94, 0.15)' :
                                  app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                          color: app.status === 'Recommended' ? 'var(--color-primary)' : 
+                          color: app.status === 'Recommended' ? 'var(--color-primary)' :
                                  app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
                                  app.status === 'Hired' ? 'var(--color-success)' :
                                  app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
@@ -476,7 +515,7 @@ export default function HRApplicationsTab() {
                 <h3 style={styles.modalTitle}>Application Details</h3>
                 <button onClick={() => setShowDetailsModal(false)} style={styles.closeBtn}>×</button>
               </div>
-              
+
               <div style={styles.modalSplitBody}>
                 {/* Left Column: Resume Viewer */}
                 <div style={styles.leftColumn}>
@@ -574,11 +613,11 @@ export default function HRApplicationsTab() {
                         <span style={{
                           ...styles.detailValue,
                           ...styles.statusBadge,
-                          backgroundColor: selectedApplication.status === 'Recommended' ? 'var(--color-primary-light)' : 
+                          backgroundColor: selectedApplication.status === 'Recommended' ? 'var(--color-primary-light)' :
                                          selectedApplication.status === 'Under Review' ? 'var(--color-accent-light)' :
                                          selectedApplication.status === 'Hired' ? 'var(--color-success-light)' :
                                          selectedApplication.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
-                          color: selectedApplication.status === 'Recommended' ? 'var(--color-primary)' : 
+                          color: selectedApplication.status === 'Recommended' ? 'var(--color-primary)' :
                                  selectedApplication.status === 'Under Review' ? 'var(--color-accent)' :
                                  selectedApplication.status === 'Hired' ? 'var(--color-success)' :
                                  selectedApplication.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
@@ -664,7 +703,7 @@ export default function HRApplicationsTab() {
       {/* Schedule Interview Modal */}
       {showScheduleModal && selectedApplication && (
         <div style={styles.modalOverlay}>
-          <div className="glass-card" style={styles.modal}>
+          <div className="glass-card" style={{ ...styles.modal, maxWidth: '860px' }}>
             <div style={styles.modalHeader}>
               <h3 style={styles.modalTitle}>Schedule Interview</h3>
               <button onClick={() => setShowScheduleModal(false)} style={styles.closeBtn}>×</button>
@@ -690,48 +729,56 @@ export default function HRApplicationsTab() {
                 </div>
 
                 <div style={styles.formSection}>
-                  <h4 style={styles.formSectionTitle}>Interview Schedule</h4>
+                  <h4 style={styles.formSectionTitle}>Interview Schedule & Availability Calendar</h4>
+                  <InterviewSchedulePicker
+                    selectedDate={scheduleForm.date}
+                    selectedTime={scheduleForm.time}
+                    onSelectDate={(date) => setScheduleForm(prev => ({ ...prev, date }))}
+                    onSelectTime={(time) => setScheduleForm(prev => ({ ...prev, time }))}
+                    interviews={interviews}
+                  />
+
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
-                      <label style={styles.label}>Date *</label>
-                      <input 
-                        type="date" 
-                        required 
-                        style={styles.input} 
+                      <label style={styles.label}>Selected Date *</label>
+                      <input
+                        type="date"
+                        required
+                        style={styles.input}
                         value={scheduleForm.date}
-                        onChange={(e) => setScheduleForm({...scheduleForm, date: e.target.value})}
+                        onChange={(e) => setScheduleForm(prev => ({ ...prev, date: e.target.value }))}
                       />
                     </div>
                     <div style={styles.formGroup}>
-                      <label style={styles.label}>Time *</label>
-                      <input 
-                        type="time" 
-                        required 
-                        style={styles.input} 
+                      <label style={styles.label}>Selected Time *</label>
+                      <input
+                        type="time"
+                        required
+                        style={styles.input}
                         value={scheduleForm.time}
-                        onChange={(e) => setScheduleForm({...scheduleForm, time: e.target.value})}
+                        onChange={(e) => setScheduleForm(prev => ({ ...prev, time: e.target.value }))}
                       />
                     </div>
                   </div>
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Interviewer *</label>
-                      <input 
-                        type="text" 
-                        required 
-                        style={styles.input} 
+                      <input
+                        type="text"
+                        required
+                        style={styles.input}
                         placeholder="e.g., HR Manager"
                         value={scheduleForm.interviewer}
-                        onChange={(e) => setScheduleForm({...scheduleForm, interviewer: e.target.value})}
+                        onChange={(e) => setScheduleForm(prev => ({ ...prev, interviewer: e.target.value }))}
                       />
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Interview Type *</label>
-                      <select 
-                        required 
+                      <select
+                        required
                         style={styles.input}
                         value={scheduleForm.interviewType}
-                        onChange={(e) => setScheduleForm({...scheduleForm, interviewType: e.target.value})}
+                        onChange={(e) => setScheduleForm(prev => ({ ...prev, interviewType: e.target.value }))}
                       >
                         <option value="Initial Screening">Initial Screening</option>
                         <option value="Technical Interview">Technical Interview</option>
@@ -742,13 +789,13 @@ export default function HRApplicationsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input 
-                      type="text" 
-                      required 
-                      style={styles.input} 
+                    <input
+                      type="text"
+                      required
+                      style={styles.input}
                       placeholder="e.g., Conference Room A or Video Call"
                       value={scheduleForm.location}
-                      onChange={(e) => setScheduleForm({...scheduleForm, location: e.target.value})}
+                      onChange={(e) => setScheduleForm(prev => ({ ...prev, location: e.target.value }))}
                     />
                   </div>
                 </div>
@@ -757,9 +804,9 @@ export default function HRApplicationsTab() {
                   <h4 style={styles.formSectionTitle}>Additional Notes</h4>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Notes</label>
-                    <textarea 
-                      style={styles.textarea} 
-                      rows="3" 
+                    <textarea
+                      style={styles.textarea}
+                      rows="3"
                       placeholder="Any additional notes for the interviewer..."
                       value={scheduleForm.notes}
                       onChange={(e) => setScheduleForm({...scheduleForm, notes: e.target.value})}
@@ -775,28 +822,28 @@ export default function HRApplicationsTab() {
                   <h4 style={styles.formSectionTitle}>Email Preview (sent automatically on submit)</h4>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>To</label>
-                    <input 
-                      type="email" 
-                      style={styles.input} 
+                    <input
+                      type="email"
+                      style={styles.input}
                       value={selectedApplication.email}
                       readOnly
                     />
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Subject</label>
-                    <input 
-                      type="text" 
-                      style={styles.input} 
+                    <input
+                      type="text"
+                      style={styles.input}
                       value={`Interview Invitation - ${selectedApplication.position} at WEA`}
                       readOnly
                     />
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Message</label>
-                    <textarea 
-                      style={styles.textarea} 
-                      rows="8" 
-                      value={`Dear ${selectedApplication.name},\n\nWe are pleased to invite you for an interview for the ${selectedApplication.position} position.\n\nInterview Details:\nDate: ${scheduleForm.date || '[Select date]'}\nTime: ${scheduleForm.time || '[Select time]'}\nInterviewer: ${scheduleForm.interviewer || '[Enter interviewer]'}\nType: ${scheduleForm.interviewType || '[Select type]'}\nLocation: ${scheduleForm.location || '[Enter location]'}\n\n${scheduleForm.notes ? `Additional Notes: ${scheduleForm.notes}\n\n` : ''}Please confirm your attendance by replying to this email.\n\nBest regards,\nWEA HR Team`}
+                    <textarea
+                      style={styles.textarea}
+                      rows="8"
+                      value={`Dear ${selectedApplication.name},\n\nWe are pleased to invite you for an interview for the ${selectedApplication.position} position.\n\nInterview Details:\nDate: ${scheduleForm.date || '[Select date]'}\nTime: ${scheduleForm.time || '[Select time]'}\nInterviewer: ${scheduleForm.interviewer || '[Enter interviewer]'}\nType: ${scheduleForm.interviewType || '[Select type]'}\nLocation: ${scheduleForm.location || '[Enter location]'}\n\n${scheduleForm.notes ? `Additional Notes: ${scheduleForm.notes}\n\n` : ''}Please confirm your attendance by contacting the HR office.\n\nBest regards,\nWEA HR Team`}
                       readOnly
                     />
                   </div>
@@ -804,7 +851,15 @@ export default function HRApplicationsTab() {
 
                 <div style={styles.modalFooter}>
                   <button type="button" onClick={() => setShowScheduleModal(false)} style={styles.closeModalBtn}>Cancel</button>
-                  <button type="submit" disabled={scheduling} style={styles.submitBtn}>
+                  <button
+                    type="submit"
+                    disabled={scheduling || !scheduleForm.date || !scheduleForm.time || !!scheduleConflict}
+                    style={{
+                      ...styles.submitBtn,
+                      opacity: (scheduling || !scheduleForm.date || !scheduleForm.time || !!scheduleConflict) ? 0.6 : 1,
+                      cursor: (scheduling || !scheduleForm.date || !scheduleForm.time || !!scheduleConflict) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
                     {scheduling ? 'Sending...' : 'Schedule & Send Email'}
                   </button>
                 </div>

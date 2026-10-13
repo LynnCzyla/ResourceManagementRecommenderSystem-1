@@ -225,11 +225,10 @@ const PROJECT_SELECT = `
   )
 `;
 
-// Simple in-memory cache for the list endpoint — avoids re-running the
-// expensive nested join on every tab switch. 30s TTL keeps data fresh
-// enough while killing repeat-fetch egress.
+// In-memory cache for the list endpoint — 3s TTL prevents spamming nested joins
+// while ensuring updates appear nearly instantaneously across portals.
 const projectsCache = new Map();
-const CACHE_TTL_MS = 30 * 1000;
+const CACHE_TTL_MS = 3 * 1000;
 
 function getCached(key) {
   const entry = projectsCache.get(key);
@@ -1473,3 +1472,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.invalidateProjectsCache = invalidateProjectsCache;
