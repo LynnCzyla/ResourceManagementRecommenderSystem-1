@@ -48,6 +48,8 @@ const mapInterview = (row) => ({
   notes: row.notes || '',
 });
 
+const OTHER_LOCATION = '__OTHER_LOCATION__';
+
 export default function HRInterviewsTab() {
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +63,7 @@ export default function HRInterviewsTab() {
   const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
   const [hoveredTab, setHoveredTab] = useState(null);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
+  const [branchLocationOptions, setBranchLocationOptions] = useState([]);
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
     time: '',
@@ -140,7 +143,25 @@ export default function HRInterviewsTab() {
 
   useEffect(() => {
     loadInterviews();
+    loadBranchLocation();
   }, []);
+
+  const loadBranchLocation = async () => {
+    try {
+      const res = await hrClient.get('/branches/my-branch');
+      const branch = res.data?.data;
+      const options = [branch?.address, branch?.location]
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+        .filter((value, index, values) => values.indexOf(value) === index);
+      setBranchLocationOptions(options);
+      if (options.length > 0) {
+        setScheduleForm(prev => ({ ...prev, location: prev.location || options[0] }));
+      }
+    } catch (err) {
+      console.error('Failed to load branch location:', err);
+    }
+  };
 
   const loadInterviews = async () => {
     try {
@@ -395,7 +416,7 @@ export default function HRInterviewsTab() {
     showSuccessAlert('Gmail opened with interview invitation!');
   };
 
-  const isHistoryStatus = (status) => status === 'Hired' || status === 'Rejected';
+  const isHistoryStatus = (status) => ['Completed', 'Hired', 'Rejected', 'Cancelled'].includes(status);
 
   const activeCount = interviews.filter(int => !isHistoryStatus(int.status)).length;
   const historyCount = interviews.filter(int => isHistoryStatus(int.status)).length;
@@ -412,7 +433,10 @@ export default function HRInterviewsTab() {
     return matchesSearch && matchesStatus && matchesTab;
   });
 
-  const todayDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayDateStr = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }, []);
 
   const interviewsByDate = useMemo(() => {
     const map = {};
@@ -1083,6 +1107,7 @@ export default function HRInterviewsTab() {
                       <input
                         type="date"
                         required
+                        min={todayDateStr}
                         style={styles.input}
                         value={scheduleForm.date}
                         onChange={(e) => setScheduleForm(prev => ({ ...prev, date: e.target.value }))}
@@ -1128,14 +1153,29 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input
-                      type="text"
+                    <select
                       required
                       style={styles.input}
-                      placeholder="e.g., Conference Room A or Video Call"
-                      value={scheduleForm.location}
-                      onChange={(e) => setScheduleForm(prev => ({ ...prev, location: e.target.value }))}
-                    />
+                      value={branchLocationOptions.includes(scheduleForm.location) ? scheduleForm.location : OTHER_LOCATION}
+                      onChange={(e) => setScheduleForm(prev => ({
+                        ...prev,
+                        location: e.target.value === OTHER_LOCATION ? '' : e.target.value,
+                      }))}
+                    >
+                      {branchLocationOptions.length === 0 && <option value="">Select a location</option>}
+                      {branchLocationOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                      <option value={OTHER_LOCATION}>Other location</option>
+                    </select>
+                    {!branchLocationOptions.includes(scheduleForm.location) && (
+                      <input
+                        type="text"
+                        required
+                        style={{ ...styles.input, marginTop: '8px' }}
+                        placeholder="Enter the interview address or meeting link"
+                        value={scheduleForm.location}
+                        onChange={(e) => setScheduleForm(prev => ({ ...prev, location: e.target.value }))}
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1214,6 +1254,7 @@ export default function HRInterviewsTab() {
                       <input
                         type="date"
                         required
+                        min={todayDateStr}
                         style={styles.input}
                         value={rescheduleForm.date}
                         onChange={(e) => setRescheduleForm(prev => ({ ...prev, date: e.target.value }))}
@@ -1259,14 +1300,29 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input
-                      type="text"
+                    <select
                       required
                       style={styles.input}
-                      placeholder="e.g., Conference Room A or Video Call"
-                      value={rescheduleForm.location}
-                      onChange={(e) => setRescheduleForm(prev => ({ ...prev, location: e.target.value }))}
-                    />
+                      value={branchLocationOptions.includes(rescheduleForm.location) ? rescheduleForm.location : OTHER_LOCATION}
+                      onChange={(e) => setRescheduleForm(prev => ({
+                        ...prev,
+                        location: e.target.value === OTHER_LOCATION ? '' : e.target.value,
+                      }))}
+                    >
+                      {branchLocationOptions.length === 0 && <option value="">Select a location</option>}
+                      {branchLocationOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                      <option value={OTHER_LOCATION}>Other location</option>
+                    </select>
+                    {!branchLocationOptions.includes(rescheduleForm.location) && (
+                      <input
+                        type="text"
+                        required
+                        style={{ ...styles.input, marginTop: '8px' }}
+                        placeholder="Enter the interview address or meeting link"
+                        value={rescheduleForm.location}
+                        onChange={(e) => setRescheduleForm(prev => ({ ...prev, location: e.target.value }))}
+                      />
+                    )}
                   </div>
                 </div>
 

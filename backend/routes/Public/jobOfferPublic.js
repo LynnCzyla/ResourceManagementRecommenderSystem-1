@@ -151,7 +151,7 @@ router.post('/offer/:token/respond', async (req, res) => {
     if (appId) {
       const { data } = await supabase
         .from('job_applications')
-        .select('id, notes, branch_id, position_applied')
+        .select('id, notes, branch_id, position_applied, job_posting_id')
         .eq('id', appId)
         .maybeSingle();
       appData = data;
@@ -193,6 +193,27 @@ router.post('/offer/:token/respond', async (req, res) => {
         .from('hired_employees')
         .update({ status: 'Active' })
         .eq('id', hiredEmployeeId);
+
+      // Close the posting only after an offer is accepted, not when HR creates the offer.
+      if (appData?.job_posting_id) {
+        const { data: posting } = await supabase
+          .from('job_postings')
+          .select('id, status, description, source_request_id, hr_resource_requests:source_request_id(quantity_needed)')
+          .eq('id', appData.job_posting_id)
+          .maybeSingle();
+        const { count: acceptedCount } = await supabase
+          .from('job_applications')
+          .select('id', { count: 'exact', head: true })
+          .eq('job_posting_id', appData.job_posting_id)
+          .eq('status', 'Hired')
+          .ilike('notes', '%OFFER_ACCEPTED%');
+        const vacancyMatch = posting?.description?.match(/\[VACANCY:\s*(\d+)\]/i);
+        const quantity = Number(posting?.hr_resource_requests?.quantity_needed)
+          || (vacancyMatch ? Number(vacancyMatch[1]) : 1);
+        if (posting?.status === 'Active' && (acceptedCount || 0) >= quantity) {
+          await supabase.from('job_postings').update({ status: 'Closed' }).eq('id', posting.id);
+        }
+      }
 
       // 3. Notify Admins and Super Admins
       try {
