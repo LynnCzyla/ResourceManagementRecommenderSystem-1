@@ -137,13 +137,27 @@ class NLPProcessor:
         # whether the skill set actually changed since the last time it ran.
         self._last_merge_skillset_signature = None
 
-        # Load spaCy model
+        # Load spaCy model.
+        # MEMORY: this process also just ran OCR (opencv/pdf2image/tesseract),
+        # whose C-extension memory isn't returned by Python's gc.collect().
+        # Force one anyway right before the model load so whatever CAN be
+        # reclaimed is, before we add ~200MB+ on top on a 512MB container.
+        import gc
+        gc.collect()
+
+        # MEMORY: 'lemmatizer' and 'attribute_ruler' are loaded by default but
+        # never used anywhere in this file (no .lemma_/.pos_/.tag_ access) -
+        # only .vector/.similarity() (needs vectors+tok2vec) and .ents/.noun_chunks
+        # (needs ner+parser) are used. Excluding them saves real RAM per spawn
+        # with zero behavior change. If you ever add lemma-based logic, remove
+        # 'lemmatizer' from this list first.
+        unused_components = ["lemmatizer", "attribute_ruler"]
         try:
-            self.nlp = spacy.load(model_name)
+            self.nlp = spacy.load(model_name, exclude=unused_components)
         except OSError:
             print(f"[NLP] Model {model_name} not found. Downloading...")
             spacy.cli.download(model_name)
-            self.nlp = spacy.load(model_name)
+            self.nlp = spacy.load(model_name, exclude=unused_components)
         
         # ============ STRUCTURAL PATTERNS ONLY ============
         # These are for finding specific data types, NOT skills

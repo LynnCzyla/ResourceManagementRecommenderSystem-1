@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: rmrs-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    healthCheckPath: /api/health
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: documents
+      - key: PYTHON_DAEMON_URL      # https://<your-service>.up.railway.app  (no trailing slash)
+        sync: false
+      - key: PYTHON_API_KEY         # same value as on Railway
+        sync: false
+      - key: APP_URL                # https://<your-app>.vercel.app
+        sync: false
+      - key: FRONTEND_URL           # same as APP_URL
+        sync: false
+      - key: CORS_ORIGINS           # https://<your-app>.vercel.app
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: SMTP_FROM
+        sync: false

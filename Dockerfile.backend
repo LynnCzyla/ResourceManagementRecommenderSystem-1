@@ -1,0 +1,20 @@
+# ============================================================
+# RMRS backend (Node/Express) - for Render
+# Python OCR/NLP runs as a separate service on Railway (Dockerfile.python).
+# Build context = repo root.
+# ============================================================
+FROM node:22-slim
+
+WORKDIR /app
+
+COPY backend/package*.json ./backend/
+RUN cd backend && npm ci --omit=dev
+
+COPY backend/ ./backend/
+
+# Logo used by transactional emails (utils/mailer.js reads this relative path)
+COPY main/src/assets/WEA_logo_bgremoved.png ./main/src/assets/WEA_logo_bgremoved.png
+
+ENV NODE_ENV=production
+# Render injects PORT (default 10000); server.js already reads process.env.PORT
+CMD ["node", "backend/server.js"]
