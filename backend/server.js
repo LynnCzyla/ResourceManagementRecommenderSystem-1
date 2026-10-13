@@ -64,6 +64,7 @@ app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
 app.use('/api/hr', verifyToken, requireRole(['Human Resources', 'HR', 'Admin', 'Super Admin']), require('./routes/HumanResource/Index'));
 app.use('/api/public', require('./routes/Public/clientFeedback'));
+app.use('/api/public', require('./routes/Public/jobOfferPublic'));
 
 app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
