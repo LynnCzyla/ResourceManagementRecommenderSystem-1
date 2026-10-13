@@ -13,6 +13,13 @@ const getTodayStr = () => {
   return `${d.getFullYear()}-${mm}-${dd}`;
 };
 
+const getLocationFontSize = (location) => {
+  if (location.length > 100) return '10px';
+  if (location.length > 70) return '11px';
+  if (location.length > 45) return '12px';
+  return '14px';
+};
+
 // Maps a job_postings row (with joined departments/positions) coming back from the
 // API into the flat shape this component's UI was built around.
 const mapPosting = (row) => ({
@@ -89,9 +96,8 @@ export default function HRJobPostingsTab() {
   const [hoveredTab, setHoveredTab] = useState(null);
   const [userBranch, setUserBranch] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
-  const locationOptions = [...new Set([userBranch?.address, userBranch?.location, userBranch?.name]
-    .map(value => String(value || '').trim())
-    .filter(Boolean))];
+  const branchAddress = String(userBranch?.address || userBranch?.location || userBranch?.name || '').trim();
+  const locationOptions = branchAddress ? [branchAddress] : [];
 
   useEffect(() => {
     loadJobPostings();
@@ -541,35 +547,15 @@ export default function HRJobPostingsTab() {
           </select>
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Location *</label>
-          <select
-            required
-            value={locationOptions.includes(formData.location) ? formData.location : '__OTHER_LOCATION__'}
-            onChange={(e) => setFormData({
-              ...formData,
-              location: e.target.value === '__OTHER_LOCATION__' ? '' : e.target.value,
-            })}
+          <label style={styles.formLabel}>Posting End Date</label>
+          <input
+            type="date"
+            min={getClosingMin()}
+            value={formData.closingDate}
+            onChange={(e) => setFormData({ ...formData, closingDate: e.target.value })}
             style={styles.formInput}
-          >
-            {locationOptions.length === 0 && <option value="">Select a branch location</option>}
-            {locationOptions.map(option => <option key={option} value={option}>{option}</option>)}
-            <option value="__OTHER_LOCATION__">Other location</option>
-          </select>
-          {!locationOptions.includes(formData.location) && (
-            <input
-              type="text"
-              required
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              style={{ ...styles.formInput, marginTop: '8px' }}
-              placeholder="Enter the job location"
-            />
-          )}
-          {!formData.location && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-              Location will be auto-filled from your branch
-            </span>
-          )}
+          />
+          <span style={styles.fieldHint}>The posting closes automatically after this date.</span>
         </div>
       </div>
       <div style={styles.formRow}>
@@ -631,19 +617,44 @@ export default function HRJobPostingsTab() {
           />
         </div>
       </div>
-      <div style={styles.formRow}>
-        <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Posting End Date</label>
-          <input
-            type="date"
-            min={getClosingMin()}
-            value={formData.closingDate}
-            onChange={(e) => setFormData({ ...formData, closingDate: e.target.value })}
-            style={styles.formInput}
-          />
-          <span style={styles.fieldHint}>The posting closes automatically after this date.</span>
-        </div>
-        <div style={styles.formGroup} />
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Location *</label>
+          <select
+            required
+            value={locationOptions.includes(formData.location) ? formData.location : '__OTHER_LOCATION__'}
+            onChange={(e) => setFormData({
+              ...formData,
+              location: e.target.value === '__OTHER_LOCATION__' ? '' : e.target.value,
+            })}
+            title={locationOptions.includes(formData.location) ? formData.location : 'Choose a branch address or enter another location'}
+            style={{
+              ...styles.formInput,
+              fontSize: getLocationFontSize(formData.location),
+            }}
+          >
+            {locationOptions.length === 0 && <option value="">Select a branch location</option>}
+            {locationOptions.map(option => (
+              <option key={option} value={option} title={option}>
+                {option}
+              </option>
+            ))}
+            <option value="__OTHER_LOCATION__">Other location</option>
+          </select>
+          {!locationOptions.includes(formData.location) && (
+            <input
+              type="text"
+              required
+              value={formData.location}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              style={{ ...styles.formInput, marginTop: '8px' }}
+              placeholder="Enter the job location"
+            />
+          )}
+          {!formData.location && (
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+              Location will be auto-filled from your branch
+            </span>
+          )}
       </div>
       <div style={styles.formGroup}>
         <label style={styles.formLabel}>Description</label>
@@ -1194,10 +1205,11 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '700px',
+    maxWidth: 'min(700px, calc(100vw - 32px))',
     maxHeight: '90vh',
     overflow: 'auto',
     padding: '28px',
+    boxSizing: 'border-box',
   },
   modalHeader: {
     display: 'flex',
@@ -1229,10 +1241,12 @@ const styles = {
     flexDirection: 'column',
     gap: '6px',
     flex: 1,
+    minWidth: 0,
   },
   formRow: {
     display: 'flex',
     gap: '16px',
+    flexWrap: 'wrap',
   },
   formLabel: {
     fontSize: '13px',
@@ -1244,6 +1258,9 @@ const styles = {
     color: 'var(--color-text-muted)',
   },
   formInput: {
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
     padding: '10px 12px',
     borderRadius: '8px',
     border: '1px solid var(--color-border)',
