@@ -1,12 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import hrClient from './Hrclient';
 
+const formatDateTime = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-PH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+};
 
 export default function HRDashboardTab() {
   const [stats, setStats] = useState({
-    totalJobPostings: 0,
     activeJobPostings: 0,
-    totalApplications: 0,
+    activeApplications: 0,
     pendingApplications: 0,
     recommendedForEmployment: 0,
     pendingResourceRequests: 0,
@@ -36,14 +44,11 @@ export default function HRDashboardTab() {
       const applications = applicationsRes.data?.data || [];
 
       setStats({
-        totalJobPostings: postings.length,
         activeJobPostings: summary.activeJobPostings || 0,
-        totalApplications: applications.length,
+        activeApplications: summary.activeApplications ?? applications.filter(a => !['Hired', 'Rejected'].includes(a.status)).length,
         pendingApplications: summary.pendingApplications || 0,
-        recommendedForEmployment: applications.filter(a => a.status === 'Recommended').length,
-        // NOTE: no Resource Requests backend route was included in the uploaded backend,
-        // so this stays at 0 until that endpoint exists. See HRResourceRequestsTab.jsx.
-        pendingResourceRequests: 0,
+        recommendedForEmployment: summary.recommendedForEmployment ?? applications.filter(a => a.status === 'Recommended').length,
+        pendingResourceRequests: summary.pendingResourceRequests || 0,
       });
 
       setRecentApplications(
@@ -106,8 +111,8 @@ export default function HRDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{stats.totalJobPostings}</div>
-            <div style={styles.statLabel}>Total Job Postings</div>
+            <div style={styles.statValue}>{stats.activeJobPostings}</div>
+              <div style={styles.statLabel}>Active Job Postings</div>
           </div>
         </div>
 
@@ -121,8 +126,8 @@ export default function HRDashboardTab() {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{stats.totalApplications}</div>
-            <div style={styles.statLabel}>Total Applications</div>
+            <div style={styles.statValue}>{stats.activeApplications}</div>
+              <div style={styles.statLabel}>Active Applications</div>
           </div>
         </div>
 
@@ -168,18 +173,6 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard} title="Currently open job postings accepting applications">
-          <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-success)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-          </div>
-          <div>
-            <div style={styles.statValue}>{stats.activeJobPostings}</div>
-            <div style={styles.statLabel}>Active Job Postings</div>
-          </div>
-        </div>
       </div>
 
       {/* Recent Activity Section */}
@@ -212,7 +205,7 @@ export default function HRDashboardTab() {
                         {app.status}
                       </span>
                     </td>
-                    <td style={styles.td}>{app.date}</td>
+                    <td style={styles.td}>{formatDateTime(app.date)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -246,7 +239,7 @@ export default function HRDashboardTab() {
                         {posting.status}
                       </span>
                     </td>
-                    <td style={styles.td}>{posting.date}</td>
+                    <td style={styles.td}>{formatDateTime(posting.date)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -43,7 +43,7 @@ const mapApplication = (row) => {
 // 1. Its status has reached terminal outcome (Hired or Rejected), OR
 // 2. Its job posting has reached its quota (e.g. 1/1 hired) and is marked filled / closed.
 const isHistoryApplication = (app) => {
-  if (app.status === 'Hired' || app.status === 'Rejected') return true;
+  if (['Hired', 'Rejected', 'Offer Declined', 'Archived', 'Withdrawn'].includes(app.status)) return true;
   if (app.postingFilled || app.postingStatus === 'Closed') return true;
   return false;
 };

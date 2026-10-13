@@ -24,9 +24,11 @@ router.get('/summary', async (req, res) => {
 
     // ✅ For Super Admin: Get all data
     if (isSuperAdmin) {
-      const [postings, applications, interviews, hires, resourceRequests] = await Promise.all([
+      const [postings, applications, pendingApplications, recommendedApplications, interviews, hires, resourceRequests] = await Promise.all([
         supabase.from('job_postings').select('id', { count: 'exact', head: true }).eq('status', 'Active'),
+        supabase.from('job_applications').select('id', { count: 'exact', head: true }).not('status', 'in', '("Hired","Rejected")'),
         supabase.from('job_applications').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
+        supabase.from('job_applications').select('id', { count: 'exact', head: true }).eq('status', 'Recommended'),
         supabase.from('interviews').select('id', { count: 'exact', head: true }).eq('status', 'Scheduled'),
         supabase.from('hired_employees').select('id', { count: 'exact', head: true }).eq('status', 'Onboarding'),
         supabase.from('hr_resource_requests').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
@@ -36,7 +38,9 @@ router.get('/summary', async (req, res) => {
         success: true,
         data: {
           activeJobPostings: postings.count || 0,
-          pendingApplications: applications.count || 0,
+          activeApplications: applications.count || 0,
+          pendingApplications: pendingApplications.count || 0,
+          recommendedForEmployment: recommendedApplications.count || 0,
           scheduledInterviews: interviews.count || 0,
           employeesOnboarding: hires.count || 0,
           pendingResourceRequests: resourceRequests.count || 0,
@@ -77,7 +81,7 @@ router.get('/summary', async (req, res) => {
     const allUserIds = [...userIds, userId];
 
     // ✅ Build queries with branch filtering
-    const [postings, applications, interviews, hires, resourceRequests] = await Promise.all([
+    const [postings, applications, pendingApplications, recommendedApplications, interviews, hires, resourceRequests] = await Promise.all([
       supabase
         .from('job_postings')
         .select('id', { count: 'exact', head: true })
@@ -87,7 +91,17 @@ router.get('/summary', async (req, res) => {
         .from('job_applications')
         .select('id', { count: 'exact', head: true })
         .in('created_by', allUserIds)
+        .not('status', 'in', '("Hired","Rejected")'),
+      supabase
+        .from('job_applications')
+        .select('id', { count: 'exact', head: true })
+        .in('created_by', allUserIds)
         .eq('status', 'Pending'),
+      supabase
+        .from('job_applications')
+        .select('id', { count: 'exact', head: true })
+        .in('created_by', allUserIds)
+        .eq('status', 'Recommended'),
       supabase
         .from('interviews')
         .select('id', { count: 'exact', head: true })
@@ -100,8 +114,7 @@ router.get('/summary', async (req, res) => {
         .eq('status', 'Onboarding'),
       supabase
         .from('hr_resource_requests')
-        .select('id', { count: 'exact', head: true })
-        .in('requested_by', allUserIds)
+        .select('id, requester:profiles!hr_resource_requests_requested_by_fkey(branch_id)')
         .eq('status', 'Pending'),
     ]);
 
@@ -111,10 +124,13 @@ router.get('/summary', async (req, res) => {
       success: true,
       data: {
         activeJobPostings: postings.count || 0,
-        pendingApplications: applications.count || 0,
+        activeApplications: applications.count || 0,
+        pendingApplications: pendingApplications.count || 0,
+        recommendedForEmployment: recommendedApplications.count || 0,
         scheduledInterviews: interviews.count || 0,
         employeesOnboarding: hires.count || 0,
-        pendingResourceRequests: resourceRequests.count || 0,
+        pendingResourceRequests: (resourceRequests.data || [])
+          .filter(request => request.requester?.branch_id === userBranchId).length,
       },
     });
   } catch (error) {
