@@ -780,8 +780,8 @@ router.post('/:id/send-offer', async (req, res) => {
 
     // Currency comes from the branch of this applicant (fallback: HR user's branch)
     let currency = 'PHP';
+    let branchId = userBranchId;
     try {
-      let branchId = userBranchId;
       if (emp.application_id) {
         const { data: appRow } = await supabase
           .from('job_applications')
@@ -802,6 +802,32 @@ router.post('/:id/send-offer', async (req, res) => {
       console.warn('Could not resolve branch currency, using PHP:', e.message);
     }
 
+    // Generate signed 14-day token for applicant offer decision
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.JWT_SECRET || 'wea-job-offer-secret-key-2026';
+    const offerToken = jwt.sign(
+      {
+        hiredEmployeeId: emp.id,
+        applicationId: emp.application_id,
+        applicantName: emp.name,
+        email: emp.email,
+        position: jobTitle || 'Position Offered',
+        salary: salaryCheck.value ?? emp.salary,
+        currency,
+        benefits: benefits || null,
+        employmentType: employmentType || 'Full-time',
+        startDate: startDate || emp.hire_date || null,
+        workLocation: workLocation || 'Office Main Headquarters',
+        workingHours: workingHours || '8:00 AM - 5:00 PM (Mon-Fri)',
+        conditions: conditions || null,
+        instructions: instructions || null,
+        branchId: branchId || null,
+        purpose: 'job_offer_decision'
+      },
+      JWT_SECRET,
+      { expiresIn: '14d' }
+    );
+
     const { sendOnboardingOfferEmail } = require('../../utils/mailer');
     await sendOnboardingOfferEmail({
       to: emp.email,
@@ -817,7 +843,8 @@ router.post('/:id/send-offer', async (req, res) => {
       conditions,
       instructions,
       subject,
-      customMessage
+      customMessage,
+      token: offerToken
     });
 
     // Update employee record

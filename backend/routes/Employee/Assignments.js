@@ -22,13 +22,13 @@ router.get('/assignments', verifyToken, async (req, res) => {
 
     if (error) throw error;
 
-    // Filter to only active assignments on active projects
+    // Filter to only active assignments on non-closed projects
     const activeAssignments = (data || []).filter(row => {
       const proj = row.projects;
       if (!proj) return false;
-      const isProjectActive = proj.status === 'Active';
-      const isAssignmentActive = row.status !== 'Completed' && row.status !== 'Inactive';
-      return isProjectActive && isAssignmentActive;
+      const isProjectClosed = ['Completed', 'Cancelled', 'Archived', 'Deleted'].includes(proj.status);
+      const isAssignmentClosed = ['Completed', 'Inactive', 'Cancelled'].includes(row.status);
+      return !isProjectClosed && !isAssignmentClosed;
     });
 
     const formattedAssignments = activeAssignments.map(row => {
@@ -74,11 +74,11 @@ router.get('/tasks', verifyToken, async (req, res) => {
       throw error;
     }
 
-    // Only active/in-progress tasks on active projects belong in the active list
+    // Only active/in-progress tasks on non-closed projects belong in the active list
     const activeTasks = (data || []).filter(row => {
       const isTaskActive = row.status !== 'Completed' && row.status !== 'Completed-Hidden' && row.status !== 'Cancelled';
-      const isProjectActive = !row.projects || row.projects.status === 'Active';
-      return isTaskActive && isProjectActive;
+      const isProjectClosed = row.projects && ['Completed', 'Cancelled', 'Archived', 'Deleted'].includes(row.projects.status);
+      return isTaskActive && !isProjectClosed;
     });
 
     const formattedTasks = activeTasks.map(row => {

@@ -10,7 +10,7 @@ const buildFullName = (firstName, middleName, lastName) =>
 
 const sendConfirmationEmail = async ({ fullName, email, purpose, message }) => {
   const mailOptions = {
-    from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
+    from: '"WEA Resource Management (No-Reply)" <wearesourcemanagement@gmail.com>',
     to: email,
     subject: 'We received your message — WEA Resource Management',
     html: `

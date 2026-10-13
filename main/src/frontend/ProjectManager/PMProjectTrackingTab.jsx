@@ -148,6 +148,29 @@ export default function PMProjectTrackingTab({ user }) {
   useEffect(() => {
     loadEmployees(selectedProjectId);
     loadTasks(selectedProjectId);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadEmployees(selectedProjectId);
+        loadTasks(selectedProjectId);
+      }
+    }, 10000);
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadProjects();
+        loadEmployees(selectedProjectId);
+        loadTasks(selectedProjectId);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, [selectedProjectId]);
 
   const handleOpenCreateTask = () => {

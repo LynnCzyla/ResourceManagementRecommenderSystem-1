@@ -672,6 +672,21 @@ router.post('/:id/assign', async (req, res) => {
       console.warn('Non-fatal cache clearing error in Projects assign:', cErr.message);
     }
 
+    try {
+      const pmProjects = require('../ProjectManager/projects');
+      if (pmProjects?.invalidateProjectsCache) pmProjects.invalidateProjectsCache();
+      const pmEmployees = require('../ProjectManager/employees');
+      if (pmEmployees?.invalidateEmployeesCache) pmEmployees.invalidateEmployeesCache();
+      const pmTasks = require('../ProjectManager/tasks');
+      if (pmTasks?.invalidateTasksCache) pmTasks.invalidateTasksCache();
+    } catch (pmErr) {
+      console.warn('Non-fatal PM cache clearing error in Projects assign:', pmErr.message);
+    }
+
+    if (employeeId) {
+      workloadService.recalculateForEmployee(employeeId).catch(e => console.warn('Non-fatal workload recalc error:', e.message));
+    }
+
     res.json({ 
       success: true, 
       assignment: data,
@@ -822,6 +837,17 @@ router.delete('/:id/assign/:employeeId', async (req, res) => {
       if (clearEmployeeCache) clearEmployeeCache(isSuperAdmin ? null : userBranchId);
     } catch (cErr) {
       console.warn('Non-fatal cache clearing error in Projects delete assign:', cErr.message);
+    }
+
+    try {
+      const pmProjects = require('../ProjectManager/projects');
+      if (pmProjects?.invalidateProjectsCache) pmProjects.invalidateProjectsCache();
+      const pmEmployees = require('../ProjectManager/employees');
+      if (pmEmployees?.invalidateEmployeesCache) pmEmployees.invalidateEmployeesCache();
+      const pmTasks = require('../ProjectManager/tasks');
+      if (pmTasks?.invalidateTasksCache) pmTasks.invalidateTasksCache();
+    } catch (pmErr) {
+      console.warn('Non-fatal PM cache clearing error in Projects delete assign:', pmErr.message);
     }
 
     if (employeeId) {

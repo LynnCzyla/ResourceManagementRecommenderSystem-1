@@ -199,6 +199,7 @@ class RecommendationEngine {
             masterAliases,
             employeeSkillsRes,
             tasksRes,
+            allTasksRes,
             perfRes
         ] = await Promise.all([
             this._getAliasMap(),
@@ -218,6 +219,10 @@ class RecommendationEngine {
                 .select('profile_id, priority, project_id, projects:project_id(status)')
                 .in('profile_id', profileIds)
                 .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled")'),
+            supabase
+                .from('project_tasks')
+                .select('profile_id')
+                .in('profile_id', profileIds),
             supabase
                 .from('performance_records')
                 .select('profile_id, rating')
@@ -298,6 +303,8 @@ class RecommendationEngine {
             perfByProfile[pid] = Math.min(avg / 5, 1.0);
         }
 
+        const profilesWithTasks = new Set((allTasksRes.data || []).map(t => t.profile_id));
+
         const batchContext = {
             preloaded: true,
             aliasMap,
@@ -305,7 +312,8 @@ class RecommendationEngine {
             skillsByProfile,
             componentsByProfile,
             workloadByProfile,
-            perfByProfile
+            perfByProfile,
+            profilesWithTasks
         };
 
         // 7. Calculate scores in-memory (lightning fast)
@@ -729,9 +737,24 @@ class RecommendationEngine {
 
         const availabilityFactor = this._calculateAvailability(workload);
 
-        const historicalPerformance = context?.preloaded
-            ? (context.perfByProfile[employee.id] ?? this.DEFAULT_HP)
-            : await this._getHistoricalPerformance(employee.id);
+        let historicalPerformance;
+        let hasPerformanceRating = false;
+
+        if (context?.preloaded) {
+            if (context.perfByProfile && (employee.id in context.perfByProfile)) {
+                historicalPerformance = context.perfByProfile[employee.id];
+                hasPerformanceRating = true;
+            } else {
+                historicalPerformance = this.DEFAULT_HP;
+                hasPerformanceRating = false;
+            }
+        } else {
+            const perfMeta = await this._getHistoricalPerformanceWithMeta(employee.id);
+            historicalPerformance = perfMeta.hp;
+            hasPerformanceRating = perfMeta.hasRecords;
+        }
+
+        const performanceRating = hasPerformanceRating ? Math.round((historicalPerformance * 5) * 10) / 10 : null;
 
         const { skill: ws, availability: wa, performance: wp } = this.COMPOSITE_WEIGHTS;
         const recommendationScore =
@@ -758,6 +781,12 @@ class RecommendationEngine {
             branchId:
                 employee.branch_id || null,
 
+            isNewEmployee:
+                Boolean(employee.isNewEmployee) && !hasPerformanceRating && !(context?.profilesWithTasks?.has(employee.id)),
+
+            joinDate:
+                employee.join_date || employee.created_at || null,
+
             matchingScore:
                 Math.round(
                     matchingScore * 1000
@@ -777,6 +806,9 @@ class RecommendationEngine {
                 Math.round(
                     historicalPerformance * 1000
                 ) / 1000,
+
+            hasPerformanceRating,
+            performanceRating,
 
             recommendationScore:
                 Math.round(
@@ -826,7 +858,9 @@ class RecommendationEngine {
                     status: availabilityFactor >= 0.80 ? 'Available' : availabilityFactor >= 0.50 ? 'Limited Availability' : 'Fully Utilized'
                 },
                 performance: {
-                    score: Math.round(historicalPerformance * 100)
+                    score: Math.round(historicalPerformance * 100),
+                    hasRating: hasPerformanceRating,
+                    rating: performanceRating
                 }
             },
 
@@ -1043,6 +1077,8 @@ class RecommendationEngine {
                     availability_status,
                     branch_id,
                     department_id,
+                    join_date,
+                    created_at,
                     departments:department_id (
                         department_name
                     )
@@ -1072,15 +1108,24 @@ class RecommendationEngine {
                 return [];
             }
             
-            const employees = (data || []).map(emp => ({
-                id: emp.id,
-                employee_id: emp.employee_id,
-                first_name: emp.first_name,
-                last_name: emp.last_name,
-                role: emp.role,
-                branch_id: emp.branch_id,
-                department: emp.departments?.department_name || null
-            }));
+            const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            const employees = (data || []).map(emp => {
+                const joinTime = emp.join_date ? new Date(emp.join_date).getTime() : (emp.created_at ? new Date(emp.created_at).getTime() : null);
+                const isNew = joinTime ? (now - joinTime <= SIXTY_DAYS_MS) : false;
+                return {
+                    id: emp.id,
+                    employee_id: emp.employee_id,
+                    first_name: emp.first_name,
+                    last_name: emp.last_name,
+                    role: emp.role,
+                    branch_id: emp.branch_id,
+                    department: emp.departments?.department_name || null,
+                    join_date: emp.join_date,
+                    created_at: emp.created_at,
+                    isNewEmployee: isNew
+                };
+            });
             
             console.log(`✅ Found ${employees.length} employees in ${isSuperAdmin ? 'ALL branches' : 'branch'}`);
             return employees;
@@ -1357,6 +1402,30 @@ class RecommendationEngine {
         } catch (error) {
             console.error('❌ Error in _getHistoricalPerformance:', error);
             return this.DEFAULT_HP;
+        }
+    }
+
+    async _getHistoricalPerformanceWithMeta(profileId) {
+        try {
+            const { data, error } = await supabase
+                .from('performance_records')
+                .select('rating')
+                .eq('profile_id', profileId)
+                .eq('feedback_source', 'project_manager')
+                .in('feedback_status', ['submitted', 'reviewed'])
+                .not('rating', 'is', null);
+
+            if (error || !data || data.length === 0) {
+                return { hp: this.DEFAULT_HP, hasRecords: false, avgRating: 0 };
+            }
+
+            const totalRating = data.reduce((sum, record) => sum + Number(record.rating), 0);
+            const avgRating = totalRating / data.length;
+            const hp = Math.min(avgRating / 5, 1.0);
+            return { hp, hasRecords: true, avgRating };
+        } catch (error) {
+            console.error('❌ Error in _getHistoricalPerformanceWithMeta:', error);
+            return { hp: this.DEFAULT_HP, hasRecords: false, avgRating: 0 };
         }
     }
 

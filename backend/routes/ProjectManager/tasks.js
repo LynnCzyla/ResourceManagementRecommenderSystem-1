@@ -48,7 +48,7 @@ const TASK_SELECT = `
 `;
 
 const tasksCache = new Map();
-const TASKS_CACHE_TTL_MS = 30 * 1000;
+const TASKS_CACHE_TTL_MS = 3 * 1000;
 
 function getTasksCached(key) {
   const entry = tasksCache.get(key);

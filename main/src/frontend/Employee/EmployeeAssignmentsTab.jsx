@@ -248,10 +248,31 @@ export default function EmployeeAssignmentsTab({ user }) {
   }, []);
 
   useEffect(() => {
-    if (sessionReady && user?.id) {
-      fetchAssignmentsAndTasks();
-      fetchHistory();
-    }
+    if (!sessionReady || !user?.id) return;
+
+    fetchAssignmentsAndTasks();
+    fetchHistory();
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchAssignmentsAndTasks();
+      }
+    }, 10000);
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAssignmentsAndTasks();
+        fetchHistory();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, [sessionReady, user?.id]);
 
   const handleUpdateStatus = async (taskId, newStatus) => {
@@ -941,6 +962,13 @@ const styles = {
     color: 'var(--color-text-secondary)',
     lineHeight: '1.5',
     marginBottom: '12px',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
   },
   projFooter: {
     display: 'flex',

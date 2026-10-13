@@ -879,7 +879,7 @@ const handleViewEmployee = async (emp) => {
                       ...p,
                       activeTasks: (p.tasks || []).filter(t => t.isActive !== false)
                     }))
-                    .filter(p => p.project_status === 'Active' || p.activeTasks.length > 0);
+                    .filter(p => !['Completed', 'Cancelled', 'Archived', 'Deleted'].includes(p.project_status) || p.activeTasks.length > 0);
 
                   const pastProjects = (employeeDetails.projects || [])
                     .map(p => ({

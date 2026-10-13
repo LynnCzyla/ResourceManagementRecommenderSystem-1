@@ -410,14 +410,56 @@ router.get('/:id/details', async (req, res) => {
 
     console.log(`📊 Found ${tasks?.length || 0} tasks for employee`);
 
+    // ✅ Get project assignments for this employee (even before tasks are created)
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('project_assignments')
+      .select(`
+        id,
+        project_id,
+        assigned_role,
+        start_date,
+        end_date,
+        status,
+        projects:project_id (
+          id,
+          project_code,
+          project_name,
+          status
+        )
+      `)
+      .eq('profile_id', id)
+      .in('status', ['Assigned', 'Active']);
+
+    if (assignmentsError) {
+      console.error('Assignments error in employee details:', assignmentsError);
+    }
+
     // Separate active vs closed tasks (Eq. 2: only active tasks count toward W)
-    const CLOSED_STATUSES = ['Completed', 'Completed-Hidden', 'Archived', 'Cancelled'];
+    const CLOSED_STATUSES = ['Completed', 'Completed-Hidden', 'Archived', 'Cancelled', 'Deleted'];
     const activeTasksOnly = (tasks || []).filter(
-      t => !CLOSED_STATUSES.includes(t.status) && t.projects?.status === 'Active'
+      t => !CLOSED_STATUSES.includes(t.status) && (!t.projects || !CLOSED_STATUSES.includes(t.projects?.status))
     );
 
-    // ✅ Group ALL tasks by project (for display, including history)
+    // ✅ Group ALL assignments & tasks by project (for display, including history)
     const projectsMap = {};
+
+    // 1. Add all projects the employee is assigned to
+    (assignments || []).forEach(assignment => {
+      const project = assignment.projects || {};
+      const projectId = assignment.project_id;
+      if (projectId && !projectsMap[projectId]) {
+        projectsMap[projectId] = {
+          project_id: projectId,
+          project_name: project.project_name || 'Unnamed Project',
+          project_code: project.project_code || null,
+          project_status: project.status || 'Active',
+          assigned_role: assignment.assigned_role,
+          tasks: []
+        };
+      }
+    });
+
+    // 2. Attach tasks to their respective project or add new project entry
     (tasks || []).forEach(task => {
       const project = task.projects || {};
       const projectId = task.project_id || 'no-project';
@@ -440,7 +482,7 @@ router.get('/:id/details', async (req, res) => {
         status: task.status || 'Pending',
         due_date: task.due_date,
         created_at: task.created_at,
-        isActive: !CLOSED_STATUSES.includes(task.status) && task.projects?.status === 'Active',
+        isActive: !CLOSED_STATUSES.includes(task.status) && (!task.projects || !CLOSED_STATUSES.includes(task.projects?.status)),
       });
     });
 

@@ -161,6 +161,26 @@ export default function PMProjectsTab({ user, onNavigate }) {
 
   useEffect(() => {
     loadProjects();
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadProjects();
+      }
+    }, 10000);
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadProjects();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, [user]);
 
   // ── Dynamic Skills Search Helper ────────────────────────────────────
@@ -854,8 +874,8 @@ export default function PMProjectsTab({ user, onNavigate }) {
             return (
               <div key={proj.id} className="glass-card" style={styles.projCard}>
                 <div style={styles.cardHeader}>
-                  <h3 style={styles.projName}>{proj.name}</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <h3 style={styles.projName} title={proj.name}>{proj.name}</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                     <span style={{
                       ...styles.statusBadge,
                       backgroundColor: proj.status === 'Active' 
@@ -876,14 +896,14 @@ export default function PMProjectsTab({ user, onNavigate }) {
                       {proj.status}
                     </span>
 
-                    {/* Small View Icon beside Active status to see allocated team and requested resources */}
+                    {/* Small View Icon beside status to see full project details, description, allocated team & resources */}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleOpenProjectAllocations(proj);
                       }}
-                      title="View Allocated Team & Resource Requirements"
+                      title="View Full Project Details & Description"
                       style={styles.smallViewBtn}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.color = 'var(--color-primary)';
@@ -915,7 +935,13 @@ export default function PMProjectsTab({ user, onNavigate }) {
                     )}
                   </div>
                 </div>
-                <p style={styles.projDesc}>{proj.description}</p>
+                <p
+                  style={styles.projDesc}
+                  title={proj.description ? `${proj.description}\n\n(Click to view full description)` : 'No description provided'}
+                  onClick={() => handleOpenProjectAllocations(proj)}
+                >
+                  {proj.description || <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>No description provided</span>}
+                </p>
 
                 {/* ✅ Cancellation Reason Box in Project History */}
                 {activeTab === 'history' && proj.status === 'Cancelled' && (
@@ -1965,6 +1991,46 @@ export default function PMProjectsTab({ user, onNavigate }) {
             {!historyDetailsModal.loading && historyDetailsModal.data && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', paddingRight: '4px' }}>
 
+                {/* 0. PROJECT DESCRIPTION */}
+                {historyDetailsModal.project?.description && (
+                  <div style={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '12px',
+                    padding: '16px 18px',
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      paddingBottom: '8px',
+                      marginBottom: '10px',
+                      borderBottom: '1px solid var(--color-border)'
+                    }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                      </svg>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        PROJECT DESCRIPTION
+                      </span>
+                    </div>
+                    <div style={{
+                      fontSize: '13.5px',
+                      color: 'var(--color-text-primary)',
+                      lineHeight: '1.65',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      overflowWrap: 'anywhere',
+                    }}>
+                      {historyDetailsModal.project.description}
+                    </div>
+                  </div>
+                )}
+
                 {/* 1. OVERALL CLIENT FEEDBACK */}
                 <div style={{
                   background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%)',
@@ -2399,6 +2465,42 @@ export default function PMProjectsTab({ user, onNavigate }) {
             {/* Modal Body (Scrollable) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', overflowY: 'auto', paddingRight: '4px' }}>
               
+              {/* SECTION 0: FULL PROJECT DESCRIPTION */}
+              <div style={styles.allocSection}>
+                <div style={styles.allocSectionHeader}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    <h3 style={styles.allocSectionTitle}>Project Description</h3>
+                  </div>
+                </div>
+                <div style={{
+                  backgroundColor: 'var(--color-bg-card)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '10px',
+                  padding: '14px 18px',
+                  fontSize: '13.5px',
+                  color: 'var(--color-text-primary)',
+                  lineHeight: '1.65',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                }}>
+                  {projectAllocationsModal.project.description ? (
+                    projectAllocationsModal.project.description
+                  ) : (
+                    <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                      No description provided for this project.
+                    </span>
+                  )}
+                </div>
+              </div>
+
               {/* SECTION 1: ALLOCATED EMPLOYEES */}
               <div style={styles.allocSection}>
                 <div style={styles.allocSectionHeader}>
@@ -2663,6 +2765,8 @@ const styles = {
     flexDirection: 'column',
     justifyContent: 'space-between',
     minHeight: '260px',
+    minWidth: 0,
+    overflow: 'hidden',
   },
   cardHeader: {
     display: 'flex',
@@ -2670,11 +2774,17 @@ const styles = {
     alignItems: 'flex-start',
     gap: '12px',
     marginBottom: '12px',
+    minWidth: 0,
   },
   projName: {
     fontSize: '18px',
     fontWeight: '700',
     lineHeight: '1.3',
+    margin: 0,
+    flex: 1,
+    minWidth: 0,
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
   },
   statusBadge: {
     fontSize: '11px',
@@ -2682,12 +2792,22 @@ const styles = {
     padding: '4px 10px',
     borderRadius: '30px',
     whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
   projDesc: {
     fontSize: '13px',
     color: 'var(--color-text-secondary)',
-    lineHeight: '1.6',
-    marginBottom: '20px',
+    lineHeight: '1.5',
+    marginBottom: '16px',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
+    cursor: 'pointer',
+    minHeight: '38px',
   },
   metaRow: {
     display: 'flex',

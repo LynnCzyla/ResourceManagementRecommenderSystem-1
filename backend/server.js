@@ -37,7 +37,7 @@ const notificationsRouter = require('./routes/notifications');
 const documentRoutes = require('./routes/Employee/documentRoutes');
 const dashboardRoutes = require('./routes/Admin/dashboard');
 const auditLogsRoutes = require('./routes/Admin/auditLogs');
-const applicantRoutes = require('./routes/applicant/applicantRoutes'); 
+const applicantRoutes = require('./routes/applicant/applicantRoutes');
 
 // ============ SUPER ADMIN ROUTES ============
 const superAdminDashboardRoutes = require('./routes/SuperAdmin/dashboard');
@@ -60,6 +60,7 @@ app.use('/api/rm', require('./routes/ResourceManager/Index'));
 app.use('/api/pm', require('./routes/ProjectManager'));
 app.use('/api/hr', verifyToken, requireRole(['Human Resources', 'HR', 'Admin', 'Super Admin']), require('./routes/HumanResource/Index'));
 app.use('/api/public', require('./routes/Public/clientFeedback'));
+app.use('/api/public', require('./routes/Public/jobOfferPublic'));
 
 app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
@@ -107,14 +108,14 @@ app.get("/", (req, res) => {
 app.post('/api/admin/clear-alias-cache', (req, res) => {
     try {
         recommendationEngine.clearAliasCache();
-        res.json({ 
-            success: true, 
-            message: 'Alias cache cleared. Will refresh on next request.' 
+        res.json({
+            success: true,
+            message: 'Alias cache cleared. Will refresh on next request.'
         });
     } catch (error) {
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
@@ -123,14 +124,14 @@ app.post('/api/admin/clear-alias-cache', (req, res) => {
 app.post('/api/admin/refresh-aliases', async (req, res) => {
     try {
         await recommendationEngine.refreshAliases();
-        res.json({ 
-            success: true, 
-            message: 'Aliases refreshed from database' 
+        res.json({
+            success: true,
+            message: 'Aliases refreshed from database'
         });
     } catch (error) {
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
@@ -138,13 +139,13 @@ app.post('/api/admin/refresh-aliases', async (req, res) => {
 // ============ GET CACHE STATUS ============
 app.get('/api/admin/cache-status', (req, res) => {
     const hasCache = recommendationEngine._aliasMap !== null;
-    const cacheAge = hasCache && recommendationEngine._aliasCacheTime 
-        ? Math.round((Date.now() - recommendationEngine._aliasCacheTime) / 1000) 
+    const cacheAge = hasCache && recommendationEngine._aliasCacheTime
+        ? Math.round((Date.now() - recommendationEngine._aliasCacheTime) / 1000)
         : null;
-    const cacheSize = hasCache && recommendationEngine._aliasMap 
-        ? Object.keys(recommendationEngine._aliasMap).length 
+    const cacheSize = hasCache && recommendationEngine._aliasMap
+        ? Object.keys(recommendationEngine._aliasMap).length
         : 0;
-    
+
     res.json({
         success: true,
         data: {
@@ -159,16 +160,16 @@ app.get('/api/admin/cache-status', (req, res) => {
 
 app.use((err, req, res, next) => {
     console.error('Error:', err);
-    res.status(500).json({ 
-        success: false, 
-        error: err.message || 'Internal server error' 
+    res.status(500).json({
+        success: false,
+        error: err.message || 'Internal server error'
     });
 });
 
 // ============ START SERVER ============
 app.listen(PORT, async () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
-    
+
     // ============ PRELOAD ALIASES ============
     console.log('🔄 Preloading skill aliases...');
     try {

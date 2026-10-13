@@ -118,7 +118,7 @@ const getBranchCode = async (branchId) => {
 // requirements configured by the Super Admin (min length, uppercase, lowercase, number, special).
 const sendCreateAccountEmail = async (email, firstName, lastName, employeeId, createLink, role, branchName) => {
   const mailOptions = {
-    from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
+    from: '"WEA Resource Management (No-Reply)" <wearesourcemanagement@gmail.com>',
     to: email,
     subject: 'Create Your WEA Account Password',
     html: `

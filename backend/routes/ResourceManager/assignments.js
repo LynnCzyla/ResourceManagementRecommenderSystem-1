@@ -239,6 +239,7 @@ router.post('/', async (req, res) => {
             console.error('Non-fatal error creating assignment notifications:', notifErr.message);
         }
 
+        // Invalidate RM caches
         try {
             const { clearDashboardCache } = require('./Dashboard');
             const { clearEmployeeCache } = require('./Employees');
@@ -248,6 +249,36 @@ router.post('/', async (req, res) => {
             if (clearProjectsCache) clearProjectsCache();
         } catch (cErr) {
             console.warn('Non-fatal cache clearing error in assignments:', cErr.message);
+        }
+
+        // Invalidate PM caches
+        try {
+            const pmProjects = require('../ProjectManager/projects');
+            if (pmProjects && typeof pmProjects.invalidateProjectsCache === 'function') {
+                pmProjects.invalidateProjectsCache();
+            }
+            const pmEmployees = require('../ProjectManager/employees');
+            if (pmEmployees && typeof pmEmployees.invalidateEmployeesCache === 'function') {
+                pmEmployees.invalidateEmployeesCache();
+            }
+            const pmTasks = require('../ProjectManager/tasks');
+            if (pmTasks && typeof pmTasks.invalidateTasksCache === 'function') {
+                pmTasks.invalidateTasksCache();
+            }
+        } catch (pmErr) {
+            console.warn('Non-fatal PM cache clearing error in assignments:', pmErr.message);
+        }
+
+        // Recalculate employee workload immediately
+        if (profile_id) {
+            try {
+                const workloadService = require('../../services/workloadService');
+                if (workloadService && typeof workloadService.recalculateForEmployee === 'function') {
+                    workloadService.recalculateForEmployee(profile_id).catch(e => console.warn('Non-fatal workload recalc error:', e.message));
+                }
+            } catch (wErr) {
+                console.warn('Non-fatal workload service error in assignments:', wErr.message);
+            }
         }
 
         res.status(201).json(data);

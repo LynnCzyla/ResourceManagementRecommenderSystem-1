@@ -320,11 +320,17 @@ export default function ApplicantJobPostingsTab() {
         console.error('Submit failed:', res.status, raw.slice(0, 300));
         if (res.status === 413) {
           showErrorAlert(`Your resume is too large for the server. Keep it under ${maxFileSize}MB.`, 'File Too Large');
-        } else if (res.status === 409) {
-          // ✅ Duplicate application: same email already applied to this posting
+        } else if (res.status === 403) {
+          // 🛡️ Block internal company employees from applying
           showErrorAlert(
-            (data && data.error) || 'This email has already applied for this position.',
-            'Already Applied'
+            (data && data.error) || 'Internal company accounts (Employee, RM, PM, HR, Admin) cannot apply as external applicants. Please use a personal email address.',
+            'Internal Email Restricted'
+          );
+        } else if (res.status === 409) {
+          // ✅ Duplicate or 3-month rejection cooldown
+          showErrorAlert(
+            (data && data.error) || 'This email has already applied for this position or is currently in a cooldown period.',
+            data?.reason === 'cooldown' ? 'Re-application Cooldown' : 'Already Applied'
           );
         } else {
           showErrorAlert(

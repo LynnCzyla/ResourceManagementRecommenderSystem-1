@@ -8,7 +8,7 @@ const { logAuditEvent } = require('../../utils/auditLogger');
 // Build and send the password-reset email via Brevo's API
 const sendResetEmail = async (email, resetLink) => {
   const mailOptions = {
-    from: process.env.SMTP_FROM || '"WEA Resource Management" <noreply@wea.com>',
+    from: '"WEA Resource Management (No-Reply)" <wearesourcemanagement@gmail.com>',
     to: email,
     subject: 'Reset Your WEA Password',
     html: `

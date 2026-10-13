@@ -25,11 +25,7 @@ export default function PMDashboardTab({ user }) {
 
   // SINGLE load function
   const loadDashboard = useCallback(async (userId, forceRefresh = false) => {
-    // Prevent duplicate loads for the same user
-    if (!forceRefresh && loadedUserIdRef.current === userId && employees.length > 0) {
-      console.log('📦 Using cached dashboard data');
-      return;
-    }
+    // Prevent concurrent loads
 
     // Prevent concurrent loads
     if (isLoadingRef.current) {
@@ -156,30 +152,29 @@ export default function PMDashboardTab({ user }) {
     };
   }, []);
 
-  // Initial load - only when user changes
+  // Initial load & live auto-refresh on visible/focus
   useEffect(() => {
-    if (user?.id) {
-      if (loadedUserIdRef.current !== user.id) {
-        loadDashboard(user.id);
-      }
-    }
-  }, [user?.id, loadDashboard]);
+    if (!user?.id) return;
+    loadDashboard(user.id, true);
 
-  // Mounted check
-  useEffect(() => {
-    let isMounted = true;
-    
-    const loadData = async () => {
-      if (!isMounted) return;
-      if (user?.id && loadedUserIdRef.current !== user.id) {
-        await loadDashboard(user.id);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadDashboard(user.id, true);
+      }
+    }, 10000);
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadDashboard(user.id, true);
       }
     };
-    
-    loadData();
-    
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
     return () => {
-      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
