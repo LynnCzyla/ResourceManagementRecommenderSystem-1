@@ -64,7 +64,14 @@ export default function InterviewSchedulePicker({
     return new Date();
   });
 
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayStr = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }, []);
+  const currentMonthStart = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }, []);
 
   // Map of date string -> array of scheduled interviews
   const interviewsByDate = useMemo(() => {
@@ -180,7 +187,12 @@ export default function InterviewSchedulePicker({
         <div style={pickerStyles.navButtonsGroup}>
           <button
             type="button"
-            onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1))}
+            disabled={calendarDate <= currentMonthStart}
+            onClick={() => {
+              if (calendarDate > currentMonthStart) {
+                setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1));
+              }
+            }}
             style={pickerStyles.navBtn}
             title="Previous Month"
           >
@@ -191,7 +203,7 @@ export default function InterviewSchedulePicker({
             onClick={() => {
               const now = new Date();
               setCalendarDate(new Date(now.getFullYear(), now.getMonth(), 1));
-              onSelectDate(now.toISOString().slice(0, 10));
+              onSelectDate(todayStr);
             }}
             style={pickerStyles.todayBtn}
           >
@@ -220,6 +232,7 @@ export default function InterviewSchedulePicker({
         {calendarCells.map((cell, idx) => {
           const dayInterviews = interviewsByDate[cell.dateStr] || [];
           const isToday = cell.dateStr === todayStr;
+          const isPast = cell.dateStr < todayStr;
           const isSelected = selectedDate === cell.dateStr;
           const hasBookings = dayInterviews.length > 0;
 
@@ -231,11 +244,14 @@ export default function InterviewSchedulePicker({
           return (
             <div
               key={`${cell.dateStr}-${idx}`}
-              onClick={() => onSelectDate(cell.dateStr)}
+              onClick={() => {
+                if (!isPast) onSelectDate(cell.dateStr);
+              }}
               title={tooltip}
               style={{
                 ...pickerStyles.cell,
                 ...(cell.isCurrentMonth ? {} : pickerStyles.cellOtherMonth),
+                ...(isPast ? pickerStyles.cellPast : {}),
                 ...(isSelected ? pickerStyles.cellSelected : {}),
                 ...(isToday ? pickerStyles.cellToday : {}),
               }}
@@ -493,6 +509,10 @@ const pickerStyles = {
   cellOtherMonth: {
     opacity: 0.35,
     background: 'transparent',
+  },
+  cellPast: {
+    opacity: 0.35,
+    cursor: 'not-allowed',
   },
   cellToday: {
     borderColor: 'var(--color-primary)',

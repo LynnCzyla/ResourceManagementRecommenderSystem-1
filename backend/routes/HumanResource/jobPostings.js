@@ -27,13 +27,17 @@ function parsePostingQuantityAndDescription(row) {
   }
   const cleanDescription = desc.replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
 
-  // Count hired applications
-  const hiredCount = (row.job_applications || []).filter(a => a.status === 'Hired').length;
+  // Count only applications whose offers were accepted. An application becomes
+  // Hired when HR sends an offer, but it should consume a vacancy only after
+  // the applicant accepts it.
+  const acceptedCount = (row.job_applications || []).filter(a =>
+    a.status === 'Hired' && String(a.notes || '').includes('OFFER_ACCEPTED')
+  ).length;
 
   return {
     quantity,
     cleanDescription,
-    hiredCount,
+    acceptedCount,
   };
 }
 
@@ -179,7 +183,7 @@ router.get('/', async (req, res) => {
             requested_by,
             requester:requested_by ( id, first_name, last_name )
           ),
-          job_applications ( id, status )
+          job_applications ( id, status, notes )
         `)
         .order('posted_date', { ascending: false });
 
@@ -189,26 +193,20 @@ router.get('/', async (req, res) => {
       if (error) throw error;
 
       const shaped = await Promise.all((data || []).map(async (row) => {
-        const { quantity, cleanDescription, hiredCount } = parsePostingQuantityAndDescription(row);
+        const { quantity, cleanDescription, acceptedCount } = parsePostingQuantityAndDescription(row);
         const rmReq = row.hr_resource_requests;
         const requester = rmReq?.requester;
         const requesterName = requester ? `${requester.first_name || ''} ${requester.last_name || ''}`.trim() : null;
 
-        const isFilled = hiredCount >= quantity;
         let finalStatus = row.status;
-
-        // Auto-close in DB if quota is filled but status is still Active
-        if (isFilled && row.status === 'Active') {
-          await supabase.from('job_postings').update({ status: 'Closed' }).eq('id', row.id);
-          finalStatus = 'Closed';
-        }
 
         return {
           ...row,
           status: finalStatus,
           description: cleanDescription,
           quantity,
-          hired_count: hiredCount,
+          accepted_count: acceptedCount,
+          hired_count: acceptedCount,
           applications: row.job_applications?.length || 0,
           source_request_title: rmReq?.request_title || null,
           source_position_title: rmReq?.position_title || null,
@@ -256,7 +254,7 @@ router.get('/', async (req, res) => {
           requested_by,
           requester:requested_by ( id, first_name, last_name )
         ),
-        job_applications ( id, status )
+        job_applications ( id, status, notes )
       `)
       .in('created_by', userIds)
       .order('posted_date', { ascending: false });
@@ -267,26 +265,20 @@ router.get('/', async (req, res) => {
     if (error) throw error;
 
     const shaped = await Promise.all((data || []).map(async (row) => {
-      const { quantity, cleanDescription, hiredCount } = parsePostingQuantityAndDescription(row);
+      const { quantity, cleanDescription, acceptedCount } = parsePostingQuantityAndDescription(row);
       const rmReq = row.hr_resource_requests;
       const requester = rmReq?.requester;
       const requesterName = requester ? `${requester.first_name || ''} ${requester.last_name || ''}`.trim() : null;
 
-      const isFilled = hiredCount >= quantity;
       let finalStatus = row.status;
-
-      // Auto-close in DB if quota is filled but status is still Active
-      if (isFilled && row.status === 'Active') {
-        await supabase.from('job_postings').update({ status: 'Closed' }).eq('id', row.id);
-        finalStatus = 'Closed';
-      }
 
       return {
         ...row,
         status: finalStatus,
         description: cleanDescription,
         quantity,
-        hired_count: hiredCount,
+        accepted_count: acceptedCount,
+        hired_count: acceptedCount,
         applications: row.job_applications?.length || 0,
         source_request_title: rmReq?.request_title || null,
         source_position_title: rmReq?.position_title || null,
@@ -318,7 +310,7 @@ router.get('/:id', async (req, res) => {
         positions ( id, position_name ),
         profiles:created_by (id, first_name, last_name, branch_id, branches:branch_id (id, name, location, currency_code)),
         hr_resource_requests:source_request_id ( id, quantity_needed ),
-        job_applications ( id, status )
+        job_applications ( id, status, notes )
       `)
       .eq('id', id)
       .single();
@@ -337,12 +329,13 @@ router.get('/:id', async (req, res) => {
       }
     }
 
-    const { quantity, cleanDescription, hiredCount } = parsePostingQuantityAndDescription(data);
+    const { quantity, cleanDescription, acceptedCount } = parsePostingQuantityAndDescription(data);
     const transformed = {
       ...data,
       description: cleanDescription,
       quantity,
-      hired_count: hiredCount,
+      accepted_count: acceptedCount,
+      hired_count: acceptedCount,
     };
 
     res.status(200).json({ success: true, data: transformed });

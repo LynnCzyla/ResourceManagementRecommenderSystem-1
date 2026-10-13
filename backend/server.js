@@ -62,6 +62,7 @@ app.use('/api/hr', verifyToken, requireRole(['Human Resources', 'HR', 'Admin', '
 app.use('/api/public', require('./routes/Public/clientFeedback'));
 app.use('/api/public', require('./routes/Public/jobOfferPublic'));
 
+
 app.use('/api/applicant', applicantRoutes);
 app.use('/api/notifications', notificationsRouter);
 
@@ -192,4 +193,4 @@ app.listen(PORT, async () => {
         console.error('❌ Failed to warm workload cache:', error.message);
         console.log('⚠️ Workload metrics will compute on first request');
     }
-});
+});

@@ -4,11 +4,10 @@ import hrClient from './Hrclient';
 import { formatMoney, currencySymbol } from '../../config/currency';
 import { blockInvalidNumberKeys } from '../../utils/numberInput';
 
-// Internal tab keys stay the same as before (Hired / Onboarding / Archived) so the existing
-// filtering logic doesn't need to change — only the LABEL and TOOLTIP shown to the user changes.
+// Internal tab keys stay the same as before (Hired / Onboarding / Archived).
 // Hired      -> displayed as "Onboarding"  (candidates who need / received a job offer email)
 // Onboarding -> displayed as "Employee"    (real WEA staff, sourced from the `profiles` table)
-// Archived   -> stays "Archived"           (applicant did not accept the offer)
+// Archived   -> stays "Archived"           (offer accepted, declined, or manually archived)
 const TAB_META = {
   Hired: {
     label: 'Onboarding',
@@ -20,22 +19,23 @@ const TAB_META = {
   },
   Archived: {
     label: 'Archived',
-    tooltip: 'The applicant did not accept the job offer.',
+    tooltip: 'Offer accepted, offer declined, or manually archived applicant records.',
   },
 };
 
 const mapHire = (row) => {
   let uiStatus = 'Hired';
   const notesStr = row.job_applications?.notes || row.notes || '';
+  const declineReasonMatch = notesStr.match(/\(Reason:\s*([\s\S]*)\)\s*$/i);
   const isAccepted = notesStr.includes('OFFER_ACCEPTED') || Boolean(row.offer_accepted) || row.status === 'Offer Accepted';
   const isDeclined = notesStr.includes('OFFER_DECLINED') || row.status === 'Offer Declined';
 
-  if (isDeclined) {
+  if (isAccepted) {
+    uiStatus = 'Offer Accepted';
+  } else if (isDeclined) {
     uiStatus = 'Offer Declined';
   } else if (row.status === 'Inactive' || row.status === 'Archived') {
     uiStatus = 'Archived';
-  } else if (isAccepted) {
-    uiStatus = 'Offer Accepted';
   } else if (row.status === 'Active' || notesStr.includes('OFFER_SENT')) {
     uiStatus = 'Offer Sent';
   } else {
@@ -54,6 +54,7 @@ const mapHire = (row) => {
     status: uiStatus,
     rawStatus: row.status,
     notes: notesStr,
+    declineReason: declineReasonMatch?.[1]?.trim() || '',
     offerAccepted: isAccepted,
     offerDeclined: isDeclined,
   };
@@ -373,8 +374,8 @@ export default function HRHiredEmployeesTab() {
   };
 
   // Status breakdown counters
-  const hiredCount = hiredEmployees.filter(e => e.status === 'Hired' || e.status === 'Offer Sent' || e.status === 'Offer Accepted').length;
-  const archivedCount = hiredEmployees.filter(e => e.status === 'Archived' || e.status === 'Inactive' || e.status === 'Offer Declined').length;
+  const hiredCount = hiredEmployees.filter(e => e.status === 'Hired' || e.status === 'Offer Sent').length;
+  const archivedCount = hiredEmployees.filter(e => e.status === 'Archived' || e.status === 'Inactive' || e.status === 'Offer Accepted' || e.status === 'Offer Declined').length;
   const employeeCount = employees.length;
 
   const filteredEmployees = hiredEmployees.filter(emp => {
@@ -386,9 +387,9 @@ export default function HRHiredEmployeesTab() {
 
     let matchesTab = false;
     if (activeSubTab === 'Hired') {
-      matchesTab = emp.status === 'Hired' || emp.status === 'Offer Sent' || emp.status === 'Offer Accepted';
+      matchesTab = emp.status === 'Hired' || emp.status === 'Offer Sent';
     } else if (activeSubTab === 'Archived') {
-      matchesTab = emp.status === 'Archived' || emp.status === 'Inactive' || emp.status === 'Offer Declined';
+      matchesTab = emp.status === 'Archived' || emp.status === 'Inactive' || emp.status === 'Offer Accepted' || emp.status === 'Offer Declined';
     }
 
     return matchesSearch && matchesDepartment && matchesTab;
@@ -758,6 +759,12 @@ export default function HRHiredEmployeesTab() {
                       {selectedEmployee.salary ? `${formatMoney(selectedEmployee.salary, branchCurrency)}/mo` : 'Not specified'}
                     </span>
                   </div>
+                  {selectedEmployee.offerDeclined && (
+                    <div style={styles.detailItemFull}>
+                      <span style={styles.detailLabel}>Reason for Declining Offer:</span>
+                      <span style={styles.detailValue}>{selectedEmployee.declineReason || 'No reason provided'}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
