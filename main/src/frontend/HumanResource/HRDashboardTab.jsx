@@ -15,7 +15,7 @@ export default function HRDashboardTab() {
   const [stats, setStats] = useState({
     activeJobPostings: 0,
     activeApplications: 0,
-    pendingApplications: 0,
+    offersSent: 0,
     recommendedForEmployment: 0,
     pendingResourceRequests: 0,
   });
@@ -33,26 +33,49 @@ export default function HRDashboardTab() {
       setLoading(true);
       setError(null);
 
-      const [summaryRes, postingsRes, applicationsRes] = await Promise.all([
+      const [summaryRes, postingsRes, applicationsRes, hiredRes] = await Promise.all([
         hrClient.get(`/dashboard/summary`),
         hrClient.get(`/job-postings`),
         hrClient.get(`/applications`),
+        hrClient.get(`/hired-employees`),
       ]);
 
       const summary = summaryRes.data?.data || {};
       const postings = postingsRes.data?.data || [];
       const applications = applicationsRes.data?.data || [];
+      const hiredRaw = hiredRes.data?.data || [];
+
+      const isHistoryApp = (app) => {
+        if (['Hired', 'Rejected', 'Offer Declined', 'Archived', 'Withdrawn'].includes(app.status)) return true;
+        if (app.posting_filled || app.posting_status === 'Closed') return true;
+        return false;
+      };
+
+      const activeApps = applications.filter(a => !isHistoryApp(a));
+      const pendingApps = activeApps.filter(a => a.status === 'Pending');
+      const recommendedApps = activeApps.filter(a => a.status === 'Recommended');
+
+      // Compute offersSent client-side from the hired-employees list
+      // (same source as the Onboarding tab) to avoid cross-branch DB miscounts.
+      // DB status='Active' or notes containing OFFER_SENT → UI 'Offer Sent'
+      const offersSentCount = hiredRaw.filter(row => {
+        const notesStr = row.job_applications?.notes || row.notes || '';
+        const isAccepted = notesStr.includes('OFFER_ACCEPTED') || Boolean(row.offer_accepted) || row.status === 'Offer Accepted';
+        const isDeclined = notesStr.includes('OFFER_DECLINED') || row.status === 'Offer Declined';
+        const isArchived = row.status === 'Inactive' || row.status === 'Archived';
+        return !isAccepted && !isDeclined && !isArchived && (row.status === 'Active' || notesStr.includes('OFFER_SENT'));
+      }).length;
 
       setStats({
-        activeJobPostings: summary.activeJobPostings || 0,
-        activeApplications: summary.activeApplications ?? applications.filter(a => !['Hired', 'Rejected'].includes(a.status)).length,
-        pendingApplications: summary.pendingApplications || 0,
-        recommendedForEmployment: summary.recommendedForEmployment ?? applications.filter(a => a.status === 'Recommended').length,
+        activeJobPostings: summary.activeJobPostings !== undefined ? summary.activeJobPostings : postings.filter(p => p.status === 'Active').length,
+        activeApplications: summary.activeApplications !== undefined ? summary.activeApplications : activeApps.length,
+        offersSent: offersSentCount,
+        recommendedForEmployment: summary.recommendedForEmployment !== undefined ? summary.recommendedForEmployment : recommendedApps.length,
         pendingResourceRequests: summary.pendingResourceRequests || 0,
       });
 
       setRecentApplications(
-        applications.slice(0, 3).map(app => ({
+        applications.slice(0, 5).map(app => ({
           id: app.id,
           name: `${app.first_name} ${app.last_name}`,
           position: app.position_applied,
@@ -62,7 +85,7 @@ export default function HRDashboardTab() {
       );
 
       setRecentPostings(
-        postings.slice(0, 3).map(p => ({
+        postings.slice(0, 5).map(p => ({
           id: p.id,
           title: p.title,
           applications: p.applications || 0,
@@ -131,16 +154,16 @@ export default function HRDashboardTab() {
           </div>
         </div>
 
-        <div className="glass-card" style={styles.statCard} title="Applications waiting for review or interview scheduling">
+        <div className="glass-card" style={styles.statCard} title="Offers sent to applicants awaiting their acceptance or rejection">
           <div style={{ ...styles.iconWrapper, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+              <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{stats.pendingApplications}</div>
-            <div style={styles.statLabel}>Pending Applications</div>
+            <div style={styles.statValue}>{stats.offersSent}</div>
+            <div style={styles.statLabel}>Offers Sent</div>
           </div>
         </div>
 

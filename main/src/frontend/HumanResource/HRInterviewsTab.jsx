@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import InterviewSchedulePicker from './InterviewSchedulePicker';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
+import LocationSelector from './LocationSelector';
 
 // Time parsing and conflict detection helpers
 const parseMinutes = (timeStr) => {
@@ -150,10 +151,8 @@ export default function HRInterviewsTab() {
     try {
       const res = await hrClient.get('/branches/my-branch');
       const branch = res.data?.data;
-      const options = [branch?.address, branch?.location]
-        .map(value => String(value || '').trim())
-        .filter(Boolean)
-        .filter((value, index, values) => values.indexOf(value) === index);
+      const branchAddress = String(branch?.address || branch?.location || branch?.name || '').trim();
+      const options = branchAddress ? [branchAddress] : [];
       setBranchLocationOptions(options);
       if (options.length > 0) {
         setScheduleForm(prev => ({ ...prev, location: prev.location || options[0] }));
@@ -248,16 +247,15 @@ export default function HRInterviewsTab() {
   const handleHire = async (id) => {
     const result = await showConfirmationAlert(
       'Hire Applicant',
-      'Are you sure you want to hire this applicant? They will be added to the Hired list under Hired Employees where you can send their formal Job Offer email.',
+      'Are you sure you want to hire this applicant? They will be added to the Onboarding list under Hired & Onboarding Employees.',
       'Yes, Hire Candidate'
     );
     if (!result.isConfirmed) return;
 
     try {
-      // Flips interview and application status to Hired and inserts into hired_employees
       await hrClient.put(`/interviews/${id}/status`, { status: 'Hired' });
       await loadInterviews();
-      showSuccessAlert('Applicant hired successfully! Moved to the Hired tab under Hired Employees.');
+      showSuccessAlert('Applicant hired successfully! They are now in the Onboarding tab under Hired & Onboarding Employees.');
     } catch (err) {
       showErrorAlert(err.response?.data?.error || 'Failed to hire applicant');
       console.error(err);
@@ -695,23 +693,6 @@ export default function HRInterviewsTab() {
                                   </button>
                                 </>
                               )}
-                              {int.status === 'Completed' && (
-                                <>
-                                  <button onClick={() => handleHire(int.id)} style={styles.hireBtn} title="Hire">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                                      <circle cx="12" cy="7" r="4"></circle>
-                                    </svg>
-                                  </button>
-                                  <button onClick={() => handleReject(int.id)} style={styles.rejectBtn} title="Reject">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <circle cx="12" cy="12" r="10"></circle>
-                                      <line x1="15" y1="9" x2="9" y2="15"></line>
-                                      <line x1="9" y1="9" x2="15" y2="15"></line>
-                                    </svg>
-                                  </button>
-                                </>
-                              )}
                             </>
                           ) : (
                             <span style={styles.viewOnlyText}>View Only</span>
@@ -821,14 +802,14 @@ export default function HRInterviewsTab() {
                               item.status === 'Completed' || item.status === 'Hired'
                                 ? 'var(--color-primary)'
                                 : item.status === 'Rejected'
-                                ? 'var(--color-danger)'
-                                : 'var(--color-accent, #3b82f6)',
+                                  ? 'var(--color-danger)'
+                                  : 'var(--color-accent, #3b82f6)',
                             background:
                               item.status === 'Completed' || item.status === 'Hired'
                                 ? 'rgba(16, 185, 129, 0.12)'
                                 : item.status === 'Rejected'
-                                ? 'rgba(239, 68, 68, 0.12)'
-                                : 'rgba(59, 130, 246, 0.12)',
+                                  ? 'rgba(239, 68, 68, 0.12)'
+                                  : 'rgba(59, 130, 246, 0.12)',
                           }}
                           title={`${formatTimeDisplay(item.interviewTime)} - ${item.applicantName} (${item.position}) [${item.status}]`}
                         >
@@ -854,11 +835,11 @@ export default function HRInterviewsTab() {
                   <h3 style={styles.inspectorTitle}>
                     {selectedCalendarDay
                       ? new Date(`${selectedCalendarDay}T00:00:00`).toLocaleDateString('en-US', {
-                          weekday: 'long',
-                          month: 'long',
-                          day: 'numeric',
-                          year: 'numeric'
-                        })
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })
                       : 'Select a day on the calendar'}
                   </h3>
                   <span style={styles.inspectorSubtitle}>
@@ -1153,29 +1134,12 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <select
-                      required
-                      style={styles.input}
-                      value={branchLocationOptions.includes(scheduleForm.location) ? scheduleForm.location : OTHER_LOCATION}
-                      onChange={(e) => setScheduleForm(prev => ({
-                        ...prev,
-                        location: e.target.value === OTHER_LOCATION ? '' : e.target.value,
-                      }))}
-                    >
-                      {branchLocationOptions.length === 0 && <option value="">Select a location</option>}
-                      {branchLocationOptions.map(option => <option key={option} value={option}>{option}</option>)}
-                      <option value={OTHER_LOCATION}>Other location</option>
-                    </select>
-                    {!branchLocationOptions.includes(scheduleForm.location) && (
-                      <input
-                        type="text"
-                        required
-                        style={{ ...styles.input, marginTop: '8px' }}
-                        placeholder="Enter the interview address or meeting link"
-                        value={scheduleForm.location}
-                        onChange={(e) => setScheduleForm(prev => ({ ...prev, location: e.target.value }))}
-                      />
-                    )}
+                    <LocationSelector
+                      value={scheduleForm.location}
+                      options={branchLocationOptions}
+                      onChange={(newLocation) => setScheduleForm(prev => ({ ...prev, location: newLocation }))}
+                      placeholder="Enter the interview address or meeting link..."
+                    />
                   </div>
                 </div>
 
@@ -1300,29 +1264,12 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <select
-                      required
-                      style={styles.input}
-                      value={branchLocationOptions.includes(rescheduleForm.location) ? rescheduleForm.location : OTHER_LOCATION}
-                      onChange={(e) => setRescheduleForm(prev => ({
-                        ...prev,
-                        location: e.target.value === OTHER_LOCATION ? '' : e.target.value,
-                      }))}
-                    >
-                      {branchLocationOptions.length === 0 && <option value="">Select a location</option>}
-                      {branchLocationOptions.map(option => <option key={option} value={option}>{option}</option>)}
-                      <option value={OTHER_LOCATION}>Other location</option>
-                    </select>
-                    {!branchLocationOptions.includes(rescheduleForm.location) && (
-                      <input
-                        type="text"
-                        required
-                        style={{ ...styles.input, marginTop: '8px' }}
-                        placeholder="Enter the interview address or meeting link"
-                        value={rescheduleForm.location}
-                        onChange={(e) => setRescheduleForm(prev => ({ ...prev, location: e.target.value }))}
-                      />
-                    )}
+                    <LocationSelector
+                      value={rescheduleForm.location}
+                      options={branchLocationOptions}
+                      onChange={(newLocation) => setRescheduleForm(prev => ({ ...prev, location: newLocation }))}
+                      placeholder="Enter the interview address or meeting link..."
+                    />
                   </div>
                 </div>
 
@@ -1635,6 +1582,11 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
+  },
+  viewOnlyText: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
   },
   form: {
     display: 'flex',

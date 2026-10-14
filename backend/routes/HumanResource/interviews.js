@@ -238,6 +238,26 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // 🛡️ Block past date/time
+    const nowInPH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+    const todayPHStr = `${nowInPH.getFullYear()}-${String(nowInPH.getMonth() + 1).padStart(2, '0')}-${String(nowInPH.getDate()).padStart(2, '0')}`;
+    const currentMinsPH = nowInPH.getHours() * 60 + nowInPH.getMinutes();
+
+    if (interview_date < todayPHStr) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot schedule an interview on a past date.',
+      });
+    }
+
+    const interviewMins = parseTimeToMinutes(interview_time);
+    if (interview_date === todayPHStr && interviewMins !== null && interviewMins <= currentMinsPH) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot schedule an interview for a time that has already passed today.',
+      });
+    }
+
     // Look up the application to verify branch access
     const { data: application, error: appError } = await supabase
       .from('job_applications')
@@ -438,6 +458,24 @@ router.put('/:id', async (req, res) => {
 
     // Check collision if date or time changed
     if (newDate && newTime && (newDate !== currentInterview.interview_date || newTime !== currentInterview.interview_time)) {
+      const nowInPH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+      const todayPHStr = `${nowInPH.getFullYear()}-${String(nowInPH.getMonth() + 1).padStart(2, '0')}-${String(nowInPH.getDate()).padStart(2, '0')}`;
+      const currentMinsPH = nowInPH.getHours() * 60 + nowInPH.getMinutes();
+
+      if (newDate < todayPHStr) {
+        return res.status(400).json({
+          success: false,
+          error: 'Cannot reschedule an interview to a past date.',
+        });
+      }
+
+      const interviewMins = parseTimeToMinutes(newTime);
+      if (newDate === todayPHStr && interviewMins !== null && interviewMins <= currentMinsPH) {
+        return res.status(400).json({
+          success: false,
+          error: 'Cannot reschedule an interview to a time that has already passed today.',
+        });
+      }
       const { data: existingOnDate } = await supabase
         .from('interviews')
         .select(`
@@ -753,15 +791,46 @@ router.put('/:id/status', async (req, res) => {
         }
       }
     } else if (status === 'Completed') {
-      // Just update application notes
+      // Update application status to Interview Completed
       if (data.application_id) {
         await supabase
           .from('job_applications')
           .update({ 
+            status: 'Interview Completed',
             notes: notes || null,
             reviewed_by: userId
           })
           .eq('id', data.application_id);
+      }
+
+      // Auto-insert applicant into hired_employees (Onboarding) so HR can make an offer
+      const app = data.job_applications || {};
+      const { data: existingHire } = await supabase
+        .from('hired_employees')
+        .select('id')
+        .eq('interview_id', id)
+        .maybeSingle();
+
+      if (!existingHire) {
+        const fullName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Candidate';
+        const { error: hireInsertError } = await supabase
+          .from('hired_employees')
+          .insert({
+            application_id: data.application_id || null,
+            interview_id: data.id,
+            name: fullName,
+            email: app.email || '',
+            phone: app.phone || null,
+            position_id: null,
+            department_id: null,
+            hire_date: new Date().toISOString().slice(0, 10),
+            status: 'Onboarding',
+          });
+        if (hireInsertError) {
+          console.error('❌ Failed to insert into hired_employees on Completed:', hireInsertError);
+        } else {
+          console.log(`✅ Auto-added ${fullName} to hired_employees (Onboarding) after interview completed`);
+        }
       }
     }
 

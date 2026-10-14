@@ -3,6 +3,7 @@ import InterviewSchedulePicker, { parseTimeToMinutes, formatTimeDisplay } from '
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
 import { API_BASE_URL } from '../../config/api';
+import LocationSelector from './LocationSelector';
 
 
 const mapApplication = (row) => {
@@ -60,6 +61,7 @@ export default function HRApplicationsTab() {
   const [positionFilter, setPositionFilter] = useState('All');
   const [scheduling, setScheduling] = useState(false);
   const [interviews, setInterviews] = useState([]);
+  const [branchLocationOptions, setBranchLocationOptions] = useState([]);
 
   // Active / History tab
   const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
@@ -113,7 +115,20 @@ export default function HRApplicationsTab() {
   useEffect(() => {
     loadApplications();
     loadInterviews();
+    loadBranchLocation();
   }, []);
+
+  const loadBranchLocation = async () => {
+    try {
+      const res = await hrClient.get('/branches/my-branch');
+      const branch = res.data?.data;
+      const branchAddress = String(branch?.address || branch?.location || branch?.name || '').trim();
+      const options = branchAddress ? [branchAddress] : [];
+      setBranchLocationOptions(options);
+    } catch (err) {
+      console.error('Failed to load branch location:', err);
+    }
+  };
 
   const loadApplications = async () => {
     try {
@@ -204,7 +219,7 @@ export default function HRApplicationsTab() {
       time: '',
       interviewer: '',
       interviewType: 'Technical Interview',
-      location: '',
+      location: branchLocationOptions[0] || '',
       notes: '',
     });
     setShowScheduleModal(true);
@@ -432,13 +447,13 @@ export default function HRApplicationsTab() {
                         <span style={{
                           ...styles.statusBadge,
                           backgroundColor: app.status === 'Recommended' ? 'var(--color-primary-light)' :
-                                 app.status === 'Interview Scheduled' ? 'rgba(56, 189, 248, 0.15)' :
-                                 app.status === 'Hired' ? 'rgba(34, 197, 94, 0.15)' :
-                                 app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                            app.status === 'Interview Scheduled' ? 'rgba(56, 189, 248, 0.15)' :
+                              app.status === 'Hired' ? 'rgba(34, 197, 94, 0.15)' :
+                                app.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
                           color: app.status === 'Recommended' ? 'var(--color-primary)' :
-                                 app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
-                                 app.status === 'Hired' ? 'var(--color-success)' :
-                                 app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                            app.status === 'Interview Scheduled' ? 'var(--color-accent)' :
+                              app.status === 'Hired' ? 'var(--color-success)' :
+                                app.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
                         }}>
                           {app.status}
                         </span>
@@ -614,13 +629,13 @@ export default function HRApplicationsTab() {
                           ...styles.detailValue,
                           ...styles.statusBadge,
                           backgroundColor: selectedApplication.status === 'Recommended' ? 'var(--color-primary-light)' :
-                                         selectedApplication.status === 'Under Review' ? 'var(--color-accent-light)' :
-                                         selectedApplication.status === 'Hired' ? 'var(--color-success-light)' :
-                                         selectedApplication.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
+                            selectedApplication.status === 'Under Review' ? 'var(--color-accent-light)' :
+                              selectedApplication.status === 'Hired' ? 'var(--color-success-light)' :
+                                selectedApplication.status === 'Rejected' ? 'var(--color-danger-light)' : 'var(--color-warning-light)',
                           color: selectedApplication.status === 'Recommended' ? 'var(--color-primary)' :
-                                 selectedApplication.status === 'Under Review' ? 'var(--color-accent)' :
-                                 selectedApplication.status === 'Hired' ? 'var(--color-success)' :
-                                 selectedApplication.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
+                            selectedApplication.status === 'Under Review' ? 'var(--color-accent)' :
+                              selectedApplication.status === 'Hired' ? 'var(--color-success)' :
+                                selectedApplication.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'
                         }}>
                           {selectedApplication.status}
                         </span>
@@ -789,13 +804,11 @@ export default function HRApplicationsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input
-                      type="text"
-                      required
-                      style={styles.input}
-                      placeholder="e.g., Conference Room A or Video Call"
+                    <LocationSelector
                       value={scheduleForm.location}
-                      onChange={(e) => setScheduleForm(prev => ({ ...prev, location: e.target.value }))}
+                      options={branchLocationOptions}
+                      onChange={(newLocation) => setScheduleForm(prev => ({ ...prev, location: newLocation }))}
+                      placeholder="Enter interview address or meeting link..."
                     />
                   </div>
                 </div>
@@ -809,7 +822,7 @@ export default function HRApplicationsTab() {
                       rows="3"
                       placeholder="Any additional notes for the interviewer..."
                       value={scheduleForm.notes}
-                      onChange={(e) => setScheduleForm({...scheduleForm, notes: e.target.value})}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })}
                     />
                   </div>
                 </div>

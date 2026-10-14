@@ -49,7 +49,9 @@ export default function PMDashboardTab({ user }) {
 
     try {
       isLoadingRef.current = true;
-      setIsLoading(true);
+      if (!loadedUserIdRef.current) {
+        setIsLoading(true);
+      }
       setLoadError('');
 
       console.log('🚀 Loading dashboard data for user:', userId);
@@ -141,7 +143,7 @@ export default function PMDashboardTab({ user }) {
         abortControllerRef.current = null;
       }
     }
-  }, [employees.length]);
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -152,33 +154,12 @@ export default function PMDashboardTab({ user }) {
     };
   }, []);
 
-  // Initial load & live auto-refresh on visible/focus
+  // Initial load - only when user changes or first mounts
   useEffect(() => {
     if (!user?.id) return;
-    loadDashboard(user.id, true);
-
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadDashboard(user.id, true);
-      }
-    }, 10000);
-
-    const handleFocus = () => {
-      if (document.visibilityState === 'visible') {
-        loadDashboard(user.id, true);
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
+    if (loadedUserIdRef.current !== user.id) {
+      loadDashboard(user.id);
+    }
   }, [user?.id, loadDashboard]);
 
   // Merge employees from tasks (client-side)
