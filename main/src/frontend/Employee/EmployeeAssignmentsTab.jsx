@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { supabase } from '../../lib/supabaseClient';
 import { API_BASE_URL } from '../../config/api';
@@ -177,8 +177,10 @@ export default function EmployeeAssignmentsTab({ user }) {
     return {};
   };
 
-  const fetchAssignmentsAndTasks = async () => {
-    setLoading(true);
+  const lastFocusFetchRef = useRef(0);
+
+  const fetchAssignmentsAndTasks = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const authHeader = await getAuthHeader();
 
@@ -194,13 +196,15 @@ export default function EmployeeAssignmentsTab({ user }) {
     } catch (error) {
       console.error('Error fetching assignments or tasks:', error);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
-  const fetchHistory = async () => {
-    setHistoryLoading(true);
-    setHistoryError('');
+  const fetchHistory = async (isBackground = false) => {
+    if (!isBackground) {
+      setHistoryLoading(true);
+      setHistoryError('');
+    }
     try {
       const authHeader = await getAuthHeader();
       const res = await axios.get(`${API_BASE_URL}/api/employee/history`, { headers: authHeader });
@@ -210,15 +214,16 @@ export default function EmployeeAssignmentsTab({ user }) {
       }
     } catch (error) {
       console.error('Error fetching employee history:', error);
-      setHistoryError('Unable to load your history right now.');
+      if (!isBackground) setHistoryError('Unable to load your history right now.');
     } finally {
-      setHistoryLoading(false);
+      if (!isBackground) setHistoryLoading(false);
     }
   };
 
   // ============ Wait for session to be restored before fetching ============
   useEffect(() => {
     let cancelled = false;
+    let authSub = null;
 
     const setupAuth = async () => {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -227,6 +232,7 @@ export default function EmployeeAssignmentsTab({ user }) {
           setSessionReady(true);
         }
       });
+      authSub = subscription;
 
       const { data: { session } } = await supabase.auth.getSession();
       if (cancelled) return;
@@ -234,35 +240,36 @@ export default function EmployeeAssignmentsTab({ user }) {
       if (session || localStorage.getItem('token')) {
         setSessionReady(true);
       }
-
-      return () => {
-        subscription?.unsubscribe();
-      };
     };
 
     setupAuth();
 
     return () => {
       cancelled = true;
+      authSub?.unsubscribe();
     };
   }, []);
 
   useEffect(() => {
     if (!sessionReady || !user?.id) return;
 
-    fetchAssignmentsAndTasks();
-    fetchHistory();
+    fetchAssignmentsAndTasks(false);
+    fetchHistory(false);
 
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        fetchAssignmentsAndTasks();
+        fetchAssignmentsAndTasks(true);
       }
-    }, 10000);
+    }, 15000);
 
     const handleFocus = () => {
       if (document.visibilityState === 'visible') {
-        fetchAssignmentsAndTasks();
-        fetchHistory();
+        const now = Date.now();
+        // Throttle rapid re-focus events (e.g. within 3 seconds)
+        if (now - lastFocusFetchRef.current < 3000) return;
+        lastFocusFetchRef.current = now;
+        fetchAssignmentsAndTasks(true);
+        fetchHistory(true);
       }
     };
     window.addEventListener('focus', handleFocus);
@@ -282,9 +289,9 @@ export default function EmployeeAssignmentsTab({ user }) {
       if (response.data.success) {
         setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
         // Moving a task to Completed sends it straight to the History sub-tab,
-        // so refresh history data to pick it up immediately.
+        // so refresh history data to pick it up immediately in background.
         if (newStatus === 'Completed') {
-          fetchHistory();
+          fetchHistory(true);
         }
       }
     } catch (error) {
@@ -359,10 +366,10 @@ export default function EmployeeAssignmentsTab({ user }) {
         setLogPercentage('');
         setLogDesc('');
         setActiveLogTaskId(null);
-        await fetchAssignmentsAndTasks();
+        await fetchAssignmentsAndTasks(true);
         // Reaching 100% auto-completes the task server-side, so pull it into History too.
         if (willComplete) {
-          fetchHistory();
+          fetchHistory(true);
         }
       }
     } catch (error) {

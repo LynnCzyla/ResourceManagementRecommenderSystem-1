@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 
 // Convert various time formats (24h, 12h, HH:MM:SS) to minutes from midnight
 export const parseTimeToMinutes = (timeStr) => {
@@ -64,10 +64,51 @@ export default function InterviewSchedulePicker({
     return new Date();
   });
 
-  const todayStr = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  }, []);
+  const getNowInManila = () => {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const parts = formatter.formatToParts(new Date());
+      const map = {};
+      parts.forEach(p => { map[p.type] = p.value; });
+      const year = map.year;
+      const month = map.month;
+      const day = map.day;
+      const hour = parseInt(map.hour, 10);
+      const minute = parseInt(map.minute, 10);
+      return {
+        dateStr: `${year}-${month}-${day}`,
+        minutes: hour * 60 + minute,
+      };
+    } catch (e) {
+      const now = new Date();
+      return {
+        dateStr: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+        minutes: now.getHours() * 60 + now.getMinutes(),
+      };
+    }
+  };
+
+  const nowInfo = useMemo(() => getNowInManila(), []);
+  const todayStr = nowInfo.dateStr;
+
+  // Auto-clear selected time if it's already passed on today
+  useEffect(() => {
+    if (selectedDate === todayStr && selectedTime) {
+      const selMins = parseTimeToMinutes(selectedTime);
+      if (selMins !== null && selMins <= nowInfo.minutes) {
+        onSelectTime('');
+      }
+    }
+  }, [selectedDate, todayStr, nowInfo.minutes, selectedTime, onSelectTime]);
+
   const currentMonthStart = useMemo(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -356,40 +397,63 @@ export default function InterviewSchedulePicker({
                 Available Times to Pick (30-min intervals) *
               </label>
               <span style={pickerStyles.timeSlotsHint}>
-                Green = Available • Red = Occupied
+                Green = Available • Red = Occupied • Gray = Passed
               </span>
             </div>
 
             <div style={pickerStyles.timeSlotsGrid}>
               {STANDARD_TIME_SLOTS.map(slot => {
+                const slotMins = parseTimeToMinutes(slot.time);
+                const isPastTime = selectedDate === todayStr && slotMins !== null && slotMins <= nowInfo.minutes;
+                const isPastDate = selectedDate && selectedDate < todayStr;
+                const isTimePassed = isPastDate || isPastTime;
+
                 const conflict = checkTimeConflict(slot.time);
                 const isSelected = selectedTime === slot.time;
-                const isAvailable = !conflict;
+                const isAvailable = !conflict && !isTimePassed;
+
+                let titleText = `Pick ${slot.label} (Available)`;
+                if (isTimePassed) {
+                  titleText = `Passed: ${slot.label} has already passed today`;
+                } else if (conflict) {
+                  titleText = `Booked: ${conflict.applicantName} (${formatTimeDisplay(conflict.interviewTime)})`;
+                }
 
                 return (
                   <button
                     key={slot.time}
                     type="button"
                     disabled={!isAvailable}
-                    onClick={() => onSelectTime(slot.time)}
-                    title={
-                      conflict
-                        ? `Booked: ${conflict.applicantName} (${formatTimeDisplay(conflict.interviewTime)})`
-                        : `Pick ${slot.label} (Available)`
-                    }
+                    onClick={() => {
+                      if (isAvailable) {
+                        onSelectTime(slot.time);
+                      }
+                    }}
+                    title={titleText}
                     style={{
                       ...pickerStyles.timeSlotBtn,
+                      ...(isTimePassed ? pickerStyles.timeSlotBtnPast : {}),
+                      ...(conflict ? pickerStyles.timeSlotBtnDisabled : {}),
                       ...(isSelected ? pickerStyles.timeSlotBtnSelected : {}),
-                      ...(!isAvailable ? pickerStyles.timeSlotBtnDisabled : {}),
                     }}
                   >
                     <span style={pickerStyles.slotIndicator}>
-                      {isSelected ? '✓' : isAvailable ? '🟢' : '🔴'}
+                      {isSelected ? '✓' : isTimePassed ? '⏱️' : isAvailable ? '🟢' : '🔴'}
                     </span>
-                    <span style={pickerStyles.slotLabel}>{slot.label}</span>
+                    <span style={{
+                      ...pickerStyles.slotLabel,
+                      ...(isTimePassed ? { textDecoration: 'line-through', opacity: 0.6 } : {})
+                    }}>
+                      {slot.label}
+                    </span>
                     {conflict && (
                       <span style={pickerStyles.slotBookedBy}>
                         {conflict.applicantName}
+                      </span>
+                    )}
+                    {isTimePassed && (
+                      <span style={pickerStyles.slotPassedText}>
+                        Passed
                       </span>
                     )}
                   </button>
@@ -771,6 +835,22 @@ const pickerStyles = {
     color: 'var(--color-text-muted)',
     cursor: 'not-allowed',
     opacity: 0.65,
+  },
+  timeSlotBtnPast: {
+    background: 'rgba(255, 255, 255, 0.02)',
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    color: 'var(--color-text-muted)',
+    cursor: 'not-allowed',
+    opacity: 0.45,
+  },
+  slotPassedText: {
+    fontSize: '9px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '600',
+    padding: '1px 5px',
+    borderRadius: '4px',
+    background: 'rgba(255, 255, 255, 0.06)',
+    letterSpacing: '0.3px',
   },
   slotIndicator: {
     fontSize: '10px',

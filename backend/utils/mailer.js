@@ -218,7 +218,7 @@ const sendOnboardingOfferEmail = async ({
   const { formatMoney } = require('./currency');
   const salaryNum = Number(String(salary ?? '').replace(/,/g, ''));
   const formattedSalary = salary
-    ? (Number.isFinite(salaryNum) ? `${formatMoney(salaryNum, currency)}/month` : salary)
+   ? (Number.isFinite(salaryNum) ? `${formatMoney(salaryNum, currency)}/month` : salary)
     : 'As agreed upon';
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
   const cleanAppUrl = appUrl.replace(/\/+$/, '');
@@ -279,12 +279,12 @@ const sendOnboardingOfferEmail = async ({
               <tr>
                 <td>
                   <a href="${token ? `${cleanAppUrl}/offer/${token}?choice=accept` : `${cleanAppUrl}/login`}" target="_blank" style="display: inline-block; background: #10b981; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);">
-                    ✓ Yes, I accept
+                    Yes, I accept
                   </a>
                 </td>
                 <td>
                   <a href="${token ? `${cleanAppUrl}/offer/${token}?choice=decline` : `${cleanAppUrl}/login`}" target="_blank" style="display: inline-block; background: #1e293b; color: #f87171; border: 1px solid #ef4444; text-decoration: none; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 10px;">
-                    ✕ No, I decline
+                    No, I decline
                   </a>
                 </td>
               </tr>
