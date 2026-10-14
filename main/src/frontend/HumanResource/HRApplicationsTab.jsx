@@ -122,10 +122,8 @@ export default function HRApplicationsTab() {
     try {
       const res = await hrClient.get('/branches/my-branch');
       const branch = res.data?.data;
-      const options = [branch?.address, branch?.location]
-        .map(value => String(value || '').trim())
-        .filter(Boolean)
-        .filter((value, index, values) => values.indexOf(value) === index);
+      const branchAddress = String(branch?.address || branch?.location || branch?.name || '').trim();
+      const options = branchAddress ? [branchAddress] : [];
       setBranchLocationOptions(options);
     } catch (err) {
       console.error('Failed to load branch location:', err);
