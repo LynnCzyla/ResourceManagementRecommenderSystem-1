@@ -4,6 +4,7 @@ import hrClient from './Hrclient';
 import { formatMoney, currencySymbol } from '../../config/currency';
 import { blockInvalidNumberKeys } from '../../utils/numberInput';
 import { API_BASE_URL } from '../../config/api';
+import LocationSelector from './LocationSelector';
 
 // Today's date as YYYY-MM-DD in the user's local timezone (what <input type="date"> uses)
 const getTodayStr = () => {
@@ -119,15 +120,15 @@ export default function HRJobPostingsTab() {
       console.log('🔍 Fetching user branch from /branches/my-branch...');
       const res = await hrClient.get('/branches/my-branch');
       console.log('📋 Branch response:', res.data);
-      
+
       if (res.data?.success && res.data.data) {
         const branch = res.data.data;
         setUserBranch(branch);
-        
+
         // Auto-fill location
         const locationValue = branch.address || branch.location || branch.name || '';
         console.log('📍 Setting location to:', locationValue);
-        
+
         setFormData(prev => ({
           ...prev,
           location: locationValue
@@ -229,8 +230,8 @@ export default function HRJobPostingsTab() {
 
   const handleSelectResourceRequest = (requestId) => {
     if (!requestId) {
-      setFormData((prev) => ({ 
-        ...prev, 
+      setFormData((prev) => ({
+        ...prev,
         sourceRequestId: '',
         location: userBranch?.address || userBranch?.location || userBranch?.name || prev.location
       }));
@@ -414,13 +415,13 @@ export default function HRJobPostingsTab() {
   // ✅ Open create modal with auto-filled location
   const openCreateModal = () => {
     console.log('📋 Opening create modal, userBranch:', userBranch);
-    
+
     // Reset form first
     setFormData({
       ...emptyForm,
       location: userBranch?.location || userBranch?.name || '',
     });
-    
+
     // If location is still empty, try to get from localStorage user
     const locationValue = userBranch?.address || userBranch?.location || userBranch?.name || '';
     if (locationValue) {
@@ -432,12 +433,12 @@ export default function HRJobPostingsTab() {
     } else {
       console.warn('⚠️ No location available from branch');
     }
-    
+
     setShowCreateModal(true);
   };
 
   const filteredPostings = jobPostings.filter((posting) => {
-    const matchesSearch = 
+    const matchesSearch =
       posting.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.location?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -619,42 +620,12 @@ export default function HRJobPostingsTab() {
       </div>
       <div style={styles.formGroup}>
         <label style={styles.formLabel}>Location *</label>
-          <select
-            required
-            value={locationOptions.includes(formData.location) ? formData.location : '__OTHER_LOCATION__'}
-            onChange={(e) => setFormData({
-              ...formData,
-              location: e.target.value === '__OTHER_LOCATION__' ? '' : e.target.value,
-            })}
-            title={locationOptions.includes(formData.location) ? formData.location : 'Choose a branch address or enter another location'}
-            style={{
-              ...styles.formInput,
-              fontSize: getLocationFontSize(formData.location),
-            }}
-          >
-            {locationOptions.length === 0 && <option value="">Select a branch location</option>}
-            {locationOptions.map(option => (
-              <option key={option} value={option} title={option}>
-                {option}
-              </option>
-            ))}
-            <option value="__OTHER_LOCATION__">Other location</option>
-          </select>
-          {!locationOptions.includes(formData.location) && (
-            <input
-              type="text"
-              required
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              style={{ ...styles.formInput, marginTop: '8px' }}
-              placeholder="Enter the job location"
-            />
-          )}
-          {!formData.location && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-              Location will be auto-filled from your branch
-            </span>
-          )}
+        <LocationSelector
+          value={formData.location}
+          options={locationOptions}
+          onChange={(newLocation) => setFormData(prev => ({ ...prev, location: newLocation }))}
+          placeholder="Enter the job location..."
+        />
       </div>
       <div style={styles.formGroup}>
         <label style={styles.formLabel}>Description</label>

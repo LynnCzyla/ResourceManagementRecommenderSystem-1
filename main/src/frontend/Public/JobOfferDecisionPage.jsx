@@ -227,7 +227,7 @@ export default function JobOfferDecisionPage({ isDark = true }) {
               {/* Offer Terms Card */}
               <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#f1f5f9', border: `1px solid ${borderCol}`, borderRadius: '16px', padding: '20px', marginBottom: '28px' }}>
                 <h3 style={{ fontSize: '15px', fontWeight: '700', margin: '0 0 16px 0', borderBottom: `1px dashed ${borderCol}`, paddingBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  📋 Summary of Offer Terms
+                  Summary of Offer Terms
                 </h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', fontSize: '13px' }}>
                   <div>
@@ -274,7 +274,7 @@ export default function JobOfferDecisionPage({ isDark = true }) {
 
               {/* Instructions or Expiration info */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: textSecondary, marginBottom: '24px', flexWrap: 'wrap', gap: '8px' }}>
-                <span>🔒 Secure 14-day signed response link</span>
+                <span>Secure 14-day signed response link</span>
                 <span>Valid through: {new Date(offerData.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               </div>
 
@@ -306,7 +306,7 @@ export default function JobOfferDecisionPage({ isDark = true }) {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                         <span style={{ fontWeight: '700', fontSize: '16px', color: selectedDecision === 'accept' ? '#34d399' : textPrimary }}>
-                          ✓ Yes, I accept
+                          Yes, I accept
                         </span>
                         <div style={{
                           width: '20px',
@@ -340,7 +340,7 @@ export default function JobOfferDecisionPage({ isDark = true }) {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                         <span style={{ fontWeight: '700', fontSize: '16px', color: selectedDecision === 'decline' ? '#f87171' : textPrimary }}>
-                          ✕ No, I decline
+                          No, I decline
                         </span>
                         <div style={{
                           width: '20px',

@@ -128,10 +128,21 @@ export default function HRLayout({ user, onLogout, isDark, toggleTheme, onProfil
     };
     window.addEventListener('resourceRequestsUpdated', handleRRUpdated);
 
+    // Allow child tabs to trigger navigation to another HR tab
+    const handleHrNavigate = (e) => {
+      const tab = e.detail?.tab;
+      if (tab) {
+        setActiveTab(tab);
+        localStorage.setItem('hrActiveTab', tab);
+      }
+    };
+    window.addEventListener('hrNavigateToTab', handleHrNavigate);
+
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('resourceRequestsUpdated', handleRRUpdated);
+      window.removeEventListener('hrNavigateToTab', handleHrNavigate);
     };
   }, [user?.id]);
 
