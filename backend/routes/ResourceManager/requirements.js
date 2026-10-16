@@ -28,6 +28,7 @@ router.get('/', async (req, res) => {
                         project_name,
                         project_code,
                         status,
+                        priority,
                         created_by,
                         profiles:created_by (
                             id,
@@ -113,6 +114,7 @@ router.get('/', async (req, res) => {
                     project_name,
                     project_code,
                     status,
+                    priority,
                     created_by,
                     profiles:created_by (
                         id,
@@ -202,7 +204,8 @@ async function transformRequirements(data) {
             start_date: item.start_date || null,
             end_date: item.end_date || null,
             status: item.status || 'Pending',
-            priority: item.priority || 'Medium',
+            priority: item.projects?.priority || item.priority || 'Medium',
+            projectPriority: item.projects?.priority || item.priority || 'Medium',
             created_at: item.created_at || null,
             updated_at: item.updated_at || null,
             created_by: item.created_by || null,
@@ -237,6 +240,8 @@ router.get('/:id', async (req, res) => {
                     id,
                     project_name,
                     project_code,
+                    priority,
+                    status,
                     created_by,
                     profiles:created_by (
                         id,

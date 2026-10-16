@@ -28,7 +28,7 @@ export default function RMRequestsTab() {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
+  const [priorityFilter, setPriorityFilter] = useState('All');
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(true);
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const [sortBy, setSortBy] = useState('score');
@@ -132,6 +132,7 @@ export default function RMRequestsTab() {
         groups.set(key, {
           projectId: key,
           projectName: req.projectName || 'Unnamed Project',
+          priority: req.projectPriority || req.priority || 'Medium',
           requirements: [],
           totalNeeded: 0,
           totalFilled: 0,
@@ -145,8 +146,30 @@ export default function RMRequestsTab() {
       group.totalNeeded += req.quantity || 1;
       group.totalFilled += assignedCount;
       group.isFullyAssigned = group.totalFilled >= group.totalNeeded;
+
+      // Update to highest priority among requirements or project if any
+      const priorityWeights = { 'high': 3, 'medium': 2, 'low': 1 };
+      const currentWeight = priorityWeights[(group.priority || '').toLowerCase()] || 2;
+      const reqWeight = priorityWeights[(req.priority || req.projectPriority || '').toLowerCase()] || 2;
+      if (reqWeight > currentWeight) {
+        group.priority = req.priority || req.projectPriority;
+      }
     });
-    return Array.from(groups.values());
+
+    // Always sort by priority from High to Low (High at the top)
+    const priorityWeights = { 'high': 3, 'medium': 2, 'low': 1 };
+    return Array.from(groups.values()).sort((a, b) => {
+      const weightA = priorityWeights[(a.priority || '').toLowerCase()] || 2;
+      const weightB = priorityWeights[(b.priority || '').toLowerCase()] || 2;
+      if (weightB !== weightA) {
+        return weightB - weightA; // High (3) first, then Medium (2), then Low (1)
+      }
+      // If priority is the same, unstaffed requests come first
+      if (a.isFullyAssigned !== b.isFullyAssigned) {
+        return a.isFullyAssigned ? 1 : -1;
+      }
+      return 0;
+    });
   };
 
   const sortCandidates = (candidates, sortBy, sortOrder) => {
@@ -209,14 +232,17 @@ export default function RMRequestsTab() {
         req.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.role_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.skills?.some(skill => skill?.toLowerCase().includes(searchQuery.toLowerCase()));
-      const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
+
+      const reqPriority = (req.priority || req.projectPriority || 'Medium').toLowerCase();
+      const matchesPriority = priorityFilter === 'All' || reqPriority === priorityFilter.toLowerCase();
+
       const assignedCount = getAssignmentCount(req.id);
       const quantity = req.quantity || 1;
       const isFullyAssigned = assignedCount >= quantity;
       const matchesUnassigned = showUnassignedOnly ? !isFullyAssigned : true;
-      return matchesSearch && matchesStatus && matchesUnassigned;
+      return matchesSearch && matchesPriority && matchesUnassigned;
     });
-  }, [requests, searchQuery, statusFilter, showUnassignedOnly, assignments]);
+  }, [requests, searchQuery, priorityFilter, showUnassignedOnly, assignments]);
 
   const groupedProjects = useMemo(
     () => groupRequestsByProject(filteredRequests),
@@ -498,13 +524,14 @@ export default function RMRequestsTab() {
                 />
               </div>
               <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
                 style={styles.filterSelect}
               >
-                <option value="All">All Status</option>
-                <option value="Pending">Pending</option>
-                <option value="Approved">Approved</option>
+                <option value="All">All Priority</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
               </select>
             </div>
           </div>
@@ -565,6 +592,28 @@ export default function RMRequestsTab() {
                               Needs Staff
                             </>
                           )}
+                        </span>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: (project.priority || '').toLowerCase() === 'high'
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : (project.priority || '').toLowerCase() === 'low'
+                              ? 'rgba(59, 130, 246, 0.15)'
+                              : 'rgba(245, 158, 11, 0.15)',
+                          color: (project.priority || '').toLowerCase() === 'high'
+                            ? '#ef4444'
+                            : (project.priority || '').toLowerCase() === 'low'
+                              ? '#3b82f6'
+                              : '#f59e0b',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          Priority: {project.priority || 'Medium'}
                         </span>
                       </div>
                     </div>
@@ -1212,7 +1261,9 @@ const styles = {
   },
   projectHeaderRight: {
     display: 'flex',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: '6px',
     flexShrink: 0,
     marginLeft: '12px',
   },
