@@ -16,6 +16,104 @@ const hasHrOrAdminRole = (user) => {
   return false;
 };
 
+// ✅ Helper to auto-insert any 'Completed' interviews that are not yet in hired_employees
+const syncCompletedInterviews = async (branchId = null, isSuperAdmin = false) => {
+  try {
+    // Find all 'Completed' interviews
+    let interviewQuery = supabase
+      .from('interviews')
+      .select(`
+        id,
+        application_id,
+        status,
+        job_applications:application_id (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone,
+          branch_id
+        )
+      `)
+      .eq('status', 'Completed');
+
+    // Filter by branch for non-super admins
+    if (!isSuperAdmin && branchId) {
+      // We filter after fetch since branch is on the joined table
+    }
+
+    const { data: completedInterviews, error: fetchError } = await interviewQuery;
+    if (fetchError || !completedInterviews?.length) return 0;
+
+    // Filter by branch if needed
+    const filtered = isSuperAdmin
+      ? completedInterviews
+      : completedInterviews.filter(i => i.job_applications?.branch_id === branchId);
+
+    if (!filtered.length) return 0;
+
+    // Get all interview_ids already in hired_employees
+    const interviewIds = filtered.map(i => i.id);
+    const { data: existing } = await supabase
+      .from('hired_employees')
+      .select('interview_id')
+      .in('interview_id', interviewIds);
+
+    const existingIds = new Set((existing || []).map(e => e.interview_id));
+
+    // Insert missing ones
+    const toInsert = filtered
+      .filter(i => !existingIds.has(i.id))
+      .map(i => {
+        const app = i.job_applications || {};
+        const fullName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Candidate';
+        return {
+          application_id: i.application_id || null,
+          interview_id: i.id,
+          name: fullName,
+          email: app.email || '',
+          phone: app.phone || null,
+          position_id: null,
+          department_id: null,
+          hire_date: new Date().toISOString().slice(0, 10),
+          status: 'Onboarding',
+        };
+      });
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabase
+        .from('hired_employees')
+        .insert(toInsert);
+      if (insertError) {
+        console.error('❌ Sync completed interviews insert error:', insertError);
+        return 0;
+      }
+      console.log(`✅ Synced ${toInsert.length} completed interview(s) into hired_employees (Onboarding)`);
+    }
+
+    return toInsert.length;
+  } catch (err) {
+    console.error('❌ syncCompletedInterviews error:', err);
+    return 0;
+  }
+};
+
+// POST /api/hr/hired-employees/sync-completed — Manually trigger backfill (also auto-called on GET)
+router.post('/sync-completed', async (req, res) => {
+  try {
+    if (!hasHrOrAdminRole(req.user)) {
+      return res.status(403).json({ success: false, error: 'Access denied.' });
+    }
+    const userBranchId = req.user?.branch_id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const synced = await syncCompletedInterviews(userBranchId, isSuperAdmin);
+    return res.status(200).json({ success: true, synced, message: `${synced} interview(s) synced to Onboarding.` });
+  } catch (error) {
+    console.error('Error in sync-completed:', error);
+    res.status(500).json({ success: false, error: 'Sync failed.' });
+  }
+});
+
 // GET /api/hr/hired-employees — list all hires with branch filtering
 router.get('/', async (req, res) => {
   try {
@@ -36,6 +134,9 @@ router.get('/', async (req, res) => {
         error: 'Access denied. Human Resources, Admin, or Super Admin role required.'
       });
     }
+
+    // ✅ Auto-sync: backfill any Completed interviews missing from hired_employees
+    await syncCompletedInterviews(userBranchId, isSuperAdmin);
 
     // ✅ For Super Admin: Get all hired employees
     if (isSuperAdmin) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import InterviewSchedulePicker from './InterviewSchedulePicker';
 import Swal from 'sweetalert2';
 import hrClient from './Hrclient';
+import LocationSelector from './LocationSelector';
 
 // Time parsing and conflict detection helpers
 const parseMinutes = (timeStr) => {
@@ -48,6 +49,8 @@ const mapInterview = (row) => ({
   notes: row.notes || '',
 });
 
+const OTHER_LOCATION = '__OTHER_LOCATION__';
+
 export default function HRInterviewsTab() {
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +64,7 @@ export default function HRInterviewsTab() {
   const [activeTab, setActiveTab] = useState('Active'); // 'Active' | 'History'
   const [hoveredTab, setHoveredTab] = useState(null);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
+  const [branchLocationOptions, setBranchLocationOptions] = useState([]);
   const [scheduleForm, setScheduleForm] = useState({
     date: '',
     time: '',
@@ -140,7 +144,23 @@ export default function HRInterviewsTab() {
 
   useEffect(() => {
     loadInterviews();
+    loadBranchLocation();
   }, []);
+
+  const loadBranchLocation = async () => {
+    try {
+      const res = await hrClient.get('/branches/my-branch');
+      const branch = res.data?.data;
+      const branchAddress = String(branch?.address || branch?.location || branch?.name || '').trim();
+      const options = branchAddress ? [branchAddress] : [];
+      setBranchLocationOptions(options);
+      if (options.length > 0) {
+        setScheduleForm(prev => ({ ...prev, location: prev.location || options[0] }));
+      }
+    } catch (err) {
+      console.error('Failed to load branch location:', err);
+    }
+  };
 
   const loadInterviews = async () => {
     try {
@@ -227,16 +247,15 @@ export default function HRInterviewsTab() {
   const handleHire = async (id) => {
     const result = await showConfirmationAlert(
       'Hire Applicant',
-      'Are you sure you want to hire this applicant? They will be added to the Hired list under Hired Employees where you can send their formal Job Offer email.',
+      'Are you sure you want to hire this applicant? They will be added to the Onboarding list under Hired & Onboarding Employees.',
       'Yes, Hire Candidate'
     );
     if (!result.isConfirmed) return;
 
     try {
-      // Flips interview and application status to Hired and inserts into hired_employees
       await hrClient.put(`/interviews/${id}/status`, { status: 'Hired' });
       await loadInterviews();
-      showSuccessAlert('Applicant hired successfully! Moved to the Hired tab under Hired Employees.');
+      showSuccessAlert('Applicant hired successfully! They are now in the Onboarding tab under Hired & Onboarding Employees.');
     } catch (err) {
       showErrorAlert(err.response?.data?.error || 'Failed to hire applicant');
       console.error(err);
@@ -395,7 +414,7 @@ export default function HRInterviewsTab() {
     showSuccessAlert('Gmail opened with interview invitation!');
   };
 
-  const isHistoryStatus = (status) => status === 'Hired' || status === 'Rejected';
+  const isHistoryStatus = (status) => ['Completed', 'Hired', 'Rejected', 'Cancelled'].includes(status);
 
   const activeCount = interviews.filter(int => !isHistoryStatus(int.status)).length;
   const historyCount = interviews.filter(int => isHistoryStatus(int.status)).length;
@@ -412,7 +431,10 @@ export default function HRInterviewsTab() {
     return matchesSearch && matchesStatus && matchesTab;
   });
 
-  const todayDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayDateStr = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }, []);
 
   const interviewsByDate = useMemo(() => {
     const map = {};
@@ -671,23 +693,6 @@ export default function HRInterviewsTab() {
                                   </button>
                                 </>
                               )}
-                              {int.status === 'Completed' && (
-                                <>
-                                  <button onClick={() => handleHire(int.id)} style={styles.hireBtn} title="Hire">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                                      <circle cx="12" cy="7" r="4"></circle>
-                                    </svg>
-                                  </button>
-                                  <button onClick={() => handleReject(int.id)} style={styles.rejectBtn} title="Reject">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <circle cx="12" cy="12" r="10"></circle>
-                                      <line x1="15" y1="9" x2="9" y2="15"></line>
-                                      <line x1="9" y1="9" x2="15" y2="15"></line>
-                                    </svg>
-                                  </button>
-                                </>
-                              )}
                             </>
                           ) : (
                             <span style={styles.viewOnlyText}>View Only</span>
@@ -797,14 +802,14 @@ export default function HRInterviewsTab() {
                               item.status === 'Completed' || item.status === 'Hired'
                                 ? 'var(--color-primary)'
                                 : item.status === 'Rejected'
-                                ? 'var(--color-danger)'
-                                : 'var(--color-accent, #3b82f6)',
+                                  ? 'var(--color-danger)'
+                                  : 'var(--color-accent, #3b82f6)',
                             background:
                               item.status === 'Completed' || item.status === 'Hired'
                                 ? 'rgba(16, 185, 129, 0.12)'
                                 : item.status === 'Rejected'
-                                ? 'rgba(239, 68, 68, 0.12)'
-                                : 'rgba(59, 130, 246, 0.12)',
+                                  ? 'rgba(239, 68, 68, 0.12)'
+                                  : 'rgba(59, 130, 246, 0.12)',
                           }}
                           title={`${formatTimeDisplay(item.interviewTime)} - ${item.applicantName} (${item.position}) [${item.status}]`}
                         >
@@ -830,11 +835,11 @@ export default function HRInterviewsTab() {
                   <h3 style={styles.inspectorTitle}>
                     {selectedCalendarDay
                       ? new Date(`${selectedCalendarDay}T00:00:00`).toLocaleDateString('en-US', {
-                          weekday: 'long',
-                          month: 'long',
-                          day: 'numeric',
-                          year: 'numeric'
-                        })
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })
                       : 'Select a day on the calendar'}
                   </h3>
                   <span style={styles.inspectorSubtitle}>
@@ -1083,6 +1088,7 @@ export default function HRInterviewsTab() {
                       <input
                         type="date"
                         required
+                        min={todayDateStr}
                         style={styles.input}
                         value={scheduleForm.date}
                         onChange={(e) => setScheduleForm(prev => ({ ...prev, date: e.target.value }))}
@@ -1128,13 +1134,11 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input
-                      type="text"
-                      required
-                      style={styles.input}
-                      placeholder="e.g., Conference Room A or Video Call"
+                    <LocationSelector
                       value={scheduleForm.location}
-                      onChange={(e) => setScheduleForm(prev => ({ ...prev, location: e.target.value }))}
+                      options={branchLocationOptions}
+                      onChange={(newLocation) => setScheduleForm(prev => ({ ...prev, location: newLocation }))}
+                      placeholder="Enter the interview address or meeting link..."
                     />
                   </div>
                 </div>
@@ -1214,6 +1218,7 @@ export default function HRInterviewsTab() {
                       <input
                         type="date"
                         required
+                        min={todayDateStr}
                         style={styles.input}
                         value={rescheduleForm.date}
                         onChange={(e) => setRescheduleForm(prev => ({ ...prev, date: e.target.value }))}
@@ -1259,13 +1264,11 @@ export default function HRInterviewsTab() {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Location *</label>
-                    <input
-                      type="text"
-                      required
-                      style={styles.input}
-                      placeholder="e.g., Conference Room A or Video Call"
+                    <LocationSelector
                       value={rescheduleForm.location}
-                      onChange={(e) => setRescheduleForm(prev => ({ ...prev, location: e.target.value }))}
+                      options={branchLocationOptions}
+                      onChange={(newLocation) => setRescheduleForm(prev => ({ ...prev, location: newLocation }))}
+                      placeholder="Enter the interview address or meeting link..."
                     />
                   </div>
                 </div>
@@ -1579,6 +1582,11 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
+  },
+  viewOnlyText: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
   },
   form: {
     display: 'flex',

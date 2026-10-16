@@ -4,6 +4,7 @@ import hrClient from './Hrclient';
 import { formatMoney, currencySymbol } from '../../config/currency';
 import { blockInvalidNumberKeys } from '../../utils/numberInput';
 import { API_BASE_URL } from '../../config/api';
+import LocationSelector from './LocationSelector';
 
 // Today's date as YYYY-MM-DD in the user's local timezone (what <input type="date"> uses)
 const getTodayStr = () => {
@@ -11,6 +12,13 @@ const getTodayStr = () => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd}`;
+};
+
+const getLocationFontSize = (location) => {
+  if (location.length > 100) return '10px';
+  if (location.length > 70) return '11px';
+  if (location.length > 45) return '12px';
+  return '14px';
 };
 
 // Maps a job_postings row (with joined departments/positions) coming back from the
@@ -30,7 +38,7 @@ const mapPosting = (row) => ({
   status: row.status || 'Active',
   applications: row.applications || 0,
   quantity: row.quantity || 1,
-  hiredCount: row.hired_count || 0,
+  acceptedCount: row.accepted_count ?? row.hired_count ?? 0,
   postedDate: row.posted_date,
   closingDate: row.closing_date || '',
   sourceRequestId: row.source_request_id || null,
@@ -85,8 +93,12 @@ export default function HRJobPostingsTab() {
   const [selectedPosting, setSelectedPosting] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [activeTab, setActiveTab] = useState('Active');
+  const [hoveredTab, setHoveredTab] = useState(null);
   const [userBranch, setUserBranch] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const branchAddress = String(userBranch?.address || userBranch?.location || userBranch?.name || '').trim();
+  const locationOptions = branchAddress ? [branchAddress] : [];
 
   useEffect(() => {
     loadJobPostings();
@@ -108,15 +120,15 @@ export default function HRJobPostingsTab() {
       console.log('🔍 Fetching user branch from /branches/my-branch...');
       const res = await hrClient.get('/branches/my-branch');
       console.log('📋 Branch response:', res.data);
-      
+
       if (res.data?.success && res.data.data) {
         const branch = res.data.data;
         setUserBranch(branch);
-        
+
         // Auto-fill location
-        const locationValue = branch.location || branch.name || '';
+        const locationValue = branch.address || branch.location || branch.name || '';
         console.log('📍 Setting location to:', locationValue);
-        
+
         setFormData(prev => ({
           ...prev,
           location: locationValue
@@ -218,10 +230,10 @@ export default function HRJobPostingsTab() {
 
   const handleSelectResourceRequest = (requestId) => {
     if (!requestId) {
-      setFormData((prev) => ({ 
-        ...prev, 
+      setFormData((prev) => ({
+        ...prev,
         sourceRequestId: '',
-        location: userBranch?.location || userBranch?.name || prev.location 
+        location: userBranch?.address || userBranch?.location || userBranch?.name || prev.location
       }));
       return;
     }
@@ -238,7 +250,7 @@ export default function HRJobPostingsTab() {
       sourceRequestId: requestId,
       title: req.positionTitle || prev.title,
       department_id: matchedDept ? String(matchedDept.id) : prev.department_id,
-      location: prev.location || userBranch?.location || userBranch?.name || '',
+      location: prev.location || userBranch?.address || userBranch?.location || userBranch?.name || '',
       quantity: req.quantity || 1,
       // SKILLS ONLY in requirements — do NOT include Experience Level!
       requirements: req.requiredSkills || prev.requirements,
@@ -377,7 +389,7 @@ export default function HRJobPostingsTab() {
       title: posting.title,
       description: posting.description || '',
       department_id: posting.department_id || '',
-      location: posting.location || userBranch?.location || userBranch?.name || '',
+      location: posting.location || userBranch?.address || userBranch?.location || userBranch?.name || '',
       employmentType: posting.employmentType,
       salaryMin: posting.salaryMin,
       salaryMax: posting.salaryMax,
@@ -395,7 +407,7 @@ export default function HRJobPostingsTab() {
   const resetForm = () => {
     setFormData({
       ...emptyForm,
-      location: userBranch?.location || userBranch?.name || '',
+      location: userBranch?.address || userBranch?.location || userBranch?.name || '',
     });
     setSelectedPosting(null);
   };
@@ -403,15 +415,15 @@ export default function HRJobPostingsTab() {
   // ✅ Open create modal with auto-filled location
   const openCreateModal = () => {
     console.log('📋 Opening create modal, userBranch:', userBranch);
-    
+
     // Reset form first
     setFormData({
       ...emptyForm,
       location: userBranch?.location || userBranch?.name || '',
     });
-    
+
     // If location is still empty, try to get from localStorage user
-    const locationValue = userBranch?.location || userBranch?.name || '';
+    const locationValue = userBranch?.address || userBranch?.location || userBranch?.name || '';
     if (locationValue) {
       setFormData(prev => ({
         ...prev,
@@ -421,18 +433,24 @@ export default function HRJobPostingsTab() {
     } else {
       console.warn('⚠️ No location available from branch');
     }
-    
+
     setShowCreateModal(true);
   };
 
   const filteredPostings = jobPostings.filter((posting) => {
-    const matchesSearch = 
+    const matchesSearch =
       posting.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       posting.location?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'All' || posting.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesTab = activeTab === 'History'
+      ? posting.status !== 'Active'
+      : posting.status === 'Active';
+    return matchesSearch && matchesStatus && matchesTab;
   });
+
+  const activeCount = jobPostings.filter(posting => posting.status === 'Active').length;
+  const historyCount = jobPostings.filter(posting => posting.status !== 'Active').length;
 
   const usedRequestIds = new Set(
     jobPostings
@@ -530,20 +548,15 @@ export default function HRJobPostingsTab() {
           </select>
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Location *</label>
+          <label style={styles.formLabel}>Posting End Date</label>
           <input
-            type="text"
-            required
-            value={formData.location}
-            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+            type="date"
+            min={getClosingMin()}
+            value={formData.closingDate}
+            onChange={(e) => setFormData({ ...formData, closingDate: e.target.value })}
             style={styles.formInput}
-            placeholder="Auto-filled from your branch"
           />
-          {!formData.location && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-              Location will be auto-filled from your branch
-            </span>
-          )}
+          <span style={styles.fieldHint}>The posting closes automatically after this date.</span>
         </div>
       </div>
       <div style={styles.formRow}>
@@ -605,19 +618,14 @@ export default function HRJobPostingsTab() {
           />
         </div>
       </div>
-      <div style={styles.formRow}>
-        <div style={styles.formGroup}>
-          <label style={styles.formLabel}>Posting End Date</label>
-          <input
-            type="date"
-            min={getClosingMin()}
-            value={formData.closingDate}
-            onChange={(e) => setFormData({ ...formData, closingDate: e.target.value })}
-            style={styles.formInput}
-          />
-          <span style={styles.fieldHint}>The posting closes automatically after this date.</span>
-        </div>
-        <div style={styles.formGroup} />
+      <div style={styles.formGroup}>
+        <label style={styles.formLabel}>Location *</label>
+        <LocationSelector
+          value={formData.location}
+          options={locationOptions}
+          onChange={(newLocation) => setFormData(prev => ({ ...prev, location: newLocation }))}
+          placeholder="Enter the job location..."
+        />
       </div>
       <div style={styles.formGroup}>
         <label style={styles.formLabel}>Description</label>
@@ -675,6 +683,29 @@ export default function HRJobPostingsTab() {
           <button onClick={loadJobPostings} style={styles.retryBtn}>Retry</button>
         </div>
       )}
+
+      <div style={styles.subTabsContainer}>
+        {['Active', 'History'].map(tab => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            onMouseEnter={() => setHoveredTab(tab)}
+            onMouseLeave={() => setHoveredTab(null)}
+            style={{
+              ...styles.subTabButton,
+              ...(activeTab === tab
+                ? styles.subTabButtonActive
+                : hoveredTab === tab ? styles.subTabButtonHovered : {}),
+            }}
+          >
+            {tab}
+            <span style={{ ...styles.tabCount, ...(activeTab === tab ? styles.tabCountActive : {}) }}>
+              {tab === 'Active' ? activeCount : historyCount}
+            </span>
+          </button>
+        ))}
+      </div>
 
       <div className="glass-card" style={styles.card}>
         <div style={styles.toolbar}>
@@ -749,7 +780,7 @@ export default function HRJobPostingsTab() {
                 <tr><td colSpan="11" style={styles.emptyRow}>No job postings found.</td></tr>
               ) : (
                 filteredPostings.map((posting) => {
-                  const isFilled = (posting.hiredCount || 0) >= (posting.quantity || 1);
+                  const isFilled = (posting.acceptedCount || 0) >= (posting.quantity || 1);
                   return (
                     <tr key={posting.id} style={styles.tableRow}>
                       <td style={styles.td}>
@@ -803,7 +834,7 @@ export default function HRJobPostingsTab() {
                           whiteSpace: 'nowrap',
                           padding: '5px 12px',
                         }}>
-                          {posting.hiredCount || 0} / {posting.quantity || 1} {isFilled ? 'Filled' : 'Needed'}
+                          {posting.acceptedCount || 0} / {posting.quantity || 1} {isFilled ? 'Filled' : 'Needed'}
                         </span>
                       </td>
                       <td style={styles.td}>{posting.employmentType}</td>
@@ -951,6 +982,47 @@ const styles = {
   subtitle: {
     fontSize: '15px',
     color: 'var(--color-text-secondary)',
+  },
+  subTabsContainer: {
+    display: 'flex',
+    gap: '8px',
+    borderBottom: '1px solid var(--color-border)',
+    marginTop: '-4px',
+    marginBottom: '20px',
+  },
+  subTabButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    padding: '10px 4px',
+    marginRight: '16px',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  subTabButtonActive: {
+    color: 'var(--color-primary)',
+    borderBottom: '2px solid var(--color-primary)',
+  },
+  subTabButtonHovered: {
+    color: 'var(--color-text-primary)',
+  },
+  tabCount: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '30px',
+    background: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-muted)',
+  },
+  tabCountActive: {
+    background: 'var(--color-primary-light)',
+    color: 'var(--color-primary)',
   },
   card: {
     padding: '24px',
@@ -1104,10 +1176,11 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '700px',
+    maxWidth: 'min(700px, calc(100vw - 32px))',
     maxHeight: '90vh',
     overflow: 'auto',
     padding: '28px',
+    boxSizing: 'border-box',
   },
   modalHeader: {
     display: 'flex',
@@ -1139,10 +1212,12 @@ const styles = {
     flexDirection: 'column',
     gap: '6px',
     flex: 1,
+    minWidth: 0,
   },
   formRow: {
     display: 'flex',
     gap: '16px',
+    flexWrap: 'wrap',
   },
   formLabel: {
     fontSize: '13px',
@@ -1154,6 +1229,9 @@ const styles = {
     color: 'var(--color-text-muted)',
   },
   formInput: {
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
     padding: '10px 12px',
     borderRadius: '8px',
     border: '1px solid var(--color-border)',

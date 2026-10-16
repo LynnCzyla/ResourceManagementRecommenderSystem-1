@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { getEmployees, getTasks, getProjects } from './pmApi';
 
 export default function PMDashboardTab({ user }) {
@@ -17,6 +18,7 @@ export default function PMDashboardTab({ user }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('name');
   const [isLoading, setIsLoading] = useState(true);
+  const [viewEmployee, setViewEmployee] = useState(null); // employee to show in modal
   
   // Use refs to track if data is already loaded for this user
   const loadedUserIdRef = useRef(null);
@@ -49,7 +51,9 @@ export default function PMDashboardTab({ user }) {
 
     try {
       isLoadingRef.current = true;
-      setIsLoading(true);
+      if (!loadedUserIdRef.current) {
+        setIsLoading(true);
+      }
       setLoadError('');
 
       console.log('🚀 Loading dashboard data for user:', userId);
@@ -141,44 +145,25 @@ export default function PMDashboardTab({ user }) {
         abortControllerRef.current = null;
       }
     }
-  }, [employees.length]);
+  }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — reset the load guard so next tab visit re-fetches fresh data
+  // (picks up new employees/assignments added while on another tab, no auto-refresh needed)
   useEffect(() => {
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      loadedUserIdRef.current = null;
     };
   }, []);
 
-  // Initial load & live auto-refresh on visible/focus
+  // Initial load - only when user changes or first mounts
   useEffect(() => {
     if (!user?.id) return;
-    loadDashboard(user.id, true);
-
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadDashboard(user.id, true);
-      }
-    }, 10000);
-
-    const handleFocus = () => {
-      if (document.visibilityState === 'visible') {
-        loadDashboard(user.id, true);
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
+    if (loadedUserIdRef.current !== user.id) {
+      loadDashboard(user.id);
+    }
   }, [user?.id, loadDashboard]);
 
   // Merge employees from tasks (client-side)
@@ -288,9 +273,13 @@ export default function PMDashboardTab({ user }) {
   const getAssignedTasks = useCallback(
     (id) => {
       const all = tasksByEmployee.get(id) || [];
+      const activeIds = new Set(projects.filter(p => p.status === 'Active').map(p => String(p.id)));
       if (selectedProjectId === 'all') {
-        const activeIds = new Set(projects.filter(p => p.status === 'Active').map(p => String(p.id)));
         return all.filter(t => activeIds.has(String(t.project_id)));
+      }
+      // If the selected project is completed or cancelled, do not include its task count
+      if (!activeIds.has(String(selectedProjectId))) {
+        return [];
       }
       return all.filter(t => String(t.project_id) === String(selectedProjectId));
     },
@@ -640,27 +629,45 @@ export default function PMDashboardTab({ user }) {
             ) : (
               filteredEmployees.map(emp => {
                 const breakdown = getEmployeeProjectBreakdown(emp.id);
+                const taskCount = getAssignedTasks(emp.id).length;
                 return (
                   <div key={emp.id} style={styles.breakdownCard}>
                     <div style={styles.breakdownHeader}>
-                      <span style={styles.breakdownName}>{emp.name}</span>
-                      <span style={{
-                        ...styles.attendanceBadge,
-                        backgroundColor: breakdown.overall === 100 
-                          ? 'rgba(16, 185, 129, 0.12)' 
-                          : breakdown.overall > 0 
-                            ? 'rgba(2, 132, 199, 0.12)' 
-                            : 'var(--color-bg-root)',
-                        color: breakdown.overall === 100 
-                          ? 'var(--color-success)' 
-                          : breakdown.overall > 0 
-                            ? 'var(--color-accent)' 
-                            : 'var(--color-text-muted)'
-                      }}>
-                        {breakdown.overall}% Complete
-                      </span>
+                      <div style={styles.breakdownLeft}>
+                        <span style={styles.breakdownName}>{emp.name}</span>
+                        <span style={styles.taskCountBadge} title={`${taskCount} task${taskCount !== 1 ? 's' : ''} assigned`}>
+                          {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                        </span>
+                      </div>
+                      <div style={styles.breakdownRight}>
+                        <span style={{
+                          ...styles.attendanceBadge,
+                          backgroundColor: breakdown.overall === 100
+                            ? 'rgba(16, 185, 129, 0.12)'
+                            : breakdown.overall > 0
+                              ? 'rgba(2, 132, 199, 0.12)'
+                              : 'var(--color-bg-root)',
+                          color: breakdown.overall === 100
+                            ? 'var(--color-success)'
+                            : breakdown.overall > 0
+                              ? 'var(--color-accent)'
+                              : 'var(--color-text-muted)'
+                        }}>
+                          {breakdown.overall}%
+                        </span>
+                        <button
+                          style={styles.viewIconBtn}
+                          title={`View projects assigned to ${emp.name}`}
+                          onClick={() => setViewEmployee({ emp, breakdown })}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                    
+
                     {breakdown.projects.length === 0 ? (
                       <div style={styles.breakdownEmpty}>No active projects or tasks.</div>
                     ) : (
@@ -669,11 +676,11 @@ export default function PMDashboardTab({ user }) {
                         {breakdown.projects.map(proj => (
                           <div key={proj.id} style={styles.breakdownProjLine}>
                             <span style={styles.breakdownProjName}>• {proj.name}:</span>
-                            <span style={styles.breakdownProjVal}>{proj.completion}% complete ({proj.remaining}% remaining)</span>
+                            <span style={styles.breakdownProjVal}>{proj.completion}% ({proj.taskCount} tasks)</span>
                           </div>
                         ))}
                         <div style={styles.breakdownOverallSummary}>
-                          <strong>Overall progress:</strong> {breakdown.overall}% complete ({100 - breakdown.overall}% remaining)
+                          <strong>Overall:</strong> {breakdown.overall}% complete ({100 - breakdown.overall}% remaining)
                         </div>
                       </div>
                     )}
@@ -684,6 +691,88 @@ export default function PMDashboardTab({ user }) {
           </div>
         </div>
       </div>
+
+      {/* Employee Projects Modal */}
+      {viewEmployee && createPortal(
+        <div style={styles.modalOverlay} onClick={() => setViewEmployee(null)}>
+          <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div style={styles.modalHeader}>
+              <div style={styles.modalEmpInfo}>
+                <img
+                  src={viewEmployee.emp.avatar}
+                  alt={viewEmployee.emp.name}
+                  style={styles.modalAvatar}
+                />
+                <div>
+                  <div style={styles.modalEmpName}>{viewEmployee.emp.name}</div>
+                  <div style={styles.modalEmpRole}>{viewEmployee.emp.position || viewEmployee.emp.role || 'No position set'}</div>
+                </div>
+              </div>
+              <button style={styles.modalCloseBtn} onClick={() => setViewEmployee(null)} title="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Summary strip */}
+            <div style={styles.modalSummaryStrip}>
+              <div style={styles.modalStat}>
+                <span style={styles.modalStatVal}>{getAssignedTasks(viewEmployee.emp.id).length}</span>
+                <span style={styles.modalStatLabel}>Total Tasks</span>
+              </div>
+              <div style={styles.modalStat}>
+                <span style={styles.modalStatVal}>{viewEmployee.breakdown.projects.length}</span>
+                <span style={styles.modalStatLabel}>Projects</span>
+              </div>
+              <div style={styles.modalStat}>
+                <span style={{ ...styles.modalStatVal, color: viewEmployee.breakdown.overall === 100 ? 'var(--color-success)' : 'var(--color-accent)' }}>
+                  {viewEmployee.breakdown.overall}%
+                </span>
+                <span style={styles.modalStatLabel}>Overall</span>
+              </div>
+            </div>
+
+            {/* Project List */}
+            <div style={styles.modalBody}>
+              <div style={styles.modalSectionTitle}>Assigned Projects</div>
+              {viewEmployee.breakdown.projects.length === 0 ? (
+                <div style={styles.modalEmpty}>No projects assigned yet.</div>
+              ) : (
+                <div style={styles.modalProjList}>
+                  {viewEmployee.breakdown.projects.map(proj => {
+                    const pct = proj.completion;
+                    const barColor = pct === 100
+                      ? 'var(--color-success)'
+                      : pct > 50
+                        ? 'var(--color-accent)'
+                        : pct > 0
+                          ? 'var(--color-warning)'
+                          : 'var(--color-border)';
+                    return (
+                      <div key={proj.id} style={styles.modalProjCard}>
+                        <div style={styles.modalProjTop}>
+                          <span style={styles.modalProjName}>{proj.name}</span>
+                          <span style={styles.modalProjTaskCount}>
+                            {proj.taskCount} {proj.taskCount === 1 ? 'task' : 'tasks'}
+                          </span>
+                        </div>
+                        <div style={styles.modalProgressTrack}>
+                          <div style={{ ...styles.modalProgressBar, width: `${pct}%`, backgroundColor: barColor }} />
+                        </div>
+                        <div style={styles.modalProjPct}>{pct}% complete</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1012,5 +1101,219 @@ const styles = {
     color: 'var(--color-text-secondary)',
     maxWidth: '400px',
     margin: '0 auto',
+  },
+
+  // breakdownCard left/right groups
+  breakdownLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    minWidth: 0,
+  },
+  breakdownRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+  },
+
+  // Task count badge on breakdownCard
+  taskCountBadge: {
+    fontSize: '10px',
+    fontWeight: '700',
+    padding: '2px 7px',
+    borderRadius: '999px',
+    background: 'rgba(99, 102, 241, 0.12)',
+    color: 'var(--color-primary)',
+    letterSpacing: '0.3px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+
+  // Eye view button
+  viewIconBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '26px',
+    height: '26px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-secondary)',
+    cursor: 'pointer',
+    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+    flexShrink: 0,
+    padding: 0,
+  },
+
+  // Modal overlay
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.55)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    padding: '24px',
+  },
+  modalBox: {
+    background: 'var(--color-bg-card)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '18px',
+    width: '100%',
+    maxWidth: '480px',
+    maxHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '20px 20px 16px',
+    borderBottom: '1px solid var(--color-border)',
+    gap: '12px',
+  },
+  modalEmpInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  modalAvatar: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '2px solid var(--color-border)',
+  },
+  modalEmpName: {
+    fontSize: '16px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  modalEmpRole: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted)',
+    marginTop: '2px',
+  },
+  modalCloseBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '32px',
+    height: '32px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    background: 'transparent',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    flexShrink: 0,
+    padding: 0,
+  },
+  modalSummaryStrip: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    borderBottom: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+  },
+  modalStat: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '14px 8px',
+    gap: '2px',
+  },
+  modalStatVal: {
+    fontSize: '22px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+  },
+  modalStatLabel: {
+    fontSize: '10px',
+    color: 'var(--color-text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.7px',
+  },
+  modalBody: {
+    overflowY: 'auto',
+    padding: '18px 20px 20px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  modalSectionTitle: {
+    fontSize: '11px',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: '0.7px',
+    color: 'var(--color-text-muted)',
+    marginBottom: '4px',
+  },
+  modalEmpty: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: '20px 0',
+  },
+  modalProjList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  modalProjCard: {
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card-hover)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  modalProjTop: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  modalProjName: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: 'var(--color-text-primary)',
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  modalProjTaskCount: {
+    fontSize: '11px',
+    fontWeight: '700',
+    color: 'var(--color-primary)',
+    background: 'rgba(99,102,241,0.1)',
+    padding: '2px 8px',
+    borderRadius: '999px',
+    flexShrink: 0,
+  },
+  modalProgressTrack: {
+    height: '6px',
+    borderRadius: '999px',
+    background: 'var(--color-border)',
+    overflow: 'hidden',
+  },
+  modalProgressBar: {
+    height: '100%',
+    borderRadius: '999px',
+    transition: 'width 0.4s ease',
+  },
+  modalProjPct: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    textAlign: 'right',
   },
 };

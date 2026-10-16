@@ -24,9 +24,24 @@ router.get('/summary', async (req, res) => {
 
     // ✅ For Super Admin: Get all data
     if (isSuperAdmin) {
-      const [postings, applications, interviews, hires, resourceRequests] = await Promise.all([
+      const [postings, applications, offersSent, recommendedApplications, interviews, hires, resourceRequests] = await Promise.all([
         supabase.from('job_postings').select('id', { count: 'exact', head: true }).eq('status', 'Active'),
-        supabase.from('job_applications').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
+        supabase
+          .from('job_applications')
+          .select('id, job_postings!inner(status)', { count: 'exact', head: true })
+          .eq('job_postings.status', 'Active')
+          .not('status', 'in', '("Hired","Rejected","Offer Declined","Archived","Withdrawn")'),
+        // Offers Sent = hired_employees rows that are Active (offer sent, awaiting response)
+        // When applicant accepts or declines, status changes away from Active → count drops
+        supabase
+          .from('hired_employees')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'Active'),
+        supabase
+          .from('job_applications')
+          .select('id, job_postings!inner(status)', { count: 'exact', head: true })
+          .eq('job_postings.status', 'Active')
+          .eq('status', 'Recommended'),
         supabase.from('interviews').select('id', { count: 'exact', head: true }).eq('status', 'Scheduled'),
         supabase.from('hired_employees').select('id', { count: 'exact', head: true }).eq('status', 'Onboarding'),
         supabase.from('hr_resource_requests').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
@@ -36,7 +51,9 @@ router.get('/summary', async (req, res) => {
         success: true,
         data: {
           activeJobPostings: postings.count || 0,
-          pendingApplications: applications.count || 0,
+          activeApplications: applications.count || 0,
+          offersSent: offersSent.count || 0,
+          recommendedForEmployment: recommendedApplications.count || 0,
           scheduledInterviews: interviews.count || 0,
           employeesOnboarding: hires.count || 0,
           pendingResourceRequests: resourceRequests.count || 0,
@@ -69,15 +86,12 @@ router.get('/summary', async (req, res) => {
     }
 
     const userIds = branchUsers?.map(u => u.id) || [];
+    const allUserIds = [...userIds, userId];
 
     console.log(`📋 Found ${userIds.length} Human Resources users in branch`);
 
-    // If no HR users in branch, return empty (or allow the current user)
-    // Since the current user IS Human Resources, we should include them
-    const allUserIds = [...userIds, userId];
-
     // ✅ Build queries with branch filtering
-    const [postings, applications, interviews, hires, resourceRequests] = await Promise.all([
+    const [postings, applications, offersSent, recommendedApplications, interviews, hires, resourceRequests] = await Promise.all([
       supabase
         .from('job_postings')
         .select('id', { count: 'exact', head: true })
@@ -85,23 +99,36 @@ router.get('/summary', async (req, res) => {
         .eq('status', 'Active'),
       supabase
         .from('job_applications')
-        .select('id', { count: 'exact', head: true })
-        .in('created_by', allUserIds)
-        .eq('status', 'Pending'),
+        .select('id, job_postings!inner(status)', { count: 'exact', head: true })
+        .eq('branch_id', userBranchId)
+        .eq('job_postings.status', 'Active')
+        .not('status', 'in', '("Hired","Rejected","Offer Declined","Archived","Withdrawn")'),
+      // Offers Sent = hired_employees rows that are Active (offer sent, awaiting response)
+      // Scoped to this branch via the job_applications join
+      supabase
+        .from('hired_employees')
+        .select('id, job_applications!inner(branch_id)', { count: 'exact', head: true })
+        .eq('job_applications.branch_id', userBranchId)
+        .eq('status', 'Active'),
+      supabase
+        .from('job_applications')
+        .select('id, job_postings!inner(status)', { count: 'exact', head: true })
+        .eq('branch_id', userBranchId)
+        .eq('job_postings.status', 'Active')
+        .eq('status', 'Recommended'),
       supabase
         .from('interviews')
-        .select('id', { count: 'exact', head: true })
-        .in('created_by', allUserIds)
+        .select('id, job_applications!inner(branch_id)', { count: 'exact', head: true })
+        .eq('job_applications.branch_id', userBranchId)
         .eq('status', 'Scheduled'),
       supabase
         .from('hired_employees')
-        .select('id', { count: 'exact', head: true })
-        .in('created_by', allUserIds)
+        .select('id, job_applications!inner(branch_id)', { count: 'exact', head: true })
+        .eq('job_applications.branch_id', userBranchId)
         .eq('status', 'Onboarding'),
       supabase
         .from('hr_resource_requests')
-        .select('id', { count: 'exact', head: true })
-        .in('requested_by', allUserIds)
+        .select('id, requester:profiles!hr_resource_requests_requested_by_fkey(branch_id)')
         .eq('status', 'Pending'),
     ]);
 
@@ -111,10 +138,13 @@ router.get('/summary', async (req, res) => {
       success: true,
       data: {
         activeJobPostings: postings.count || 0,
-        pendingApplications: applications.count || 0,
+        activeApplications: applications.count || 0,
+        offersSent: offersSent.count || 0,
+        recommendedForEmployment: recommendedApplications.count || 0,
         scheduledInterviews: interviews.count || 0,
         employeesOnboarding: hires.count || 0,
-        pendingResourceRequests: resourceRequests.count || 0,
+        pendingResourceRequests: (resourceRequests.data || [])
+          .filter(request => request.requester?.branch_id === userBranchId).length,
       },
     });
   } catch (error) {

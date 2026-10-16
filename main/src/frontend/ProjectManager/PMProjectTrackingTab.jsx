@@ -30,7 +30,16 @@ function mergeEmployeesFromTasks(employeesList, tasksList) {
   return Array.from(map.values());
 }
 
+function getLocalDateString() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function PMProjectTrackingTab({ user }) {
+  const todayStr = React.useMemo(() => getLocalDateString(), []);
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -40,6 +49,7 @@ export default function PMProjectTrackingTab({ user }) {
   const [projectSearchQuery, setProjectSearchQuery] = useState('');
   const [completedDropdownOpen, setCompletedDropdownOpen] = useState(false);
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
+  const [viewingEmployee, setViewingEmployee] = useState(null);
 
   const projectDropdownRef = useRef(null);
   const completedDropdownRef = useRef(null);
@@ -229,6 +239,23 @@ export default function PMProjectTrackingTab({ user }) {
     }
     if (!newTaskData.title || !newTaskData.employeeId) return;
 
+    // Validate date: cannot be before today or beyond project deadline
+    const taskProj = projects.find(p => String(p.id) === String(targetProjectId));
+    const projDeadline = taskProj?.endDate
+      ? String(taskProj.endDate).slice(0, 10)
+      : (taskProj?.end_date ? String(taskProj.end_date).slice(0, 10) : undefined);
+    const taskDueDate = newTaskData.dueDate || todayStr;
+
+    if (taskDueDate < todayStr) {
+      setFormError('Due date cannot be before today');
+      return;
+    }
+    const maxAllowed = projDeadline ? (projDeadline >= todayStr ? projDeadline : todayStr) : null;
+    if (maxAllowed && taskDueDate > maxAllowed) {
+      setFormError(`Due date cannot be beyond the project deadline (${maxAllowed})`);
+      return;
+    }
+
     setFormError('');
     setSubmittingTask(true);
     try {
@@ -238,7 +265,7 @@ export default function PMProjectTrackingTab({ user }) {
         title: newTaskData.title,
         description: newTaskData.description,
         priority: newTaskData.priority,
-        dueDate: newTaskData.dueDate || new Date().toISOString().split('T')[0],
+        dueDate: taskDueDate,
         createdBy: user?.id,
       });
 
@@ -369,6 +396,23 @@ export default function PMProjectTrackingTab({ user }) {
   const handleSaveTaskEdit = async (e) => {
     e.preventDefault();
     setFormError('');
+
+    // Validate date: cannot be before today or beyond project deadline
+    const taskProj = taskToEdit ? projects.find(p => String(p.id) === String(taskToEdit.projectId)) : null;
+    const projDeadline = taskProj?.endDate
+      ? String(taskProj.endDate).slice(0, 10)
+      : (taskProj?.end_date ? String(taskProj.end_date).slice(0, 10) : undefined);
+
+    if (editTaskData.dueDate && editTaskData.dueDate < todayStr) {
+      setFormError('Due date cannot be before today');
+      return;
+    }
+    const maxAllowed = projDeadline ? (projDeadline >= todayStr ? projDeadline : todayStr) : null;
+    if (maxAllowed && editTaskData.dueDate > maxAllowed) {
+      setFormError(`Due date cannot be beyond the project deadline (${maxAllowed})`);
+      return;
+    }
+
     try {
       if (isRedoMode) {
         // Reopen the SAME task (reset to 0% / Pending) instead of creating a
@@ -525,6 +569,20 @@ export default function PMProjectTrackingTab({ user }) {
   const modalAssignableEmployees = showEditTaskModal && taskToEdit ? getModalAssignableEmployees() : [];
   // For the Create Task modal: when in "All Projects" mode, use the project selected in the dropdown
   const createModalProject = (newTaskData.projectId ? projects.find(p => String(p.id) === String(newTaskData.projectId)) : null) || selectedProject;
+
+  const createProjectDeadline = createModalProject?.endDate
+    ? String(createModalProject.endDate).slice(0, 10)
+    : (createModalProject?.end_date ? String(createModalProject.end_date).slice(0, 10) : undefined);
+  const createModalMaxDate = createProjectDeadline
+    ? (createProjectDeadline >= todayStr ? createProjectDeadline : todayStr)
+    : undefined;
+
+  const editProjectDeadline = modalProject?.endDate
+    ? String(modalProject.endDate).slice(0, 10)
+    : (modalProject?.end_date ? String(modalProject.end_date).slice(0, 10) : undefined);
+  const editModalMaxDate = editProjectDeadline
+    ? (editProjectDeadline >= todayStr ? editProjectDeadline : todayStr)
+    : undefined;
 
   const filteredActiveProjects = activeProjects.filter(p => 
     p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
@@ -807,17 +865,66 @@ export default function PMProjectTrackingTab({ user }) {
           
           <div style={styles.teamList}>
            {currentProjectEmployees.map(emp => {
-            const isAssigned = !!(emp.assignments && emp.assignments.length > 0) ||
-              currentProjectTasks.some(t => t.employeeId === emp.id);
+            // Filter only active projects (exclude Completed, Cancelled, Archived, Deleted)
+            const empProjects = activeProjects.filter(p => {
+              if (p.allocatedEmployees && p.allocatedEmployees.some(ae => String(ae.profileId) === String(emp.id))) return true;
+              if (tasks.some(t => String(t.projectId) === String(p.id) && String(t.employeeId) === String(emp.id))) return true;
+              if (emp.projectIds && emp.projectIds.map(String).includes(String(p.id))) return true;
+              if (emp.projectId && String(emp.projectId) === String(p.id)) return true;
+              if (emp.assignments && emp.assignments.some(a => String(a.projectId || a.project_id) === String(p.id))) return true;
+              return false;
+            });
+            const isAssigned = empProjects.length > 0 ||
+              !!(emp.assignments && emp.assignments.length > 0) ||
+              currentProjectTasks.some(t => t.employeeId === emp.id) ||
+              (emp.projectIds && emp.projectIds.length > 0);
+
+            // Only count tasks that belong to active projects on the Project Tracking board (Pending to Completed)
+            // Exclude tasks if the project is completed or cancelled
+            const empTasks = currentProjectTasks.filter(t => {
+              if (String(t.employeeId) !== String(emp.id)) return false;
+              if (t.status === 'Cancelled') return false;
+              const proj = projects.find(p => String(p.id) === String(t.projectId));
+              if (proj && ['Completed', 'Archived', 'Cancelled', 'Cancelled-Hidden', 'Deleted'].includes(proj.status)) {
+                return false;
+              }
+              return true;
+            });
+            const taskCount = empTasks.length;
+
             return (
               <div key={emp.id} style={styles.teamItem}>
-                <img src={emp.avatar} alt={emp.name} style={styles.teamAvatar} />
-                <div style={styles.teamMeta}>
-                  <div style={styles.teamName}>{emp.name}</div>
-                  <div style={styles.teamRole}>
-                    {isAssigned ? 'Assigned' : 'Unassigned'}
+                <div style={styles.teamItemLeft}>
+                  <img src={emp.avatar} alt={emp.name} style={styles.teamAvatar} />
+                  <div style={styles.teamMeta}>
+                    <div style={styles.teamName} title={emp.name}>{emp.name}</div>
+                    <div style={styles.teamSubRow}>
+                      <span style={{
+                        ...styles.teamRole,
+                        color: isAssigned ? '#10b981' : 'var(--color-text-secondary)',
+                        fontWeight: isAssigned ? '600' : '400',
+                      }}>
+                        {isAssigned ? 'Assigned' : 'Unassigned'}
+                      </span>
+                      <span style={styles.teamDot}>•</span>
+                      <span style={styles.teamTaskCount}>
+                        {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                      </span>
+                    </div>
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  style={styles.teamViewBtn}
+                  onClick={() => setViewingEmployee({ emp, projects: empProjects, tasks: empTasks })}
+                  title={`View projects assigned to ${emp.name}`}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
               </div>
             );
           })}
@@ -903,6 +1010,123 @@ export default function PMProjectTrackingTab({ user }) {
           })}
         </div>
       </div>
+
+      {/* Employee Assigned Projects Modal */}
+      {viewingEmployee && (
+        <div style={styles.modalOverlay} onClick={() => setViewingEmployee(null)}>
+          <div className="glass-card" style={styles.employeeProjectsModalCard} onClick={e => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div style={styles.employeeModalHeader}>
+                <img
+                  src={viewingEmployee.emp.avatar}
+                  alt={viewingEmployee.emp.name}
+                  style={styles.employeeModalAvatar}
+                />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: 'var(--color-text-primary)' }}>
+                    {viewingEmployee.emp.name}
+                  </h3>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                    {viewingEmployee.emp.role || 'Team Member'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingEmployee(null)}
+                style={styles.closeModalBtn}
+                title="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Quick stats strip */}
+            <div style={styles.empModalStatsStrip}>
+              <div style={styles.empModalStatBox}>
+                <span style={styles.empModalStatValue}>{viewingEmployee.projects.length}</span>
+                <span style={styles.empModalStatLabel}>Assigned Projects</span>
+              </div>
+              <div style={styles.empModalStatBox}>
+                <span style={styles.empModalStatValue}>{viewingEmployee.tasks.length}</span>
+                <span style={styles.empModalStatLabel}>Active Tasks</span>
+              </div>
+              <div style={styles.empModalStatBox}>
+                <span style={{
+                  ...styles.empModalStatValue,
+                  color: viewingEmployee.projects.length > 0 ? 'var(--color-success, #10b981)' : 'var(--color-text-muted)'
+                }}>
+                  {viewingEmployee.projects.length > 0 ? 'Assigned' : 'Unassigned'}
+                </span>
+                <span style={styles.empModalStatLabel}>Status</span>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '14px' }}>
+              <div style={styles.empModalSectionHeading}>
+                Assigned Projects ({viewingEmployee.projects.length})
+              </div>
+
+              {viewingEmployee.projects.length === 0 ? (
+                <div style={styles.empModalEmptyProjects}>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.4, marginBottom: '8px' }}>
+                    <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                    <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                  </svg>
+                  <div>This employee is not currently assigned to any projects.</div>
+                </div>
+              ) : (
+                <div style={styles.empModalProjectsList}>
+                  {viewingEmployee.projects.map(proj => {
+                    const projTasks = tasks.filter(t => String(t.projectId) === String(proj.id) && String(t.employeeId) === String(viewingEmployee.emp.id) && t.status !== 'Cancelled');
+                    const allocation = (proj.allocatedEmployees || []).find(ae => String(ae.profileId) === String(viewingEmployee.emp.id));
+                    const assignedRole = allocation?.role || viewingEmployee.emp.role || 'Team Member';
+
+                    return (
+                      <div key={proj.id} style={styles.empModalProjectItem}>
+                        <div style={styles.empModalProjectHeader}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={styles.empModalProjectName}>
+                              {proj.name || proj.project_name || 'Untitled Project'}
+                            </div>
+                            <div style={styles.empModalProjectRole}>
+                              Role: <strong style={{ color: 'var(--color-text-primary)' }}>{assignedRole}</strong>
+                            </div>
+                          </div>
+                          <span style={{
+                            ...styles.empModalStatusBadge,
+                            backgroundColor: proj.status === 'Active'
+                              ? 'rgba(16, 185, 129, 0.15)'
+                              : proj.status === 'Completed'
+                                ? 'rgba(59, 130, 246, 0.15)'
+                                : 'rgba(148, 163, 184, 0.15)',
+                            color: proj.status === 'Active'
+                              ? 'var(--color-success, #10b981)'
+                              : proj.status === 'Completed'
+                                ? 'var(--color-primary, #3b82f6)'
+                                : 'var(--color-text-muted)',
+                          }}>
+                            {proj.status || 'Active'}
+                          </span>
+                        </div>
+
+                        <div style={styles.empModalProjectFooter}>
+                          <div style={styles.empModalProjectDates}>
+                            {proj.startDate ? `${proj.startDate} → ${proj.endDate || 'Ongoing'}` : 'Timeline not specified'}
+                          </div>
+                          <div style={styles.empModalTaskPill}>
+                            {projTasks.length} {projTasks.length === 1 ? 'task' : 'tasks'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Assign Task Modal */}
       {showCreateTaskModal && (
@@ -1022,9 +1246,15 @@ export default function PMProjectTrackingTab({ user }) {
                     value={newTaskData.dueDate} 
                     onChange={(e) => setNewTaskData({ ...newTaskData, dueDate: e.target.value })} 
                     style={styles.modalInput} 
-                    max={createModalProject?.endDate ? String(createModalProject.endDate).slice(0, 10) : undefined}
+                    min={todayStr}
+                    max={createModalMaxDate}
                     required
                   />
+                  {createModalMaxDate && (
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                      Allowed: Today ({todayStr}) to Project Deadline ({createModalMaxDate})
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1152,9 +1382,15 @@ export default function PMProjectTrackingTab({ user }) {
                   value={editTaskData.dueDate}
                   onChange={(e) => setEditTaskData(prev => ({ ...prev, dueDate: e.target.value }))}
                   style={styles.modalInput}
-                  max={selectedProject?.endDate ? String(selectedProject.endDate).slice(0, 10) : undefined}
+                  min={todayStr}
+                  max={editModalMaxDate}
                   required
                 />
+                {editModalMaxDate && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                    Allowed: Today ({todayStr}) to Project Deadline ({editModalMaxDate})
+                  </div>
+                )}
               </div>
               <div style={styles.suggestionPanel}>
                 <div style={styles.suggestionHeader}>Suggested Temporary Replacements</div>
@@ -1400,23 +1636,69 @@ const styles = {
   teamItem: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: '10px',
     paddingBottom: '12px',
     borderBottom: '1px solid var(--color-border)',
+  },
+  teamItemLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    minWidth: 0,
+    flex: 1,
   },
   teamAvatar: {
     width: '40px',
     height: '40px',
     borderRadius: '50%',
     objectFit: 'cover',
+    flexShrink: 0,
   },
   teamMeta: {
     display: 'flex',
     flexDirection: 'column',
+    minWidth: 0,
+    flex: 1,
   },
   teamName: {
     fontSize: '13px',
     fontWeight: '700',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    color: 'var(--color-text-primary)',
+  },
+  teamSubRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginTop: '2px',
+    flexWrap: 'wrap',
+  },
+  teamDot: {
+    fontSize: '10px',
+    color: 'var(--color-text-muted)',
+  },
+  teamTaskCount: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: 'var(--color-text-muted)',
+  },
+  teamViewBtn: {
+    width: '28px',
+    height: '28px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-root)',
+    color: 'var(--color-text-secondary)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0,
+    transition: 'all 0.15s ease',
+    padding: 0,
   },
   teamRole: {
     fontSize: '11px',
@@ -1549,6 +1831,14 @@ const styles = {
     fontSize: '11px',
     color: 'var(--color-text-secondary)',
     lineHeight: '1.4',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
+    margin: '4px 0 6px',
   },
   taskFooter: {
     display: 'flex',
@@ -1795,5 +2085,136 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontWeight: '700',
-  }
+  },
+
+  // Employee Assigned Projects Modal Styles
+  employeeProjectsModalCard: {
+    width: '100%',
+    maxWidth: '520px',
+    maxHeight: '85vh',
+    overflowY: 'auto',
+    padding: '24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px',
+    borderRadius: '16px',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
+  },
+  employeeModalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  employeeModalAvatar: {
+    width: '46px',
+    height: '46px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '2px solid var(--color-border)',
+  },
+  empModalStatsStrip: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '10px',
+    background: 'var(--color-bg-root)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '10px',
+    padding: '12px 14px',
+  },
+  empModalStatBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    textAlign: 'center',
+    gap: '2px',
+  },
+  empModalStatValue: {
+    fontSize: '20px',
+    fontWeight: '800',
+    color: 'var(--color-text-primary)',
+  },
+  empModalStatLabel: {
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.6px',
+    color: 'var(--color-text-muted)',
+    fontWeight: '600',
+  },
+  empModalSectionHeading: {
+    fontSize: '11px',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: '0.7px',
+    color: 'var(--color-text-muted)',
+    marginBottom: '8px',
+  },
+  empModalEmptyProjects: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '28px 16px',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    borderRadius: '10px',
+    border: '1px dashed var(--color-border)',
+    background: 'var(--color-bg-root)',
+  },
+  empModalProjectsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  empModalProjectItem: {
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card-hover)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  empModalProjectHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '10px',
+  },
+  empModalProjectName: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+  },
+  empModalProjectRole: {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+    marginTop: '2px',
+  },
+  empModalStatusBadge: {
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '3px 9px',
+    borderRadius: '999px',
+    flexShrink: 0,
+  },
+  empModalProjectFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: '6px',
+    borderTop: '1px solid var(--color-border)',
+    fontSize: '11px',
+  },
+  empModalProjectDates: {
+    color: 'var(--color-text-muted)',
+  },
+  empModalTaskPill: {
+    fontWeight: '700',
+    color: 'var(--color-primary)',
+    background: 'rgba(99,102,241,0.1)',
+    padding: '2px 8px',
+    borderRadius: '999px',
+  },
 };
