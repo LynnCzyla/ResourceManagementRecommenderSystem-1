@@ -358,6 +358,11 @@ router.post('/', async (req, res) => {
       logDescription: `PM ${userId} submitted resource request(s) for project ${projectId}`,
     });
 
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
+
     res.status(201).json({
       success: true,
       message: 'Resource request(s) submitted successfully',
@@ -525,6 +530,12 @@ router.delete('/:id', async (req, res) => {
       systemCategory: 'Resource Management',
       logDescription: `Cancelled resource request ${id}`,
     });
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
+
     res.status(200).json({ success: true, message: 'Resource request cancelled successfully', data: updatedReq });
   } catch (error) {
     console.error('Error cancelling resource request:', error);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchDashboard } from './Rmapi';
 import RMAvatar from './RMAvatar';
+import SkillGapChart from './SkillGapChart';
 import { API_BASE_URL } from '../../config/api';
 
 const BAR_COLORS = [
@@ -33,6 +34,7 @@ export default function RMDashboardTab() {
   const [workloadDistributionPct, setWorkloadDistributionPct] = useState({ available: 0, limited: 0, fullyLoaded: 0 });
   const [monthlyTrend, setMonthlyTrend] = useState([]);
   const [demandVsAvailableCapacity, setDemandVsAvailableCapacity] = useState([]);
+  const [skillGap, setSkillGap] = useState({ summary: null, skills: [] });
   const [hiringNeed, setHiringNeed] = useState(null);
 
   const [loading, setLoading] = useState(true);
@@ -68,6 +70,7 @@ export default function RMDashboardTab() {
       setWorkloadDistributionPct(data.workloadDistributionPct || { available: 0, limited: 0, fullyLoaded: 0 });
       setMonthlyTrend(data.monthlyTrend || []);
       setDemandVsAvailableCapacity(data.demandVsAvailableCapacity || []);
+      setSkillGap(data.skillGap || { summary: null, skills: [] });
       setHiringNeed(data.hiringNeed || null);
     } catch (err) {
       setError(err.message);
@@ -838,6 +841,14 @@ export default function RMDashboardTab() {
 
               </div>
             )}
+          </div>
+
+          {/* Skill Gap by PM Requests */}
+          <div style={styles.analyticsSection}>
+            <h3 style={styles.analyticsTitle} title="Skill shortfall across open project resource requests compared to available branch workforce">
+              Skill Gap by PM Requests
+            </h3>
+            <SkillGapChart skills={skillGap.skills} summary={skillGap.summary} />
           </div>
 
           {/* 3. Resource Utilization by Department Card */}
