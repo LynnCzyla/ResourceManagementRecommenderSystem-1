@@ -4,6 +4,7 @@ const router = express.Router();
 const supabase = require('../../supabase');
 const { verifyToken } = require('../Middleware/auth');
 const workloadService = require('../../services/workloadService');
+const { buildComparisonKeys } = require('../../utils/skillNormalizer');
 
 // ✅ Apply auth middleware
 router.use(verifyToken);
@@ -314,7 +315,7 @@ router.get('/', async (req, res) => {
     const deptStats = {};
     for (const row of employeeRows) {
       if ((row.rawRole || '').toLowerCase().includes('project manager') ||
-          (row.rawRole || '').toLowerCase().includes('project_manager')) continue; // exclude PMs
+        (row.rawRole || '').toLowerCase().includes('project_manager')) continue; // exclude PMs
       const dept = row.department;
       if (!deptStats[dept]) deptStats[dept] = { total: 0, count: 0 };
       deptStats[dept].total += row.utilizationRate;
@@ -335,12 +336,12 @@ router.get('/', async (req, res) => {
     );
     const totalForPct = employeeOnlyRows.length || 1;
     const empAvailable = employeeOnlyRows.filter(r => r.workloadStatus === 'Available').length;
-    const empLimited   = employeeOnlyRows.filter(r => r.workloadStatus === 'Limited Availability').length;
-    const empFull      = employeeOnlyRows.filter(r => r.workloadStatus === 'Fully Utilized').length;
+    const empLimited = employeeOnlyRows.filter(r => r.workloadStatus === 'Limited Availability').length;
+    const empFull = employeeOnlyRows.filter(r => r.workloadStatus === 'Fully Utilized').length;
     const workloadDistributionPct = {
-      available:  Math.round((empAvailable / totalForPct) * 100),
-      limited:    Math.round((empLimited   / totalForPct) * 100),
-      fullyLoaded:Math.round((empFull      / totalForPct) * 100),
+      available: Math.round((empAvailable / totalForPct) * 100),
+      limited: Math.round((empLimited / totalForPct) * 100),
+      fullyLoaded: Math.round((empFull / totalForPct) * 100),
     };
 
     // ✅ Build the last 6 calendar months
@@ -526,6 +527,302 @@ router.get('/', async (req, res) => {
       demandVsAvailableCapacity = [];
     }
 
+    // ✅ Skill Gap by PM Requests
+    let skillGap = {
+      summary: {
+        critical: 0,
+        high: 0,
+        medium: 0,
+        covered: 0,
+        requestsAffected: 0,
+      },
+      skills: [],
+    };
+
+    try {
+      // 1. Fetch open resource requirements (Pending and Partially Allocated)
+      let openReqsQuery = supabase
+        .from('project_resource_requirements')
+        .select('id, project_id, status, quantity_needed, role_title')
+        .in('status', ['Pending', 'Partially Allocated']);
+
+      if (!isSuperAdmin && userBranchId) {
+        if (branchProjectIds.length > 0) {
+          openReqsQuery = openReqsQuery.in('project_id', branchProjectIds);
+        } else {
+          openReqsQuery = openReqsQuery.eq('project_id', 0);
+        }
+      }
+
+      const { data: openReqsData, error: openReqsErr } = await openReqsQuery;
+      if (openReqsErr) throw openReqsErr;
+
+      const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
+      const filteredOpenReqs = (openReqsData || []).filter((r) => {
+        const title = (r.role_title || '').trim().toLowerCase();
+        return !excludedKeywords.some((kw) => title.includes(kw));
+      });
+
+      const openReqMap = new Map();
+      const openReqIds = [];
+      for (const r of filteredOpenReqs) {
+        openReqMap.set(r.id, r);
+        openReqIds.push(r.id);
+      }
+
+      if (openReqIds.length > 0) {
+        // Available employees in this branch: roles Employee & PM, excluding Fully Utilized
+        const availableBranchEmployees = employeeRows.filter(
+          (e) => e.workloadStatus !== 'Fully Utilized'
+        );
+        const availableEmpIds = availableBranchEmployees.map((e) => e.id);
+
+        const [reqSkillsResult, empSkillsResult, aliasesResult] = await Promise.all([
+          supabase
+            .from('requirement_skills')
+            .select('id, requirement_id, skills, skill_type')
+            .in('requirement_id', openReqIds),
+          availableEmpIds.length > 0
+            ? supabase
+              .from('employee_skills')
+              .select('profile_id, skill_id, skills:skill_id ( id, skill_name )')
+              .in('profile_id', availableEmpIds)
+            : Promise.resolve({ data: [], error: null }),
+          supabase
+            .from('skill_aliases')
+            .select(`
+              id,
+              master:master_skill_id ( id, skill_name ),
+              alias:alias_skill_id ( id, skill_name )
+            `),
+        ]);
+
+        if (reqSkillsResult.error) throw reqSkillsResult.error;
+        if (empSkillsResult.error) throw empSkillsResult.error;
+
+        // Build alias mapping dictionary (alias comparison key -> canonical master name)
+        const aliasMap = new Map();
+        for (const item of (aliasesResult.data || [])) {
+          const masterName = item.master?.skill_name;
+          const aliasName = item.alias?.skill_name;
+          if (masterName && aliasName) {
+            for (const key of buildComparisonKeys(aliasName)) {
+              if (!aliasMap.has(key)) {
+                aliasMap.set(key, masterName);
+              }
+            }
+          }
+        }
+
+        // Helper to canonicalize a skill name
+        const getCanonicalSkillName = (rawSkill) => {
+          if (!rawSkill) return '';
+          const trimmed = String(rawSkill).trim();
+          for (const key of buildComparisonKeys(trimmed)) {
+            if (aliasMap.has(key)) {
+              return aliasMap.get(key);
+            }
+          }
+          return trimmed;
+        };
+
+        // Group required skills by canonical skill
+        const demandMap = new Map();
+        const affectedReqIds = new Set();
+
+        for (const row of (reqSkillsResult.data || [])) {
+          const rawSkillName = (row.skills || '').trim();
+          if (!rawSkillName) continue;
+
+          const canonicalName = getCanonicalSkillName(rawSkillName);
+          const canonicalKey = canonicalName.toLowerCase();
+          const req = openReqMap.get(row.requirement_id);
+          const qty = req ? (Number(req.quantity_needed) || 1) : 1;
+          const rawType = (row.skill_type || 'primary').trim().toLowerCase();
+          const isPrimary = rawType === 'primary';
+
+          affectedReqIds.add(row.requirement_id);
+
+          if (!demandMap.has(canonicalKey)) {
+            demandMap.set(canonicalKey, {
+              skill: canonicalName,
+              canonicalKeys: new Set(buildComparisonKeys(canonicalName)),
+              type: isPrimary ? 'Primary' : 'Secondary',
+              demand: qty,
+              reqIds: new Set([row.requirement_id]),
+            });
+          } else {
+            const entry = demandMap.get(canonicalKey);
+            if (!entry.reqIds.has(row.requirement_id)) {
+              entry.demand += qty;
+              entry.reqIds.add(row.requirement_id);
+            }
+            if (isPrimary) {
+              entry.type = 'Primary';
+            }
+          }
+        }
+
+        // Employee skills map: profileId -> Set of comparison keys
+        const empSkillMap = new Map();
+        for (const row of (empSkillsResult.data || [])) {
+          const profileId = row.profile_id;
+          const skillName = row.skills?.skill_name;
+          if (!profileId || !skillName) continue;
+
+          if (!empSkillMap.has(profileId)) {
+            empSkillMap.set(profileId, new Set());
+          }
+          const empKeys = empSkillMap.get(profileId);
+          for (const key of buildComparisonKeys(skillName)) {
+            empKeys.add(key);
+          }
+          const canonicalName = getCanonicalSkillName(skillName);
+          if (canonicalName !== skillName) {
+            for (const key of buildComparisonKeys(canonicalName)) {
+              empKeys.add(key);
+            }
+          }
+        }
+
+        // Compute supply, gap, and severity per demanded skill
+        const calculatedSkills = [];
+        let criticalCount = 0;
+        let highCount = 0;
+        let mediumCount = 0;
+        let coveredCount = 0;
+
+        for (const [canonicalKey, d] of demandMap.entries()) {
+          let supplyCount = 0;
+          for (const [empId, empKeys] of empSkillMap.entries()) {
+            let hasSkill = false;
+            for (const reqKey of d.canonicalKeys) {
+              if (empKeys.has(reqKey)) {
+                hasSkill = true;
+                break;
+              }
+            }
+            if (hasSkill) {
+              supplyCount++;
+            }
+          }
+
+          const gap = Math.max(0, d.demand - supplyCount);
+          let severity = 'Covered';
+          if (d.type === 'Primary') {
+            if (supplyCount === 0) {
+              severity = 'Critical';
+            } else if (supplyCount < d.demand) {
+              severity = 'High';
+            } else {
+              severity = 'Covered';
+            }
+          } else {
+            if (gap > 0) {
+              severity = 'Medium';
+            } else {
+              severity = 'Covered';
+            }
+          }
+
+          if (severity === 'Critical') criticalCount++;
+          else if (severity === 'High') highCount++;
+          else if (severity === 'Medium') mediumCount++;
+          else coveredCount++;
+
+          const requestDetails = Array.from(d.reqIds).map((reqId) => {
+            const req = openReqMap.get(reqId);
+            const proj = activeProjectMap.get(req?.project_id);
+            return {
+              id: reqId,
+              projectName: proj?.project_name || `Project #${req?.project_id}`,
+              roleTitle: req?.role_title || 'Unassigned Role',
+              quantityNeeded: req?.quantity_needed || 1,
+              type: d.type,
+              status: req?.status || 'Pending',
+            };
+          });
+
+          const matchedEmployees = [];
+          for (const [empId, empKeys] of empSkillMap.entries()) {
+            let hasSkill = false;
+            for (const reqKey of d.canonicalKeys) {
+              if (empKeys.has(reqKey)) {
+                hasSkill = true;
+                break;
+              }
+            }
+            if (hasSkill) {
+              const emp = availableBranchEmployees.find((e) => e.id === empId);
+              if (emp) {
+                matchedEmployees.push({
+                  id: emp.id,
+                  name: emp.name,
+                  avatar: emp.avatar,
+                  role: emp.role,
+                  department: emp.department,
+                  workloadStatus: emp.workloadStatus,
+                });
+              }
+            }
+          }
+
+          calculatedSkills.push({
+            skill: d.skill,
+            type: d.type,
+            demand: d.demand,
+            supply: supplyCount,
+            gap,
+            severity,
+            requests: d.reqIds.size,
+            requestDetails,
+            matchedEmployees,
+          });
+        }
+
+        // Sort by severity: Critical > High > Medium > Covered, then gap descending, then demand descending
+        const severityRank = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Covered': 3 };
+        calculatedSkills.sort((a, b) => {
+          const sDiff = severityRank[a.severity] - severityRank[b.severity];
+          if (sDiff !== 0) return sDiff;
+          return b.gap - a.gap || b.demand - a.demand;
+        });
+
+        const totalDemandPositions = calculatedSkills.reduce((acc, s) => acc + s.demand, 0);
+        const totalMetPositions = calculatedSkills.reduce((acc, s) => acc + Math.min(s.demand, s.supply), 0);
+        const coveragePct = totalDemandPositions > 0
+          ? Math.round((totalMetPositions / totalDemandPositions) * 100)
+          : (calculatedSkills.length > 0 ? Math.round((coveredCount / calculatedSkills.length) * 100) : 100);
+
+        skillGap = {
+          summary: {
+            critical: criticalCount,
+            high: highCount,
+            medium: mediumCount,
+            covered: coveredCount,
+            totalSkills: calculatedSkills.length,
+            requestsAffected: affectedReqIds.size,
+            totalDemandPositions,
+            totalMetPositions,
+            coveragePct,
+          },
+          skills: calculatedSkills,
+        };
+      }
+    } catch (skillGapErr) {
+      console.warn('⚠️ Skill gap calculation error:', skillGapErr.message);
+      skillGap = {
+        summary: {
+          critical: 0,
+          high: 0,
+          medium: 0,
+          covered: 0,
+          requestsAffected: 0,
+        },
+        skills: [],
+      };
+    }
+
     // ✅ Hiring Outlook (employees only, excluding PMs)
     const overallUtilizationRate = employeeOnlyRows.length
       ? Math.round(employeeOnlyRows.reduce((sum, e) => sum + e.utilizationRate, 0) / employeeOnlyRows.length)
@@ -587,6 +884,7 @@ router.get('/', async (req, res) => {
       workloadDistributionPct,
       monthlyTrend,
       demandVsAvailableCapacity,
+      skillGap,
       hiringNeed,
     };
 
