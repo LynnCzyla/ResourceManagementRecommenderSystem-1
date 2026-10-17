@@ -27,12 +27,12 @@ function parsePostingQuantityAndDescription(row) {
   }
   const cleanDescription = desc.replace(/\[VACANCY:\s*\d+\]/gi, '').trim();
 
-  // Count only applications whose offers were accepted. An application becomes
-  // Hired when HR sends an offer, but it should consume a vacancy only after
-  // the applicant accepts it.
-  const acceptedCount = (row.job_applications || []).filter(a =>
-    a.status === 'Hired' && String(a.notes || '').includes('OFFER_ACCEPTED')
-  ).length;
+  // Count applications where an offer has been sent (OFFER_SENT) or accepted
+  // (OFFER_ACCEPTED). A vacancy slot is consumed as soon as HR sends the offer.
+  const acceptedCount = (row.job_applications || []).filter(a => {
+    const notes = String(a.notes || '');
+    return a.status === 'Hired' && (notes.includes('OFFER_SENT') || notes.includes('OFFER_ACCEPTED'));
+  }).length;
 
   return {
     quantity,
@@ -207,7 +207,7 @@ router.get('/', async (req, res) => {
           quantity,
           accepted_count: acceptedCount,
           hired_count: acceptedCount,
-          applications: row.job_applications?.length || 0,
+          applications: (row.job_applications || []).filter(a => !['Rejected', 'Hired', 'Withdrawn'].includes(a.status)).length,
           source_request_title: rmReq?.request_title || null,
           source_position_title: rmReq?.position_title || null,
           source_requester_name: requesterName,
@@ -279,7 +279,7 @@ router.get('/', async (req, res) => {
         quantity,
         accepted_count: acceptedCount,
         hired_count: acceptedCount,
-        applications: row.job_applications?.length || 0,
+        applications: (row.job_applications || []).filter(a => !['Rejected', 'Hired', 'Withdrawn'].includes(a.status)).length,
         source_request_title: rmReq?.request_title || null,
         source_position_title: rmReq?.position_title || null,
         source_requester_name: requesterName,

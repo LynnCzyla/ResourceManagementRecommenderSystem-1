@@ -127,7 +127,14 @@ export default function PMWeeklyReportTab({ user }) {
 
     const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
     const safeCurrentPage = Math.min(currentPage, totalPages);
-    const paginatedRows = filteredRows.slice(
+    // Sort by date descending so the latest report appears at the top
+    const sortedRows = [...filteredRows].sort((a, b) => {
+        if (!a.rawDate && !b.rawDate) return 0;
+        if (!a.rawDate) return 1;
+        if (!b.rawDate) return -1;
+        return b.rawDate.localeCompare(a.rawDate);
+    });
+    const paginatedRows = sortedRows.slice(
         (safeCurrentPage - 1) * rowsPerPage,
         safeCurrentPage * rowsPerPage
     );
