@@ -16,10 +16,10 @@ const PRIORITY_WEIGHTS = {
   'High': 3
 };
 
-// ✅ Simple in-memory cache with branch-aware keys
+// ✅ In-memory cache with branch-aware keys (3s debounce to prevent stampedes while guaranteeing near-instant sync)
 const cache = {
   data: {},
-  ttl: 60000 // Cache for 1 minute
+  ttl: 3000 // 3 seconds cache
 };
 
 const toTitleCase = (str) =>
@@ -31,17 +31,10 @@ const toTitleCase = (str) =>
 const getCacheKey = (branchId) => `branch_${branchId || 'all'}`;
 
 const clearDashboardCache = (branchId = null) => {
-  if (branchId) {
-    const key = getCacheKey(branchId);
-    delete cache.data[key];
-    console.log(`🗑️ Dashboard cache cleared for branch: ${branchId}`);
-  } else {
-    cache.data = {};
-    console.log('🗑️ All dashboard cache cleared');
-  }
+  cache.data = {};
 };
 
-const CLOSED_TASK_STATUSES = ['Completed', 'Completed-Hidden', 'Archived'];
+const CLOSED_TASK_STATUSES = ['Completed', 'Completed-Hidden', 'Archived', 'Cancelled', 'Canceled', 'Deleted'];
 
 /**
  * GET /api/rm/dashboard
@@ -267,15 +260,20 @@ router.get('/', async (req, res) => {
       // For Project Managers: always Available (they manage, not execute tasks)
       // For Employees: load is based on Eq. (2) active task workload score W
       const isPM = roleLower === 'project manager' || roleLower === 'project_manager';
-      let workloadStatus = emp.availability_status || 'Available';
+      let workloadStatus = 'Available';
       let utilizationRate = 0;
 
       if (isPM) {
         // PMs are always Available in analytics — they don't consume capacity slots
         workloadStatus = 'Available';
         utilizationRate = 0;
+      } else if (workloadScore === 0) {
+        workloadStatus = 'Available';
+        utilizationRate = 0;
       } else {
-        utilizationRate = workloadService.getUtilizationRate(emp.id, workloadStatus, workloadScore);
+        const A = workloadService.computeAvailabilityFactor(workloadScore);
+        workloadStatus = workloadService.toStatusLabel(A);
+        utilizationRate = workloadService.toUtilizationRate(A, workloadStatus, workloadScore);
       }
 
       if (workloadStatus === 'Available') {
@@ -406,7 +404,7 @@ router.get('/', async (req, res) => {
     try {
       let reqQuery = supabase
         .from('project_resource_requirements')
-        .select('id, created_at, status, quantity_needed, role_title, project_id')
+        .select('id, created_at, status, quantity_needed, role_title, project_id, projects:project_id(id, status)')
         .gte('created_at', sixMonthsAgo.toISOString());
 
       if (!isSuperAdmin && userBranchId) {
@@ -423,7 +421,11 @@ router.get('/', async (req, res) => {
       const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
       const filteredReqs = (allReqs || []).filter((r) => {
         const title = (r.role_title || '').trim().toLowerCase();
-        return !excludedKeywords.some((kw) => title.includes(kw));
+        if (excludedKeywords.some((kw) => title.includes(kw))) return false;
+        const projStatus = r.projects?.status;
+        if (['Completed', 'Archived', 'Cancelled', 'Canceled'].includes(projStatus)) return false;
+        if (['Cancelled', 'Canceled', 'Completed', 'Done'].includes(r.status)) return false;
+        return true;
       });
 
       // ✅ Kunin ang history entries at active assignments ng mga requirements na ito (kung meron)
@@ -540,10 +542,10 @@ router.get('/', async (req, res) => {
     };
 
     try {
-      // 1. Fetch open resource requirements (Pending and Partially Allocated)
+      // 1. Fetch open resource requirements (Pending and Partially Allocated) — only for Active projects
       let openReqsQuery = supabase
         .from('project_resource_requirements')
-        .select('id, project_id, status, quantity_needed, role_title')
+        .select('id, project_id, status, quantity_needed, role_title, projects:project_id(id, status)')
         .in('status', ['Pending', 'Partially Allocated']);
 
       if (!isSuperAdmin && userBranchId) {
@@ -557,10 +559,15 @@ router.get('/', async (req, res) => {
       const { data: openReqsData, error: openReqsErr } = await openReqsQuery;
       if (openReqsErr) throw openReqsErr;
 
+      const CLOSED_PROJ_STATUSES_SG = ['Completed', 'Archived', 'Cancelled', 'Canceled'];
       const excludedKeywords = ['project manager', 'resource manager', 'admin', 'human resources', 'hr'];
       const filteredOpenReqs = (openReqsData || []).filter((r) => {
         const title = (r.role_title || '').trim().toLowerCase();
-        return !excludedKeywords.some((kw) => title.includes(kw));
+        if (excludedKeywords.some((kw) => title.includes(kw))) return false;
+        // ✅ Exclude reqs from cancelled/completed projects
+        const projStatus = r.projects?.status;
+        if (CLOSED_PROJ_STATUSES_SG.includes(projStatus)) return false;
+        return true;
       });
 
       const openReqMap = new Map();

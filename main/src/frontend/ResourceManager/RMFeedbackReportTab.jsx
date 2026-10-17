@@ -880,7 +880,31 @@ export default function RMFeedbackReportTab() {
                               {p.projectCode}
                             </span>
                           )}
-                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{p.projectStatus}</span>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '1px 7px',
+                            borderRadius: '4px',
+                            backgroundColor: p.projectStatus === 'Completed'
+                              ? 'rgba(16, 185, 129, 0.12)'
+                              : p.projectStatus === 'Cancelled'
+                                ? 'rgba(239, 68, 68, 0.12)'
+                                : 'rgba(59, 130, 246, 0.12)',
+                            color: p.projectStatus === 'Completed'
+                              ? '#10b981'
+                              : p.projectStatus === 'Cancelled'
+                                ? '#ef4444'
+                                : '#3b82f6',
+                            border: `1px solid ${
+                              p.projectStatus === 'Completed'
+                                ? 'rgba(16, 185, 129, 0.25)'
+                                : p.projectStatus === 'Cancelled'
+                                  ? 'rgba(239, 68, 68, 0.25)'
+                                  : 'rgba(59, 130, 246, 0.25)'
+                            }`
+                          }}>
+                            {p.projectStatus}
+                          </span>
                         </div>
                       </td>
                       <td style={styles.td}>

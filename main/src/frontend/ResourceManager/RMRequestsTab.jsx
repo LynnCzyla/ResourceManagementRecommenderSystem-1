@@ -219,13 +219,14 @@ export default function RMRequestsTab() {
 
   const filteredRequests = useMemo(() => {
     return requests.filter(req => {
-      // Exclude requests for completed/archived projects
-      if (req.projectStatus === 'Completed' || req.projectStatus === 'Archived') {
+      // Exclude requests for completed/archived/cancelled projects
+      const projStatusLower = (req.projectStatus || '').toLowerCase();
+      if (['completed', 'archived', 'cancelled', 'canceled'].includes(projStatusLower)) {
         return false;
       }
       // Exclude Cancelled / Canceled / Completed / Done / Rejected requests from Resource Allocation Requests
       const statusLower = (req.status || '').toLowerCase();
-      if (['cancelled', 'canceled', 'completed', 'done', 'rejected'].includes(statusLower)) {
+      if (['cancelled', 'canceled', 'completed', 'done', 'rejected', 'filled', 'fulfilled'].includes(statusLower)) {
         return false;
       }
       const matchesSearch =
@@ -267,10 +268,12 @@ export default function RMRequestsTab() {
   useEffect(() => {
     fetchData();
     const handleUpdate = () => {
-      fetchData();
+      fetchData(true);
     };
     window.addEventListener('rmDataUpdated', handleUpdate);
-    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
+    return () => {
+      window.removeEventListener('rmDataUpdated', handleUpdate);
+    };
   }, []);
 
   useEffect(() => {
@@ -289,8 +292,8 @@ export default function RMRequestsTab() {
   // 5. Event Handlers and other functions
   // ============================================
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [requestsData, employeesData, assignmentsData] = await Promise.all([
         fetchRequirements(),
@@ -302,15 +305,17 @@ export default function RMRequestsTab() {
       setAssignments(Array.isArray(assignmentsData) ? assignmentsData : (assignmentsData?.assignments || assignmentsData?.data || []));
     } catch (error) {
       console.error('❌ Error fetching data:', error);
-      Swal.fire({
-        title: 'Error!',
-        text: error.message || 'Failed to load data. Please try again.',
-        icon: 'error',
-        confirmButtonColor: 'var(--color-danger)',
-        confirmButtonText: 'OK',
-      });
+      if (!silent) {
+        Swal.fire({
+          title: 'Error!',
+          text: error.message || 'Failed to load data. Please try again.',
+          icon: 'error',
+          confirmButtonColor: 'var(--color-danger)',
+          confirmButtonText: 'OK',
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
       hasAutoExpanded.current = false;
     }
   };
@@ -444,6 +449,50 @@ export default function RMRequestsTab() {
     } catch (error) {
       console.error('Error rejecting request:', error);
       showErrorAlert('Failed to reject request. Please try again.');
+    }
+  };
+
+  const handleCancelRequest = async (reqId) => {
+    const result = await showConfirmationAlert(
+      'Cancel Request',
+      'Are you sure you want to cancel this resource request? It will be removed from this page.',
+      'Yes, Cancel'
+    );
+    if (!result.isConfirmed) return;
+    try {
+      await updateRequirementStatus(reqId, 'Cancelled');
+      setRequests(prev => prev.filter(r => r.id !== reqId));
+      if (activeRequestDetails?.id === reqId) {
+        setActiveRequestDetails(null);
+        setRecommendations({ recommended: [], all: [] });
+      }
+      await fetchData();
+      showSuccessAlert('Request has been cancelled.');
+    } catch (error) {
+      console.error('Error cancelling request:', error);
+      showErrorAlert('Failed to cancel request. Please try again.');
+    }
+  };
+
+  const handleCompleteRequest = async (reqId) => {
+    const result = await showConfirmationAlert(
+      'Complete Request',
+      'Are you sure you want to mark this resource request as completed? It will be removed from this page.',
+      'Yes, Complete'
+    );
+    if (!result.isConfirmed) return;
+    try {
+      await updateRequirementStatus(reqId, 'Completed');
+      setRequests(prev => prev.filter(r => r.id !== reqId));
+      if (activeRequestDetails?.id === reqId) {
+        setActiveRequestDetails(null);
+        setRecommendations({ recommended: [], all: [] });
+      }
+      await fetchData();
+      showSuccessAlert('Request has been marked as completed.');
+    } catch (error) {
+      console.error('Error completing request:', error);
+      showErrorAlert('Failed to complete request. Please try again.');
     }
   };
 
@@ -720,13 +769,43 @@ export default function RMRequestsTab() {
                                       </>
                                     ) : 'View Candidates'}
                                   </button>
-                                  {req.status === 'Pending' && !isFullyAssigned && (
-                                    <button
-                                      onClick={() => handleReject(req.id)}
-                                      style={styles.rejectBtn}
-                                    >
-                                      Reject
-                                    </button>
+                                  {!isFullyAssigned && (
+                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                      {req.status === 'Pending' && (
+                                        <button
+                                          onClick={() => handleReject(req.id)}
+                                          style={styles.rejectBtn}
+                                        >
+                                          Reject
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => handleCancelRequest(req.id)}
+                                        style={{
+                                          ...styles.rejectBtn,
+                                          color: '#ef4444',
+                                          borderColor: 'rgba(239, 68, 68, 0.4)',
+                                          backgroundColor: 'rgba(239, 68, 68, 0.08)'
+                                        }}
+                                        title="Cancel this resource request"
+                                      >
+                                        Cancel
+                                      </button>
+                                      {req.status === 'Partially Allocated' && (
+                                        <button
+                                          onClick={() => handleCompleteRequest(req.id)}
+                                          style={{
+                                            ...styles.rejectBtn,
+                                            color: 'var(--color-success)',
+                                            borderColor: 'rgba(34, 197, 94, 0.4)',
+                                            backgroundColor: 'rgba(34, 197, 94, 0.08)'
+                                          }}
+                                          title="Mark as completed with current allocations"
+                                        >
+                                          Complete
+                                        </button>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               </div>

@@ -374,7 +374,107 @@ router.post('/', async (req, res) => {
   }
 });
 
+// ✅ PUT /api/pm/resource-requests/:id — PM edits their own Pending/Open request
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role, quantity, primarySkills, secondarySkills, startDate, endDate, justification } = req.body;
+    const userId = req.user?.id;
+    const isSuperAdmin = req.user?.is_super_admin || false;
+    const userRole = req.user?.role;
+
+    console.log(`📋 Editing resource request ${id}`);
+
+    // Fetch the existing request
+    const { data: existing, error: findErr } = await supabase
+      .from('project_resource_requirements')
+      .select('id, project_id, status, projects(id, created_by)')
+      .eq('id', id)
+      .single();
+
+    if (findErr || !existing) {
+      return res.status(404).json({ success: false, message: 'Resource request not found' });
+    }
+
+    // Only allow editing Pending or Open requests
+    if (!['Pending', 'Open'].includes(existing.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot edit a request with status "${existing.status}". Only Pending or Open requests can be edited.`
+      });
+    }
+
+    // Check ownership
+    const projectOwnerId = existing.projects?.created_by;
+    if (!isSuperAdmin && userRole === 'Project Manager' && projectOwnerId !== userId) {
+      return res.status(403).json({ success: false, message: 'You can only edit resource requests for your own projects' });
+    }
+
+    // Validate quantity
+    const qty = parseInt(quantity, 10);
+    if (!quantity || isNaN(qty) || qty < 1) {
+      return res.status(400).json({ success: false, message: 'Quantity must be a positive integer' });
+    }
+
+    // Build update payload
+    const positionId = role ? await findPositionIdByName(role) : null;
+    const updatePayload = {
+      role_title: positionId ? null : (role || null),
+      position_id: positionId || null,
+      quantity_needed: qty,
+      justification: justification || null,
+      start_date: startDate || null,
+      end_date: endDate || null,
+    };
+
+    const { data, error: updateErr } = await supabase
+      .from('project_resource_requirements')
+      .update(updatePayload)
+      .eq('id', id)
+      .select(REQUEST_SELECT)
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    // Rebuild requirement_skills: delete old ones then insert new
+    await supabase.from('requirement_skills').delete().eq('requirement_id', id);
+
+    const primaryList = Array.isArray(primarySkills)
+      ? primarySkills
+      : (primarySkills || '').split(',').map(s => s.trim()).filter(Boolean);
+    const secondaryList = Array.isArray(secondarySkills)
+      ? secondarySkills
+      : (secondarySkills || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    await attachSkillsToRequirement(id, primaryList, 'Primary');
+    await attachSkillsToRequirement(id, secondaryList, 'Secondary');
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
+
+    // Re-fetch with updated skills
+    const { data: updated } = await supabase
+      .from('project_resource_requirements')
+      .select(REQUEST_SELECT)
+      .eq('id', id)
+      .single();
+
+    const withCounts = await addAllocationCounts([updated || data]);
+    res.status(200).json({
+      success: true,
+      message: 'Resource request updated successfully',
+      data: transformRequest(withCounts[0])
+    });
+  } catch (error) {
+    console.error('Error updating resource request:', error);
+    res.status(500).json({ success: false, message: 'Failed to update resource request', error: error.message });
+  }
+});
+
 // ✅ PATCH /api/pm/resource-requests/:id/status — only project owner or super admin
+
 router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
@@ -424,7 +524,13 @@ router.patch('/:id/status', async (req, res) => {
     let hasPermission = isSuperAdmin || isProjectOwner;
 
     if (userRole === 'Project Manager') {
-      hasPermission = isProjectOwner;
+      const userBranchId = req.user?.branch_id;
+      const { data: projectOwner } = await supabase
+        .from('profiles')
+        .select('branch_id')
+        .eq('id', projectOwnerId)
+        .single();
+      hasPermission = isProjectOwner || (userBranchId && projectOwner?.branch_id === userBranchId);
     } else if (userRole === 'Resource Manager') {
       const { data: projectOwner } = await supabase
         .from('profiles')
@@ -501,8 +607,18 @@ router.delete('/:id', async (req, res) => {
     }
 
     const isProjectOwner = existing.projects?.created_by === userId;
+    const userBranchId = req.user?.branch_id;
+    let isSameBranch = false;
+    if (userBranchId && existing.projects?.created_by) {
+      const { data: ownerProf } = await supabase
+        .from('profiles')
+        .select('branch_id')
+        .eq('id', existing.projects.created_by)
+        .single();
+      isSameBranch = ownerProf?.branch_id === userBranchId;
+    }
 
-    if (!isSuperAdmin && userId && !isProjectOwner) {
+    if (!isSuperAdmin && userId && !isProjectOwner && !isSameBranch) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to delete this request'

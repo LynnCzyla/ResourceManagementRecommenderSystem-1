@@ -68,6 +68,11 @@ router.patch('/:id/approve', async (req, res) => {
       }
     }
 
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
+
     res.json({ success: true, data });
   } catch (error) {
     console.error('❌ Error in approve resource request:', error);
@@ -113,6 +118,11 @@ router.patch('/:id/reject', async (req, res) => {
         console.error('Non-fatal notification error on reject request:', notifErr.message);
       }
     }
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
 
     res.json({ success: true, data });
   } catch (error) {

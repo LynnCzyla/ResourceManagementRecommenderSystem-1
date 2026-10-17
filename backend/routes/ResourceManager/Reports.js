@@ -100,7 +100,7 @@ router.post('/utilization', async (req, res) => {
         .from('project_tasks')
         .select('profile_id, status, project_id, priority')
         .in('profile_id', employeeIds)
-        .not('status', 'in', '("Completed","Completed-Hidden","Archived")')
+        .not('status', 'in', '("Completed","Completed-Hidden","Archived","Cancelled","Canceled","Deleted")')
     ]);
 
     if (projectsResult.error) throw projectsResult.error;

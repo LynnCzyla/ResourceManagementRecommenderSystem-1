@@ -7,23 +7,16 @@ const workloadService = require('../../services/workloadService');
 // ✅ Apply auth middleware
 router.use(verifyToken);
 
-// ✅ Simple in-memory cache with branch-aware keys
+// ✅ Simple in-memory cache with branch-aware keys (3s debounce to prevent stampedes)
 const cache = {
   data: {},
-  ttl: 60000 // 1 minute
+  ttl: 3000 // 3 seconds cache
 };
 
 const getCacheKey = (branchId) => `branch_${branchId || 'all'}`;
 
 const clearEmployeeCache = (branchId = null) => {
-  if (branchId) {
-    const key = getCacheKey(branchId);
-    delete cache.data[key];
-    console.log(`🗑️ Employee cache cleared for branch: ${branchId}`);
-  } else {
-    cache.data = {};
-    console.log('🗑️ All employee cache cleared');
-  }
+  cache.data = {};
 };
 
 /**
@@ -187,13 +180,15 @@ router.get('/', async (req, res) => {
         workloadStatus = 'Available';
         utilizationRate = 0;
         availabilityFactor = 1.0;
+      } else if (score === 0) {
+        workloadStatus = 'Available';
+        utilizationRate = 0;
+        availabilityFactor = 1.0;
       } else {
-        // Use cached workload details (from recalculateForEmployee) for accurate W & utilization.
-        // Falls back to local task-count score if no cache entry exists yet.
-        const cached = workloadService.getWorkloadDetails(p.id, p.availability_status || 'Available', score);
-        workloadStatus = cached.workloadStatus || p.availability_status || 'Available';
-        utilizationRate = cached.utilizationRate ?? workloadService.getUtilizationRate(p.id, workloadStatus, score);
-        availabilityFactor = score === 0 ? 1.0 : (cached.availabilityFactor ?? (1 / (1 + Math.exp(0.4 * (score - 7)))));
+        const A = workloadService.computeAvailabilityFactor(score);
+        workloadStatus = workloadService.toStatusLabel(A);
+        utilizationRate = workloadService.toUtilizationRate(A, workloadStatus, score);
+        availabilityFactor = parseFloat(A.toFixed(3));
       }
 
       const isAssignable = !isPM;
@@ -515,6 +510,25 @@ router.get('/:id/details', async (req, res) => {
       workloadStatus = A >= 0.80 ? 'Available' : A >= 0.50 ? 'Limited Availability' : 'Fully Utilized';
       utilizationRate = Math.min(100, Math.max(1, Math.round((workloadScore / 7) * 100)));
       availabilityFactor = parseFloat(A.toFixed(3));
+    }
+
+    // Keep profiles table and cache synchronized with live calculation
+    if (!isPM) {
+      supabase
+        .from('profiles')
+        .update({
+          availability_status: workloadStatus,
+          workload_score: workloadScore,
+          availability_factor: availabilityFactor,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', profile.id)
+        .then(() => {
+          try {
+            workloadService.recalculateForEmployee(profile.id).catch(() => {});
+          } catch (_) {}
+        })
+        .catch(() => {});
     }
 
     const name = `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed';

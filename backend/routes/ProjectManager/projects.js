@@ -248,6 +248,10 @@ function invalidateProjectsCache() {
     const { clearProjectsCache } = require('../ResourceManager/Projects');
     if (typeof clearProjectsCache === 'function') clearProjectsCache();
   } catch (e) {}
+  try {
+    const { clearEmployeeCache } = require('../ResourceManager/Employees');
+    if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+  } catch (e) {}
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────
@@ -888,11 +892,20 @@ router.put('/:id', async (req, res) => {
     if (teamSize !== undefined) updateData.team_size = teamSizeCheck.value;
     if (duration !== undefined) updateData.duration_days = parseInt(duration, 10) || null;
 
-    const { data, error } = await supabase
+    let updateQuery = supabase
       .from('projects')
       .update(updateData)
-      .eq('id', id)
-      .eq('created_by', req.user.id)
+      .eq('id', id);
+
+    if (!req.user.is_admin && !req.user.is_super_admin) {
+      if (req.user.branch_id) {
+        updateQuery = updateQuery.or(`created_by.eq.${req.user.id},branch_id.eq.${req.user.branch_id}`);
+      } else {
+        updateQuery = updateQuery.eq('created_by', req.user.id);
+      }
+    }
+
+    const { data, error } = await updateQuery
       .select()
       .single();
 
@@ -1033,11 +1046,15 @@ router.patch('/:id/status', async (req, res) => {
     // Fetch existing project to capture name, description, and creator
     let projectQuery = supabase
       .from('projects')
-      .select('id, project_name, status, created_by, project_description')
+      .select('id, project_name, status, created_by, project_description, branch_id')
       .eq('id', id);
 
     if (!req.user.is_admin && !req.user.is_super_admin) {
-      projectQuery = projectQuery.eq('created_by', req.user.id);
+      if (req.user.branch_id) {
+        projectQuery = projectQuery.or(`created_by.eq.${req.user.id},branch_id.eq.${req.user.branch_id}`);
+      } else {
+        projectQuery = projectQuery.eq('created_by', req.user.id);
+      }
     }
 
     const { data: project, error: projErr } = await projectQuery.single();
@@ -1196,7 +1213,7 @@ router.patch('/:id/status', async (req, res) => {
         .from('project_resource_requirements')
         .update({ status: 'Completed' })
         .eq('project_id', id)
-        .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+        .in('status', ['Pending', 'Open', 'Approved', 'Partially Allocated', 'Filled', 'Fulfilled']);
     } else if (status === 'Cancelled') {
       const cancelReasonText = (reason || '').trim() || 'Project cancelled by Project Manager';
 
@@ -1214,7 +1231,7 @@ router.patch('/:id/status', async (req, res) => {
         .eq('project_id', id)
         .eq('status', 'Assigned');
 
-      // 2. Mark pending/open/approved/filled resource requirements as Cancelled
+      // 2. Mark pending/open/approved/partially allocated/filled resource requirements as Cancelled
       await supabase
         .from('project_resource_requirements')
         .update({
@@ -1224,7 +1241,7 @@ router.patch('/:id/status', async (req, res) => {
           cancellation_reason: cancelReasonText,
         })
         .eq('project_id', id)
-        .in('status', ['Pending', 'Open', 'Approved', 'Filled']);
+        .in('status', ['Pending', 'Open', 'Approved', 'Partially Allocated', 'Filled']);
 
       // 3. Mark non-completed tasks as Cancelled
       await supabase
@@ -1445,6 +1462,31 @@ router.patch('/:id/status', async (req, res) => {
         ? `Cancelled project ${id} ("${project.project_name}")${(reason || '').trim() ? ` with reason: ${(reason || '').trim()}` : ''}`
         : `Updated project ${id} status to ${status}`,
     });
+
+    // Recalculate workload for all affected employees so their availability factor immediately updates
+    try {
+      const workloadService = require('../../services/workloadService');
+      const { data: affectedAssignments } = await supabase
+        .from('project_assignments')
+        .select('profile_id')
+        .eq('project_id', id);
+      const { data: affectedTasks } = await supabase
+        .from('project_tasks')
+        .select('profile_id')
+        .eq('project_id', id);
+      const affectedIds = [
+        ...new Set(
+          (affectedAssignments || []).concat(affectedTasks || [])
+            .map(r => r.profile_id)
+            .filter(Boolean)
+        )
+      ];
+      for (const pId of affectedIds) {
+        workloadService.recalculateForEmployee(pId).catch(e => console.warn('Workload recalc error:', e.message));
+      }
+    } catch (e) {
+      console.warn('Non-fatal error recalculating employee workloads:', e.message);
+    }
 
     invalidateProjectsCache();
     try {

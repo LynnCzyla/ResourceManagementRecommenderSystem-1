@@ -10,6 +10,17 @@ const { verifyToken, clearProfileCache } = require('../Middleware/auth');
 // ✅ Apply verifyToken to ALL routes in this file
 router.use(verifyToken);
 
+function invalidateStaffCaches() {
+  try {
+    const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+    if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    const { clearEmployeeCache } = require('../ResourceManager/Employees');
+    if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+    const pmEmployees = require('../ProjectManager/employees');
+    if (pmEmployees?.invalidateEmployeesCache) pmEmployees.invalidateEmployeesCache();
+  } catch (e) {}
+}
+
 // Get all users with email from auth.users (filtered by branch and role)
 router.get("/", async (req, res) => {
   try {
@@ -530,6 +541,7 @@ router.put("/:id", async (req, res) => {
     if (authError) throw authError;
 
     clearProfileCache(id);
+    invalidateStaffCaches();
 
     res.json({
       success: true,
@@ -889,6 +901,7 @@ router.patch("/:id/status", async (req, res) => {
 
     // Clear cached profile and invalidate Supabase session if deactivated
     clearProfileCache(id);
+    invalidateStaffCaches();
     if (status === 'Deactivated') {
       try {
         await supabase.auth.admin.signOut(id);
@@ -987,6 +1000,7 @@ router.delete("/:id", async (req, res) => {
       if (error) throw error;
       
       clearProfileCache(id);
+      invalidateStaffCaches();
 
       await logAuditEvent({
         req,

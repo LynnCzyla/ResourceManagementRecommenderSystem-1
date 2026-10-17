@@ -233,6 +233,17 @@ export function clearCacheForEndpoints(endpoints) {
     }
   }
   keysToDelete.forEach(key => cache.delete(key));
+
+  // Also clear matching pendingRequests so in-flight queries don't re-populate stale cache
+  for (const [key] of pendingRequests) {
+    for (const endpoint of endpoints) {
+      if (key.includes(endpoint)) {
+        pendingRequests.delete(key);
+        break;
+      }
+    }
+  }
+
   console.log(`🧹 Cleared cache for: ${endpoints.join(', ')}`);
 }
 
@@ -295,7 +306,7 @@ export function getProjectHistoryDetails(id, signal) {
 }
 
 export function createProject(payload) {
-  clearCacheForEndpoints(['/projects', '/dashboard']);
+  clearCacheForEndpoints(['/projects', '/dashboard', '/resource-requests']);
   return pm('/projects', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -313,7 +324,7 @@ export function updateProject(id, payload) {
 }
 
 export function updateProjectStatus(id, status, restoreMode, reason) {
-  clearCacheForEndpoints(['/projects', '/dashboard', '/employees', '/tasks']);
+  clearCacheForEndpoints(['/projects', '/dashboard', '/employees', '/tasks', '/resource-requests']);
   let mode = typeof restoreMode === 'string' ? restoreMode : null;
   let r = typeof reason === 'string' ? reason : null;
   if (typeof restoreMode === 'object' && restoreMode !== null) {
@@ -337,7 +348,7 @@ export function deleteProject(id) {
 }
 
 export function assignEmployeeToProject(projectId, employeeId, role, assignedBy) {
-  clearCacheForEndpoints(['/employees', '/dashboard']);
+  clearCacheForEndpoints(['/employees', '/projects', '/dashboard']);
   return pm(`/projects/${projectId}/assign`, {
     method: 'POST',
     body: JSON.stringify({ employeeId, role, assignedBy }),
@@ -380,6 +391,15 @@ export function updateResourceRequestStatus(id, status) {
 
 export function cancelResourceRequest(id) {
   return updateResourceRequestStatus(id, 'Cancelled');
+}
+
+export function updateResourceRequest(id, payload) {
+  clearCacheForEndpoints(['/resource-requests', '/dashboard']);
+  return pm(`/resource-requests/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+    skipCache: true
+  });
 }
 
 export function deleteResourceRequest(id) {

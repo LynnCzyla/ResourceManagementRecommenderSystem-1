@@ -38,6 +38,7 @@ router.get('/assignments', verifyToken, async (req, res) => {
 
       return {
         id: proj.id,
+        assignmentId: row.id,
         name: proj.project_name,
         description: proj.project_description,
         startDate: proj.start_date,
@@ -136,6 +137,19 @@ router.put('/tasks/:id', verifyToken, async (req, res) => {
     if (error) throw error;
 
     workloadService.recalculateForEmployee(req.user.id).catch(e => console.warn('Workload recalc error:', e.message));
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+      const { clearProjectsCache } = require('../ResourceManager/Projects');
+      if (typeof clearProjectsCache === 'function') clearProjectsCache();
+      const { clearEmployeeCache } = require('../ResourceManager/Employees');
+      if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+      const { invalidateTasksCache } = require('../ProjectManager/tasks');
+      if (typeof invalidateTasksCache === 'function') invalidateTasksCache();
+      const { invalidateProjectsCache } = require('../ProjectManager/projects');
+      if (typeof invalidateProjectsCache === 'function') invalidateProjectsCache();
+    } catch (e) {}
 
     res.json({ success: true, message: 'Task status updated successfully', data });
   } catch (error) {
@@ -300,6 +314,19 @@ router.post('/tasks/:id/progress', verifyToken, async (req, res) => {
     if (employeeProfileId) {
       workloadService.recalculateForEmployee(employeeProfileId).catch(e => console.warn('Workload recalc error:', e.message));
     }
+
+    try {
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+      const { clearProjectsCache } = require('../ResourceManager/Projects');
+      if (typeof clearProjectsCache === 'function') clearProjectsCache();
+      const { clearEmployeeCache } = require('../ResourceManager/Employees');
+      if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+      const { invalidateTasksCache } = require('../ProjectManager/tasks');
+      if (typeof invalidateTasksCache === 'function') invalidateTasksCache();
+      const { invalidateProjectsCache } = require('../ProjectManager/projects');
+      if (typeof invalidateProjectsCache === 'function') invalidateProjectsCache();
+    } catch (e) {}
 
     res.json({ success: true, message: 'Progress logged successfully', data });
   } catch (error) {
