@@ -414,7 +414,7 @@ export default function HRInterviewsTab() {
     showSuccessAlert('Gmail opened with interview invitation!');
   };
 
-  const isHistoryStatus = (status) => ['Completed', 'Hired', 'Rejected', 'Cancelled'].includes(status);
+  const isHistoryStatus = (status) => ['Hired', 'Rejected', 'Cancelled'].includes(status);
 
   const activeCount = interviews.filter(int => !isHistoryStatus(int.status)).length;
   const historyCount = interviews.filter(int => isHistoryStatus(int.status)).length;
@@ -689,6 +689,22 @@ export default function HRInterviewsTab() {
                                   <button onClick={() => handleCompleteInterview(int.id)} style={styles.completeBtn} title="Complete Interview">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                       <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                  </button>
+                                </>
+                              )}
+                              {int.status === 'Completed' && (
+                                <>
+                                  <button onClick={() => handleHire(int.id)} style={styles.completeBtn} title="Hire Applicant">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                      <circle cx="12" cy="7" r="4"></circle>
+                                    </svg>
+                                  </button>
+                                  <button onClick={() => handleReject(int.id)} style={{ ...styles.rescheduleBtn, backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }} title="Reject Applicant">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                                      <line x1="6" y1="6" x2="18" y2="18"></line>
                                     </svg>
                                   </button>
                                 </>
