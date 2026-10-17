@@ -174,19 +174,18 @@ export default function PMFeedbackFormTab({ user }) {
   }, [sentRequests]);
 
   const sortedProjects = useMemo(() => {
-    const withStatus = projects.map(p => {
-      const feedbackStatus = projectFeedbackStatusMap[p.id] || null;
-      const isProjectCompleted = String(p.status || '').toLowerCase() === 'completed';
-      const isFeedbackCompleted = feedbackStatus === 'completed';
-      return {
-        ...p,
-        isProjectCompleted,
-        feedbackStatus,
-        isDone: isFeedbackCompleted,
-      };
-    });
+    const withStatus = projects
+      .filter(p => String(p.status || '').toLowerCase() === 'completed') // Only completed projects
+      .map(p => {
+        const feedbackStatus = projectFeedbackStatusMap[p.id] || null;
+        return {
+          ...p,
+          isProjectCompleted: true,
+          feedbackStatus,
+          isDone: feedbackStatus === 'completed',
+        };
+      });
     return [...withStatus].sort((a, b) => {
-      if (a.isProjectCompleted !== b.isProjectCompleted) return a.isProjectCompleted ? -1 : 1;
       if (a.isDone !== b.isDone) return a.isDone ? 1 : -1;
       return (a.name || '').localeCompare(b.name || '');
     });

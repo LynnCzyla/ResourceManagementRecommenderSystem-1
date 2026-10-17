@@ -165,29 +165,21 @@ export default function PMSendFeedbackTab({ user }) {
   }, [evaluations, projectId]);
 
   // Calculate evaluation status for each project in dropdown
+  // Only show Completed projects in the dropdown per requirement
   const projectsWithStatus = useMemo(() => {
-    return projects.map(p => {
-      const isProjectComplete = String(p.status || '').toLowerCase() === 'completed';
-      const projectEvals = evaluations.filter(ev => String(ev.project_id) === String(p.id));
-      const hasEvals = projectEvals.length > 0;
-
-      let statusLabel = '';
-      if (isProjectComplete) {
-        statusLabel = hasEvals ? `[Completed - Evaluated] ${p.name}` : `[Completed - Needs Eval] ${p.name}`;
-      } else {
-        statusLabel = hasEvals ? `[Active - Evaluated] ${p.name}` : `[Active - Needs Eval] ${p.name}`;
-      }
-
-      return {
-        ...p,
-        isProjectComplete,
-        hasEvals,
-        statusLabel,
-      };
-    }).sort((a, b) => {
-      if (a.isProjectComplete !== b.isProjectComplete) return a.isProjectComplete ? -1 : 1;
-      return (a.name || '').localeCompare(b.name || '');
-    });
+    return projects
+      .filter(p => String(p.status || '').toLowerCase() === 'completed')
+      .map(p => {
+        const projectEvals = evaluations.filter(ev => String(ev.project_id) === String(p.id));
+        const hasEvals = projectEvals.length > 0;
+        const statusLabel = hasEvals ? `[Evaluated] ${p.name}` : `[Needs Eval] ${p.name}`;
+        return {
+          ...p,
+          isProjectComplete: true,
+          hasEvals,
+          statusLabel,
+        };
+      }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   }, [projects, evaluations]);
 
   const toggleSelectEmployee = (id) => {
