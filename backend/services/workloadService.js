@@ -12,7 +12,7 @@ const PRIORITY_WEIGHTS = {
   high: 3,
 };
 
-const CLOSED_STATUSES = ['Completed', 'Completed-Hidden', 'Archived', 'Cancelled'];
+const CLOSED_STATUSES = ['Completed', 'Completed-Hidden', 'Archived', 'Cancelled', 'Canceled', 'Deleted'];
 
 // In-memory cache for fast lookups of computed metrics per employee
 const employeeMetricsCache = new Map();
@@ -83,24 +83,51 @@ function toUtilizationRate(A, status, W = null) {
   return status === 'Available' ? 0 : status === 'Limited Availability' ? 50 : 100;
 }
 
+let isInvalidating = false;
+
 /**
  * Helper to invalidate application-level caches
  */
 function invalidateRelatedCaches() {
+  if (isInvalidating) return;
+  isInvalidating = true;
   try {
-    const { clearDashboardCache } = require('../routes/ResourceManager/Dashboard');
-    if (typeof clearDashboardCache === 'function') clearDashboardCache();
-  } catch (e) {}
+    try {
+      employeeMetricsCache.clear();
+    } catch (e) {}
 
-  try {
-    const { clearEmployeeCache } = require('../routes/ResourceManager/Employees');
-    if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
-  } catch (e) {}
+    try {
+      const { clearDashboardCache } = require('../routes/ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+    } catch (e) {}
 
-  try {
-    const pmTasks = require('../routes/ProjectManager/tasks');
-    if (typeof pmTasks.invalidateTasksCache === 'function') pmTasks.invalidateTasksCache();
-  } catch (e) {}
+    try {
+      const { clearEmployeeCache } = require('../routes/ResourceManager/Employees');
+      if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+    } catch (e) {}
+
+    try {
+      const { clearProjectsCache } = require('../routes/ResourceManager/Projects');
+      if (typeof clearProjectsCache === 'function') clearProjectsCache();
+    } catch (e) {}
+
+    try {
+      const pmTasks = require('../routes/ProjectManager/tasks');
+      if (typeof pmTasks.invalidateTasksCache === 'function') pmTasks.invalidateTasksCache();
+    } catch (e) {}
+
+    try {
+      const pmProjects = require('../routes/ProjectManager/projects');
+      if (typeof pmProjects.invalidateProjectsCache === 'function') pmProjects.invalidateProjectsCache();
+    } catch (e) {}
+
+    try {
+      const pmEmployees = require('../routes/ProjectManager/employees');
+      if (typeof pmEmployees.invalidateEmployeesCache === 'function') pmEmployees.invalidateEmployeesCache();
+    } catch (e) {}
+  } finally {
+    isInvalidating = false;
+  }
 }
 
 /**

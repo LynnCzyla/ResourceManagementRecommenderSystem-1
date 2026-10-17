@@ -48,8 +48,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     }).length;
 
     const completedTasksCount = (tasks || []).filter(t => {
-      const isTaskCompleted = t.status === 'Completed' || t.status === 'Completed-Hidden';
-      const isProjectCompleted = t.projects && (t.projects.status === 'Completed' || t.projects.status === 'Archived');
+      const isTaskCompleted = t.status === 'Completed' || t.status === 'Completed-Hidden' || t.status === 'Cancelled' || t.status === 'Canceled';
+      const isProjectCompleted = t.projects && ['Completed', 'Archived', 'Cancelled', 'Cancelled-Hidden', 'Deleted'].includes(t.projects.status);
       return isTaskCompleted || isProjectCompleted;
     }).length;
 

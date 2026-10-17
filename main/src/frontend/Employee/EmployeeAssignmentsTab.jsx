@@ -130,17 +130,17 @@ function statusColor(status) {
 // Icon components
 const IconAssignments = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-    <polyline points="14 2 14 8 20 8"/>
-    <line x1="16" y1="13" x2="8" y2="13"/>
-    <line x1="16" y1="17" x2="8" y2="17"/>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
   </svg>
 );
 
 const IconHistory = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-    <circle cx="12" cy="12" r="10"/>
-    <polyline points="12 6 12 12 16 14"/>
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
   </svg>
 );
 
@@ -382,12 +382,13 @@ export default function EmployeeAssignmentsTab({ user }) {
 
   if (loading) return <div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading assignments...</div>;
 
-  // Completed tasks live in the History sub-tab, not the active list.
-  const activeTasks = tasks.filter(t => t.status !== 'Completed');
+  // Completed or cancelled tasks live in the History sub-tab, not the active list.
+  const activeTasks = tasks.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled' && t.status !== 'Completed-Hidden');
 
   const activeCount = activeTasks.filter(t => t.status === 'In Progress').length;
   const pendingCount = activeTasks.filter(t => t.status === 'Pending').length;
-  const completedCount = historyTasks.length;
+  const historyProjectsCount = historyProjects.length;
+  const historyTasksCount = historyTasks.length;
 
   return (
     <div style={styles.container}>
@@ -400,7 +401,10 @@ export default function EmployeeAssignmentsTab({ user }) {
       <div style={styles.subTabBar}>
         <button
           type="button"
-          onClick={() => setSubTab('assignments')}
+          onClick={() => {
+            setSubTab('assignments');
+            fetchAssignmentsAndTasks(true);
+          }}
           onMouseEnter={() => setHoveredTab('assignments')}
           onMouseLeave={() => setHoveredTab(null)}
           style={{
@@ -413,7 +417,10 @@ export default function EmployeeAssignmentsTab({ user }) {
         </button>
         <button
           type="button"
-          onClick={() => setSubTab('history')}
+          onClick={() => {
+            setSubTab('history');
+            fetchHistory(true);
+          }}
           onMouseEnter={() => setHoveredTab('history')}
           onMouseLeave={() => setHoveredTab(null)}
           style={{
@@ -424,7 +431,7 @@ export default function EmployeeAssignmentsTab({ user }) {
           <IconHistory />
           History
           <span style={{ ...styles.tabCount, ...(subTab === 'history' ? styles.tabCountActive : {}) }}>
-            {completedCount}
+            {historyProjectsCount}
           </span>
         </button>
       </div>
@@ -463,8 +470,8 @@ export default function EmployeeAssignmentsTab({ user }) {
                 </svg>
               </div>
               <div>
-                <div style={styles.summaryValue}>{completedCount}</div>
-                <div style={styles.summaryLabel}>Completed Tasks</div>
+                <div style={styles.summaryValue}>{historyTasksCount}</div>
+                <div style={styles.summaryLabel}>Task History</div>
               </div>
             </div>
           </div>
@@ -476,8 +483,8 @@ export default function EmployeeAssignmentsTab({ user }) {
               {projects.length === 0 ? (
                 <p style={styles.emptyText}>No project assignments.</p>
               ) : (
-                projects.map(proj => (
-                  <div key={proj.id} style={styles.projItem}>
+                projects.map((proj, idx) => (
+                  <div key={proj.assignmentId ? `proj-assign-${proj.assignmentId}` : `proj-${proj.id}-${idx}`} style={styles.projItem}>
                     <div style={styles.projHeader}>
                       <h3 style={styles.projName}>{proj.name}</h3>
                       <span style={styles.timelineBadge}>Active Assignment</span>
@@ -718,63 +725,91 @@ export default function EmployeeAssignmentsTab({ user }) {
             <>
               {historyError && <div style={styles.errorBanner}>{historyError}</div>}
 
-              {/* Completed Projects */}
+              {/* Project History */}
               <div className="glass-card" style={styles.card}>
-                <h2 style={styles.sectionTitle}>Completed Projects</h2>
+                <h2 style={styles.sectionTitle}>Project History</h2>
                 <div style={styles.list}>
                   {historyProjects.length === 0 ? (
-                    <p style={styles.emptyText}>No completed projects yet.</p>
+                    <p style={styles.emptyText}>No project history yet.</p>
                   ) : (
-                    historyProjects.map(proj => (
-                      <div key={proj.id} style={styles.historyItem}>
-                        <div style={styles.itemHeader}>
-                          <h3 style={styles.itemName}>{proj.name}</h3>
-                          <span style={styles.doneBadge}>
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                              <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                            Completed
-                          </span>
+                    historyProjects.map((proj, idx) => {
+                      const isCancelled = proj.status === 'Cancelled' || proj.status === 'Canceled';
+                      return (
+                        <div key={proj.assignmentId ? `hist-proj-assign-${proj.assignmentId}` : `hist-proj-${proj.id}-${idx}`} style={styles.historyItem}>
+                          <div style={styles.itemHeader}>
+                            <h3 style={styles.itemName}>{proj.name}</h3>
+                            <span style={isCancelled ? styles.cancelledBadge : styles.doneBadge}>
+                              {isCancelled ? (
+                                <>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                  </svg>
+                                  Cancelled
+                                </>
+                              ) : (
+                                <>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                  </svg>
+                                  Completed
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          <p style={styles.itemDesc}>{proj.description}</p>
+                          <div style={styles.itemFooter}>
+                            <span>Timeline: <strong>{proj.startDate} to {proj.endDate}</strong></span>
+                            <span>Project Manager: <strong>{proj.projectManager}</strong></span>
+                          </div>
                         </div>
-                        <p style={styles.itemDesc}>{proj.description}</p>
-                        <div style={styles.itemFooter}>
-                          <span>Timeline: <strong>{proj.startDate} to {proj.endDate}</strong></span>
-                          <span>Project Manager: <strong>{proj.projectManager}</strong></span>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
 
-              {/* Completed Tasks */}
+              {/* Task History */}
               <div className="glass-card" style={styles.card}>
-                <h2 style={styles.sectionTitle}>Completed Tasks</h2>
-                <p style={styles.sectionSubtitle}>Every task you've brought to 100% completion, with its full progress trail.</p>
+                <h2 style={styles.sectionTitle}>Task History</h2>
+                <p style={styles.sectionSubtitle}>History of your completed and concluded tasks, with their full progress trail.</p>
                 <div style={styles.list}>
                   {historyTasks.length === 0 ? (
-                    <p style={styles.emptyText}>No completed tasks yet.</p>
+                    <p style={styles.emptyText}>No task history yet.</p>
                   ) : (
-                    historyTasks.map(task => {
+                    historyTasks.map((task, idx) => {
                       const isExpanded = expandedTaskId === task.id;
+                      const isCancelled = task.status === 'Cancelled' || task.status === 'Canceled';
                       return (
-                        <div key={task.id} style={styles.historyItem}>
+                        <div key={task.id ? `hist-task-${task.id}` : `hist-task-${idx}`} style={styles.historyItem}>
                           <div style={styles.itemHeader}>
                             <div>
                               <h3 style={styles.itemName}>{task.title}</h3>
                               <span style={styles.projectTag}>{task.projectName}</span>
                             </div>
-                            <span style={styles.doneBadge}>
-                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12"></polyline>
-                              </svg>
-                              Completed
+                            <span style={isCancelled ? styles.cancelledBadge : styles.doneBadge}>
+                              {isCancelled ? (
+                                <>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                  </svg>
+                                  Cancelled
+                                </>
+                              ) : (
+                                <>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                  </svg>
+                                  Completed
+                                </>
+                              )}
                             </span>
                           </div>
                           <p style={styles.itemDesc}>{task.description}</p>
                           <div style={styles.itemFooter}>
                             <span>Due Date: <strong>{task.dueDate}</strong></span>
-                            <span>Completed On: <strong>{task.completedOn || 'N/A'}</strong></span>
+                            <span>{isCancelled ? 'Concluded On:' : 'Completed On:'} <strong>{task.completedOn || 'N/A'}</strong></span>
                           </div>
 
                           {task.progressLogs && task.progressLogs.length > 0 && (
@@ -1234,6 +1269,19 @@ const styles = {
     borderRadius: '30px',
     background: 'var(--color-primary-light)',
     color: 'var(--color-success)',
+    whiteSpace: 'nowrap',
+  },
+  cancelledBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    fontSize: '11px',
+    fontWeight: '700',
+    padding: '3px 8px',
+    borderRadius: '30px',
+    background: 'rgba(239, 68, 68, 0.12)',
+    color: 'var(--color-danger, #ef4444)',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
     whiteSpace: 'nowrap',
   },
   itemDesc: {

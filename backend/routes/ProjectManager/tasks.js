@@ -64,6 +64,14 @@ function invalidateTasksCache() {
     const { clearDashboardCache } = require('../ResourceManager/Dashboard');
     if (typeof clearDashboardCache === 'function') clearDashboardCache();
   } catch (e) {}
+  try {
+    const { clearProjectsCache } = require('../ResourceManager/Projects');
+    if (typeof clearProjectsCache === 'function') clearProjectsCache();
+  } catch (e) {}
+  try {
+    const { clearEmployeeCache } = require('../ResourceManager/Employees');
+    if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+  } catch (e) {}
 }
 
 // ✅ GET /api/pm/tasks — list tasks (optional ?projectId= / ?employeeId= filters)

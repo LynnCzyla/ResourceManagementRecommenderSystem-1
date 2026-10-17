@@ -160,8 +160,8 @@ export default function EmployeeDashboardTab({ user }) {
             </svg>
           </div>
           <div>
-            <div style={styles.statValue}>{completedTasks}</div>
-            <div style={styles.statLabel}>Completed Tasks</div>
+            <div style={styles.statValue}>{stats.completedTasksCount ?? 0}</div>
+            <div style={styles.statLabel}>Task History</div>
           </div>
         </div>
       </div>

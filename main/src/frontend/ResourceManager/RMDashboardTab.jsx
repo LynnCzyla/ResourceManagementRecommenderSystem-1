@@ -51,14 +51,16 @@ export default function RMDashboardTab() {
   useEffect(() => {
     loadDashboard();
     const handleUpdate = () => {
-      loadDashboard();
+      loadDashboard(true);
     };
     window.addEventListener('rmDataUpdated', handleUpdate);
-    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
+    return () => {
+      window.removeEventListener('rmDataUpdated', handleUpdate);
+    };
   }, []);
 
-  const loadDashboard = async () => {
-    setLoading(true);
+  const loadDashboard = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await fetchDashboard();
@@ -75,7 +77,7 @@ export default function RMDashboardTab() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

@@ -44,13 +44,15 @@ export default function RMProjectsTab() {
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    const handleUpdate = () => loadData(true);
     window.addEventListener('rmDataUpdated', handleUpdate);
-    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
+    return () => {
+      window.removeEventListener('rmDataUpdated', handleUpdate);
+    };
   }, []);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [projData, empData, reqData] = await Promise.all([
@@ -64,7 +66,7 @@ export default function RMProjectsTab() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

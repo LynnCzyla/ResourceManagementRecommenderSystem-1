@@ -397,11 +397,15 @@ router.post("/create", async (req, res) => {
       performed_by: req.user.employee_id
     });
 
-    // ✅ Finding 18: Invalidate RM employee cache so new employee is immediately visible
+    // ✅ Invalidate RM employee and dashboard caches + PM employee cache so new employee is immediately visible
     try {
       clearEmployeeCache(adminBranchId);
+      const { clearDashboardCache } = require('../ResourceManager/Dashboard');
+      if (typeof clearDashboardCache === 'function') clearDashboardCache();
+      const pmEmployees = require('../ProjectManager/employees');
+      if (pmEmployees?.invalidateEmployeesCache) pmEmployees.invalidateEmployeesCache();
     } catch (cErr) {
-      console.warn('⚠️ Non-fatal: Failed to clear employee cache:', cErr.message);
+      console.warn('⚠️ Non-fatal: Failed to clear employee/dashboard cache:', cErr.message);
     }
 
     res.status(201).json({

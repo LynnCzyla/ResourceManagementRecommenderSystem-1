@@ -7,23 +7,16 @@ const workloadService = require('../../services/workloadService');
 // ✅ Apply auth middleware
 router.use(verifyToken);
 
-// ✅ Cache for projects data with branch-aware keys
+// ✅ Cache for projects data with branch-aware keys (3s debounce to prevent stampedes)
 const cache = {
   data: {}, // Store by branch_id
-  ttl: 60000 // 1 minute cache
+  ttl: 3000 // 3 seconds cache
 };
 
 const getCacheKey = (branchId) => `branch_${branchId || 'all'}`;
 
 const clearProjectsCache = (branchId = null) => {
-  if (branchId) {
-    const key = getCacheKey(branchId);
-    delete cache.data[key];
-    console.log(`🗑️ Projects cache cleared for branch: ${branchId}`);
-  } else {
-    cache.data = {};
-    console.log('🗑️ All projects cache cleared');
-  }
+  cache.data = {};
 };
 
 // Statuses that mean "not started yet"

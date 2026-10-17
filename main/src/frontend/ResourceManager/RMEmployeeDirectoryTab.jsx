@@ -28,13 +28,15 @@ export default function RMEmployeeDirectoryTab() {
 
   useEffect(() => {
     loadEmployees();
-    const handleUpdate = () => loadEmployees();
+    const handleUpdate = () => loadEmployees(true);
     window.addEventListener('rmDataUpdated', handleUpdate);
-    return () => window.removeEventListener('rmDataUpdated', handleUpdate);
+    return () => {
+      window.removeEventListener('rmDataUpdated', handleUpdate);
+    };
   }, []);
 
-  const loadEmployees = async () => {
-    setLoading(true);
+  const loadEmployees = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [empData, projData, reqData] = await Promise.all([
@@ -48,7 +50,7 @@ export default function RMEmployeeDirectoryTab() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -181,6 +183,20 @@ const handleViewEmployee = async (emp) => {
     }
     
     setEmployeeDetails(details);
+    if (details) {
+      setEmployees(prev => prev.map(e => {
+        if (e.id === emp.id) {
+          return {
+            ...e,
+            workloadScore: details.workloadScore ?? e.workloadScore,
+            workloadStatus: details.workloadStatus ?? e.workloadStatus,
+            availabilityFactor: details.availabilityFactor ?? e.availabilityFactor,
+            utilizationRate: details.utilizationRate ?? e.utilizationRate,
+          };
+        }
+        return e;
+      }));
+    }
   } catch (err) {
     console.error('Error fetching employee details:', err);
     setEmployeeDetails({
