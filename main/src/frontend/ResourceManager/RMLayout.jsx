@@ -56,16 +56,6 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme, onProfil
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('rmActiveTab') || 'dashboard';
   });
-  const [visitedTabs, setVisitedTabs] = useState(() => new Set([localStorage.getItem('rmActiveTab') || 'dashboard']));
-
-  useEffect(() => {
-    setVisitedTabs(prev => {
-      if (prev.has(activeTab)) return prev;
-      const next = new Set(prev);
-      next.add(activeTab);
-      return next;
-    });
-  }, [activeTab]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -123,16 +113,6 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme, onProfil
       setSidebarCollapsed(false);
     }
   };
-
-  // All four tabs stay mounted the whole session; we just show/hide with CSS.
-  // Switching tabs used to unmount the previous tab and mount a fresh one,
-  // which meant every single click refired fetchEmployees()/fetchProjects()/etc.
-  // from scratch and showed the "Loading…" screen again, even if you'd already
-  // loaded that tab seconds earlier. Now each tab loads once and stays cached
-  // in memory until the RM Portal session ends (logout / refresh).
-  const tabVisibility = (tabName) => ({
-    display: activeTab === tabName ? 'contents' : 'none',
-  });
 
   return (
     <div style={styles.layoutWrapper}>
@@ -414,12 +394,12 @@ export default function RMLayout({ user, onLogout, isDark, toggleTheme, onProfil
         </header>
 
         <main style={styles.contentContainer}>
-          {visitedTabs.has('dashboard') && <div style={tabVisibility('dashboard')}><RMDashboardTab /></div>}
-          {visitedTabs.has('directory') && <div style={tabVisibility('directory')}><RMEmployeeDirectoryTab /></div>}
-          {visitedTabs.has('projects') && <div style={tabVisibility('projects')}><RMProjectsTab /></div>}
-          {visitedTabs.has('requests') && <div style={tabVisibility('requests')}><RMRequestsTab /></div>}
-          {visitedTabs.has('requestForm') && <div style={tabVisibility('requestForm')}><RMResourceRequestFormTab /></div>}
-          {visitedTabs.has('feedbackReport') && <div style={tabVisibility('feedbackReport')}><RMFeedbackReportTab /></div>}
+          {activeTab === 'dashboard' && <RMDashboardTab />}
+          {activeTab === 'directory' && <RMEmployeeDirectoryTab />}
+          {activeTab === 'projects' && <RMProjectsTab />}
+          {activeTab === 'requests' && <RMRequestsTab />}
+          {activeTab === 'requestForm' && <RMResourceRequestFormTab />}
+          {activeTab === 'feedbackReport' && <RMFeedbackReportTab />}
         </main>
       </div>
 

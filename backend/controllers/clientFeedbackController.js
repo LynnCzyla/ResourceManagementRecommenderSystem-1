@@ -361,6 +361,49 @@ const submitFeedbackResponses = async (req, res) => {
       additionalComments,
     });
 
+    // When client feedback is completed, update project to Completed if it is not already Cancelled
+    try {
+      const { data: proj } = await supabase
+        .from('projects')
+        .select('id, status')
+        .eq('id', row.project_id)
+        .maybeSingle();
+
+      if (proj && proj.status !== 'Cancelled' && proj.status !== 'Completed') {
+        await supabase
+          .from('projects')
+          .update({ status: 'Completed', updated_at: new Date().toISOString() })
+          .eq('id', row.project_id);
+
+        // Mark associated requirements as Completed
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Completed' })
+          .eq('project_id', row.project_id)
+          .in('status', ['Pending', 'Open', 'Approved', 'Partially Allocated', 'Filled', 'Fulfilled']);
+
+        // Invalidate caches
+        try {
+          const { clearDashboardCache } = require('../routes/ResourceManager/Dashboard');
+          if (typeof clearDashboardCache === 'function') clearDashboardCache();
+        } catch (e) {}
+        try {
+          const { clearProjectsCache } = require('../routes/ResourceManager/Projects');
+          if (typeof clearProjectsCache === 'function') clearProjectsCache();
+        } catch (e) {}
+        try {
+          const { clearEmployeeCache } = require('../routes/ResourceManager/Employees');
+          if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+        } catch (e) {}
+        try {
+          const workloadService = require('../services/workloadService');
+          if (typeof workloadService.invalidateRelatedCaches === 'function') workloadService.invalidateRelatedCaches();
+        } catch (e) {}
+      }
+    } catch (projErr) {
+      console.warn('Non-fatal error updating project status on client feedback complete:', projErr.message);
+    }
+
     // Cross-role notifications: Sent ONLY to the Resource Manager (RM)
     // PMs and Employees will only be notified when the RM reviews and grants permission.
     try {

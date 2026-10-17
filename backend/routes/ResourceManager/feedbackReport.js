@@ -79,12 +79,24 @@ router.get('/project-ratings', async (req, res) => {
 
       const recommendVal = responses.find(r => typeof r.would_recommend === 'boolean')?.would_recommend ?? null;
 
+      // Resolve accurate project status:
+      // If DB project is explicitly Completed, Cancelled, or Archived, respect it.
+      // If client feedback request itself is completed, resolve as 'Completed'.
+      let resolvedProjectStatus = project?.status;
+      if (resolvedProjectStatus === 'Cancelled' || resolvedProjectStatus === 'Canceled') {
+        resolvedProjectStatus = 'Cancelled';
+      } else if (resolvedProjectStatus === 'Completed' || reqRow.status === 'completed') {
+        resolvedProjectStatus = 'Completed';
+      } else {
+        resolvedProjectStatus = resolvedProjectStatus || 'Active';
+      }
+
       list.push({
         id: reqRow.id,
         projectId: reqRow.project_id,
         projectName: project?.project_name || 'Unnamed Project',
         projectCode: project?.project_code || '—',
-        projectStatus: project?.status || 'Active',
+        projectStatus: resolvedProjectStatus,
         clientName: reqRow.client_name || 'Client',
         clientEmail: reqRow.client_email || '—',
         completedAt: reqRow.completed_at || reqRow.created_at,
@@ -159,7 +171,7 @@ router.get('/', async (req, res) => {
         created_at,
         subject:profiles!performance_records_profile_id_fkey ( id, employee_id, first_name, last_name, role ),
         evaluator:profiles!performance_records_created_by_fkey ( id, employee_id, first_name, last_name, role ),
-        project:projects!performance_records_project_id_fkey ( id, project_name, project_code )
+        project:projects!performance_records_project_id_fkey ( id, project_name, project_code, status )
       `)
       .order('rated_at', { ascending: false });
 

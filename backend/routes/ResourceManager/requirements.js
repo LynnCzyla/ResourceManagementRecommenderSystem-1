@@ -85,8 +85,7 @@ router.get('/', async (req, res) => {
             .from('projects')
             .select('id, status')
             .in('created_by', userIds)
-            .neq('status', 'Completed')
-            .neq('status', 'Archived');
+            .not('status', 'in', '("Completed","Archived","Cancelled","Canceled")');
 
         if (projectError) {
             console.error('❌ Error fetching branch projects:', projectError);
@@ -160,7 +159,7 @@ async function transformRequirements(data) {
     // ✅ 'Rejected' is intentionally NOT filtered — RMs need to see rejection history.
     const activeData = (data || []).filter(item => {
         const projStatus = item.projects?.status;
-        if (projStatus === 'Completed' || projStatus === 'Archived') return false;
+        if (['Completed', 'Archived', 'Cancelled', 'Canceled'].includes(projStatus)) return false;
         if (['Cancelled', 'Canceled', 'Completed', 'Done'].includes(item.status)) return false;
         return true;
     });
@@ -398,8 +397,12 @@ router.put('/:id/status', async (req, res) => {
         try {
             const { clearDashboardCache } = require('./Dashboard');
             const { clearProjectsCache } = require('./Projects');
-            if (clearDashboardCache) clearDashboardCache(isSuperAdmin ? null : userBranchId);
-            if (clearProjectsCache) clearProjectsCache(isSuperAdmin ? null : userBranchId);
+            const { clearEmployeeCache } = require('./Employees');
+            if (clearDashboardCache) clearDashboardCache();
+            if (clearProjectsCache) clearProjectsCache();
+            if (clearEmployeeCache) clearEmployeeCache();
+            const pmProjects = require('../ProjectManager/projects');
+            if (pmProjects?.invalidateProjectsCache) pmProjects.invalidateProjectsCache();
         } catch (cErr) {
             console.warn('⚠️ Non-fatal error clearing cache after requirement status update:', cErr.message);
         }
@@ -534,6 +537,18 @@ router.post('/', async (req, res) => {
         }
 
         console.log(`✅ Requirement created with ID: ${data.id}`);
+        try {
+            const { clearDashboardCache } = require('./Dashboard');
+            const { clearProjectsCache } = require('./Projects');
+            const { clearEmployeeCache } = require('./Employees');
+            if (typeof clearDashboardCache === 'function') clearDashboardCache();
+            if (typeof clearProjectsCache === 'function') clearProjectsCache();
+            if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+            const pmProjects = require('../ProjectManager/projects');
+            if (pmProjects?.invalidateProjectsCache) pmProjects.invalidateProjectsCache();
+        } catch (cErr) {
+            console.warn('Non-fatal cache clear error after requirement create:', cErr.message);
+        }
         res.json({
             success: true,
             data: data,
@@ -609,6 +624,18 @@ router.delete('/:id', async (req, res) => {
         }
 
         console.log(`✅ Requirement ${id} cancelled`);
+        try {
+            const { clearDashboardCache } = require('./Dashboard');
+            const { clearProjectsCache } = require('./Projects');
+            const { clearEmployeeCache } = require('./Employees');
+            if (typeof clearDashboardCache === 'function') clearDashboardCache();
+            if (typeof clearProjectsCache === 'function') clearProjectsCache();
+            if (typeof clearEmployeeCache === 'function') clearEmployeeCache();
+            const pmProjects = require('../ProjectManager/projects');
+            if (pmProjects?.invalidateProjectsCache) pmProjects.invalidateProjectsCache();
+        } catch (cErr) {
+            console.warn('Non-fatal cache clear error after requirement cancel:', cErr.message);
+        }
         res.json({
             success: true,
             message: 'Requirement cancelled successfully'

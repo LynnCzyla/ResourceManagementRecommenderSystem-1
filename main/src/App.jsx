@@ -16,6 +16,7 @@ import JobOfferDecisionPage from './frontend/Public/JobOfferDecisionPage';
 import { supabase, getSession, establishSessionFromUrl } from './lib/supabaseClient';
 import Swal from 'sweetalert2';
 import axios from 'axios';
+import { clearAllCache as clearPmCache } from './frontend/ProjectManager/pmApi';
 import './App.css';
 
 const BOOT_IS_RECOVERY =
@@ -148,6 +149,7 @@ function App() {
 
   const performLogout = async () => {
     try {
+      clearPmCache();
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('loginTime');
