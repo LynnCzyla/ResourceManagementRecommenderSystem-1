@@ -34,6 +34,8 @@ export default function ApplicantJobPostingsTab() {
 
   // ✅ Add state for max file size
   const [maxFileSize, setMaxFileSize] = useState(5);
+  const [cvTemplate, setCvTemplate] = useState(null);
+  const [cvTemplateLoading, setCvTemplateLoading] = useState(true);
 
   const [applyForm, setApplyForm] = useState({
     firstName: '',
@@ -71,6 +73,31 @@ export default function ApplicantJobPostingsTab() {
       console.error('❌ Failed to fetch system settings:', err);
       // Keep default 5MB
     }
+  };
+
+  const fetchCvTemplate = async () => {
+    setCvTemplateLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/cv-template`);
+      if (res.ok) {
+        const data = await res.json();
+        setCvTemplate(data.data || null);
+      }
+    } catch (err) {
+      console.warn('Could not load CV template:', err);
+    } finally {
+      setCvTemplateLoading(false);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    if (!cvTemplate?.download_url) return;
+    window.open(cvTemplate.download_url, '_blank', 'noreferrer');
+  };
+
+  const handleViewTemplate = () => {
+    if (!cvTemplate?.view_url) return;
+    window.open(cvTemplate.view_url, '_blank', 'noreferrer');
   };
 
   // Fetch branches for filter
@@ -176,6 +203,7 @@ export default function ApplicantJobPostingsTab() {
   useEffect(() => {
     fetchBranches();
     fetchSystemSettings(); // ✅ Fetch system settings on mount
+    fetchCvTemplate();
     loadJobPostings();
   }, []);
 
@@ -426,6 +454,69 @@ export default function ApplicantJobPostingsTab() {
   return (
     <div style={styles.container}>
       {error && <div style={styles.errorBanner}>{error}</div>}
+
+      {/* Official CV Template Download Banner */}
+      <div className="glass-card" style={styles.cvBanner}>
+        <div style={styles.cvBannerLeft}>
+          <div style={styles.cvBannerIconWrap}>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+          </div>
+          <div>
+            <h3 style={styles.cvBannerHeading}>Official Applicant CV Template</h3>
+            <p style={styles.cvBannerSubtext}>
+              {cvTemplate
+                ? `Download our standard template (${cvTemplate.file_name}), fill it out, and attach it when applying.`
+                : 'No CV template available yet. You may apply using your own standard resume.'}
+            </p>
+          </div>
+        </div>
+
+        <div style={styles.cvBannerActions}>
+          {cvTemplateLoading ? (
+            <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Loading template…</span>
+          ) : cvTemplate ? (
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {cvTemplate.view_url && (
+                <button
+                  type="button"
+                  id="applicant-view-template-btn"
+                  style={styles.cvOutlineBtn}
+                  onClick={handleViewTemplate}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}>
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  View
+                </button>
+              )}
+              {cvTemplate.download_url && (
+                <button
+                  type="button"
+                  id="applicant-download-template-btn"
+                  style={styles.cvPrimaryBtn}
+                  onClick={handleDownloadTemplate}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download CV Template
+                </button>
+              )}
+            </div>
+          ) : (
+            <span style={styles.noTemplateText}>No CV template available yet.</span>
+          )}
+        </div>
+      </div>
 
       <div className="applicant-search-section" style={styles.searchSection}>
         <div className="applicant-search-bar" style={styles.searchBar}>
@@ -714,24 +805,94 @@ export default function ApplicantJobPostingsTab() {
                 </div>
 
                 <div style={styles.formSection}>
-                  <h4 style={styles.formSectionTitle}>Resume</h4>
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>
-                      Upload Resume (PDF only) *
-                      <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>
-                        (Max {maxFileSize}MB)
-                      </span>
-                    </label>
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      required
-                      onChange={handleApplyFileChange}
-                      style={styles.fileInput}
-                    />
-                    <p style={styles.fileHelp}>
-                      Accepted formats: PDF only. Max size: {maxFileSize}MB
-                    </p>
+                  <div style={styles.cvModalSection}>
+                    {/* Left: Template View & Download */}
+                    <div style={styles.cvModalTemplateSide}>
+                      <div style={styles.cvModalBoxHeader}>
+                        <div style={styles.cvStepNumSmall}>1</div>
+                        <div>
+                          <h4 style={styles.cvBoxHeading}>Official CV Template</h4>
+                          <p style={styles.cvBoxSubtext}>Download our template, complete it, and upload it next.</p>
+                        </div>
+                      </div>
+
+                      {cvTemplateLoading ? (
+                        <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Checking template…</span>
+                      ) : cvTemplate ? (
+                        <div style={styles.cvModalTemplateCard}>
+                          <div style={styles.cvTemplateFileBadge}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" style={{ flexShrink: 0 }}>
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                            <span style={{ fontSize: '13px', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {cvTemplate.file_name}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                            {cvTemplate.view_url && (
+                              <button
+                                type="button"
+                                onClick={handleViewTemplate}
+                                style={styles.cvOutlineBtnSmall}
+                                id="applicant-modal-view-template-btn"
+                              >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '4px' }}>
+                                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </svg>
+                                View
+                              </button>
+                            )}
+                            {cvTemplate.download_url && (
+                              <button
+                                type="button"
+                                onClick={handleDownloadTemplate}
+                                style={styles.cvPrimaryBtnSmall}
+                                id="applicant-modal-download-template-btn"
+                              >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '4px' }}>
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                  <polyline points="7 10 12 15 17 10" />
+                                  <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Download CV Template
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={styles.cvNoTemplateBox}>
+                          <p style={styles.cvNoTemplateText}>No CV template available yet.</p>
+                          <p style={styles.cvNoTemplateSub}>You may upload your own resume directly.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: Upload CV file right next to it! */}
+                    <div style={styles.cvModalUploadSide}>
+                      <div style={styles.cvModalBoxHeader}>
+                        <div style={styles.cvStepNumSmall}>2</div>
+                        <div>
+                          <h4 style={styles.cvBoxHeading}>Upload Completed CV *</h4>
+                          <p style={styles.cvBoxSubtext}>PDF only (Max {maxFileSize}MB).</p>
+                        </div>
+                      </div>
+
+                      <div style={styles.formGroup}>
+                        <input
+                          type="file"
+                          accept="application/pdf"
+                          required
+                          onChange={handleApplyFileChange}
+                          style={styles.fileInput}
+                          id="modal-resume-input"
+                        />
+                        <p style={styles.fileHelp}>
+                          Accepted formats: PDF only. Max size: {maxFileSize}MB
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1135,5 +1296,189 @@ const styles = {
   metaText: {
     fontSize: '13px',
     color: 'var(--color-text-secondary)',
+  },
+  cvBanner: {
+    padding: '20px 24px',
+    marginBottom: '20px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '16px',
+    borderRadius: '12px',
+    border: '1px solid var(--color-border)',
+  },
+  cvBannerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    flex: '1 1 320px',
+  },
+  cvBannerIconWrap: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '12px',
+    backgroundColor: 'var(--color-primary-light, rgba(59,130,246,0.1))',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  cvBannerHeading: {
+    fontSize: '16px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    margin: '0 0 4px 0',
+  },
+  cvBannerSubtext: {
+    fontSize: '13px',
+    color: 'var(--color-text-secondary)',
+    margin: 0,
+    lineHeight: 1.5,
+  },
+  cvBannerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  cvOutlineBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '9px 16px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-primary)',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  cvPrimaryBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '9px 16px',
+    borderRadius: '8px',
+    border: 'none',
+    backgroundColor: 'var(--color-primary)',
+    color: '#fff',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  cvOutlineBtnSmall: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    border: '1px solid var(--color-border)',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-primary)',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  cvPrimaryBtnSmall: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    border: 'none',
+    backgroundColor: 'var(--color-primary)',
+    color: '#fff',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  noTemplateText: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted)',
+    fontStyle: 'italic',
+  },
+  cvModalSection: {
+    display: 'flex',
+    gap: '16px',
+    flexWrap: 'wrap',
+    padding: '16px',
+    backgroundColor: 'var(--color-bg-root, rgba(0,0,0,0.02))',
+    borderRadius: '10px',
+    border: '1px solid var(--color-border)',
+  },
+  cvModalTemplateSide: {
+    flex: '1 1 240px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  cvModalUploadSide: {
+    flex: '1 1 240px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  cvModalBoxHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  cvStepNumSmall: {
+    width: '22px',
+    height: '22px',
+    borderRadius: '50%',
+    backgroundColor: 'var(--color-primary)',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '11px',
+    fontWeight: '700',
+    flexShrink: 0,
+  },
+  cvBoxHeading: {
+    fontSize: '13px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    margin: 0,
+  },
+  cvBoxSubtext: {
+    fontSize: '11px',
+    color: 'var(--color-text-secondary)',
+    margin: '2px 0 0 0',
+  },
+  cvModalTemplateCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    padding: '10px',
+    borderRadius: '8px',
+    backgroundColor: 'var(--color-bg-card)',
+    border: '1px solid var(--color-border)',
+  },
+  cvTemplateFileBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    color: 'var(--color-text-primary)',
+  },
+  cvNoTemplateBox: {
+    padding: '12px',
+    borderRadius: '8px',
+    backgroundColor: 'var(--color-bg-card)',
+    border: '1px dashed var(--color-border)',
+    textAlign: 'center',
+  },
+  cvNoTemplateText: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: 'var(--color-text-secondary)',
+    margin: '0 0 2px 0',
+  },
+  cvNoTemplateSub: {
+    fontSize: '11px',
+    color: 'var(--color-text-muted)',
+    margin: 0,
   },
 };

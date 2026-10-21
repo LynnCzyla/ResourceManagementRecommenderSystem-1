@@ -26,24 +26,39 @@ function resolveUserId(user) {
   return undefined;
 }
 
-function StarInput({ value, onChange }) {
+function StarInput({ value, onChange, size = 30, disabled = false }) {
+  const [hover, setHover] = useState(0);
   return (
-    <div style={{ display: 'flex', gap: 4 }}>
-      {[1, 2, 3, 4, 5].map(n => (
-        <span
-          key={n}
-          onClick={() => onChange(n)}
-          style={{
-            cursor: 'pointer',
-            fontSize: 22,
-            color: n <= (value || 0) ? '#f59e0b' : 'var(--color-border, #d1d5db)',
-            transition: 'color 0.15s ease',
-            userSelect: 'none',
-          }}
-        >
-          ★
-        </span>
-      ))}
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      {[1, 2, 3, 4, 5].map(n => {
+        const filled = (hover || value || 0) >= n;
+        const isHovered = hover === n;
+        return (
+          <span
+            key={n}
+            onClick={() => !disabled && onChange && onChange(n)}
+            onMouseEnter={() => !disabled && setHover(n)}
+            onMouseLeave={() => !disabled && setHover(0)}
+            style={{
+              cursor: disabled ? 'default' : 'pointer',
+              fontSize: `${size}px`,
+              lineHeight: 1,
+              color: filled ? '#f59e0b' : 'rgba(148, 163, 184, 0.28)',
+              textShadow: filled ? '0 0 10px rgba(245, 158, 11, 0.35)' : 'none',
+              transform: !disabled && isHovered ? 'scale(1.15)' : 'scale(1)',
+              transition: 'color 0.15s ease, transform 0.12s ease, text-shadow 0.15s ease',
+              userSelect: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1px',
+            }}
+            title={disabled ? undefined : `${n} Star${n > 1 ? 's' : ''}`}
+          >
+            ★
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -203,7 +218,20 @@ export default function PMSendFeedbackTab({ user }) {
     setSelectedProfileIds([]);
   };
 
-  const handleStar = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const handleStar = (field, value) => {
+    setForm(prev => {
+      const next = { ...prev, [field]: value };
+      const criteriaKeys = Object.keys(RATING_LABELS);
+      const allRated = criteriaKeys.every(k => (next[k] || 0) > 0);
+      if (allRated) {
+        const sum = criteriaKeys.reduce((acc, k) => acc + (next[k] || 0), 0);
+        next.rating = Number((sum / criteriaKeys.length).toFixed(2));
+      } else {
+        next.rating = 0;
+      }
+      return next;
+    });
+  };
   const handleText = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
@@ -216,8 +244,10 @@ export default function PMSendFeedbackTab({ user }) {
       Swal.fire('No employees selected', 'Please select at least one employee checkbox to evaluate.', 'warning');
       return;
     }
-    if (!form.rating) {
-      Swal.fire('Missing rating', 'Please give an overall star rating before submitting.', 'warning');
+    const criteriaKeys = Object.keys(RATING_LABELS);
+    const unrated = criteriaKeys.filter(k => !form[k] || form[k] < 1);
+    if (unrated.length > 0 || !form.rating) {
+      Swal.fire('Incomplete evaluation', 'Please rate all six criteria before submitting. Overall Rating will be calculated automatically.', 'warning');
       return;
     }
 
@@ -299,10 +329,21 @@ export default function PMSendFeedbackTab({ user }) {
     },
     ratingRow: {
       display: 'flex',
-      justifyContent: 'space-between',
       alignItems: 'center',
-      padding: '10px 0',
-      borderBottom: '1px solid var(--color-border)',
+      gap: '36px',
+      padding: '15px 8px',
+      borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+      borderRadius: '8px',
+      flexWrap: 'wrap',
+    },
+    ratingLabel: {
+      width: '200px',
+      minWidth: '200px',
+      fontSize: '14.5px',
+      fontWeight: 500,
+      color: 'var(--color-text-primary)',
+      display: 'flex',
+      alignItems: 'center',
     },
     button: {
       padding: '12px 24px',
@@ -547,16 +588,69 @@ export default function PMSendFeedbackTab({ user }) {
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div style={styles.ratingRow}>
-              <span style={{ fontWeight: 600 }}>Overall Rating *</span>
-              <StarInput value={form.rating} onChange={(v) => handleStar('rating', v)} />
-            </div>
-            {Object.entries(RATING_LABELS).map(([field, label]) => (
-              <div key={field} style={styles.ratingRow}>
-                <span>{label}</span>
-                <StarInput value={form[field]} onChange={(v) => handleStar(field, v)} />
+            {/* Overall Rating (Subtly highlighted card) */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '36px',
+              padding: '16px 20px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(245, 158, 11, 0.07)',
+              border: '1px solid rgba(245, 158, 11, 0.28)',
+              marginBottom: '12px',
+              flexWrap: 'wrap',
+            }}>
+              <div style={{ ...styles.ratingLabel, width: '200px', minWidth: '200px' }}>
+                <span style={{ fontWeight: 700, fontSize: '15.5px', color: '#fbbf24' }}>
+                  Overall Rating *
+                </span>
               </div>
-            ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                {form.rating > 0 ? (
+                  <>
+                    <StarInput value={Math.round(form.rating)} size={30} disabled={true} />
+                    <span style={{
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      color: '#fbbf24',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(245, 158, 11, 0.16)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                    }}>
+                      {form.rating.toFixed(2)} / 5
+                    </span>
+                  </>
+                ) : (
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    padding: '5px 14px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                    color: '#f59e0b',
+                    border: '1px solid rgba(245, 158, 11, 0.28)',
+                    letterSpacing: '0.3px',
+                  }}>
+                    Pending (Rate all 6 criteria)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Six Evaluation Criteria */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {Object.entries(RATING_LABELS).map(([field, label]) => (
+                <div key={field} style={styles.ratingRow}>
+                  <span style={styles.ratingLabel}>
+                    {label} *
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <StarInput value={form[field]} onChange={(v) => handleStar(field, v)} size={30} />
+                  </div>
+                </div>
+              ))}
+            </div>
 
             <div style={{ ...styles.formGroup, marginTop: 18 }}>
               <label style={styles.label}>PM Assessment</label>

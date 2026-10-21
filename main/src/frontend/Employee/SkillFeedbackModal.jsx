@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import Swal from 'sweetalert2';
 import { supabase } from '../../lib/supabaseClient';
 import { API_BASE_URL } from '../../config/api';
 
@@ -142,6 +143,16 @@ export default function SkillFeedbackModal({
         const key = skillKey(skillName);
         setApproved(prev => prev.filter(s => skillKey(s) !== key));
         setRejected(prev => prev.filter(s => skillKey(s) !== key));
+    };
+
+    const handleApproveAll = () => {
+        if (pendingSkills.length === 0) return;
+        setApproved(prev => {
+            const existingKeys = new Set(prev.map(s => skillKey(s)));
+            const toAdd = pendingSkills.filter(s => !existingKeys.has(skillKey(s)));
+            return [...prev, ...toAdd];
+        });
+        setRejected(prev => prev.filter(s => !pendingSkills.some(p => skillKey(p) === skillKey(s))));
     };
 
     const handleSubmit = async () => {
@@ -323,6 +334,23 @@ export default function SkillFeedbackModal({
                                 </div>
                             ) : (
                                 <>
+                                    {/* Pending Skills Header & Approve All */}
+                                    {pendingSkills.length > 0 && (
+                                        <div style={modalStyles.pendingHeaderRow}>
+                                            <span style={modalStyles.pendingHeaderTitle}>
+                                                Pending Review ({pendingSkills.length})
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={handleApproveAll}
+                                                style={modalStyles.approveAllBtn}
+                                                title={`Move all ${pendingSkills.length} pending skills to Approved`}
+                                            >
+                                                ✓ Approve All ({pendingSkills.length})
+                                            </button>
+                                        </div>
+                                    )}
+
                                     {/* Pending Skills — same neutral card as the simple view,
                                         with quiet outlined actions instead of solid color blocks */}
                                     {pendingSkills.map((skill, index) => (
@@ -818,6 +846,36 @@ const modalStyles = {
         fontSize: '16px',
         fontWeight: '600',
         color: 'var(--color-primary)',
+    },
+    pendingHeaderRow: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '12px',
+        paddingBottom: '8px',
+        borderBottom: '1px solid var(--color-border)',
+    },
+    pendingHeaderTitle: {
+        fontSize: '13px',
+        fontWeight: '600',
+        color: 'var(--color-text-secondary)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+    },
+    approveAllBtn: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '5px 14px',
+        backgroundColor: 'var(--color-primary, #2563eb)',
+        color: '#ffffff',
+        border: 'none',
+        borderRadius: 'var(--radius-sm, 6px)',
+        fontSize: '12px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
     },
 };
 
