@@ -6,14 +6,18 @@ import { API_BASE_URL } from '../../config/api';
 
 const PUBLIC_BASE = `${API_BASE_URL}/api/public`;
 
-const RATING_CATEGORIES = [
-  { key: 'rating', label: 'Overall Rating' },
+const CRITERIA_CATEGORIES = [
   { key: 'technical_skills_rating', label: 'Technical Skills' },
   { key: 'communication_rating', label: 'Communication' },
   { key: 'timeliness_rating', label: 'Timeliness' },
   { key: 'quality_of_work_rating', label: 'Quality of Work' },
   { key: 'teamwork_rating', label: 'Teamwork' },
   { key: 'problem_solving_rating', label: 'Problem Solving' },
+];
+
+const RATING_CATEGORIES = [
+  { key: 'rating', label: 'Overall Rating' },
+  ...CRITERIA_CATEGORIES,
 ];
 
 function emptyEmployeeResponse() {
@@ -114,11 +118,26 @@ export default function ClientFeedbackPage() {
   }, [token, loadRequest]);
 
   const updateEmployeeField = (employeeId, field, value) => {
-    setFieldErrors(prev => ({ ...prev, [`${employeeId}.${field}`]: undefined }));
-    setEmployeeResponses(prev => ({
+    setFieldErrors(prev => ({
       ...prev,
-      [employeeId]: { ...prev[employeeId], [field]: value },
+      [`${employeeId}.${field}`]: undefined,
+      [`${employeeId}.rating`]: undefined,
     }));
+    setEmployeeResponses(prev => {
+      const current = { ...(prev[employeeId] || emptyEmployeeResponse()), [field]: value };
+      // Check if all 6 criteria are rated
+      const allRated = CRITERIA_CATEGORIES.every(c => (current[c.key] || 0) > 0);
+      if (allRated) {
+        const sum = CRITERIA_CATEGORIES.reduce((acc, c) => acc + Number(current[c.key] || 0), 0);
+        current.rating = Number((sum / CRITERIA_CATEGORIES.length).toFixed(2));
+      } else {
+        current.rating = 0;
+      }
+      return {
+        ...prev,
+        [employeeId]: current,
+      };
+    });
   };
 
   const updateSharedField = (field, value) => {
@@ -131,10 +150,13 @@ export default function ClientFeedbackPage() {
     const pmTarget = requestData?.pm || (requestData?.employees || []).find(e => e.isPm) || (requestData?.employees || [])[0];
     if (pmTarget) {
       const r = employeeResponses[pmTarget.id] || emptyEmployeeResponse();
-      for (const cat of RATING_CATEGORIES) {
+      for (const cat of CRITERIA_CATEGORIES) {
         if (!r[cat.key] || r[cat.key] < 1) {
           errors[`${pmTarget.id}.${cat.key}`] = `${cat.label} is required`;
         }
+      }
+      if (!r.rating || r.rating < 1) {
+        errors[`${pmTarget.id}.rating`] = 'Please rate all criteria to calculate overall rating';
       }
       if (r.wouldRecommend === null) {
         errors[`${pmTarget.id}.wouldRecommend`] = 'Please select Yes or No';
@@ -442,8 +464,61 @@ export default function ClientFeedbackPage() {
                   </span>
                 </div>
 
-                <div style={styles.ratingGrid}>
-                  {RATING_CATEGORIES.map(cat => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '22px' }}>
+                  {/* Overall Rating (Automatically calculated) */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    paddingBottom: '14px',
+                    borderBottom: '1px solid var(--color-border)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                      <label style={{ ...styles.label, fontSize: '14px', fontWeight: '700', color: 'var(--color-text-primary)' }}>
+                        Overall Rating *
+                      </label>
+                      {r.rating > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+                            {[1, 2, 3, 4, 5].map(n => (
+                              <span
+                                key={n}
+                                style={{
+                                  fontSize: '24px',
+                                  lineHeight: 1,
+                                  color: n <= Math.round(r.rating) ? '#eab308' : 'var(--color-border)',
+                                  userSelect: 'none',
+                                }}
+                              >
+                                ★
+                              </span>
+                            ))}
+                          </div>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#eab308' }}>
+                            {r.rating} / 5 Stars
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          padding: '3px 10px',
+                          borderRadius: '6px',
+                          backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                          color: '#f59e0b',
+                          letterSpacing: '0.3px',
+                        }}>
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                    {fieldErrors[`${pmTarget.id}.rating`] && (
+                      <span style={styles.fieldError}>{fieldErrors[`${pmTarget.id}.rating`]}</span>
+                    )}
+                  </div>
+
+                  {/* 6 Evaluation Criteria arranged vertically */}
+                  {CRITERIA_CATEGORIES.map(cat => (
                     <div key={cat.key} style={styles.ratingGroup}>
                       <label style={styles.label}>{cat.label} *</label>
                       <StarRating

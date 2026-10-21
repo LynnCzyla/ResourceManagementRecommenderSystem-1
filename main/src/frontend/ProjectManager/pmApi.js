@@ -356,6 +356,14 @@ export function assignEmployeeToProject(projectId, employeeId, role, assignedBy)
   });
 }
 
+export function unassignEmployeeFromProject(projectId, employeeId) {
+  clearCacheForEndpoints(['/employees', '/projects', '/dashboard', '/tasks']);
+  return pm(`/projects/${projectId}/assign/${employeeId}`, {
+    method: 'DELETE',
+    skipCache: true
+  });
+}
+
 // ── Skills ──────────────────────────────────────────────────────────────
 
 // ✅ Get skills for autocomplete

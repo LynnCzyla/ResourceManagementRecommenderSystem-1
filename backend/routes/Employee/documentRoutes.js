@@ -126,6 +126,11 @@ router.get('/documents', verifyToken, documentController.getDocuments);
 router.get('/documents/:documentId/details', verifyToken, documentController.getDocumentDetails);
 
 router.get('/skills', verifyToken, documentController.getSkills);
+router.post('/skills/manual', verifyToken, documentController.addManualSkill);
+router.post('/manual-skill', verifyToken, documentController.addManualSkill);
+router.post('/skills', verifyToken, documentController.addManualSkill);
+router.delete('/skills/:skillId', verifyToken, documentController.deleteSkill);
+router.post('/approve-all-pending', verifyToken, documentController.approveAllPendingSkills);
 router.get('/stats', verifyToken, documentController.getStats);
 
 // ============ EMPLOYEE SUB-ROUTES ============
