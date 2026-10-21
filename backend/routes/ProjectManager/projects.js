@@ -1505,6 +1505,173 @@ router.patch('/:id/status', async (req, res) => {
   }
 });
 
+// ── DELETE /api/pm/projects/:id/assign/:employeeId — PM unassigns/removes an employee from their project ──
+router.delete('/:id/assign/:employeeId', async (req, res) => {
+  const { id, employeeId } = req.params;
+  const pmUserId = req.user?.id;
+
+  try {
+    // 1. Verify project exists
+    const { data: project, error: projError } = await supabase
+      .from('projects')
+      .select('id, project_name, created_by, branch_id')
+      .eq('id', id)
+      .single();
+
+    if (projError || !project) {
+      return res.status(404).json({ success: false, error: 'Project not found' });
+    }
+
+    // 2. Fetch employee details
+    const { data: employee, error: empError } = await supabase
+      .from('profiles')
+      .select('id, branch_id, first_name, last_name')
+      .eq('id', employeeId)
+      .single();
+
+    if (empError || !employee) {
+      return res.status(404).json({ success: false, error: 'Employee not found' });
+    }
+
+    // 3. Get assignment details before unassigning
+    const { data: assignmentData } = await supabase
+      .from('project_assignments')
+      .select('requirement_id, assigned_role')
+      .eq('project_id', id)
+      .eq('profile_id', employeeId)
+      .maybeSingle();
+
+    let requirementId = assignmentData?.requirement_id;
+    const assignedRole = assignmentData?.assigned_role || 'Team Member';
+
+    if (!requirementId && assignedRole && assignedRole !== 'Team Member' && assignedRole !== 'team member') {
+      const { data: matchedReq } = await supabase
+        .from('project_resource_requirements')
+        .select('id')
+        .eq('project_id', id)
+        .ilike('role_title', assignedRole.trim())
+        .maybeSingle();
+      if (matchedReq?.id) {
+        requirementId = matchedReq.id;
+      }
+    }
+
+    const todayDate = new Date().toISOString().split('T')[0];
+    const { error: unassignError } = await supabase
+      .from('project_assignments')
+      .update({
+        status: 'Unassigned',
+        end_date: todayDate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('project_id', id)
+      .eq('profile_id', employeeId)
+      .eq('status', 'Assigned');
+
+    if (unassignError) throw unassignError;
+
+    // 4. Unassign any non-completed tasks for this employee on this project
+    try {
+      await supabase
+        .from('project_tasks')
+        .update({ profile_id: null })
+        .eq('project_id', id)
+        .eq('profile_id', employeeId)
+        .neq('status', 'Completed');
+    } catch (taskErr) {
+      console.warn('Non-fatal task unassignment warning:', taskErr.message);
+    }
+
+    // 5. Reset requirement status back to 'Pending' if needed
+    if (requirementId) {
+      const { data: remaining } = await supabase
+        .from('project_assignments')
+        .select('id')
+        .eq('requirement_id', requirementId)
+        .eq('status', 'Assigned');
+
+      const { data: reqData } = await supabase
+        .from('project_resource_requirements')
+        .select('quantity_needed')
+        .eq('id', requirementId)
+        .single();
+
+      const needed = reqData?.quantity_needed || 1;
+      const count = remaining?.length || 0;
+
+      if (count < needed) {
+        await supabase
+          .from('project_resource_requirements')
+          .update({ status: 'Pending' })
+          .eq('id', requirementId);
+      }
+    }
+
+    // 6. Notifications
+    try {
+      const projectName = project.project_name || 'a project';
+      const empName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+      const notifs = [
+        {
+          recipient_id: employeeId,
+          type: 'assignment',
+          text: `You have been removed from project "${projectName}".`,
+          read: false
+        }
+      ];
+      if (project.created_by && project.created_by !== pmUserId) {
+        notifs.push({
+          recipient_id: project.created_by,
+          type: 'assignment',
+          text: `${empName || 'An employee'} has been removed from project "${projectName}" (${assignedRole}).`,
+          read: false
+        });
+      }
+      await supabase.from('notifications').insert(notifs);
+    } catch (nErr) {
+      console.warn('Non-fatal notification error:', nErr.message);
+    }
+
+    // 7. Audit log
+    try {
+      await logAuditEvent({
+        userId: pmUserId,
+        action: 'PROJECT_MEMBER_UNASSIGNED',
+        entity: 'project_assignments',
+        entityId: id,
+        details: { projectId: id, employeeId, assignedRole }
+      });
+    } catch (aErr) {}
+
+    // 8. Invalidate caches
+    invalidateProjectsCache();
+    try {
+      const { invalidateEmployeesCache } = require('./employees');
+      if (typeof invalidateEmployeesCache === 'function') invalidateEmployeesCache();
+    } catch (e) {}
+    try {
+      const { invalidateTasksCache } = require('./tasks');
+      if (typeof invalidateTasksCache === 'function') invalidateTasksCache();
+    } catch (e) {}
+
+    // 9. Recalculate workload
+    try {
+      const workloadService = require('../../services/workloadService');
+      if (workloadService?.recalculateForEmployee) {
+        workloadService.recalculateForEmployee(employeeId).catch(() => {});
+      }
+    } catch (wErr) {}
+
+    res.json({
+      success: true,
+      message: 'Employee removed from project successfully'
+    });
+  } catch (err) {
+    console.error('❌ PM project unassign error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ❌ DELETE /api/pm/projects/:id — Hard DELETE permanently disabled per lifecycle policy (D02 fix)
 router.delete('/:id', async (req, res) => {
   return res.status(405).json({

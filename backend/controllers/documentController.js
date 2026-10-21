@@ -13,6 +13,49 @@ const {
     addComparisonKeys,
     hasComparisonKey
 } = require('../utils/skillNormalizer');
+const { logAuditEvent } = require('../utils/auditLogger');
+
+// Acronyms to preserve casing for (e.g. CRM, ERP, PLC)
+const KNOWN_ACRONYMS = new Map([
+    ['crm', 'CRM'],
+    ['erp', 'ERP'],
+    ['plc', 'PLC'],
+    ['sql', 'SQL'],
+    ['cad', 'CAD'],
+    ['cam', 'CAM'],
+    ['scada', 'SCADA'],
+    ['api', 'API'],
+    ['aws', 'AWS'],
+    ['gcp', 'GCP'],
+    ['html', 'HTML'],
+    ['css', 'CSS'],
+    ['ui', 'UI'],
+    ['ux', 'UX'],
+    ['hr', 'HR'],
+    ['seo', 'SEO'],
+    ['qa', 'QA'],
+    ['ai', 'AI'],
+    ['ml', 'ML'],
+    ['iot', 'IoT'],
+    ['it', 'IT'],
+    ['saas', 'SaaS'],
+    ['hvac', 'HVAC'],
+    ['cnc', 'CNC'],
+    ['pcb', 'PCB'],
+    ['vlsi', 'VLSI']
+]);
+
+function formatSkillNameWithAcronyms(name) {
+    if (!name) return '';
+    const trimmed = typeof normalizeSkill === 'function' ? normalizeSkill(name) : String(name).trim();
+    return trimmed.split(/(\s+|-|\/)/).map(token => {
+        const lower = token.toLowerCase();
+        if (KNOWN_ACRONYMS.has(lower)) {
+            return KNOWN_ACRONYMS.get(lower);
+        }
+        return token;
+    }).join('');
+}
 
 // ============================================================
 // Cached Profile Helper — avoids re-querying `profiles` on every
@@ -490,7 +533,7 @@ exports.getDocuments = async (req, res) => {
 
         const { data, error: fetchError } = await supabase
             .from('documents')
-            .select('id, document_type, file_name, created_at, processed_at, feedback_pending, skills_approved, extraction_method, ocr_confidence, word_count')
+            .select('id, document_type, file_name, created_at, processed_at, feedback_pending, skills_approved, extraction_method, ocr_confidence, word_count, extracted_skills, approved_skills, rejected_skills')
             .eq('employee_id', profileData.employee_id)
             .order('created_at', { ascending: false });
 
@@ -606,11 +649,367 @@ exports.getSkills = async (req, res) => {
 
         if (skillsError) throw skillsError;
 
-        const skills = data.map(item => item.skills).filter(Boolean);
+        // Return the employee_skills row id as `es_id` so the client can
+        // reference the correct row when deleting, without exposing the
+        // internal profile_id.
+        const skills = (data || []).map(item => ({
+            ...item.skills,
+            es_id: item.id   // employee_skills row id (used for DELETE)
+        })).filter(s => s && s.skill_name);
         res.json({ success: true, data: skills });
 
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============ MANUAL SKILL ENTRY ============
+exports.addManualSkill = async (req, res) => {
+    try {
+        // 1. Resolve profile_id from JWT (req.user.id), never from req.body
+        const { data: ownProfile, error: profileErr } = await getProfileFromToken(req.user.id);
+        if (profileErr || !ownProfile) {
+            return res.status(401).json({ success: false, error: 'User profile not found' });
+        }
+
+        const rawSkillName = req.body.skill_name || req.body.name || req.body.skill;
+        if (!rawSkillName || typeof rawSkillName !== 'string' || !rawSkillName.trim()) {
+            return res.status(400).json({ success: false, error: 'Skill name is required' });
+        }
+
+        // 2. Normalize the name with backend/utils/skillNormalizer.js (keep acronym casing like CRM, ERP, PLC)
+        const trimmed = normalizeSkill(rawSkillName);
+        const cleanSkillName = formatSkillNameWithAcronyms(trimmed);
+        const searchKey = skillKey(cleanSkillName);
+
+        if (!cleanSkillName) {
+            return res.status(400).json({ success: false, error: 'Valid skill name is required' });
+        }
+
+        // 3. Block duplicates for the same employee with a friendly message
+        const { data: existingUserSkills, error: userSkillsErr } = await supabase
+            .from('employee_skills')
+            .select('skill_id, skills ( id, skill_name )')
+            .eq('profile_id', ownProfile.id);
+
+        if (userSkillsErr) throw userSkillsErr;
+
+        const userSkillKeys = new Set();
+        (existingUserSkills || []).forEach(item => {
+            const existingName = item.skills?.skill_name;
+            if (existingName) {
+                addComparisonKeys(userSkillKeys, existingName);
+            }
+        });
+
+        const isDuplicate = hasComparisonKey(userSkillKeys, cleanSkillName);
+        if (isDuplicate) {
+            return res.status(409).json({
+                success: false,
+                error: `"${cleanSkillName}" is already in your skills portfolio.`
+            });
+        }
+
+        // 4. Find it in the skills table (case-insensitive), or create it if new
+        const { data: existingMasterSkills, error: masterErr } = await supabase
+            .from('skills')
+            .select('id, skill_name');
+
+        if (masterErr) throw masterErr;
+
+        let targetSkillId = null;
+        let officialSkillName = cleanSkillName;
+
+        if (existingMasterSkills && existingMasterSkills.length > 0) {
+            const matched = existingMasterSkills.find(s => {
+                const sKeys = new Set(buildComparisonKeys(s.skill_name));
+                return hasComparisonKey(sKeys, cleanSkillName);
+            });
+            if (matched) {
+                targetSkillId = matched.id;
+                officialSkillName = matched.skill_name;
+            }
+        }
+
+        if (!targetSkillId) {
+            const { data: newSkill, error: insertSkillErr } = await supabase
+                .from('skills')
+                .insert({ skill_name: cleanSkillName })
+                .select()
+                .single();
+
+            if (insertSkillErr) {
+                // In case of race condition or case-insensitive collision
+                const { data: foundSkill } = await supabase
+                    .from('skills')
+                    .select('id, skill_name')
+                    .ilike('skill_name', cleanSkillName)
+                    .maybeSingle();
+
+                if (foundSkill) {
+                    targetSkillId = foundSkill.id;
+                    officialSkillName = foundSkill.skill_name;
+                } else {
+                    throw insertSkillErr;
+                }
+            } else {
+                targetSkillId = newSkill.id;
+                officialSkillName = newSkill.skill_name;
+            }
+        }
+
+        // 5. Insert into employee_skills (NO schema changes, profile_id from JWT)
+        const { error: insertLinkErr } = await supabase
+            .from('employee_skills')
+            .insert({
+                profile_id: ownProfile.id,
+                skill_id: targetSkillId
+            });
+
+        if (insertLinkErr) {
+            if (insertLinkErr.code === '23505') {
+                return res.status(409).json({
+                    success: false,
+                    error: `"${officialSkillName}" is already in your skills portfolio.`
+                });
+            }
+            throw insertLinkErr;
+        }
+
+        // 6. Do NOT send manual skills to the ML feedback/training flow.
+
+        // 7. Add an audit log entry
+        await logAuditEvent({
+            req,
+            action: 'CREATE',
+            systemCategory: 'Skills Portfolio',
+            logDescription: `Employee manually added skill: "${officialSkillName}"`
+        });
+
+        return res.json({
+            success: true,
+            message: `"${officialSkillName}" added to your skills portfolio`,
+            data: {
+                id: targetSkillId,
+                skill_name: officialSkillName
+            }
+        });
+
+    } catch (error) {
+        console.error('Error adding manual skill:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============ DELETE A SKILL ============
+exports.deleteSkill = async (req, res) => {
+    try {
+        const { data: ownProfile, error: profileErr } = await getProfileFromToken(req.user.id);
+        if (profileErr || !ownProfile) {
+            return res.status(401).json({ success: false, error: 'User profile not found' });
+        }
+
+        const { skillId } = req.params;
+        if (!skillId) {
+            return res.status(400).json({ success: false, error: 'Skill ID is required' });
+        }
+
+        // Fetch the row first to confirm ownership and get the name for the audit log
+        const { data: row, error: fetchErr } = await supabase
+            .from('employee_skills')
+            .select('id, profile_id, skills ( skill_name )')
+            .eq('id', skillId)
+            .maybeSingle();
+
+        if (fetchErr) throw fetchErr;
+        if (!row) return res.status(404).json({ success: false, error: 'Skill not found' });
+        if (row.profile_id !== ownProfile.id) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        const skillName = row.skills?.skill_name || 'Unknown skill';
+
+        const { error: deleteErr } = await supabase
+            .from('employee_skills')
+            .delete()
+            .eq('id', skillId);
+
+        if (deleteErr) throw deleteErr;
+
+        await logAuditEvent({
+            req,
+            action: 'DELETE',
+            systemCategory: 'Skills Portfolio',
+            logDescription: `Employee removed skill from portfolio: "${skillName}"`
+        });
+
+        return res.json({ success: true, message: `"${skillName}" removed from your skills portfolio` });
+    } catch (error) {
+        console.error('Error deleting skill:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ============ APPROVE ALL PENDING SKILLS ============
+exports.approveAllPendingSkills = async (req, res) => {
+    try {
+        const { data: ownProfile, error: profileErr } = await getProfileFromToken(req.user.id);
+        if (profileErr || !ownProfile) {
+            return res.status(401).json({ success: false, error: 'User profile not found' });
+        }
+
+        const employeeId = ownProfile.employee_id || ownProfile.id;
+
+        // Fetch all documents for this employee that have pending feedback or unapproved skills
+        const { data: pendingDocs, error: docsErr } = await supabase
+            .from('documents')
+            .select('id, file_name, extracted_skills, approved_skills, rejected_skills, feedback_pending, skills_approved')
+            .eq('employee_id', employeeId)
+            .or('feedback_pending.eq.true,skills_approved.eq.false');
+
+        if (docsErr) throw docsErr;
+
+        if (!pendingDocs || pendingDocs.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No pending skills found',
+                count: 0
+            });
+        }
+
+        // Collect all unrejected skills from all pending documents
+        const allApprovedToInsert = new Set();
+        const docUpdates = [];
+
+        const toSkillArr = (val) => {
+            if (Array.isArray(val)) return val;
+            if (!val) return [];
+            if (typeof val === 'string') {
+                try {
+                    const p = JSON.parse(val);
+                    if (Array.isArray(p)) return p;
+                    if (typeof p === 'object' && p !== null) return Object.values(p);
+                } catch {
+                    return [val];
+                }
+            }
+            if (typeof val === 'object') return Object.values(val);
+            return [];
+        };
+
+        for (const doc of pendingDocs) {
+            const extracted = toSkillArr(doc.extracted_skills);
+            const rejected = new Set(toSkillArr(doc.rejected_skills).map(r => skillKey(typeof r === 'string' ? r : (r?.skill_name || ''))));
+            const alreadyApproved = new Set(toSkillArr(doc.approved_skills).map(a => skillKey(typeof a === 'string' ? a : (a?.skill_name || ''))));
+
+            const newDocApproved = [...toSkillArr(doc.approved_skills)];
+
+            for (const skill of extracted) {
+                const sName = typeof skill === 'string' ? skill : (skill.skill_name || skill.skill || '');
+                if (!sName) continue;
+                const k = skillKey(sName);
+                if (!rejected.has(k)) {
+                    allApprovedToInsert.add(sName);
+                    if (!alreadyApproved.has(k)) {
+                        newDocApproved.push(sName);
+                    }
+                }
+            }
+
+            docUpdates.push({
+                id: doc.id,
+                approved_skills: newDocApproved,
+                feedback_pending: false,
+                skills_approved: true
+            });
+        }
+
+        const skillsToLink = Array.from(allApprovedToInsert);
+
+        if (skillsToLink.length > 0) {
+            // Find or create in skills table
+            const { data: allMasterSkills } = await supabase
+                .from('skills')
+                .select('id, skill_name');
+
+            const masterMap = new Map();
+            (allMasterSkills || []).forEach(s => {
+                masterMap.set(skillKey(s.skill_name), s.id);
+            });
+
+            const skillIdsToLink = [];
+            for (const sName of skillsToLink) {
+                const k = skillKey(sName);
+                if (masterMap.has(k)) {
+                    skillIdsToLink.push(masterMap.get(k));
+                } else {
+                    const { data: createdSkill } = await supabase
+                        .from('skills')
+                        .insert({ skill_name: sName })
+                        .select('id')
+                        .single();
+                    if (createdSkill) {
+                        masterMap.set(k, createdSkill.id);
+                        skillIdsToLink.push(createdSkill.id);
+                    }
+                }
+            }
+
+            // Check existing links for this profile
+            const { data: existingLinks } = await supabase
+                .from('employee_skills')
+                .select('skill_id')
+                .eq('profile_id', ownProfile.id);
+
+            const existingSet = new Set((existingLinks || []).map(l => l.skill_id));
+            const missingLinks = [...new Set(skillIdsToLink)]
+                .filter(id => !existingSet.has(id))
+                .map(id => ({ profile_id: ownProfile.id, skill_id: id, source: 'extracted' }));
+
+            if (missingLinks.length > 0) {
+                const { error: insertLinksErr } = await supabase
+                    .from('employee_skills')
+                    .insert(missingLinks);
+
+                if (insertLinksErr && insertLinksErr.code === '42703') {
+                    // Fallback without source column
+                    const basicLinks = missingLinks.map(({ profile_id, skill_id }) => ({ profile_id, skill_id }));
+                    await supabase.from('employee_skills').insert(basicLinks);
+                }
+            }
+
+            // Save feedback training records for learning
+            const trainingRows = skillsToLink.map(phrase => ({
+                phrase,
+                label: 1,
+                employee_id: employeeId
+            }));
+            if (trainingRows.length > 0) {
+                await supabase.from('feedback_training').insert(trainingRows);
+            }
+        }
+
+        // Update all documents
+        for (const upd of docUpdates) {
+            await supabase
+                .from('documents')
+                .update({
+                    approved_skills: upd.approved_skills,
+                    feedback_pending: false,
+                    skills_approved: true
+                })
+                .eq('id', upd.id);
+        }
+
+        return res.json({
+            success: true,
+            message: `Successfully approved all pending skills across ${docUpdates.length} document(s)`,
+            count: skillsToLink.length
+        });
+
+    } catch (error) {
+        console.error('Error approving all pending skills:', error);
+        return res.status(500).json({ success: false, error: error.message });
     }
 };
 

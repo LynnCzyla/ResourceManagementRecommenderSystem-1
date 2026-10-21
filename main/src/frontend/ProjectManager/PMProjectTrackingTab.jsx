@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Swal from 'sweetalert2';
-import { getEmployees, getTasks, createTask, updateTask, deleteTask, getProjects, updateProject, assignEmployeeToProject } from './pmApi';
+import { getEmployees, getTasks, createTask, updateTask, deleteTask, getProjects, updateProject, assignEmployeeToProject, unassignEmployeeFromProject } from './pmApi';
 
 // Employees are only guaranteed a formal `project_assignments` row when
 // they were added to a project through the assignment flow. Tasks are
@@ -148,6 +148,58 @@ export default function PMProjectTrackingTab({ user }) {
     } catch (err) {
       console.error('❌ loadTasks: Failed to fetch tasks:', err);
       setLoadError(err.message || 'Failed to load tasks');
+    }
+  };
+
+  const handleUnassignEmployee = async (employeeId, employeeName, targetProjectId, projectName) => {
+    const proj = projects.find(p => String(p.id) === String(targetProjectId));
+    const projTitle = projectName || proj?.name || 'this project';
+
+    const result = await Swal.fire({
+      title: 'Remove from Project?',
+      html: `Are you sure you want to unassign <strong>${employeeName}</strong> from <strong>"${projTitle}"</strong>?<br/><br/><span style="font-size:13px;color:var(--color-text-secondary)">Any active, non-completed tasks for this employee on this project will be unassigned.</span>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Remove',
+      cancelButtonText: 'Keep on Project',
+      reverseButtons: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      customClass: {
+        popup: 'swal-custom-popup',
+      }
+    });
+
+    if (result.isConfirmed) {
+      try {
+        await unassignEmployeeFromProject(targetProjectId, employeeId);
+        Swal.fire({
+          title: 'Removed!',
+          text: `${employeeName} has been removed from "${projTitle}".`,
+          icon: 'success',
+          timer: 1800,
+          showConfirmButton: false,
+          customClass: {
+            popup: 'swal-custom-popup',
+          }
+        });
+        if (viewingEmployee && String(viewingEmployee.emp.id) === String(employeeId)) {
+          setViewingEmployee(null);
+        }
+        await Promise.all([
+          loadEmployees(selectedProjectId),
+          loadTasks(selectedProjectId),
+          loadProjects(),
+        ]);
+      } catch (err) {
+        console.error('Failed to unassign employee:', err);
+        Swal.fire({
+          title: 'Error',
+          text: err.message || 'Failed to remove employee from project.',
+          icon: 'error',
+          confirmButtonColor: 'var(--color-primary)',
+        });
+      }
     }
   };
 
@@ -914,17 +966,40 @@ export default function PMProjectTrackingTab({ user }) {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  style={styles.teamViewBtn}
-                  onClick={() => setViewingEmployee({ emp, projects: empProjects, tasks: empTasks })}
-                  title={`View projects assigned to ${emp.name}`}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    style={styles.teamViewBtn}
+                    onClick={() => setViewingEmployee({ emp, projects: empProjects, tasks: empTasks })}
+                    title={`View projects assigned to ${emp.name}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+
+                  {selectedProjectId !== 'all' && !isViewingCompletedProject && (
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.teamViewBtn,
+                        color: 'var(--color-danger, #ef4444)',
+                        borderColor: 'rgba(239, 68, 68, 0.35)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                      }}
+                      onClick={() => handleUnassignEmployee(emp.id, emp.name, selectedProjectId, selectedProject?.name)}
+                      title={`Remove ${emp.name} from ${selectedProject?.name || 'this project'}`}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="8.5" cy="7" r="4" />
+                        <line x1="18" y1="8" x2="23" y2="13" />
+                        <line x1="23" y1="8" x2="18" y2="13" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -1114,8 +1189,39 @@ export default function PMProjectTrackingTab({ user }) {
                           <div style={styles.empModalProjectDates}>
                             {proj.startDate ? `${proj.startDate} → ${proj.endDate || 'Ongoing'}` : 'Timeline not specified'}
                           </div>
-                          <div style={styles.empModalTaskPill}>
-                            {projTasks.length} {projTasks.length === 1 ? 'task' : 'tasks'}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={styles.empModalTaskPill}>
+                              {projTasks.length} {projTasks.length === 1 ? 'task' : 'tasks'}
+                            </div>
+                            {proj.status !== 'Completed' && proj.status !== 'Cancelled' && (
+                              <button
+                                type="button"
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                                  color: 'var(--color-danger, #ef4444)',
+                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                onClick={() => handleUnassignEmployee(viewingEmployee.emp.id, viewingEmployee.emp.name, proj.id, proj.name || proj.project_name)}
+                                title={`Remove ${viewingEmployee.emp.name} from ${proj.name || proj.project_name || 'project'}`}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                  <circle cx="8.5" cy="7" r="4" />
+                                  <line x1="18" y1="8" x2="23" y2="13" />
+                                  <line x1="23" y1="8" x2="18" y2="13" />
+                                </svg>
+                                Unassign
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>

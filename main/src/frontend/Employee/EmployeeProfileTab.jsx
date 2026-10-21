@@ -42,6 +42,16 @@ export default function EmployeeProfileTab() {
   const [autoApprovedPredictions, setAutoApprovedPredictions] = useState({});
   const [previouslyRejectedSkills, setPreviouslyRejectedSkills] = useState([]);
 
+  // Manual Skill Entry states
+  const [showAddSkillModal, setShowAddSkillModal] = useState(false);
+  const [newSkillName, setNewSkillName] = useState('');
+  const [addingSkill, setAddingSkill] = useState(false);
+
+  // Edit Skills Modal states
+  const [showEditSkillsModal, setShowEditSkillsModal] = useState(false);
+  const [skillsToDelete, setSkillsToDelete] = useState([]);   // skills marked for removal
+  const [savingDeletes, setSavingDeletes] = useState(false);
+
   // Progress states
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState('');
@@ -262,13 +272,20 @@ export default function EmployeeProfileTab() {
 
       const skillsRes = await axios.get(`${API_URL}/employee/skills?employeeId=${actualEmployeeId}`, { headers: authHeader });
       if (skillsRes.data.success) {
-        // ============ FIX: Extract skill names from objects ============
-        const skillNames = skillsRes.data.data.map(s => {
-          if (typeof s === 'string') return s;
-          return s.skill_name || s.skill_tag || s.skill || String(s);
+        // Keep the skill objects so we have skill_name, source, proficiency, years
+        const skillList = skillsRes.data.data.map(s => {
+          if (typeof s === 'string') return { skill_name: s, source: 'extracted' };
+          return {
+            id: s.id,
+            es_id: s.es_id,   // employee_skills row id — used for DELETE
+            skill_name: s.skill_name || s.skill_tag || s.skill || String(s),
+            source: s.source || 'extracted',
+            proficiency: s.proficiency || null,
+            years: s.years || null
+          };
         });
-        console.log('📊 Processed skills:', skillNames);
-        setEmployeeSkills(skillNames);
+        console.log('📊 Processed skills:', skillList);
+        setEmployeeSkills(skillList);
       }
 
       // ============ FIX: Separate documents by type ============
@@ -648,7 +665,13 @@ export default function EmployeeProfileTab() {
     // the still-running save from the first one.
     setOcrLoading(true);
     if (approvedSkills?.length > 0) {
-      const merged = Array.from(new Set([...employeeSkills, ...approvedSkills]));
+      const existingKeys = new Set(
+        employeeSkills.map(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim())
+      );
+      const newItems = approvedSkills
+        .filter(name => !existingKeys.has(name.toLowerCase().trim()))
+        .map(name => ({ skill_name: name, source: 'extracted' }));
+      const merged = [...employeeSkills, ...newItems];
       setEmployeeSkills(merged);
       if (employeeInfo) setEmployeeInfo({ ...employeeInfo, skills: merged });
     }
@@ -683,7 +706,13 @@ export default function EmployeeProfileTab() {
 
       if (response.data.success) {
         console.log('✅ Auto-submitted feedback for auto-approved skills');
-        const merged = Array.from(new Set([...employeeSkills, ...approvedSkills]));
+        const existingKeys = new Set(
+          employeeSkills.map(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim())
+        );
+        const newItems = approvedSkills
+          .filter(name => !existingKeys.has(name.toLowerCase().trim()))
+          .map(name => ({ skill_name: name, source: 'extracted' }));
+        const merged = [...employeeSkills, ...newItems];
         setEmployeeSkills(merged);
         if (employeeInfo) setEmployeeInfo({ ...employeeInfo, skills: merged });
       }
@@ -714,6 +743,265 @@ export default function EmployeeProfileTab() {
   };
 
   const handleRemoveCert = (certId) => setCertifications(certifications.filter(c => c.id !== certId));
+
+  // ── Manual Skill Handlers ──────────────────────────────────────────────────
+  const handleOpenAddSkill = () => {
+    setNewSkillName('');
+    setShowAddSkillModal(true);
+  };
+
+  // ── Edit Skills Handlers ───────────────────────────────────────────────────
+  const handleOpenEditSkills = () => {
+    setSkillsToDelete([]);
+    setShowEditSkillsModal(true);
+  };
+
+  const handleMarkForDelete = (skill) => {
+    const key = (typeof skill === 'string' ? skill : (skill.skill_name || '')).toLowerCase().trim();
+    setSkillsToDelete(prev =>
+      prev.some(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim() === key)
+        ? prev
+        : [...prev, skill]
+    );
+  };
+
+  const handleUndoDelete = (skill) => {
+    const key = (typeof skill === 'string' ? skill : (skill.skill_name || '')).toLowerCase().trim();
+    setSkillsToDelete(prev =>
+      prev.filter(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim() !== key)
+    );
+  };
+
+  const handleSaveDeletedSkills = async () => {
+    if (skillsToDelete.length === 0) return;
+    setSavingDeletes(true);
+    try {
+      const authHeader = await getAuthHeader();
+      const errors = [];
+      for (const skill of skillsToDelete) {
+        // Use es_id (employee_skills row id) for the DELETE endpoint
+        const rowId = typeof skill === 'object' ? (skill.es_id || skill.id) : null;
+        if (rowId) {
+          try {
+            await axios.delete(`${API_URL}/employee/skills/${rowId}`, { headers: authHeader });
+          } catch (err) {
+            errors.push(typeof skill === 'object' ? (skill.skill_name || 'Unknown') : skill);
+          }
+        }
+        // If no rowId at all — skill was never persisted, just skip (it won't appear in DB)
+      }
+      // Remove deleted skills from local state
+      const deleteKeys = new Set(
+        skillsToDelete.map(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim())
+      );
+      setEmployeeSkills(prev =>
+        prev.filter(s => !deleteKeys.has((typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim()))
+      );
+      setSkillsToDelete([]);
+      setShowEditSkillsModal(false);
+      if (errors.length > 0) {
+        Swal.fire({ title: 'Partial Success', text: `Could not remove: ${errors.join(', ')}`, icon: 'warning', confirmButtonColor: '#2563eb' });
+      } else {
+        Swal.fire({ title: 'Done!', text: 'Skills removed from your portfolio.', icon: 'success', timer: 1800, showConfirmButton: false });
+      }
+    } catch (err) {
+      console.error('Error deleting skills:', err);
+      Swal.fire({ title: 'Error', text: 'Failed to remove skills. Please try again.', icon: 'error', confirmButtonColor: '#2563eb' });
+    } finally {
+      setSavingDeletes(false);
+    }
+  };
+
+  const handleSaveManualSkill = async (e) => {
+    if (e) e.preventDefault();
+    const cleanName = newSkillName.trim();
+    if (!cleanName) {
+      Swal.fire({
+        title: 'Skill Name Required',
+        text: 'Please enter a skill name before saving.',
+        icon: 'warning',
+        confirmButtonColor: '#2563eb'
+      });
+      return;
+    }
+
+    // Client-side duplicate check (case-insensitive & whitespace normalized)
+    const targetKey = cleanName.toLowerCase().replace(/\s+/g, ' ').trim();
+    const isDuplicate = employeeSkills.some(s => {
+      const name = typeof s === 'string' ? s : (s.skill_name || s.skill_tag || s.skill || '');
+      return name.toLowerCase().replace(/\s+/g, ' ').trim() === targetKey;
+    });
+
+    if (isDuplicate) {
+      Swal.fire({
+        title: 'Duplicate Skill',
+        text: `"${cleanName}" is already in your skills portfolio.`,
+        icon: 'info',
+        confirmButtonColor: '#2563eb'
+      });
+      return;
+    }
+
+    setAddingSkill(true);
+    try {
+      const authHeader = await getAuthHeader();
+      const response = await axios.post(
+        `${API_URL}/employee/skills/manual`,
+        {
+          skill_name: cleanName
+        },
+        { headers: authHeader }
+      );
+
+      if (response.data.success) {
+        const addedSkill = response.data.data;
+        // Show the new skill in the list right away
+        setEmployeeSkills(prev => [...prev, addedSkill]);
+        setShowAddSkillModal(false);
+        setNewSkillName('');
+
+        Swal.fire({
+          title: 'Skill Added!',
+          text: `"${addedSkill.skill_name || cleanName}" has been added to your skills portfolio.`,
+          icon: 'success',
+          timer: 2000,
+          showConfirmButton: false
+        });
+      }
+    } catch (err) {
+      console.error('Error adding manual skill:', err);
+      Swal.fire({
+        title: 'Duplicate or Invalid Skill',
+        text: err.response?.data?.error || err.message || 'Could not add skill.',
+        icon: 'warning',
+        confirmButtonColor: '#2563eb'
+      });
+    } finally {
+      setAddingSkill(false);
+    }
+  };
+
+  // Helper to ensure safe array from document skill fields (which can be array, object, string, or null)
+  const toSkillArray = (val) => {
+    if (Array.isArray(val)) return val;
+    if (!val) return [];
+    if (typeof val === 'string') {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === 'object' && parsed !== null) return Object.values(parsed);
+      } catch {
+        return [val];
+      }
+    }
+    if (typeof val === 'object') {
+      return Object.values(val);
+    }
+    return [];
+  };
+
+  // Compute unreviewed/pending skills across all uploaded documents
+  const pendingSkillsFromDocs = React.useMemo(() => {
+    const allDocs = [...employeeDocuments, ...certifications];
+    const existingSkillKeys = new Set(
+      employeeSkills.map(s => {
+        const name = typeof s === 'string' ? s : (s.skill_name || s.skill_tag || s.skill || '');
+        return name.toLowerCase().replace(/\s+/g, ' ').trim();
+      })
+    );
+    const pendingSet = new Set();
+    allDocs.forEach(doc => {
+      if (doc && (doc.feedback_pending === true || doc.skills_approved === false)) {
+        const extracted = toSkillArray(doc.extracted_skills);
+        const rejected = toSkillArray(doc.rejected_skills);
+        const approved = toSkillArray(doc.approved_skills);
+
+        const rejectedKeys = new Set(rejected.map(r => (typeof r === 'string' ? r : (r?.skill_name || '')).toLowerCase().replace(/\s+/g, ' ').trim()));
+        const approvedKeys = new Set(approved.map(a => (typeof a === 'string' ? a : (a?.skill_name || '')).toLowerCase().replace(/\s+/g, ' ').trim()));
+
+        extracted.forEach(item => {
+          const sName = typeof item === 'string' ? item : (item?.skill_name || item?.skill || '');
+          if (!sName) return;
+          const k = sName.toLowerCase().replace(/\s+/g, ' ').trim();
+          if (!rejectedKeys.has(k) && !approvedKeys.has(k) && !existingSkillKeys.has(k)) {
+            pendingSet.add(sName);
+          }
+        });
+      }
+    });
+    return Array.from(pendingSet);
+  }, [employeeDocuments, certifications, employeeSkills]);
+
+  const handleApproveAllPending = async () => {
+    const count = pendingSkillsFromDocs.length;
+    if (count === 0) return;
+
+    const result = await Swal.fire({
+      title: `Approve ${count} pending skills?`,
+      text: 'Extracted skills can occasionally include noisy or non-skill phrases. Are you sure you want to approve all of them?',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#2563eb',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: `Yes, approve all (${count})`,
+      cancelButtonText: 'Glance at list first'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        setLoading(true);
+        const authHeader = await getAuthHeader();
+        const res = await axios.post(
+          `${API_URL}/employee/approve-all-pending`,
+          {},
+          { headers: authHeader }
+        );
+
+        if (res.data.success) {
+          await fetchEmployeeData();
+          Swal.fire({
+            title: 'Approved!',
+            text: res.data.message || `Successfully approved ${count} pending skills.`,
+            icon: 'success',
+            timer: 2500,
+            showConfirmButton: false
+          });
+        }
+      } catch (err) {
+        console.error('Error approving all pending skills:', err);
+        Swal.fire({
+          title: 'Error',
+          text: err.response?.data?.error || 'Failed to approve pending skills.',
+          icon: 'error',
+          confirmButtonColor: '#2563eb'
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleOpenReviewPending = () => {
+    const unreviewedDoc = [...employeeDocuments, ...certifications].find(d => d && (d.feedback_pending === true || d.skills_approved === false));
+    if (unreviewedDoc) {
+      setPendingDocumentId(unreviewedDoc.id);
+      const extracted = toSkillArray(unreviewedDoc.extracted_skills);
+      const rejected = toSkillArray(unreviewedDoc.rejected_skills);
+      const approved = toSkillArray(unreviewedDoc.approved_skills);
+      const rejectedKeys = new Set(rejected.map(r => (typeof r === 'string' ? r : r?.skill_name || '').toLowerCase().trim()));
+      const approvedKeys = new Set(approved.map(a => (typeof a === 'string' ? a : a?.skill_name || '').toLowerCase().trim()));
+      const needsRev = extracted.filter(s => {
+        const k = (typeof s === 'string' ? s : s?.skill_name || '').toLowerCase().trim();
+        return !rejectedKeys.has(k) && !approvedKeys.has(k);
+      });
+
+      setNeedsReviewSkills(needsRev);
+      setPendingSkills(needsRev);
+      setAutoApprovedSkills(approved);
+      setPendingDocumentType(unreviewedDoc.document_type || 'Resume');
+      setShowFeedbackModal(true);
+    }
+  };
 
   const showErrorAlert = (message, title = 'Error') => {
     return Swal.fire({
@@ -1011,6 +1299,198 @@ export default function EmployeeProfileTab() {
         onSkip={handleSkipFeedback}
       />
 
+      {/* ═══════════════ EDIT SKILLS MODAL ═══════════════ */}
+      {showEditSkillsModal && (() => {
+        const deleteKeys = new Set(
+          skillsToDelete.map(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim())
+        );
+        const remainingSkills = employeeSkills.filter(
+          s => !deleteKeys.has((typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim())
+        );
+        return (
+          <div style={styles.modalOverlay} onClick={() => !savingDeletes && setShowEditSkillsModal(false)}>
+            <div
+              style={{ ...styles.modalBox, maxWidth: '560px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div style={styles.modalHeader}>
+                <h2 style={styles.modalTitle}>Edit Skills</h2>
+                <button
+                  type="button"
+                  onClick={() => !savingDeletes && setShowEditSkillsModal(false)}
+                  style={styles.modalCloseBtn}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+
+                {/* Current skills list header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', gap: '12px', flexWrap: 'wrap' }}>
+                  <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', margin: 0 }}>
+                    Click <strong>Remove</strong> on any skill to mark it for deletion. You can undo before saving.
+                  </p>
+                  {remainingSkills.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSkillsToDelete(prev => {
+                        const existingKeys = new Set(prev.map(s => (typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim()));
+                        const toAdd = remainingSkills.filter(s => !existingKeys.has((typeof s === 'string' ? s : (s.skill_name || '')).toLowerCase().trim()));
+                        return [...prev, ...toAdd];
+                      })}
+                      style={styles.editSkillRemoveBtn}
+                    >
+                      Remove All
+                    </button>
+                  )}
+                </div>
+
+                {remainingSkills.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
+                    {remainingSkills.map((skill, idx) => {
+                      const name = typeof skill === 'string' ? skill : (skill.skill_name || String(skill));
+                      return (
+                        <div key={idx} style={styles.editSkillRow}>
+                          <span style={{ fontSize: '14px', color: 'var(--color-text-primary)', flex: 1 }}>{name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkForDelete(skill)}
+                            style={styles.editSkillRemoveBtn}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center', padding: '16px 0' }}>
+                    {skillsToDelete.length > 0 ? 'All skills marked for deletion.' : 'No skills in portfolio.'}
+                  </p>
+                )}
+
+                {/* Delete Skills section */}
+                {skillsToDelete.length > 0 && (
+                  <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+                    <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--color-danger)', margin: '0 0 10px 0', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Delete Skills ({skillsToDelete.length})
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {skillsToDelete.map((skill, idx) => {
+                        const name = typeof skill === 'string' ? skill : (skill.skill_name || String(skill));
+                        return (
+                          <div key={idx} style={styles.editSkillDeleteRow}>
+                            <span style={{ fontSize: '14px', color: 'var(--color-danger)', flex: 1, textDecoration: 'line-through' }}>{name}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUndoDelete(skill)}
+                              style={styles.editSkillUndoBtn}
+                            >
+                              Undo
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ ...styles.modalFooter, justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                  {skillsToDelete.length > 0 ? `${skillsToDelete.length} skill(s) will be removed` : 'No changes'}
+                </span>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowEditSkillsModal(false)}
+                    style={styles.modalCancelBtn}
+                    disabled={savingDeletes}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveDeletedSkills}
+                    disabled={skillsToDelete.length === 0 || savingDeletes}
+                    style={{
+                      ...styles.editSkillSaveBtn,
+                      opacity: (skillsToDelete.length === 0 || savingDeletes) ? 0.5 : 1,
+                      cursor: (skillsToDelete.length === 0 || savingDeletes) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {savingDeletes ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══════════════ ADD SKILL MODAL ═══════════════ */}
+      {showAddSkillModal && (
+        <div style={styles.modalOverlay} onClick={() => !addingSkill && setShowAddSkillModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Add Skill to Portfolio</h2>
+              <button
+                type="button"
+                onClick={() => !addingSkill && setShowAddSkillModal(false)}
+                style={styles.modalCloseBtn}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveManualSkill}>
+              <div style={styles.modalBody}>
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>
+                    Skill Name <span style={{ color: 'var(--color-danger)' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newSkillName}
+                    onChange={(e) => setNewSkillName(e.target.value)}
+                    placeholder="e.g. Power Transformers, Python, PLC, ERP"
+                    style={styles.formInput}
+                    autoFocus
+                    required
+                    disabled={addingSkill}
+                  />
+                </div>
+              </div>
+
+              <div style={styles.modalFooter}>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSkillModal(false)}
+                  style={styles.modalCancelBtn}
+                  disabled={addingSkill}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    ...styles.modalSubmitBtn,
+                    opacity: addingSkill ? 0.7 : 1,
+                    cursor: addingSkill ? 'not-allowed' : 'pointer'
+                  }}
+                  disabled={addingSkill}
+                >
+                  {addingSkill ? 'Saving...' : 'Add Skill'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div style={styles.header}>
         <h1 style={styles.title}>My Profile Portfolio</h1>
         <p style={styles.subtitle}>Upload credentials, run CV parsers, and manage skills & certifications.</p>
@@ -1163,20 +1643,54 @@ export default function EmployeeProfileTab() {
           {/* Right: Skills Portfolio */}
           <div style={styles.col}>
             <div className="glass-card" style={styles.card}>
-              <h2 style={styles.sectionTitle}>Skills Portfolio</h2>
-              <p style={styles.sectionSubtitle}>Verified skills extracted automatically from your resume profile.</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '8px' }}>
+                <div>
+                  <h2 style={styles.sectionTitle}>Skills Portfolio</h2>
+                  <p style={styles.sectionSubtitle}>Verified skills extracted from documents or added manually.</p>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={handleOpenEditSkills}
+                    style={styles.editSkillBtn}
+                    title="Remove skills from your portfolio"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddSkill}
+                    style={styles.addSkillBtn}
+                    title="Add a skill manually"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Add Skill
+                  </button>
+                </div>
+              </div>
+
+
+
               <div style={styles.skillsList}>
                 {skills.length > 0
                   ? skills.map((skill, idx) => {
-                    // ============ FIX: Handle both string and object skills ============
-                    let skillName = skill;
-                    if (typeof skill === 'object' && skill !== null) {
-                      // If it's an object, extract the skill name
-                      skillName = skill.skill_name || skill.skill_tag || skill.skill || String(skill);
-                    }
-                    return <span key={idx} style={styles.skillPill}>{skillName}</span>;
+                    const skillName = typeof skill === 'object' && skill !== null
+                      ? (skill.skill_name || skill.skill_tag || skill.skill || String(skill))
+                      : skill;
+                    return (
+                      <span key={idx} style={styles.skillPill}>
+                        {skillName}
+                      </span>
+                    );
                   })
-                  : <p style={styles.noSkills}>No skills extracted yet. Upload a resume to get started.</p>
+                  : <p style={styles.noSkills}>No skills added yet. Click &ldquo;Add Skill&rdquo; or upload a resume to get started.</p>
                 }
               </div>
             </div>
@@ -1480,7 +1994,100 @@ const styles = {
     fontSize: '12px', fontWeight: '600', padding: '6px 12px',
     borderRadius: '30px', background: 'var(--color-bg-card-hover)',
     color: 'var(--color-text-primary)', border: '1px solid var(--color-border)',
-    display: 'flex', alignItems: 'center', gap: '8px',
+    display: 'inline-flex', alignItems: 'center', gap: '8px',
+  },
+  skillSourceBadge: {
+    fontSize: '10px',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    padding: '2px 7px',
+    borderRadius: '10px',
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    color: 'var(--color-primary, #2563eb)',
+    border: '1px solid rgba(59, 130, 246, 0.3)',
+  },
+  skillProficiencyBadge: {
+    fontSize: '10px',
+    fontWeight: '600',
+    padding: '2px 7px',
+    borderRadius: '10px',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    color: '#10b981',
+    border: '1px solid rgba(16, 185, 129, 0.3)',
+  },
+  skillYearsBadge: {
+    fontSize: '10px',
+    fontWeight: '600',
+    padding: '2px 7px',
+    borderRadius: '10px',
+    backgroundColor: 'var(--color-bg-card)',
+    color: 'var(--color-text-muted)',
+    border: '1px solid var(--color-border)',
+  },
+  addSkillBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '7px 14px',
+    backgroundColor: 'var(--color-primary, #2563eb)',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  pendingSkillsBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: '12px',
+    padding: '12px 16px',
+    marginBottom: '16px',
+    backgroundColor: 'rgba(234, 179, 8, 0.1)',
+    border: '1px solid rgba(234, 179, 8, 0.3)',
+    borderRadius: '8px',
+  },
+  pendingBannerText: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+  },
+  pendingBannerIcon: {
+    fontSize: '16px',
+  },
+  pendingBannerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  reviewPendingBtn: {
+    padding: '5px 12px',
+    backgroundColor: 'transparent',
+    color: 'var(--color-text-primary)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  approveAllPendingBtn: {
+    padding: '5px 14px',
+    backgroundColor: 'var(--color-primary, #2563eb)',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
   },
   noSkills: { fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center', padding: '20px 0' },
 
@@ -1559,5 +2166,151 @@ const styles = {
   retryBtn: {
     padding: '10px 24px', backgroundColor: 'var(--color-primary)', color: '#ffffff',
     border: 'none', borderRadius: '6px', fontSize: '14px', fontWeight: '600', cursor: 'pointer',
+  },
+
+  // ── Add Skill Modal ────────────────────────────────────────────────────────
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    padding: '20px',
+  },
+  modalBox: {
+    backgroundColor: 'var(--color-bg-card, #ffffff)',
+    borderRadius: '12px',
+    border: '1px solid var(--color-border)',
+    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+    width: '100%',
+    maxWidth: '480px',
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '18px 24px',
+    borderBottom: '1px solid var(--color-border)',
+  },
+  modalTitle: {
+    fontSize: '18px',
+    fontWeight: '700',
+    color: 'var(--color-text-primary)',
+    margin: 0,
+  },
+  modalCloseBtn: {
+    background: 'none',
+    border: 'none',
+    fontSize: '20px',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    padding: '4px 8px',
+    borderRadius: '4px',
+  },
+  modalBody: {
+    padding: '24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+  modalFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '10px',
+    padding: '16px 24px',
+    borderTop: '1px solid var(--color-border)',
+    backgroundColor: 'var(--color-bg-root)',
+  },
+  modalCancelBtn: {
+    padding: '9px 18px',
+    backgroundColor: 'transparent',
+    color: 'var(--color-text-secondary)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  modalSubmitBtn: {
+    padding: '9px 20px',
+    backgroundColor: 'var(--color-primary, #2563eb)',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  // ── Edit Skills Modal ──────────────────────────────────────────────────────
+  editSkillBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '7px 14px',
+    backgroundColor: 'transparent',
+    color: 'var(--color-text-secondary)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  editSkillRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 14px',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '6px',
+    gap: '12px',
+  },
+  editSkillRemoveBtn: {
+    padding: '4px 14px',
+    backgroundColor: 'transparent',
+    color: 'var(--color-danger)',
+    border: '1px solid var(--color-danger)',
+    borderRadius: '5px',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  editSkillDeleteRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 14px',
+    backgroundColor: 'rgba(239,68,68,0.06)',
+    border: '1px solid rgba(239,68,68,0.25)',
+    borderRadius: '6px',
+    gap: '12px',
+  },
+  editSkillUndoBtn: {
+    padding: '4px 12px',
+    backgroundColor: 'var(--color-bg-card-hover)',
+    color: 'var(--color-text-secondary)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '5px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  editSkillSaveBtn: {
+    padding: '9px 20px',
+    backgroundColor: 'var(--color-danger, #ef4444)',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
   },
 };
