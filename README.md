@@ -68,7 +68,7 @@ Developed as a capstone/thesis project.
 
 1. Clone the repo
 ```
-   git clone https://github.com/<your-username>/ResourceManagementRecommenderSystem.git
+   git clone https://github.com/LynnCzyla/ResourceManagementRecommenderSystem.git
 ```
 2. Create your Supabase project and run the SQL in `backend/sql/`.
 3. Backend:
@@ -109,9 +109,9 @@ The included `Dockerfile` builds one image with Node (API) and Python (OCR/NLP/M
 
 ## 👥 Team
 
-* <Lynn Czyla Alpuerto>
-* <Romell Ebuen>
-* <Vincent Miguel Soriano>
+* Lynn Czyla Alpuerto
+* Romell Ebuen
+* Vincent Miguel Soriano
 
 ## 📄 License
 
