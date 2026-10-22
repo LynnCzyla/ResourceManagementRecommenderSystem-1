@@ -800,13 +800,46 @@ export default function EmployeeProfileTab() {
       setSkillsToDelete([]);
       setShowEditSkillsModal(false);
       if (errors.length > 0) {
-        Swal.fire({ title: 'Partial Success', text: `Could not remove: ${errors.join(', ')}`, icon: 'warning', confirmButtonColor: '#2563eb' });
+        Swal.fire({
+          title: 'Partial Success',
+          text: `Could not remove: ${errors.join(', ')}`,
+          icon: 'warning',
+          zIndex: 10050,
+          confirmButtonText: 'OK',
+          confirmButtonColor: 'var(--color-primary)',
+          background: 'var(--color-bg-card)',
+          color: 'var(--color-text-primary)',
+          iconColor: 'var(--color-warning)',
+          customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+        });
       } else {
-        Swal.fire({ title: 'Done!', text: 'Skills removed from your portfolio.', icon: 'success', timer: 1800, showConfirmButton: false });
+        Swal.fire({
+          title: 'Done!',
+          text: 'Skills removed from your portfolio.',
+          icon: 'success',
+          timer: 1800,
+          showConfirmButton: false,
+          zIndex: 10050,
+          background: 'var(--color-bg-card)',
+          color: 'var(--color-text-primary)',
+          iconColor: 'var(--color-success)',
+          customClass: { popup: 'swal-custom-popup' }
+        });
       }
     } catch (err) {
       console.error('Error deleting skills:', err);
-      Swal.fire({ title: 'Error', text: 'Failed to remove skills. Please try again.', icon: 'error', confirmButtonColor: '#2563eb' });
+      Swal.fire({
+        title: 'Error',
+        text: 'Failed to remove skills. Please try again.',
+        icon: 'error',
+        zIndex: 10050,
+        confirmButtonText: 'OK',
+        confirmButtonColor: 'var(--color-primary)',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+        iconColor: 'var(--color-danger)',
+        customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+      });
     } finally {
       setSavingDeletes(false);
     }
@@ -820,16 +853,25 @@ export default function EmployeeProfileTab() {
         title: 'Skill Name Required',
         text: 'Please enter a skill name before saving.',
         icon: 'warning',
-        confirmButtonColor: '#2563eb'
+        zIndex: 10050,
+        confirmButtonText: 'OK',
+        confirmButtonColor: 'var(--color-primary)',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+        iconColor: 'var(--color-warning)',
+        customClass: {
+          popup: 'swal-custom-popup',
+          confirmButton: 'swal-custom-confirm'
+        }
       });
       return;
     }
 
-    // Client-side duplicate check (case-insensitive & whitespace normalized)
-    const targetKey = cleanName.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Check locally first so duplicate entries are rejected before the request.
+    const targetKey = cleanName.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
     const isDuplicate = employeeSkills.some(s => {
       const name = typeof s === 'string' ? s : (s.skill_name || s.skill_tag || s.skill || '');
-      return name.toLowerCase().replace(/\s+/g, ' ').trim() === targetKey;
+      return name.toLocaleLowerCase().replace(/\s+/g, ' ').trim() === targetKey;
     });
 
     if (isDuplicate) {
@@ -837,7 +879,16 @@ export default function EmployeeProfileTab() {
         title: 'Duplicate Skill',
         text: `"${cleanName}" is already in your skills portfolio.`,
         icon: 'info',
-        confirmButtonColor: '#2563eb'
+        zIndex: 10050,
+        confirmButtonText: 'OK',
+        confirmButtonColor: 'var(--color-primary)',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+        iconColor: 'var(--color-primary)',
+        customClass: {
+          popup: 'swal-custom-popup',
+          confirmButton: 'swal-custom-confirm'
+        }
       });
       return;
     }
@@ -865,16 +916,33 @@ export default function EmployeeProfileTab() {
           text: `"${addedSkill.skill_name || cleanName}" has been added to your skills portfolio.`,
           icon: 'success',
           timer: 2000,
-          showConfirmButton: false
+          showConfirmButton: false,
+          zIndex: 10050,
+          background: 'var(--color-bg-card)',
+          color: 'var(--color-text-primary)',
+          iconColor: 'var(--color-success)',
+          customClass: {
+            popup: 'swal-custom-popup'
+          }
         });
       }
     } catch (err) {
       console.error('Error adding manual skill:', err);
+      const isExistingSkill = err.response?.status === 409;
       Swal.fire({
-        title: 'Duplicate or Invalid Skill',
+        title: isExistingSkill ? 'Skill Already Added' : 'Unable to Add Skill',
         text: err.response?.data?.error || err.message || 'Could not add skill.',
-        icon: 'warning',
-        confirmButtonColor: '#2563eb'
+        icon: isExistingSkill ? 'info' : 'warning',
+        zIndex: 10050,
+        confirmButtonText: 'OK',
+        confirmButtonColor: 'var(--color-primary)',
+        background: 'var(--color-bg-card)',
+        color: 'var(--color-text-primary)',
+        iconColor: isExistingSkill ? 'var(--color-primary)' : 'var(--color-warning)',
+        customClass: {
+          popup: 'swal-custom-popup',
+          confirmButton: 'swal-custom-confirm'
+        }
       });
     } finally {
       setAddingSkill(false);
