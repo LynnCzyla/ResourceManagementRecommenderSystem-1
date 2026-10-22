@@ -33,6 +33,7 @@ export default function RMRequestsTab() {
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const [sortBy, setSortBy] = useState('score');
   const [sortOrder, setSortOrder] = useState('desc');
+  const [isInfoHovered, setIsInfoHovered] = useState(false);
 
   const hasAutoExpanded = useRef(false);
 
@@ -69,7 +70,7 @@ export default function RMRequestsTab() {
           alignItems: 'center',
           gap: '3px',
           fontSize: '11px',
-          fontWeight: '500',
+          fontWeight: '700',
           color: 'var(--color-text-muted, #94a3b8)',
           backgroundColor: 'rgba(148, 163, 184, 0.12)',
           padding: '2px 8px',
@@ -427,6 +428,63 @@ export default function RMRequestsTab() {
       color: 'var(--color-text-primary)',
       iconColor: 'var(--color-danger)',
       customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' }
+    });
+  };
+
+  const showClassificationInfo = () => {
+    Swal.fire({
+      title: 'Candidate Classification',
+      html: `
+        <div style="text-align: left; line-height: 1.45; font-size: 13px; max-height: 58vh; overflow-y: auto; padding: 0 4px 2px">
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px 12px; margin-bottom: 10px; border-radius: 8px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.25)">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
+              <span style="font-size: 18px; font-weight: 800; color: #60a5fa">60%</span>
+              <span style="font-size: 12px; color: var(--color-text-muted)">Skills</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
+              <span style="font-size: 18px; font-weight: 800; color: #f59e0b">25%</span>
+              <span style="font-size: 12px; color: var(--color-text-muted)">Availability</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
+              <span style="font-size: 18px; font-weight: 800; color: #a78bfa">15%</span>
+              <span style="font-size: 12px; color: var(--color-text-muted)">Performance</span>
+            </div>
+          </div>
+          <section style="padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04)">
+            <strong style="display: block; margin-bottom: 4px; color: var(--color-text-primary)">Overall Score</strong>
+            <span>Combines skill match (60%), availability (25%), and performance history (15%). A higher score means a stronger fit. It turns red when a core skill is missing.</span>
+          </section>
+          <section style="padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04)">
+            <strong style="display: block; margin-bottom: 4px; color: #22c55e">Matching Skills · 60%</strong>
+            <span>Core skills count 4x more than secondary skills, so the weighted percentage may differ from the simple count (4/5 is not always 80%).</span>
+            <div style="margin-top: 6px"><span style="color: #22c55e; font-weight: 700">Green</span> = matched skills, including aliases.</div>
+            <div><span style="color: #ef4444; font-weight: 700">Red</span> = missing skills. <strong>Core: x/y</strong> = primary skills met.</div>
+          </section>
+          <section style="padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04)">
+            <strong style="display: block; margin-bottom: 4px; color: #f59e0b">Availability · 25%</strong>
+            <span>Based on workload. Active tasks use priority weights: High 3, Medium 2, Low 1.</span>
+            <div style="margin-top: 6px"><strong>Available:</strong> 80% or higher · <strong>Limited:</strong> 50–79% · <strong>Fully Utilized:</strong> below 50%</div>
+          </section>
+          <section style="padding: 10px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.04)">
+            <strong style="display: block; margin-bottom: 4px; color: #a78bfa">Performance History · 15%</strong>
+            <span>Average Project Manager rating out of 5, converted to a percentage. No-rating employees use the neutral 70% default and display 3.5 stars.</span>
+          </section>
+        </div>
+      `,
+      width: 'min(620px, calc(100vw - 32px))',
+      padding: '24px',
+      icon: 'info',
+      confirmButtonColor: 'var(--color-primary)',
+      background: 'var(--color-bg-card)',
+      color: 'var(--color-text-primary)',
+      customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-confirm' },
+      didOpen: () => {
+        const popup = Swal.getPopup();
+        if (popup) {
+          popup.style.setProperty('width', 'min(900px, calc(100vw - 32px))', 'important');
+          popup.style.setProperty('max-width', '900px', 'important');
+        }
+      }
     });
   };
 
@@ -823,7 +881,36 @@ export default function RMRequestsTab() {
 
         {/* Right Panel - Recommendations */}
         <div style={styles.panel}>
-          <h2 style={styles.panelTitle}>Recommendations</h2>
+          <h2 style={{ ...styles.panelTitle, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            Recommendations
+            <button
+              type="button"
+              onClick={showClassificationInfo}
+              onMouseEnter={() => setIsInfoHovered(true)}
+              onMouseLeave={() => setIsInfoHovered(false)}
+              title="View candidate classification details"
+              aria-label="Candidate classification information"
+              style={{
+                color: isInfoHovered ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                fontSize: '15px',
+                lineHeight: 1,
+                cursor: 'pointer',
+                fontWeight: '700',
+                border: `1px solid ${isInfoHovered ? 'var(--color-primary)' : 'var(--color-text-muted)'}`,
+                borderRadius: '50%',
+                background: isInfoHovered ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
+                width: '18px',
+                height: '18px',
+                padding: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              ⓘ
+            </button>
+          </h2>
 
           {!activeRequestDetails ? (
             <div style={styles.emptyPanelState}>
@@ -952,6 +1039,16 @@ export default function RMRequestsTab() {
                               }}>
                                 {rec.score}% Score
                               </span>
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                                color: '#22c55e'
+                              }}>
+                                Matching Skills: {rec.breakdown?.skillMatchScore ?? rec.matchingScore ?? 0}%
+                              </span>
                               {(() => {
                                 const wScore = rec.workloadScore ?? rec.breakdown?.availability?.workloadPoints ?? 0;
                                 const rawFactor = rec.availabilityFactor ?? (1 / (1 + Math.exp(0.4 * (wScore - 7))));
@@ -963,7 +1060,7 @@ export default function RMRequestsTab() {
                                 return (
                                   <span style={{
                                     fontSize: '11px',
-                                    fontWeight: '500',
+                                    fontWeight: '700',
                                     padding: '2px 8px',
                                     borderRadius: '10px',
                                     backgroundColor: isHeavy
@@ -984,7 +1081,7 @@ export default function RMRequestsTab() {
                               {rec.breakdown?.primarySkills?.fulfillment && (
                                 <span style={{
                                   fontSize: '10px',
-                                  fontWeight: '600',
+                                  fontWeight: '700',
                                   padding: '2px 6px',
                                   borderRadius: '8px',
                                   backgroundColor: rec.missingCoreSkills ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
@@ -1004,8 +1101,11 @@ export default function RMRequestsTab() {
                               {statusInfo.label}
                             </span>
                             <div style={styles.recStars}>
-                              {renderStars(performanceRating, hasRating)}
+                              {renderStars(performanceRating || 3.5, true)}
                             </div>
+                            <span style={styles.performanceHistory}>
+                              Performance history: {Math.round((rec.historicalPerformance ?? 0.7) * 100)}%
+                            </span>
                           </div>
                         </div>
 
@@ -1034,7 +1134,7 @@ export default function RMRequestsTab() {
                                   <span key={`p-miss-${i}`} style={{
                                     ...styles.missingSkill,
                                     border: '1px dashed #ef4444',
-                                    fontWeight: '600'
+                                    fontWeight: '700'
                                   }} title="Missing mandatory prerequisite">
                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '3px' }}>
                                       <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -1062,7 +1162,7 @@ export default function RMRequestsTab() {
                                       backgroundColor: 'rgba(59, 130, 246, 0.1)',
                                       padding: '2px 8px',
                                       borderRadius: '4px',
-                                      fontWeight: '500'
+                                      fontWeight: '700'
                                     }} title={tooltip}>
                                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '3px' }}>
                                         <polyline points="20 6 9 17 4 12"></polyline>
@@ -1077,7 +1177,8 @@ export default function RMRequestsTab() {
                                     color: 'var(--color-text-muted)',
                                     backgroundColor: 'rgba(107, 114, 128, 0.08)',
                                     padding: '2px 6px',
-                                    borderRadius: '4px'
+                                    borderRadius: '4px',
+                                    fontWeight: '700'
                                   }} title="Optional skill not possessed">
                                     {skill}
                                   </span>
@@ -1620,6 +1721,13 @@ const styles = {
   },
   recStars: {
     fontSize: '12px',
+    fontWeight: '700',
+  },
+  performanceHistory: {
+    fontSize: '10px',
+    fontWeight: '700',
+    color: 'var(--color-text-secondary)',
+    whiteSpace: 'nowrap',
   },
   recSkills: {
     display: 'flex',
@@ -1635,7 +1743,7 @@ const styles = {
   },
   skillsLabel: {
     fontSize: '11px',
-    fontWeight: '500',
+    fontWeight: '700',
     color: 'var(--color-text-muted)',
     marginRight: '4px',
   },
@@ -1645,7 +1753,7 @@ const styles = {
     backgroundColor: 'rgba(34, 197, 94, 0.1)',
     padding: '2px 8px',
     borderRadius: '4px',
-    fontWeight: '500',
+    fontWeight: '700',
   },
   missingSkill: {
     fontSize: '10px',
@@ -1653,7 +1761,7 @@ const styles = {
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     padding: '2px 8px',
     borderRadius: '4px',
-    fontWeight: '500',
+    fontWeight: '700',
   },
   moreSkills: {
     fontSize: '10px',
