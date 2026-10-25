@@ -95,9 +95,16 @@ export default function ApplicantJobPostingsTab() {
     window.open(cvTemplate.download_url, '_blank', 'noreferrer');
   };
 
+  const getTemplatePreviewUrl = () => {
+    if (!cvTemplate?.view_url) return null;
+    if (!/\.docx$/i.test(cvTemplate.file_name || '')) return cvTemplate.view_url;
+    return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(cvTemplate.view_url)}`;
+  };
+
   const handleViewTemplate = () => {
-    if (!cvTemplate?.view_url) return;
-    window.open(cvTemplate.view_url, '_blank', 'noreferrer');
+    const previewUrl = getTemplatePreviewUrl();
+    if (!previewUrl) return;
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
   };
 
   // Fetch branches for filter
