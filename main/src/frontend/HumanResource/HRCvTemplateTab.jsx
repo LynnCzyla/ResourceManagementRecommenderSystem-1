@@ -194,6 +194,12 @@ export default function HRCvTemplateTab() {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
+  const getPreviewUrl = () => {
+    if (!template?.view_url) return null;
+    if (!/\.docx$/i.test(template.file_name || '')) return template.view_url;
+    return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(template.view_url)}`;
+  };
+
   return (
     <div style={styles.container}>
       {/* Hidden file input */}
@@ -294,7 +300,7 @@ export default function HRCvTemplateTab() {
               {/* Preview Button */}
               {template.view_url && (
                 <a
-                  href={template.view_url}
+                  href={getPreviewUrl()}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={styles.actionBtnOutline}
